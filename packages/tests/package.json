@@ -1,0 +1,21 @@
+{
+  "name": "@app/tests",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest",
+    "test:run": "vitest run",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@app/node": "file:../node",
+    "@app/db": "file:../db",
+    "@app/worker": "file:../worker"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.2.0",
+    "vitest": "^3.2.4"
+  }
+}

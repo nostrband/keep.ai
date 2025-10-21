@@ -1,0 +1,28 @@
+{
+  "name": "keep-ai",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Privacy-focused AI assistant app with peer-to-peer sync",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "clean": "turbo run clean",
+    "type-check": "turbo run type-check"
+  },
+  "devDependencies": {
+    "turbo": "^1.10.0",
+    "typescript": "^5.2.0"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  },
+  "dependencies": {
+    "debug": "^4.4.3",
+    "sqlite3": "^5.1.7"
+  }
+}

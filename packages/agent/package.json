@@ -1,0 +1,32 @@
+{
+  "name": "@app/agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm --dts --external @app/proto --external @app/db",
+    "dev": "tsup src/index.ts --format esm --dts --watch --external @app/proto --external @app/db",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@app/db": "file:../db",
+    "@app/proto": "file:../proto",
+    "@openrouter/ai-sdk-provider": "^1.2.0",
+    "ai": "^5.0.76",
+    "croner": "^9.1.0",
+    "debug": "^4.3.4",
+    "exa-js": "^1.10.2"
+  },
+  "devDependencies": {
+    "tsup": "^7.2.0",
+    "typescript": "^5.2.0"
+  }
+}

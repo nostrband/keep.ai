@@ -1,0 +1,22 @@
+{
+  "name": "@app/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsup src/server.ts --format cjs --out-dir dist && tsup src/workerHost.ts --format cjs --out-dir dist",
+    "postbuild": "cp -r ../web/dist ./public",
+    "dev": "tsx src/server.ts",
+    "start": "node dist/server.js",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "debug": "^4.3.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20.4.0",
+    "tsup": "^7.2.0",
+    "tsx": "^3.12.0",
+    "typescript": "^5.2.0"
+  }
+}

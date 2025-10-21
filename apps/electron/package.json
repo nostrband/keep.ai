@@ -1,0 +1,22 @@
+{
+  "name": "@app/electron",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsup src/main.ts --format cjs --out-dir dist && tsup src/preload.ts --format cjs --out-dir dist",
+    "postbuild": "cp -r ../web/dist ./renderer",
+    "dev": "tsx src/main.ts",
+    "electron": "electron .",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "debug": "^4.3.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20.4.0",
+    "tsup": "^7.2.0",
+    "tsx": "^3.12.0",
+    "typescript": "^5.2.0"
+  }
+}

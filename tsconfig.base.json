@@ -1,0 +1,29 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM"],
+    "types": [],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "strict": true,
+    "forceConsistentCasingInFileNames": true,
+    "noEmit": true,
+    // "incremental": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "baseUrl": ".",
+    "paths": {
+      "@app/proto/*": ["packages/proto/src/*"],
+      "@app/agent/*": ["packages/agent/src/*"],
+      "@app/db/*": ["packages/db/src/*"],
+      "@app/worker/*": ["packages/worker/src/*"],
+      "@app/transports/*": ["packages/transports/src/*"],
+      "@app/ui/*": ["packages/ui/src/*"]
+    }
+  },
+  "exclude": ["node_modules", "dist", "build"]
+}

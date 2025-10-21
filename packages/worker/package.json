@@ -1,0 +1,30 @@
+{
+  "name": "@app/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/node/node-worker.cjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@app/agent": "file:../agent",
+    "@app/db": "file:../db",
+    "@app/proto": "file:../proto",
+    "debug": "^4.3.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "tsup": "^7.2.0",
+    "typescript": "^5.2.0"
+  }
+}
