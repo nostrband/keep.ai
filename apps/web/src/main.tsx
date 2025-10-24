@@ -8,7 +8,6 @@ import sharedWorkerUrl from "./shared-worker.ts?sharedworker&url";
 import dedicatedWorkerUrl from "./worker.ts?worker&url";
 import { QueryProvider } from "./QueryProvider.tsx";
 import { notifyTablesChanged, queryClient, setOnLocalChanges } from "./queryClient.ts";
-
 import debug from "debug";
 import { API_ENDPOINT } from "./const.ts";
 
