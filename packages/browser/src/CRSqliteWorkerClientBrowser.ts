@@ -1,10 +1,16 @@
 // Reusable CRSqlite Tab Synchronization class
 import { DBInterface } from "@app/db";
-import { BroadcastMessage, WorkerMessage, CRSqliteWorkerClientBase } from "@app/worker";
+import {
+  BroadcastMessage,
+  WorkerMessage,
+  CRSqliteWorkerClientBase,
+} from "@app/sync";
 import { LeaderWebWorker, stableName } from "./LeaderWebWorker";
 import debug from "debug";
 
-const debugCRSqliteWorkerClientBrowser = debug("browser:CRSqliteWorkerClientBrowser");
+const debugCRSqliteWorkerClientBrowser = debug(
+  "browser:CRSqliteWorkerClientBrowser"
+);
 
 function supportsNativeSharedWorkerModule(): boolean {
   try {
@@ -75,12 +81,15 @@ export class CRSqliteWorkerClientBrowser extends CRSqliteWorkerClientBase {
         this.worker.addEventListener("message", (e: MessageEvent) =>
           this.processWorkerMessage(e.data)
         );
-        this.worker.addEventListener("error", ({reason, error}: { reason: string, error?: unknown }) => {
-          debugCRSqliteWorkerClientBrowser("Failed to start:", reason, error);
-          if (this.onError) {
-            this.onError(reason);
+        this.worker.addEventListener(
+          "error",
+          ({ reason, error }: { reason: string; error?: unknown }) => {
+            debugCRSqliteWorkerClientBrowser("Failed to start:", reason, error);
+            if (this.onError) {
+              this.onError(reason);
+            }
           }
-        });
+        );
 
         // Starts the worker if tab is leader
         await this.worker.start();

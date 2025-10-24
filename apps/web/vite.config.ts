@@ -14,7 +14,7 @@ export default defineConfig({
     format: 'es'
   },
   optimizeDeps: {
-    exclude: ['@app/worker', '@vlcn.io/crsqlite-wasm']
+    exclude: ['@app/sync', '@app/db', '@app/browser', '@vlcn.io/crsqlite-wasm']
   },
   server: {
     fs: {

@@ -4,8 +4,8 @@ import { UIMessage } from "ai";
 const metadataSchema = z.object({
   createdAt: z.string().datetime(),
   threadId: z.string().optional(),
-  resourceId: z.string().optional(),
+  userId: z.string().optional(),
 });
-type MessageMetadata = z.infer<typeof metadataSchema>;
+export type MessageMetadata = z.infer<typeof metadataSchema>;
 
 export type AssistantUIMessage = UIMessage<MessageMetadata>;

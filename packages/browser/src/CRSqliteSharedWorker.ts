@@ -1,6 +1,10 @@
 // Reusable CRSqlite Shared Worker class
 import { DBInterface } from "@app/db";
-import { CRSqliteWorkerBase, BroadcastMessage, WorkerResponse } from "@app/worker";
+import {
+  CRSqliteWorkerBase,
+  BroadcastMessage,
+  WorkerResponse,
+} from "@app/sync";
 import debug from "debug";
 
 const debugCRSqliteSharedWorker = debug("browser:CRSqliteSharedWorker");
@@ -45,7 +49,9 @@ export class CRSqliteSharedWorker extends CRSqliteWorkerBase {
   }
 
   private processPendingPorts(): void {
-    debugCRSqliteSharedWorker(`Processing ${this.pendingPorts.length} pending connections`);
+    debugCRSqliteSharedWorker(
+      `Processing ${this.pendingPorts.length} pending connections`
+    );
 
     while (this.pendingPorts.length > 0) {
       const port = this.pendingPorts.shift()!;
@@ -56,7 +62,9 @@ export class CRSqliteSharedWorker extends CRSqliteWorkerBase {
   private setupPortHandlers(port: MessagePort): void {
     debugCRSqliteSharedWorker("Setting up port handlers for connected tab");
 
-    port.addEventListener("message", (m) => this.processClientMessage(m.data, port));
+    port.addEventListener("message", (m) =>
+      this.processClientMessage(m.data, port)
+    );
 
     port.start();
 

@@ -45,6 +45,9 @@ export class CRSqliteWorkerClientBase extends CRSqlitePeer {
       // Call parent start method which handles database initialization
       await super.start();
 
+      // Start sync
+      await this.requestSync();
+
       debugWorkerClientBase("Started successfully");
     } catch (error) {
       debugWorkerClientBase("Failed to start:", error);
@@ -151,6 +154,7 @@ export class CRSqliteWorkerClientBase extends CRSqlitePeer {
     try {
       const changes = await super.processChanges(message);
       const touched = new Set(changes.map(c => c.table));
+      console.log("touched", touched, this.onTablesChanged);
       if (touched.size)
         this.onTablesChanged?.([...touched]);
       return changes;
@@ -166,7 +170,7 @@ export class CRSqliteWorkerClientBase extends CRSqlitePeer {
     }
   }
 
-  async requestSync(): Promise<void> {
+  private async requestSync(): Promise<void> {
     if (!this.isStarted) {
       debugWorkerClientBase("Cannot sync - not started");
       return;

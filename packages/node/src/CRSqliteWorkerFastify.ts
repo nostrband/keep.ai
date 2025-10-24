@@ -1,6 +1,13 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
-import { CRSqliteWorkerAPI } from "@app/worker";
-import { BroadcastMessage, WorkerMessage } from "@app/worker";
+import {
+  BroadcastMessage,
+  WorkerMessage,
+  CRSqliteWorkerAPI,
+  deserializeBroadcastMessage,
+  SerializableBroadcastMessage,
+  serializeBroadcastMessage,
+  serializeWorkerResponse,
+} from "@app/sync";
 import { DBInterface } from "@app/db";
 import debug from "debug";
 
@@ -30,7 +37,7 @@ export class CRSqliteWorkerFastify {
         try {
           const msg = request.body as WorkerMessage;
           const response = await this.api.sync(msg);
-          reply.send(response);
+          reply.send(serializeWorkerResponse(response));
         } catch (error) {
           reply.status(400).send({
             type: "error",
@@ -47,7 +54,7 @@ export class CRSqliteWorkerFastify {
         try {
           const msg = request.body as WorkerMessage;
           const response = await this.api.exec(msg);
-          reply.send(response);
+          reply.send(serializeWorkerResponse(response));
         } catch (error) {
           reply.status(400).send({
             type: "error",
@@ -62,8 +69,8 @@ export class CRSqliteWorkerFastify {
       "/changes",
       async (request: FastifyRequest, reply: FastifyReply) => {
         try {
-          const msg = request.body as BroadcastMessage;
-          await this.api.changes(msg);
+          const msg = request.body as SerializableBroadcastMessage;
+          await this.api.changes(deserializeBroadcastMessage(msg));
           reply.send({ success: true });
         } catch (error) {
           reply.status(400).send({
@@ -118,15 +125,21 @@ export class CRSqliteWorkerFastify {
   }
 
   private broadcastToClients(message: BroadcastMessage): void {
-    debugCRSqliteWorkerFastify(`Broadcasting to ${this.sseClients.size} clients:`, message);
+    debugCRSqliteWorkerFastify(
+      `Broadcasting to ${this.sseClients.size} clients, changes:`,
+      message.data?.length
+    );
 
     const clientsToRemove: SSEClient[] = [];
 
     for (const client of this.sseClients) {
       try {
-        this.sendSSEMessage(client.reply, message);
+        this.sendSSEMessage(client.reply, serializeBroadcastMessage(message));
       } catch (error) {
-        debugCRSqliteWorkerFastify(`Error sending to client ${client.id}:`, error);
+        debugCRSqliteWorkerFastify(
+          `Error sending to client ${client.id}:`,
+          error
+        );
         clientsToRemove.push(client);
       }
     }

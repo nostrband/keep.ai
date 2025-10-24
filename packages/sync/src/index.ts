@@ -3,4 +3,7 @@ export * from './CRSqliteWorkerBase';
 export * from './CRSqliteWorkerClientBase';
 export * from './CRSqliteWorkerAPI';
 export * from './CRSqliteWorkerClientHTTP';
+export * from './Peer';
+export * from './Transport';
+export * from './TransportClientHttp';
 export * from './messages';

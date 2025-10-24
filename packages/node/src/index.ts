@@ -146,5 +146,6 @@ export async function createDBNode(file: string): Promise<DBInterface> {
   });
 }
 
-// Export the Fastify worker class
+// Export the Fastify worker classes
 export * from './CRSqliteWorkerFastify';
+export * from './TransportServerFastify';

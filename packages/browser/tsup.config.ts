@@ -5,6 +5,6 @@ export default defineConfig({
   format: ['esm', 'cjs'],
   dts: true,
   treeshake: true,
-  external: ['@app/db'],
+  external: ['@app/db', '@app/sync'],
   noExternal: ['@vlcn.io/crsqlite-wasm'],
 });

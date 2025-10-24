@@ -72,7 +72,7 @@ Long-running tasks:
 - Use addTaskTool to create a task with your plan.
 - Set task datetime to current time to be executed immediately.
 - Confirm to user that you're working on their query and will report back when it's ready.
-- Be BRIEF in your reply, prefer something like "working on it" versus "I created a background task with plan ... shceduled for ... and will reply to main chat".
+- Be BRIEF in your reply, prefer something like "working on it" versus "I created a background task with plan <...> scheduled for <...> and will reply to main chat".
 `;
 }
 

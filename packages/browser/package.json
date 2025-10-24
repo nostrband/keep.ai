@@ -21,7 +21,7 @@
   },
   "dependencies": {
     "@app/db": "file:../db",
-    "@app/worker": "file:../worker",
+    "@app/sync": "file:../sync",
     "@vlcn.io/crsqlite-wasm": "^0.16.0",
     "broadcast-channel": "^7.0.0",
     "debug": "^4.3.4"

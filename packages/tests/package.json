@@ -11,7 +11,7 @@
   "dependencies": {
     "@app/node": "file:../node",
     "@app/db": "file:../db",
-    "@app/worker": "file:../worker"
+    "@app/sync": "file:../sync"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

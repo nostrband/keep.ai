@@ -70,7 +70,7 @@ export function makeSendMessageTool(
           metadata: {
             createdAt: now.toISOString(),
             threadId: chatId,
-            resourceId: userId,
+            userId: userId,
           },
         };
 
@@ -80,7 +80,7 @@ export function makeSendMessageTool(
         let thread: StorageThreadType | null = null;
         if (chat_id) {
           thread = await memoryStore.getThread(chat_id);
-          if (!thread || thread.resourceId !== userId)
+          if (!thread || thread.user_id !== userId)
             throw new Error("No such thread");
         }
 
@@ -88,7 +88,7 @@ export function makeSendMessageTool(
         if (thread) {
           await memoryStore.saveThread({
             ...thread,
-            updatedAt: now,
+            updated_at: now,
           });
 
           await chatStore.updateChat({
@@ -98,9 +98,9 @@ export function makeSendMessageTool(
         } else {
           await memoryStore.saveThread({
             id: chatId,
-            createdAt: now,
-            resourceId: userId,
-            updatedAt: now,
+            created_at: now,
+            user_id: userId,
+            updated_at: now,
             title: "",
           });
 

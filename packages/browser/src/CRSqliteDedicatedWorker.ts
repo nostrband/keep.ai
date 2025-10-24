@@ -1,7 +1,11 @@
 /// <reference lib="webworker" />
 // Reusable CRSqlite Shared Worker class
 import { DBInterface } from "@app/db";
-import { CRSqliteWorkerBase, BroadcastMessage, WorkerResponse } from "@app/worker";
+import {
+  CRSqliteWorkerBase,
+  BroadcastMessage,
+  WorkerResponse,
+} from "@app/sync";
 import debug from "debug";
 
 const debugCRSqliteDedicatedWorker = debug("browser:CRSqliteDedicatedWorker");
@@ -10,8 +14,14 @@ export class CRSqliteDedicatedWorker extends CRSqliteWorkerBase {
   private pending: MessageEvent[] = [];
   private broadcastChannel: BroadcastChannel | null = null;
 
-  constructor(db: DBInterface | (() => DBInterface)) {
-    super(db, (msg) => this.broadcastChanges(msg));
+  constructor(
+    db: DBInterface | (() => DBInterface),
+    onChanges?: (msg: BroadcastMessage) => Promise<void>
+  ) {
+    super(db, async (msg) => {
+      await this.broadcastChanges(msg);
+      if (onChanges) await onChanges(msg);
+    });
 
     // Immediately
     globalThis.addEventListener("message", (m) => {

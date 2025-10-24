@@ -14,7 +14,10 @@ export { getOpenRouter, getModelName } from './model';
 export { getInstructions, type AGENT_MODE } from './instructions';
 
 // Utilities
-export { addCreatedAt, getWeekDay, createPlannerTaskPrompt } from './utils';
+export { getWeekDay, createPlannerTaskPrompt } from './utils';
+
+// Worker
+export { KeepWorker, type KeepWorkerConfig } from './KeepWorker';
 
 // Interfaces
 export { type Memory } from './interfaces';

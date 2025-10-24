@@ -21,7 +21,9 @@
   },
   "dependencies": {
     "@app/db": "file:../db",
-    "@app/worker": "file:../worker",
+    "@app/sync": "file:../sync",
+    "@fastify/cors": "^11.1.0",
+    "@noble/ciphers": "^0.5.3",
     "@vlcn.io/crsqlite": "^0.16.0",
     "debug": "^4.3.4",
     "fastify": "^5.6.1",

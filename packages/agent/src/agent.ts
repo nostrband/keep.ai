@@ -63,9 +63,10 @@ ${workingMemory}
       steps, // All previous steps with their results
       messages, // Messages to be sent to the model
     }) => {
+      const msg = messages.at(-1)!;
+      const res: any = {};
       if (stepNumber === 0) {
         // Timestamper
-        const msg = messages.at(-1)!;
         if (msg.role === "user") {
           const now = new Date();
           const timestamp = `
@@ -84,20 +85,51 @@ ${workingMemory}
           }
         }
 
-        return {
-          messages
-        }
+        // Override messages
+        res.messages = messages;
       }
 
+      const text =
+        typeof msg.content === "string"
+          ? msg.content
+          : msg.content
+              .map((p) => {
+                const pr = p.type + ":";
+                switch (p.type) {
+                  case "text":
+                    return pr + p.text;
+                  case "tool-call":
+                    return pr + p.toolName;
+                  case "tool-result":
+                    return pr + p.toolName;
+                  case "file":
+                    return pr + p.filename || "<file>";
+                  case "image":
+                    return (
+                      pr +
+                      (p.image instanceof URL ? p.image.toString() : "<image>")
+                    );
+                  case "reasoning":
+                    return pr + p.text;
+                }
+              })
+              .join(", ");
+      debugAgent(`Step ${stepNumber}: '${text}'`);
+
       // Change nothing
-      return {};
+      return res;
     },
     onStepFinish(stepResult) {
-      debugAgent("step result", JSON.stringify(stepResult, null, 2));
-      if (stepResult.finishReason === "stop") {
-        // FIXME write messages to db
-        debugAgent("finished", JSON.stringify(stepResult, null, 2));
-      }
+      debugAgent(
+        `Step result (${stepResult.finishReason}): '${
+          stepResult.text ||
+          stepResult.toolResults.map((r) => JSON.stringify(r.output)).join("\n")
+        }' usage ${JSON.stringify(stepResult.usage)}`
+      );
+      // if (stepResult.finishReason === "stop") {
+      //   // FIXME write messages to db
+      //   debugAgent("finished", JSON.stringify(stepResult, null, 2));
+      // }
     },
   });
 }

@@ -43,7 +43,7 @@ export class CRSqlitePeer {
   }
 
   async processChanges(message: BroadcastMessage): Promise<Change[]> {
-    debugPeer("Received broadcast message:", message);
+    debugPeer("Received broadcast message, changes: ", message.data.length);
 
     if (message.type === "changes" && message.data) {
       try {
@@ -81,12 +81,12 @@ export class CRSqlitePeer {
             `INSERT INTO crsql_changes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               change.table,
-              change.pk,
+              new Uint8Array(change.pk),
               change.cid,
               change.val,
               change.col_version,
               change.db_version,
-              change.site_id,
+              new Uint8Array(change.site_id),
               change.cl,
               change.seq,
             ]

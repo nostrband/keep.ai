@@ -4,21 +4,21 @@ import debug from "debug";
 
 const debugMemoryStore = debug("db:memory-store");
 
-export type StorageThreadType = {
+export type Thread = {
   id: string;
   title?: string;
-  resourceId: string;
-  createdAt: Date;
-  updatedAt: Date;
+  user_id: string;
+  created_at: Date;
+  updated_at: Date;
   metadata?: Record<string, unknown>;
 };
 
-export type StorageResourceType = {
+export type Resource = {
   id: string;
   workingMemory?: string;
   metadata?: Record<string, unknown>;
-  createdAt: Date;
-  updatedAt: Date;
+  created_at: Date;
+  updated_at: Date;
 };
 
 export class MemoryStore {
@@ -31,20 +31,26 @@ export class MemoryStore {
   }
 
   // Thread operations
-  async saveThread(thread: StorageThreadType): Promise<void> {
-    await this.db.db.exec(`INSERT OR REPLACE INTO threads (id, title, resourceId, createdAt, updatedAt, metadata)
-        VALUES (?, ?, ?, ?, ?, ?)`, [
-      thread.id,
-      thread.title || "",
-      thread.resourceId,
-      thread.createdAt.toISOString(),
-      thread.updatedAt.toISOString(),
-      JSON.stringify(thread.metadata || {})
-    ]);
+  async saveThread(thread: Thread): Promise<void> {
+    await this.db.db.exec(
+      `INSERT OR REPLACE INTO threads (id, title, user_id, created_at, updated_at, metadata)
+        VALUES (?, ?, ?, ?, ?, ?)`,
+      [
+        thread.id,
+        thread.title || "",
+        thread.user_id,
+        thread.created_at.toISOString(),
+        thread.updated_at.toISOString(),
+        JSON.stringify(thread.metadata || {}),
+      ]
+    );
   }
 
-  async getThread(threadId: string): Promise<StorageThreadType | null> {
-    const results = await this.db.db.execO<Record<string, unknown>>(`SELECT * FROM threads WHERE id = ?`, [threadId]);
+  async getThread(threadId: string): Promise<Thread | null> {
+    const results = await this.db.db.execO<Record<string, unknown>>(
+      `SELECT * FROM threads WHERE id = ?`,
+      [threadId]
+    );
 
     if (!results || results.length === 0) {
       return null;
@@ -54,16 +60,17 @@ export class MemoryStore {
     return {
       id: row.id as string,
       title: (row.title as string) || undefined,
-      resourceId: row.resourceId as string,
-      createdAt: new Date(row.createdAt as string),
-      updatedAt: new Date(row.updatedAt as string),
+      user_id: row.user_id as string,
+      created_at: new Date(row.created_at as string),
+      updated_at: new Date(row.updated_at as string),
       metadata: row.metadata ? JSON.parse(row.metadata as string) : undefined,
     };
   }
 
-  async listThreads(): Promise<StorageThreadType[]> {
+  async listThreads(): Promise<Thread[]> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT * FROM threads WHERE resourceId = ? ORDER BY updatedAt DESC`, [this.user_id]
+      `SELECT * FROM threads WHERE user_id = ? ORDER BY updated_at DESC`,
+      [this.user_id]
     );
 
     if (!results) return [];
@@ -71,9 +78,9 @@ export class MemoryStore {
     return results.map((row) => ({
       id: row.id as string,
       title: (row.title as string) || undefined,
-      resourceId: row.resourceId as string,
-      createdAt: new Date(row.createdAt as string),
-      updatedAt: new Date(row.updatedAt as string),
+      user_id: row.user_id as string,
+      created_at: new Date(row.created_at as string),
+      updated_at: new Date(row.updated_at as string),
       metadata: row.metadata ? JSON.parse(row.metadata as string) : undefined,
     }));
   }
@@ -89,35 +96,45 @@ export class MemoryStore {
         throw new Error("Message metadata must include threadId");
       }
 
-      await this.db.db.exec(`INSERT OR REPLACE INTO messages (id, threadId, resourceId, role, content, createdAt)
-          VALUES (?, ?, ?, ?, ?, ?)`, [
-        message.id,
-        threadId,
-        this.user_id,
-        message.role,
-        JSON.stringify(message),
-        metadata.createdAt || new Date().toISOString()
-      ]);
+      await this.db.db.exec(
+        `INSERT OR REPLACE INTO messages (id, thread_id, user_id, role, content, created_at)
+          VALUES (?, ?, ?, ?, ?, ?)`,
+        [
+          message.id,
+          threadId,
+          this.user_id,
+          message.role,
+          JSON.stringify(message),
+          metadata.createdAt || new Date().toISOString(),
+        ]
+      );
     }
   }
 
   async getMessages({
     threadId,
-    limit,
+    limit = 50,
+    since,
   }: {
     threadId?: string;
     limit?: number;
+    since?: string;
   }): Promise<AssistantUIMessage[]> {
-    let sql = `SELECT * FROM messages WHERE resourceId = ?`;
+    let sql = `SELECT * FROM messages WHERE user_id = ?`;
     const args: (string | number)[] = [this.user_id];
 
     if (threadId) {
-      sql += ` AND threadId = ?`;
+      sql += ` AND thread_id = ?`;
       args.push(threadId);
     }
 
+    if (since) {
+      sql += ` AND created_at > ?`;
+      args.push(since);
+    }
+
     // A batch of latest messages
-    sql += ` ORDER BY createdAt DESC`;
+    sql += ` ORDER BY created_at DESC`;
 
     if (limit) {
       sql += ` LIMIT ?`;
@@ -140,6 +157,7 @@ export class MemoryStore {
         }
       })
       .filter((m) => !!m)
+      .filter((m) => !!m.role)
       .sort((a, b) =>
         // re-sort ASC
         a.metadata!.createdAt! < b.metadata!.createdAt!
@@ -151,19 +169,25 @@ export class MemoryStore {
   }
 
   // Resource operations
-  async saveResource(resource: StorageResourceType): Promise<void> {
-    await this.db.db.exec(`INSERT OR REPLACE INTO resources (id, workingMemory, metadata, createdAt, updatedAt)
-        VALUES (?, ?, ?, ?, ?)`, [
-      resource.id,
-      resource.workingMemory || "",
-      JSON.stringify(resource.metadata || {}),
-      resource.createdAt.toISOString(),
-      resource.updatedAt.toISOString()
-    ]);
+  async saveResource(resource: Resource): Promise<void> {
+    await this.db.db.exec(
+      `INSERT OR REPLACE INTO resources (id, workingMemory, metadata, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?)`,
+      [
+        resource.id,
+        resource.workingMemory || "",
+        JSON.stringify(resource.metadata || {}),
+        resource.created_at.toISOString(),
+        resource.updated_at.toISOString(),
+      ]
+    );
   }
 
-  async getResource(): Promise<StorageResourceType | null> {
-    const results = await this.db.db.execO<Record<string, unknown>>(`SELECT * FROM resources WHERE id = ?`, [this.user_id]);
+  async getResource(): Promise<Resource | null> {
+    const results = await this.db.db.execO<Record<string, unknown>>(
+      `SELECT * FROM resources WHERE id = ?`,
+      [this.user_id]
+    );
 
     if (!results || results.length === 0) {
       return null;
@@ -174,8 +198,8 @@ export class MemoryStore {
       id: row.id as string,
       workingMemory: (row.workingMemory as string) || undefined,
       metadata: row.metadata ? JSON.parse(row.metadata as string) : undefined,
-      createdAt: new Date(row.createdAt as string),
-      updatedAt: new Date(row.updatedAt as string),
+      created_at: new Date(row.created_at as string),
+      updated_at: new Date(row.updated_at as string),
     };
   }
 
@@ -185,13 +209,16 @@ export class MemoryStore {
     metadata?: Record<string, unknown>
   ): Promise<void> {
     const now = new Date();
-    await this.db.db.exec(`INSERT OR REPLACE INTO resources (id, workingMemory, metadata, createdAt, updatedAt)
-        VALUES (?, ?, ?, ?, ?)`, [
-      this.user_id,
-      workingMemory,
-      JSON.stringify(metadata || {}),
-      now.toISOString(),
-      now.toISOString()
-    ]);
+    await this.db.db.exec(
+      `INSERT OR REPLACE INTO resources (id, workingMemory, metadata, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?)`,
+      [
+        this.user_id,
+        workingMemory,
+        JSON.stringify(metadata || {}),
+        now.toISOString(),
+        now.toISOString(),
+      ]
+    );
   }
 }

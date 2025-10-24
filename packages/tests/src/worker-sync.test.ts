@@ -204,7 +204,6 @@ describe("CRSqlite Worker and Client Synchronization", () => {
 
   it("should synchronize data between client and worker", async () => {
     // Initial sync - client requests sync from worker
-    await client.requestSync();
     console.log("t1");
 
     // Wait for sync to complete

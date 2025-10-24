@@ -37,36 +37,40 @@ export class ChatStore {
 
     // Create new chat with first message info
     const now = new Date().toISOString();
-    await this.db.db.exec(`INSERT INTO chats (id, user_id, first_message_content, first_message_time, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?)`, [chatId, this.user_id, firstMessageContent, now, now, now]);
+    await this.db.db.exec(
+      `INSERT INTO chats (id, user_id, first_message_content, first_message_time, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?)`,
+      [chatId, this.user_id, firstMessageContent, now, now, now]
+    );
   }
 
   // Update chat info when new messages are sent
-  async updateChat(opts: {
-    chatId: string;
-    updatedAt: Date;
-  }): Promise<void> {
+  async updateChat(opts: { chatId: string; updatedAt: Date }): Promise<void> {
     const { chatId, updatedAt } = opts;
 
     // Update existing chat
-    const result = await this.db.db.exec(`UPDATE chats
+    const result = await this.db.db.exec(
+      `UPDATE chats
           SET updated_at = ?
-          WHERE id = ? AND user_id = ?`, [updatedAt.toISOString(), chatId, this.user_id]);
-    
+          WHERE id = ? AND user_id = ?`,
+      [updatedAt.toISOString(), chatId, this.user_id]
+    );
+
     // Note: cr-sqlite exec doesn't return changes count like better-sqlite3
     // We'll assume the operation succeeded if no error was thrown
   }
 
   // Delete chat
-  async deleteChat(opts: {
-    chatId: string;
-  }): Promise<void> {
+  async deleteChat(opts: { chatId: string }): Promise<void> {
     const { chatId } = opts;
 
     // Delete existing chat
-    await this.db.db.exec(`DELETE FROM chats
-          WHERE id = ? AND user_id = ?`, [chatId, this.user_id]);
-    
+    await this.db.db.exec(
+      `DELETE FROM chats
+          WHERE id = ? AND user_id = ?`,
+      [chatId, this.user_id]
+    );
+
     // Note: cr-sqlite exec doesn't return changes count like better-sqlite3
     // We'll assume the operation succeeded if no error was thrown
   }
@@ -74,8 +78,11 @@ export class ChatStore {
   // Mark chat as read by updating read_at timestamp
   async readChat(chatId: string): Promise<void> {
     const now = new Date().toISOString();
-    
-    await this.db.db.exec(`UPDATE chats SET read_at = ? WHERE id = ? AND user_id = ?`, [now, chatId, this.user_id]);
+
+    await this.db.db.exec(
+      `UPDATE chats SET read_at = ? WHERE id = ? AND user_id = ?`,
+      [now, chatId, this.user_id]
+    );
   }
 
   // Get all chats for sidebar - now reads directly from chats table
@@ -88,7 +95,8 @@ export class ChatStore {
       read_at: string | null;
     }>
   > {
-    const results = await this.db.db.execO<Record<string, unknown>>(`SELECT
+    const results = await this.db.db.execO<Record<string, unknown>>(
+      `SELECT
             id,
             updated_at,
             first_message_content as first_message,
@@ -97,8 +105,10 @@ export class ChatStore {
           FROM chats
           WHERE user_id = ?
           ORDER BY updated_at DESC
-          LIMIT 100`, [this.user_id]);
-    
+          LIMIT 100`,
+      [this.user_id]
+    );
+
     if (!results) return [];
 
     return results.map((row) => ({

@@ -1,8 +1,4 @@
-// import "server-only";
 import { CRSqliteDB } from "./database";
-import debug from "debug";
-
-const debugTaskStore = debug("db:task-store");
 
 export interface Task {
   id: string;
@@ -32,14 +28,17 @@ export class TaskStore {
     id: string,
     timestamp: number,
     task: string,
-    type: string = '',
-    thread_id: string = '',
-    title: string = '',
-    cron: string = ''
+    type: string = "",
+    thread_id: string = "",
+    title: string = "",
+    cron: string = ""
   ): Promise<string> {
     // Insert new task
-    await this.db.db.exec(`INSERT INTO tasks (id, user_id, timestamp, task, reply, state, thread_id, error, type, title, cron)
-          VALUES (?, ?, ?, ?, '', '', ?, '', ?, ?, ?)`, [id, this.user_id, timestamp, task, thread_id, type, title, cron]);
+    await this.db.db.exec(
+      `INSERT INTO tasks (id, user_id, timestamp, task, reply, state, thread_id, error, type, title, cron)
+          VALUES (?, ?, ?, ?, '', '', ?, '', ?, ?, ?)`,
+      [id, this.user_id, timestamp, task, thread_id, type, title, cron]
+    );
 
     return id;
   }
@@ -97,18 +96,19 @@ export class TaskStore {
       state: row.state as string,
       thread_id: row.thread_id as string,
       error: row.error as string,
-      type: (row.type as string) || '',
-      title: (row.title as string) || '',
-      cron: (row.cron as string) || '',
+      type: (row.type as string) || "",
+      title: (row.title as string) || "",
+      cron: (row.cron as string) || "",
     }));
   }
 
   // Delete task by ID - returns true if task was found and deleted, false if not found
-  async deleteTask(
-    id: string
-  ): Promise<void> {
+  async deleteTask(id: string): Promise<void> {
     // Mark the task as deleted
-    await this.db.db.exec(`UPDATE tasks SET deleted = TRUE WHERE id = ? AND user_id = ? AND (deleted IS NULL OR deleted = FALSE)`, [id, this.user_id]);
+    await this.db.db.exec(
+      `UPDATE tasks SET deleted = TRUE WHERE id = ? AND user_id = ? AND (deleted IS NULL OR deleted = FALSE)`,
+      [id, this.user_id]
+    );
 
     // Note: cr-sqlite exec doesn't return changes count like better-sqlite3
     // We'll assume the operation succeeded if no error was thrown
@@ -117,12 +117,15 @@ export class TaskStore {
   // Get task with oldest timestamp with reply '' for this user that is ready to trigger (timestamp <= now)
   async getNextTask(): Promise<Task | null> {
     const currentTimeSeconds = Math.floor(Date.now() / 1000); // Convert milliseconds to seconds
-    
-    const results = await this.db.db.execO<Record<string, unknown>>(`SELECT id, user_id, timestamp, task, reply, state, thread_id, error, type, title, cron
+
+    const results = await this.db.db.execO<Record<string, unknown>>(
+      `SELECT id, user_id, timestamp, task, reply, state, thread_id, error, type, title, cron
           FROM tasks
           WHERE user_id = ? AND state = '' AND timestamp <= ? AND (deleted IS NULL OR deleted = FALSE)
           ORDER BY timestamp ASC
-          LIMIT 1`, [this.user_id, currentTimeSeconds]);
+          LIMIT 1`,
+      [this.user_id, currentTimeSeconds]
+    );
 
     if (!results || results.length === 0) {
       return null;
@@ -138,19 +141,20 @@ export class TaskStore {
       state: row.state as string,
       thread_id: row.thread_id as string,
       error: row.error as string,
-      type: (row.type as string) || '',
-      title: (row.title as string) || '',
-      cron: (row.cron as string) || '',
+      type: (row.type as string) || "",
+      title: (row.title as string) || "",
+      cron: (row.cron as string) || "",
     };
   }
 
   // Get task by user_id and id
-  async getTask(
-    id: string
-  ): Promise<Task> {
-    const results = await this.db.db.execO<Record<string, unknown>>(`SELECT id, user_id, timestamp, task, reply, state, thread_id, error, type, title, cron
+  async getTask(id: string): Promise<Task> {
+    const results = await this.db.db.execO<Record<string, unknown>>(
+      `SELECT id, user_id, timestamp, task, reply, state, thread_id, error, type, title, cron
           FROM tasks
-          WHERE user_id = ? AND id = ? AND (deleted IS NULL OR deleted = FALSE)`, [this.user_id, id]);
+          WHERE user_id = ? AND id = ? AND (deleted IS NULL OR deleted = FALSE)`,
+      [this.user_id, id]
+    );
 
     if (!results || results.length === 0) {
       throw new Error("Task not found");
@@ -166,9 +170,9 @@ export class TaskStore {
       state: row.state as string,
       thread_id: row.thread_id as string,
       error: row.error as string,
-      type: (row.type as string) || '',
-      title: (row.title as string) || '',
-      cron: (row.cron as string) || '',
+      type: (row.type as string) || "",
+      title: (row.title as string) || "",
+      cron: (row.cron as string) || "",
     };
   }
 
@@ -190,10 +194,13 @@ export class TaskStore {
     }
 
     // Update the task
-    await this.db.db.exec(`UPDATE tasks
+    await this.db.db.exec(
+      `UPDATE tasks
           SET reply = ?, state = ?, thread_id = ?, error = ?
-          WHERE user_id = ? AND id = ? AND (deleted IS NULL OR deleted = FALSE) AND reply = ''`, [reply, state, thread_id, error, this.user_id, id]);
-    
+          WHERE user_id = ? AND id = ? AND (deleted IS NULL OR deleted = FALSE) AND reply = ''`,
+      [reply, state, thread_id, error, this.user_id, id]
+    );
+
     // Note: cr-sqlite exec doesn't return changes count like better-sqlite3
     // We'll assume the operation succeeded if no error was thrown
   }
@@ -201,21 +208,24 @@ export class TaskStore {
   // Update task - updates all fields of an existing task
   async updateTask(task: Task): Promise<void> {
     // Update the task with all provided values
-    await this.db.db.exec(`UPDATE tasks
+    await this.db.db.exec(
+      `UPDATE tasks
           SET user_id = ?, timestamp = ?, task = ?, reply = ?, state = ?, thread_id = ?, error = ?, type = ?, title = ?, cron = ?
-          WHERE id = ? AND (deleted IS NULL OR deleted = FALSE)`, [
-      task.user_id,
-      task.timestamp,
-      task.task,
-      task.reply,
-      task.state,
-      task.thread_id,
-      task.error,
-      task.type,
-      task.title,
-      task.cron,
-      task.id
-    ]);
+          WHERE id = ? AND (deleted IS NULL OR deleted = FALSE)`,
+      [
+        task.user_id,
+        task.timestamp,
+        task.task,
+        task.reply,
+        task.state,
+        task.thread_id,
+        task.error,
+        task.type,
+        task.title,
+        task.cron,
+        task.id,
+      ]
+    );
 
     // Note: cr-sqlite exec doesn't return changes count like better-sqlite3
     // We'll assume the operation succeeded if no error was thrown
@@ -223,10 +233,13 @@ export class TaskStore {
 
   // Check if there's a cron task of a specific type
   async hasCronTaskOfType(taskType: string): Promise<boolean> {
-    const results = await this.db.db.execO<{ count: number }>(`SELECT COUNT(*) as count
+    const results = await this.db.db.execO<{ count: number }>(
+      `SELECT COUNT(*) as count
           FROM tasks
-          WHERE user_id = ? AND type = ? AND cron != '' AND (deleted IS NULL OR deleted = FALSE)`, [this.user_id, taskType]);
-    
+          WHERE user_id = ? AND type = ? AND cron != '' AND (deleted IS NULL OR deleted = FALSE)`,
+      [this.user_id, taskType]
+    );
+
     const count = results?.[0]?.count || 0;
     return count > 0;
   }

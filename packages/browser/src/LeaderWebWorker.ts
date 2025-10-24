@@ -1,4 +1,8 @@
-import { BroadcastChannel, createLeaderElection, LeaderElector } from "broadcast-channel";
+import {
+  BroadcastChannel,
+  createLeaderElection,
+  LeaderElector,
+} from "broadcast-channel";
 import debug from "debug";
 
 const debugLeaderWebWorker = debug("browser:LeaderWebWorker");
@@ -27,11 +31,17 @@ export class LeaderWebWorker {
   constructor(workerUrl: string | URL, opts?: LeaderWebWorkerOptions) {
     this.url = workerUrl;
     this.name = opts?.name ?? stableName(String(workerUrl));
-    this.type = opts?.type ?? (supportsModuleDedicatedWorker() ? "module" : "classic");
+    this.type =
+      opts?.type ?? (supportsModuleDedicatedWorker() ? "module" : "classic");
   }
 
   /** Read-only leadership flag for callers */
-  get isLeader(): boolean { return this._isLeader; }
+  get isLeader(): boolean {
+    return this._isLeader;
+  }
+  isStarted(): boolean {
+    return this.started;
+  }
 
   addEventListener(type: "message" | "error", fn: MsgHandler | ErrHandler) {
     if (type === "message") this.msgHandlers.add(fn as MsgHandler);
@@ -43,7 +53,8 @@ export class LeaderWebWorker {
   }
 
   postMessage(data: any) {
-    if (!this.started || !this.worker || !this._isLeader) throw new Error("Worker not started or not leader");
+    if (!this.started || !this.worker || !this._isLeader)
+      throw new Error("Worker not started or not leader");
     this.worker.postMessage(data);
   }
 
@@ -96,9 +107,21 @@ export class LeaderWebWorker {
 
   async terminate(): Promise<void> {
     try {
-      if (this.worker) { try { this.worker.terminate(); } catch {} }
-      if (this.elector) { try { await this.elector.die(); } catch {} }
-      if (this.chan) { try { await this.chan.close(); } catch {} }
+      if (this.worker) {
+        try {
+          this.worker.terminate();
+        } catch {}
+      }
+      if (this.elector) {
+        try {
+          await this.elector.die();
+        } catch {}
+      }
+      if (this.chan) {
+        try {
+          await this.chan.close();
+        } catch {}
+      }
     } finally {
       this.worker = undefined;
       this.elector = undefined;
@@ -117,8 +140,12 @@ export class LeaderWebWorker {
     for (const fn of this.errHandlers) fn(e);
   }
   private async cleanupElectionOnly() {
-    try { await this.elector?.die(); } catch {}
-    try { await this.chan?.close(); } catch {}
+    try {
+      await this.elector?.die();
+    } catch {}
+    try {
+      await this.chan?.close();
+    } catch {}
     this.elector = undefined;
     this.chan = undefined;
   }
@@ -127,7 +154,10 @@ export class LeaderWebWorker {
 // helpers
 export function stableName(s: string) {
   let h = 2166136261 >>> 0;
-  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
   return `lw-${h.toString(36)}`;
 }
 function supportsModuleDedicatedWorker(): boolean {
@@ -135,7 +165,10 @@ function supportsModuleDedicatedWorker(): boolean {
     const b = new Blob(["export {};"], { type: "text/javascript" });
     const u = URL.createObjectURL(b);
     const w = new Worker(u, { type: "module" as any });
-    w.terminate(); URL.revokeObjectURL(u);
+    w.terminate();
+    URL.revokeObjectURL(u);
     return true;
-  } catch { return false; }
+  } catch {
+    return false;
+  }
 }

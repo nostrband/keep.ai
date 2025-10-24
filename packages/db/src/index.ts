@@ -1,21 +1,27 @@
 // Database core
-export { KeepDB } from './database';
-export type { CRSqliteDB } from './database';
+export { KeepDb } from "./database";
+export type { CRSqliteDB } from "./database";
 
 // Database interface
-export type { DBInterface, CreateDBFunction } from './interfaces';
+export type { DBInterface, CreateDBFunction } from "./interfaces";
 
 // Memory store
-export { MemoryStore } from './memory-store';
-export type { StorageThreadType, StorageResourceType } from './memory-store';
+export { MemoryStore } from "./memory-store";
+export type {
+  Thread as StorageThreadType,
+  Resource as StorageResourceType,
+} from "./memory-store";
 
 // Chat store
-export { ChatStore } from './chat-store';
+export { ChatStore } from "./chat-store";
 
 // Note store
-export { NoteStore } from './note-store';
-export type { Note, NoteListItem } from './note-store';
+export { NoteStore } from "./note-store";
+export type { Note, NoteListItem } from "./note-store";
 
 // Task store
-export { TaskStore } from './task-store';
-export type { Task } from './task-store';
+export { TaskStore } from "./task-store";
+export type { Task } from "./task-store";
+
+// Api
+export { KeepDbApi } from "./api";

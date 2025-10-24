@@ -1,15 +1,4 @@
 // src/lib/utils.ts
-import { UIMessage } from 'ai';
-
-export function addCreatedAt(messages: UIMessage[]) {
-  return messages.map((m) => ({
-    ...m,
-    metadata: {
-      createdAt: new Date(),
-    },
-  }));
-}
-
 export function getWeekDay(date = new Date()) {
   const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
   return days[date.getDay()];

@@ -1,6 +1,7 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    "lib": ["ES2022", "WebWorker", "DOM"],  // includes SharedWorker types
     "jsx": "react-jsx",
     "allowImportingTsExtensions": true,
     "noEmit": true

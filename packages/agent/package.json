@@ -8,12 +8,13 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
     }
   },
   "scripts": {
-    "build": "tsup src/index.ts --format esm --dts --external @app/proto --external @app/db",
-    "dev": "tsup src/index.ts --format esm --dts --watch --external @app/proto --external @app/db",
+    "build": "tsup src/index.ts --format esm,cjs --dts --external @app/proto --external @app/db",
+    "dev": "tsup src/index.ts --format esm,cjs --dts --watch --external @app/proto --external @app/db",
     "type-check": "tsc --noEmit"
   },
   "dependencies": {

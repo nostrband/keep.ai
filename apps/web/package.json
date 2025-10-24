@@ -13,7 +13,8 @@
     "@app/browser": "file:../../packages/browser",
     "@app/db": "file:../../packages/db",
     "@app/ui": "file:../../packages/ui",
-    "@app/worker": "file:../../packages/worker",
+    "@app/sync": "file:../../packages/sync",
+    "@tanstack/react-query": "^5.90.5",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },

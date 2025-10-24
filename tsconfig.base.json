@@ -20,9 +20,11 @@
       "@app/proto/*": ["packages/proto/src/*"],
       "@app/agent/*": ["packages/agent/src/*"],
       "@app/db/*": ["packages/db/src/*"],
-      "@app/worker/*": ["packages/worker/src/*"],
-      "@app/transports/*": ["packages/transports/src/*"],
-      "@app/ui/*": ["packages/ui/src/*"]
+      "@app/sync/*": ["packages/sync/src/*"],
+      "@app/ui/*": ["packages/ui/src/*"],
+      "@app/cli/*": ["apps/cli/src/*"],
+      "@app/web/*": ["apps/web/src/*"],
+      "@app/server/*": ["apps/server/src/*"]
     }
   },
   "exclude": ["node_modules", "dist", "build"]

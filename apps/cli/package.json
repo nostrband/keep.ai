@@ -1,0 +1,31 @@
+{
+  "name": "@app/cli",
+  "version": "0.1.0",
+  "description": "CLI for Keep AI assistant",
+  "main": "dist/index.js",
+  "bin": {
+    "keepai": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "clean": "rm -rf dist",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@app/agent": "file:../../packages/agent",
+    "@app/db": "file:../../packages/db",
+    "@app/node": "file:../../packages/node",
+    "@app/sync": "file:../../packages/sync",
+    "commander": "^14.0.1",
+    "debug": "^4.4.3",
+    "dotenv": "^17.2.3"
+  },
+  "devDependencies": {
+    "tsup": "^7.2.0",
+    "typescript": "^5.2.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
