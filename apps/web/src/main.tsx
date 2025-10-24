@@ -17,9 +17,10 @@ debug.enable("*");
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <QueryProvider
+      // Using it for testing to bypass workers
       // backendUrl={API_ENDPOINT}
       sharedWorkerUrl={sharedWorkerUrl}
-      // dedicatedWorkerUrl={dedicatedWorkerUrl}
+      dedicatedWorkerUrl={dedicatedWorkerUrl}
       queryClient={queryClient}
       setOnLocalChanges={setOnLocalChanges}
       onRemoteChanges={(tables) => notifyTablesChanged(tables, false)}

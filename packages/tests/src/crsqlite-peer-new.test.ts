@@ -7,7 +7,7 @@ import {
   Cursor,
   PeerMessage,
   Peer,
-} from "@app/worker";
+} from "@app/sync";
 
 // Custom transport that connects two peers directly
 class DirectTransport implements Transport {
