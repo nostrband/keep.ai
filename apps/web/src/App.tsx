@@ -8,6 +8,8 @@ import ThreadDetailPage from "./components/ThreadDetailPage";
 import MemoryPage from "./components/MemoryPage";
 import TasksPage from "./components/TasksPage";
 import TaskDetailPage from "./components/TaskDetailPage";
+import NotesPage from "./components/NotesPage";
+import NoteDetailPage from "./components/NoteDetailPage";
 
 function App() {
   const { dbStatus, error } = useCRSqliteQuery();
@@ -39,6 +41,8 @@ function App() {
         <Route path="/memory" element={<MemoryPage />} />
         <Route path="/tasks" element={<TasksPage />} />
         <Route path="/tasks/:id" element={<TaskDetailPage />} />
+        <Route path="/notes" element={<NotesPage />} />
+        <Route path="/notes/:id" element={<NoteDetailPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>

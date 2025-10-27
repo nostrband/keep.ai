@@ -95,6 +95,13 @@ export default function SharedHeader({ title, subtitle }: SharedHeaderProps) {
                     Memory
                   </Link>
                   <Link
+                    to="/notes"
+                    className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                    onClick={() => setIsOpen(false)}
+                  >
+                    Notes
+                  </Link>
+                  <Link
                     to="/tasks"
                     className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
                     onClick={() => setIsOpen(false)}
