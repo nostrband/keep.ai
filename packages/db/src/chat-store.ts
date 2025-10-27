@@ -38,8 +38,8 @@ export class ChatStore {
     // Create new chat with first message info
     const now = new Date().toISOString();
     await this.db.db.exec(
-      `INSERT INTO chats (id, user_id, first_message_content, first_message_time, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO chats (id, user_id, first_message_content, first_message_time, created_at, updated_at, read_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [chatId, this.user_id, firstMessageContent, now, now, now]
     );
   }
@@ -49,7 +49,7 @@ export class ChatStore {
     const { chatId, updatedAt } = opts;
 
     // Update existing chat
-    const result = await this.db.db.exec(
+    await this.db.db.exec(
       `UPDATE chats
           SET updated_at = ?
           WHERE id = ? AND user_id = ?`,
@@ -73,6 +73,37 @@ export class ChatStore {
 
     // Note: cr-sqlite exec doesn't return changes count like better-sqlite3
     // We'll assume the operation succeeded if no error was thrown
+  }
+
+  // Get a specific chat by ID
+  async getChat(chatId: string): Promise<{
+    id: string;
+    user_id: string;
+    first_message_content: string | null;
+    first_message_time: string | null;
+    created_at: string;
+    updated_at: string;
+    read_at: string | null;
+  } | null> {
+    const results = await this.db.db.execO<Record<string, unknown>>(
+      `SELECT id, user_id, first_message_content, first_message_time, created_at, updated_at, read_at
+       FROM chats
+       WHERE id = ? AND user_id = ?`,
+      [chatId, this.user_id]
+    );
+
+    if (!results || results.length === 0) return null;
+
+    const row = results[0];
+    return {
+      id: row.id as string,
+      user_id: row.user_id as string,
+      first_message_content: row.first_message_content as string | null,
+      first_message_time: row.first_message_time as string | null,
+      created_at: row.created_at as string,
+      updated_at: row.updated_at as string,
+      read_at: row.read_at as string | null,
+    };
   }
 
   // Mark chat as read by updating read_at timestamp

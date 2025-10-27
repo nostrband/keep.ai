@@ -34,7 +34,7 @@ interface QueryProviderProps {
   dedicatedWorkerUrl?: string;
   queryClient: QueryClient;
   setOnLocalChanges: (cb: () => void) => void;
-  onRemoteChanges: (tables: string[]) => void;
+  onRemoteChanges: (tables: string[], api: KeepDbApi) => void;
 }
 
 export function QueryProvider({
@@ -125,7 +125,7 @@ export function QueryProvider({
       const peer = new Peer(db, [transport]);
 
       // Notify reactive components on changes
-      peer.addListener("change", onRemoteChanges);
+      peer.addListener("change", (tables: string[]) => onRemoteChanges(tables, api));
       // Set up event handlers
       peer.addListener("sync", () => {
         // Additional sync data handling if needed

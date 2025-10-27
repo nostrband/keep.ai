@@ -115,15 +115,16 @@ export class TaskStore {
   }
 
   // Get task with oldest timestamp with reply '' for this user that is ready to trigger (timestamp <= now)
+  // Prioritizes tasks with 'message' type over other types
   async getNextTask(): Promise<Task | null> {
     const currentTimeSeconds = Math.floor(Date.now() / 1000); // Convert milliseconds to seconds
 
+    // Fetch all pending tasks (no LIMIT 1)
     const results = await this.db.db.execO<Record<string, unknown>>(
       `SELECT id, user_id, timestamp, task, reply, state, thread_id, error, type, title, cron
           FROM tasks
           WHERE user_id = ? AND state = '' AND timestamp <= ? AND (deleted IS NULL OR deleted = FALSE)
-          ORDER BY timestamp ASC
-          LIMIT 1`,
+          ORDER BY timestamp ASC`,
       [this.user_id, currentTimeSeconds]
     );
 
@@ -131,8 +132,8 @@ export class TaskStore {
       return null;
     }
 
-    const row = results[0];
-    return {
+    // Convert results to Task objects
+    const tasks: Task[] = results.map((row) => ({
       id: row.id as string,
       user_id: row.user_id as string,
       timestamp: row.timestamp as number,
@@ -144,7 +145,16 @@ export class TaskStore {
       type: (row.type as string) || "",
       title: (row.title as string) || "",
       cron: (row.cron as string) || "",
-    };
+    }));
+
+    // First, look for tasks with 'message' type
+    const messageTask = tasks.find(task => task.type === 'message');
+    if (messageTask) {
+      return messageTask;
+    }
+
+    // If no 'message' type task found, return the oldest task (first in the ordered list)
+    return tasks[0];
   }
 
   // Get task by user_id and id

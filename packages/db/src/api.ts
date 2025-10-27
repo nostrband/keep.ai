@@ -50,6 +50,8 @@ export class KeepDbApi {
   }): Promise<AssistantUIMessage> {
     const now = new Date();
     const role = input.role || "user";
+    const chatId = input.threadId; // Reuse threadId as chatId
+    
     // First ensure the thread exists
     const existingThread = await this.memoryStore.getThread(input.threadId);
     if (!existingThread) {
@@ -79,6 +81,16 @@ export class KeepDbApi {
     // Save the message
     await this.memoryStore.saveMessages([message]);
 
+    // Ensure Chat object exists with threadId reused as chatId
+    const existingChat = await this.chatStore.getChat(chatId);
+    if (existingChat) {
+      // Update existing chat
+      await this.chatStore.updateChat({ chatId, updatedAt: now });
+    } else {
+      // Create new chat
+      await this.chatStore.createChat({ chatId, message });
+    }
+
     // Create task for agent to process the user message
     if (role === "user") {
       // Create task with type='message' and message_id in 'task' field
@@ -96,5 +108,32 @@ export class KeepDbApi {
     }
 
     return message;
+  }
+
+  async getNewAssistantMessages(): Promise<AssistantUIMessage[]> {
+    const sql = `
+      SELECT m.*
+      FROM messages AS m
+      JOIN chats AS c ON c.id = m.thread_id
+      WHERE (c.read_at IS NULL OR m.created_at > c.read_at) AND m.role = 'assistant'
+      ORDER BY m.created_at
+    `;
+    
+    const result = await this.#db.db.execO<Record<string, unknown>>(sql);
+    if (!result) return [];
+
+    return result
+      .filter((row) => !!row.content)
+      .map((row) => {
+        // Parse the full UIMessage from content field
+        try {
+          return JSON.parse(row.content as string) as AssistantUIMessage;
+        } catch (e) {
+          console.debug("Bad message in db", row, e);
+          return undefined;
+        }
+      })
+      .filter((m) => !!m)
+      .filter((m) => !!m.role);
   }
 }

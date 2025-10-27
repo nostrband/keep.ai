@@ -1,0 +1,15 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --accent: 42 67% 55%; /* #D6A642 converted to HSL */
+    --accent-foreground: 0 0% 100%; /* White text on accent background */
+  }
+  
+  * {
+    @apply border-gray-200;
+  }
+  body {
+    @apply bg-white text-gray-900;
+  }
+}

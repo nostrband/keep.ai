@@ -1,5 +1,7 @@
 // Query client configuration with table-based invalidation
 import { QueryClient } from "@tanstack/react-query";
+import { messageNotifications } from "./lib/MessageNotifications";
+import type { KeepDbApi } from "@app/db";
 
 export const queryClient = new QueryClient({
   defaultOptions: {
@@ -20,8 +22,8 @@ export function setOnLocalChanges(callback: (() => void) | null) {
 }
 
 // Call this from your sync/applyChanges code.
-export function notifyTablesChanged(tables: string[], isLocalChange = true) {
-  console.log("notifyTablesChanged", tables);
+export function notifyTablesChanged(tables: string[], isLocalChange: boolean, api: KeepDbApi) {
+  console.log("notifyTablesChanged", tables, isLocalChange, globalThis);
   const set = new Set(tables);
   queryClient.invalidateQueries({
     predicate(q) {
@@ -34,5 +36,12 @@ export function notifyTablesChanged(tables: string[], isLocalChange = true) {
   // If this is a local change, trigger sync
   if (isLocalChange && onLocalChangesCallback) {
     onLocalChangesCallback();
+  }
+
+  if (!isLocalChange && globalThis === window) {
+    // Check for new messages and show notifications
+    messageNotifications.checkNewMessages(api).catch((error) => {
+      console.debug("Message notifications failed:", error);
+    });
   }
 }

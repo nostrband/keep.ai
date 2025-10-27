@@ -24,14 +24,7 @@ export function useAddMessage() {
         content: input.content,
       });
 
-      return {
-        id: message.id,
-        thread_id: input.threadId,
-        user_id: api.userId,
-        role: input.role,
-        content: input.content,
-        created_at: message.metadata?.createdAt || "",
-      };
+      return message;
     },
     // onMutate: async ({ threadId, role, content, userId = 'default-user' }) => {
     //   await queryClient.cancelQueries({ queryKey: qk.threadMessages(threadId) });
@@ -61,8 +54,36 @@ export function useAddMessage() {
       // Invalidate to get fresh data from DB
       queryClient.invalidateQueries({ queryKey: qk.threadMessages(threadId) });
       queryClient.invalidateQueries({ queryKey: qk.thread(threadId) });
+      // Also invalidate chat-related queries since chatId === threadId
+      queryClient.invalidateQueries({ queryKey: qk.chatMessages(threadId) });
+      queryClient.invalidateQueries({ queryKey: qk.chat(threadId) });
+      queryClient.invalidateQueries({ queryKey: qk.allChats() });
 
-      notifyTablesChanged(["messages", "threads"]);
+      notifyTablesChanged(["messages", "threads", "chats"], true, api!);
+    },
+  });
+}
+
+export function useReadChat() {
+  const { api } = useCRSqliteQuery();
+
+  return useMutation({
+    mutationFn: async (input: {
+      chatId: string;
+      userId?: string;
+    }) => {
+      if (!api) throw new Error("Chat store not available");
+      if (input.userId && api.userId !== input.userId)
+        throw new Error("Wrong user id");
+
+      await api.chatStore.readChat(input.chatId);
+    },
+    onSuccess: (_result, { chatId }) => {
+      // Invalidate chat-related queries to reflect the updated read_at timestamp
+      queryClient.invalidateQueries({ queryKey: qk.chat(chatId) });
+      queryClient.invalidateQueries({ queryKey: qk.allChats() });
+
+      notifyTablesChanged(["chats"], true, api!);
     },
   });
 }

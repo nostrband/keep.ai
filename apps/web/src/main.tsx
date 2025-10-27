@@ -9,7 +9,7 @@ import dedicatedWorkerUrl from "./worker.ts?worker&url";
 import { QueryProvider } from "./QueryProvider.tsx";
 import { notifyTablesChanged, queryClient, setOnLocalChanges } from "./queryClient.ts";
 import debug from "debug";
-import { API_ENDPOINT } from "./const.ts";
+// import { API_ENDPOINT } from "./const.ts";
 
 debug.enable("*");
 
@@ -22,7 +22,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
       dedicatedWorkerUrl={dedicatedWorkerUrl}
       queryClient={queryClient}
       setOnLocalChanges={setOnLocalChanges}
-      onRemoteChanges={(tables) => notifyTablesChanged(tables, false)}
+      onRemoteChanges={(tables, api) => notifyTablesChanged(tables, false, api)}
     >
       <App />
     </QueryProvider>
