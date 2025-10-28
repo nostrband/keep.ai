@@ -54,7 +54,6 @@ Note that scheduled time is returned in LOCAL timezone, which might differ from 
         // Format tasks for response
         const formattedTasks = tasks.map((task) => ({
           id: task.id,
-          user_id: task.user_id,
           title: task.title,
           timestamp: task.timestamp,
           datetime:

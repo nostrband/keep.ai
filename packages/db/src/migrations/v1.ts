@@ -8,7 +8,6 @@ export async function migrateV1(tx: DBInterface["tx"] extends (fn: (tx: infer T)
   // Chats table with all final columns
   await tx.exec(`CREATE TABLE IF NOT EXISTS chats (
     id TEXT PRIMARY KEY NOT NULL,
-    user_id TEXT NOT NULL DEFAULT '',
     created_at DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
     updated_at DATETIME DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
     read_at DATETIME,
@@ -19,7 +18,6 @@ export async function migrateV1(tx: DBInterface["tx"] extends (fn: (tx: infer T)
   // Tasks table with all final columns
   await tx.exec(`CREATE TABLE IF NOT EXISTS tasks (
     id TEXT PRIMARY KEY NOT NULL,
-    user_id TEXT NOT NULL DEFAULT '',
     timestamp INTEGER NOT NULL DEFAULT 0,
     task TEXT NOT NULL DEFAULT '',
     reply TEXT DEFAULT '',
@@ -35,7 +33,6 @@ export async function migrateV1(tx: DBInterface["tx"] extends (fn: (tx: infer T)
   // Notes table
   await tx.exec(`CREATE TABLE IF NOT EXISTS notes (
     id TEXT PRIMARY KEY NOT NULL,
-    user_id TEXT NOT NULL DEFAULT '',
     title TEXT NOT NULL DEFAULT '',
     content TEXT NOT NULL DEFAULT '',
     tags TEXT NOT NULL DEFAULT '',
@@ -48,7 +45,6 @@ export async function migrateV1(tx: DBInterface["tx"] extends (fn: (tx: infer T)
   await tx.exec(`CREATE TABLE IF NOT EXISTS threads (
     id TEXT NOT NULL PRIMARY KEY,
     title TEXT NOT NULL DEFAULT '',
-    user_id TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL DEFAULT '',
     updated_at TEXT NOT NULL DEFAULT '',
     metadata TEXT NOT NULL DEFAULT ''
@@ -57,7 +53,6 @@ export async function migrateV1(tx: DBInterface["tx"] extends (fn: (tx: infer T)
   await tx.exec(`CREATE TABLE IF NOT EXISTS messages (
     id TEXT NOT NULL PRIMARY KEY,
     thread_id TEXT NOT NULL DEFAULT '',
-    user_id TEXT NOT NULL DEFAULT '',
     role TEXT NOT NULL DEFAULT '',
     content TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL DEFAULT ''
@@ -73,9 +68,6 @@ export async function migrateV1(tx: DBInterface["tx"] extends (fn: (tx: infer T)
 
   // Chats indexes
   await tx.exec(
-    `CREATE INDEX IF NOT EXISTS idx_chats_user_id ON chats(user_id)`
-  );
-  await tx.exec(
     `CREATE INDEX IF NOT EXISTS idx_chats_updated_at ON chats(updated_at)`
   );
   await tx.exec(
@@ -83,9 +75,6 @@ export async function migrateV1(tx: DBInterface["tx"] extends (fn: (tx: infer T)
   );
 
   // Tasks indexes
-  await tx.exec(
-    `CREATE INDEX IF NOT EXISTS idx_tasks_user_id ON tasks(user_id)`
-  );
   await tx.exec(
     `CREATE INDEX IF NOT EXISTS idx_tasks_timestamp ON tasks(timestamp)`
   );
@@ -96,38 +85,26 @@ export async function migrateV1(tx: DBInterface["tx"] extends (fn: (tx: infer T)
     `CREATE INDEX IF NOT EXISTS idx_tasks_state ON tasks(state)`
   );
   await tx.exec(
-    `CREATE INDEX IF NOT EXISTS idx_tasks_user_reply_timestamp ON tasks(user_id, reply, timestamp)`
+    `CREATE INDEX IF NOT EXISTS idx_tasks_reply_timestamp ON tasks(reply, timestamp)`
   );
   await tx.exec(
-    `CREATE INDEX IF NOT EXISTS idx_tasks_user_state_timestamp ON tasks(user_id, state, timestamp)`
+    `CREATE INDEX IF NOT EXISTS idx_tasks_state_timestamp ON tasks(state, timestamp)`
   );
 
   // Notes indexes
-  await tx.exec(
-    `CREATE INDEX IF NOT EXISTS idx_notes_user_id ON notes(user_id)`
-  );
   await tx.exec(
     `CREATE INDEX IF NOT EXISTS idx_notes_updated ON notes(updated)`
   );
   await tx.exec(
     `CREATE INDEX IF NOT EXISTS idx_notes_priority ON notes(priority)`
   );
-  await tx.exec(
-    `CREATE INDEX IF NOT EXISTS idx_notes_user_updated ON notes(user_id, updated)`
-  );
 
   // Memory tables indexes
-  await tx.exec(
-    `CREATE INDEX IF NOT EXISTS idx_threads_user_id ON threads(user_id)`
-  );
   await tx.exec(
     `CREATE INDEX IF NOT EXISTS idx_threads_updated_at ON threads(updated_at)`
   );
   await tx.exec(
     `CREATE INDEX IF NOT EXISTS idx_messages_thread_id ON messages(thread_id)`
-  );
-  await tx.exec(
-    `CREATE INDEX IF NOT EXISTS idx_messages_user_id ON messages(user_id)`
   );
   await tx.exec(
     `CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at)`

@@ -7,7 +7,6 @@ import { StorageThreadType } from "@app/db";
 interface Thread {
   id: string;
   title: string;
-  user_id: string;
   created_at: string;
   updated_at: string;
   metadata: string;
@@ -40,7 +39,6 @@ export function useAllThreads() {
       return threads.map((thread: StorageThreadType): Thread => ({
         id: thread.id,
         title: thread.title || '',
-        user_id: thread.user_id,
         created_at: thread.created_at.toISOString(),
         updated_at: thread.updated_at.toISOString(),
         metadata: JSON.stringify(thread.metadata || {}),
@@ -64,7 +62,6 @@ export function useThread(threadId: string, userId?: string) {
       return {
         id: thread.id,
         title: thread.title || '',
-        user_id: thread.user_id,
         created_at: thread.created_at.toISOString(),
         updated_at: thread.updated_at.toISOString(),
         metadata: JSON.stringify(thread.metadata || {}),

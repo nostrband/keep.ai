@@ -7,11 +7,9 @@ const debugChatStore = debug("db:chat-store");
 
 export class ChatStore {
   private db: CRSqliteDB;
-  private user_id: string;
 
-  constructor(db: CRSqliteDB, user_id: string) {
+  constructor(db: CRSqliteDB) {
     this.db = db;
-    this.user_id = user_id;
   }
 
   // Create a new chat ID (but don't save to DB yet - only when first message is sent)
@@ -38,9 +36,9 @@ export class ChatStore {
     // Create new chat with first message info
     const now = new Date().toISOString();
     await this.db.db.exec(
-      `INSERT INTO chats (id, user_id, first_message_content, first_message_time, created_at, updated_at, read_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [chatId, this.user_id, firstMessageContent, now, now, now]
+      `INSERT INTO chats (id, first_message_content, first_message_time, created_at, updated_at, read_at)
+          VALUES (?, ?, ?, ?, ?, ?)`,
+      [chatId, firstMessageContent, now, now, now]
     );
   }
 
@@ -52,8 +50,8 @@ export class ChatStore {
     await this.db.db.exec(
       `UPDATE chats
           SET updated_at = ?
-          WHERE id = ? AND user_id = ?`,
-      [updatedAt.toISOString(), chatId, this.user_id]
+          WHERE id = ?`,
+      [updatedAt.toISOString(), chatId]
     );
 
     // Note: cr-sqlite exec doesn't return changes count like better-sqlite3
@@ -67,8 +65,8 @@ export class ChatStore {
     // Delete existing chat
     await this.db.db.exec(
       `DELETE FROM chats
-          WHERE id = ? AND user_id = ?`,
-      [chatId, this.user_id]
+          WHERE id = ?`,
+      [chatId]
     );
 
     // Note: cr-sqlite exec doesn't return changes count like better-sqlite3
@@ -78,7 +76,6 @@ export class ChatStore {
   // Get a specific chat by ID
   async getChat(chatId: string): Promise<{
     id: string;
-    user_id: string;
     first_message_content: string | null;
     first_message_time: string | null;
     created_at: string;
@@ -86,10 +83,10 @@ export class ChatStore {
     read_at: string | null;
   } | null> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, user_id, first_message_content, first_message_time, created_at, updated_at, read_at
+      `SELECT id, first_message_content, first_message_time, created_at, updated_at, read_at
        FROM chats
-       WHERE id = ? AND user_id = ?`,
-      [chatId, this.user_id]
+       WHERE id = ?`,
+      [chatId]
     );
 
     if (!results || results.length === 0) return null;
@@ -97,7 +94,6 @@ export class ChatStore {
     const row = results[0];
     return {
       id: row.id as string,
-      user_id: row.user_id as string,
       first_message_content: row.first_message_content as string | null,
       first_message_time: row.first_message_time as string | null,
       created_at: row.created_at as string,
@@ -111,8 +107,8 @@ export class ChatStore {
     const now = new Date().toISOString();
 
     await this.db.db.exec(
-      `UPDATE chats SET read_at = ? WHERE id = ? AND user_id = ?`,
-      [now, chatId, this.user_id]
+      `UPDATE chats SET read_at = ? WHERE id = ?`,
+      [now, chatId]
     );
   }
 
@@ -134,10 +130,8 @@ export class ChatStore {
             first_message_time,
             read_at
           FROM chats
-          WHERE user_id = ?
           ORDER BY updated_at DESC
-          LIMIT 100`,
-      [this.user_id]
+          LIMIT 100`
     );
 
     if (!results) return [];

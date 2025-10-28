@@ -2,7 +2,6 @@ import { CRSqliteDB } from "./database";
 
 export interface Task {
   id: string;
-  user_id: string;
   timestamp: number;
   task: string;
   reply: string;
@@ -16,11 +15,9 @@ export interface Task {
 
 export class TaskStore {
   private db: CRSqliteDB;
-  private user_id: string;
 
-  constructor(db: CRSqliteDB, user_id: string) {
+  constructor(db: CRSqliteDB) {
     this.db = db;
-    this.user_id = user_id;
   }
 
   // Set a new task - fails if task for this timestamp already exists for this user
@@ -35,9 +32,9 @@ export class TaskStore {
   ): Promise<string> {
     // Insert new task
     await this.db.db.exec(
-      `INSERT INTO tasks (id, user_id, timestamp, task, reply, state, thread_id, error, type, title, cron)
-          VALUES (?, ?, ?, ?, '', '', ?, '', ?, ?, ?)`,
-      [id, this.user_id, timestamp, task, thread_id, type, title, cron]
+      `INSERT INTO tasks (id, timestamp, task, reply, state, thread_id, error, type, title, cron)
+          VALUES (?, ?, ?, '', '', ?, '', ?, ?, ?)`,
+      [id, timestamp, task, thread_id, type, title, cron]
     );
 
     return id;
@@ -48,15 +45,11 @@ export class TaskStore {
     include_finished: boolean = false,
     until?: number
   ): Promise<Task[]> {
-    let sql = `SELECT id, user_id, timestamp, task, reply, state, thread_id, error, type, title, cron
+    let sql = `SELECT id, timestamp, task, reply, state, thread_id, error, type, title, cron
                FROM tasks`;
     const args: (string | number)[] = [];
 
     const conditions: string[] = [];
-
-    // Filter by user_id
-    conditions.push("user_id = ?");
-    args.push(this.user_id);
 
     // Filter by state if not including finished tasks
     if (!include_finished) {
@@ -89,7 +82,6 @@ export class TaskStore {
 
     return results.map((row) => ({
       id: row.id as string,
-      user_id: row.user_id as string,
       timestamp: row.timestamp as number,
       task: row.task as string,
       reply: row.reply as string,
@@ -106,8 +98,8 @@ export class TaskStore {
   async deleteTask(id: string): Promise<void> {
     // Mark the task as deleted
     await this.db.db.exec(
-      `UPDATE tasks SET deleted = TRUE WHERE id = ? AND user_id = ? AND (deleted IS NULL OR deleted = FALSE)`,
-      [id, this.user_id]
+      `UPDATE tasks SET deleted = TRUE WHERE id = ? AND (deleted IS NULL OR deleted = FALSE)`,
+      [id]
     );
 
     // Note: cr-sqlite exec doesn't return changes count like better-sqlite3
@@ -121,11 +113,11 @@ export class TaskStore {
 
     // Fetch all pending tasks (no LIMIT 1)
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, user_id, timestamp, task, reply, state, thread_id, error, type, title, cron
+      `SELECT id, timestamp, task, reply, state, thread_id, error, type, title, cron
           FROM tasks
-          WHERE user_id = ? AND state = '' AND timestamp <= ? AND (deleted IS NULL OR deleted = FALSE)
+          WHERE state = '' AND timestamp <= ? AND (deleted IS NULL OR deleted = FALSE)
           ORDER BY timestamp ASC`,
-      [this.user_id, currentTimeSeconds]
+      [currentTimeSeconds]
     );
 
     if (!results || results.length === 0) {
@@ -135,7 +127,6 @@ export class TaskStore {
     // Convert results to Task objects
     const tasks: Task[] = results.map((row) => ({
       id: row.id as string,
-      user_id: row.user_id as string,
       timestamp: row.timestamp as number,
       task: row.task as string,
       reply: row.reply as string,
@@ -157,13 +148,13 @@ export class TaskStore {
     return tasks[0];
   }
 
-  // Get task by user_id and id
+  // Get task by id
   async getTask(id: string): Promise<Task> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, user_id, timestamp, task, reply, state, thread_id, error, type, title, cron
+      `SELECT id, timestamp, task, reply, state, thread_id, error, type, title, cron
           FROM tasks
-          WHERE user_id = ? AND id = ? AND (deleted IS NULL OR deleted = FALSE)`,
-      [this.user_id, id]
+          WHERE id = ? AND (deleted IS NULL OR deleted = FALSE)`,
+      [id]
     );
 
     if (!results || results.length === 0) {
@@ -173,7 +164,6 @@ export class TaskStore {
     const row = results[0];
     return {
       id: row.id as string,
-      user_id: row.user_id as string,
       timestamp: row.timestamp as number,
       task: row.task as string,
       reply: row.reply as string,
@@ -186,7 +176,7 @@ export class TaskStore {
     };
   }
 
-  // Finish task - error if user_id+timestamp not found or already reply !== '', error if input reply === ''
+  // Finish task - error if id not found or already reply !== '', error if input reply === ''
   async finishTask(
     id: string,
     thread_id: string,
@@ -207,8 +197,8 @@ export class TaskStore {
     await this.db.db.exec(
       `UPDATE tasks
           SET reply = ?, state = ?, thread_id = ?, error = ?
-          WHERE user_id = ? AND id = ? AND (deleted IS NULL OR deleted = FALSE) AND reply = ''`,
-      [reply, state, thread_id, error, this.user_id, id]
+          WHERE id = ? AND (deleted IS NULL OR deleted = FALSE) AND reply = ''`,
+      [reply, state, thread_id, error, id]
     );
 
     // Note: cr-sqlite exec doesn't return changes count like better-sqlite3
@@ -220,10 +210,9 @@ export class TaskStore {
     // Update the task with all provided values
     await this.db.db.exec(
       `UPDATE tasks
-          SET user_id = ?, timestamp = ?, task = ?, reply = ?, state = ?, thread_id = ?, error = ?, type = ?, title = ?, cron = ?
+          SET timestamp = ?, task = ?, reply = ?, state = ?, thread_id = ?, error = ?, type = ?, title = ?, cron = ?
           WHERE id = ? AND (deleted IS NULL OR deleted = FALSE)`,
       [
-        task.user_id,
         task.timestamp,
         task.task,
         task.reply,
@@ -246,8 +235,8 @@ export class TaskStore {
     const results = await this.db.db.execO<{ count: number }>(
       `SELECT COUNT(*) as count
           FROM tasks
-          WHERE user_id = ? AND type = ? AND cron != '' AND (deleted IS NULL OR deleted = FALSE)`,
-      [this.user_id, taskType]
+          WHERE type = ? AND cron != '' AND (deleted IS NULL OR deleted = FALSE)`,
+      [taskType]
     );
 
     const count = results?.[0]?.count || 0;

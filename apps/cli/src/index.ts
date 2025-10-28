@@ -3,13 +3,13 @@
 import { Command } from 'commander';
 import { registerChatCommand } from './commands/chat';
 import { registerWorkerCommand } from './commands/worker';
+import { registerInitCommand } from './commands/init';
 import { Env, setEnv } from '@app/agent';
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
 import * as dotenv from 'dotenv';
 import debug from 'debug';
-import { KEEPAI_DIR } from './const';
 
 const debugCli = debug('cli:index');
 
@@ -58,6 +58,7 @@ program
   .version('0.1.0');
 
 // Register all commands
+registerInitCommand(program);
 registerChatCommand(program);
 registerWorkerCommand(program);
 

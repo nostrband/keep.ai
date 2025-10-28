@@ -80,7 +80,7 @@ export function makeSendMessageTool(
         let thread: StorageThreadType | null = null;
         if (chat_id) {
           thread = await memoryStore.getThread(chat_id);
-          if (!thread || thread.user_id !== userId)
+          if (!thread)
             throw new Error("No such thread");
         }
 
@@ -99,7 +99,6 @@ export function makeSendMessageTool(
           await memoryStore.saveThread({
             id: chatId,
             created_at: now,
-            user_id: userId,
             updated_at: now,
             title: "",
           });

@@ -3,7 +3,6 @@ import { CRSqliteDB } from "./database";
 
 export interface Note {
   id: string;
-  user_id: string;
   title: string;
   content: string;
   tags: string[];
@@ -14,7 +13,6 @@ export interface Note {
 
 export interface NoteRow {
   id: string;
-  user_id: string;
   title: string;
   content: string;
   tags: string; // JSON string
@@ -25,7 +23,6 @@ export interface NoteRow {
 
 export interface NoteListItem {
   id: string;
-  user_id: string;
   title: string;
   tags: string[];
   priority: "low" | "medium" | "high";
@@ -44,7 +41,6 @@ function rowToNote(row: NoteRow): Note {
 function rowToNoteListItem(row: NoteRow, snippet?: string): NoteListItem {
   return {
     id: row.id,
-    user_id: row.user_id,
     title: row.title,
     tags: JSON.parse(row.tags),
     priority: row.priority,
@@ -56,11 +52,9 @@ function rowToNoteListItem(row: NoteRow, snippet?: string): NoteListItem {
 
 export class NoteStore {
   private db: CRSqliteDB;
-  private user_id: string;
 
-  constructor(db: CRSqliteDB, user_id: string) {
+  constructor(db: CRSqliteDB) {
     this.db = db;
-    this.user_id = user_id;
   }
 
   async validateCreateNote(
@@ -68,10 +62,9 @@ export class NoteStore {
     content: string,
     tags: string[] = []
   ): Promise<void> {
-    // Check if user already has 500 notes
+    // Check if already has 500 notes
     const results = await this.db.db.execO<{ count: number }>(
-      "SELECT COUNT(*) as count FROM notes WHERE user_id = ?",
-      [this.user_id]
+      "SELECT COUNT(*) as count FROM notes"
     );
     const count = results?.[0]?.count || 0;
 
@@ -101,14 +94,13 @@ export class NoteStore {
     const tagsJson = JSON.stringify(tags);
 
     await this.db.db.exec(
-      `INSERT INTO notes (id, user_id, title, content, tags, priority, created, updated)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [noteId, this.user_id, title, content, tagsJson, priority, now, now]
+      `INSERT INTO notes (id, title, content, tags, priority, created, updated)
+          VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [noteId, title, content, tagsJson, priority, now, now]
     );
 
     return {
       id: noteId,
-      user_id: this.user_id,
       title,
       content,
       tags,
@@ -135,8 +127,8 @@ export class NoteStore {
   }> {
     // First, get the existing note
     const results = await this.db.db.execO<NoteRow>(
-      "SELECT * FROM notes WHERE id = ? AND user_id = ?",
-      [noteId, this.user_id]
+      "SELECT * FROM notes WHERE id = ?",
+      [noteId]
     );
 
     if (!results || results.length === 0) {
@@ -177,13 +169,12 @@ export class NoteStore {
     await this.db.db.exec(
       `UPDATE notes
           SET title = ?, content = ?, tags = ?, priority = ?, updated = ?
-          WHERE id = ? AND user_id = ?`,
-      [newTitle, newContent, tagsJson, newPriority, now, noteId, this.user_id]
+          WHERE id = ?`,
+      [newTitle, newContent, tagsJson, newPriority, now, noteId]
     );
 
     return {
       id: noteId,
-      user_id: this.user_id,
       title: newTitle,
       content: newContent,
       tags: newTags,
@@ -198,10 +189,9 @@ export class NoteStore {
     tags?: string[];
     regexp?: string;
   }): Promise<NoteListItem[]> {
-    // Get all notes for the user
+    // Get all notes
     const results = await this.db.db.execO<NoteRow>(
-      "SELECT * FROM notes WHERE user_id = ? ORDER BY updated DESC",
-      [this.user_id]
+      "SELECT * FROM notes ORDER BY updated DESC"
     );
 
     if (!results) return [];
@@ -294,11 +284,11 @@ export class NoteStore {
     limit?: number;
     offset?: number;
   }): Promise<NoteListItem[]> {
-    let sql = "SELECT * FROM notes WHERE user_id = ?";
-    const args: (string | number)[] = [this.user_id];
+    let sql = "SELECT * FROM notes";
+    const args: (string | number)[] = [];
 
     if (options?.priority) {
-      sql += " AND priority = ?";
+      sql += " WHERE priority = ?";
       args.push(options.priority);
     }
 
@@ -323,8 +313,8 @@ export class NoteStore {
 
   async getNote(noteId: string): Promise<Note | null> {
     const results = await this.db.db.execO<NoteRow>(
-      "SELECT * FROM notes WHERE id = ? AND user_id = ?",
-      [noteId, this.user_id]
+      "SELECT * FROM notes WHERE id = ?",
+      [noteId]
     );
 
     if (!results || results.length === 0) {
@@ -335,9 +325,8 @@ export class NoteStore {
   }
 
   async deleteNote(noteId: string): Promise<boolean> {
-    await this.db.db.exec("DELETE FROM notes WHERE id = ? AND user_id = ?", [
+    await this.db.db.exec("DELETE FROM notes WHERE id = ?", [
       noteId,
-      this.user_id,
     ]);
 
     // Note: cr-sqlite exec doesn't return changes count like better-sqlite3

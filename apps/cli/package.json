@@ -19,7 +19,8 @@
     "@app/sync": "file:../../packages/sync",
     "commander": "^14.0.1",
     "debug": "^4.4.3",
-    "dotenv": "^17.2.3"
+    "dotenv": "^17.2.3",
+    "nostr-tools": "^2.17.1"
   },
   "devDependencies": {
     "tsup": "^7.2.0",

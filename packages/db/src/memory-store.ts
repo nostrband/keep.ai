@@ -7,7 +7,6 @@ const debugMemoryStore = debug("db:memory-store");
 export type Thread = {
   id: string;
   title?: string;
-  user_id: string;
   created_at: Date;
   updated_at: Date;
   metadata?: Record<string, unknown>;
@@ -23,22 +22,19 @@ export type Resource = {
 
 export class MemoryStore {
   private db: CRSqliteDB;
-  private user_id: string;
 
-  constructor(db: CRSqliteDB, user_id: string) {
+  constructor(db: CRSqliteDB) {
     this.db = db;
-    this.user_id = user_id;
   }
 
   // Thread operations
   async saveThread(thread: Thread): Promise<void> {
     await this.db.db.exec(
-      `INSERT OR REPLACE INTO threads (id, title, user_id, created_at, updated_at, metadata)
-        VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT OR REPLACE INTO threads (id, title, created_at, updated_at, metadata)
+        VALUES (?, ?, ?, ?, ?)`,
       [
         thread.id,
         thread.title || "",
-        thread.user_id,
         thread.created_at.toISOString(),
         thread.updated_at.toISOString(),
         JSON.stringify(thread.metadata || {}),
@@ -60,7 +56,6 @@ export class MemoryStore {
     return {
       id: row.id as string,
       title: (row.title as string) || undefined,
-      user_id: row.user_id as string,
       created_at: new Date(row.created_at as string),
       updated_at: new Date(row.updated_at as string),
       metadata: row.metadata ? JSON.parse(row.metadata as string) : undefined,
@@ -69,8 +64,7 @@ export class MemoryStore {
 
   async listThreads(): Promise<Thread[]> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT * FROM threads WHERE user_id = ? ORDER BY updated_at DESC`,
-      [this.user_id]
+      `SELECT * FROM threads ORDER BY updated_at DESC`
     );
 
     if (!results) return [];
@@ -78,7 +72,6 @@ export class MemoryStore {
     return results.map((row) => ({
       id: row.id as string,
       title: (row.title as string) || undefined,
-      user_id: row.user_id as string,
       created_at: new Date(row.created_at as string),
       updated_at: new Date(row.updated_at as string),
       metadata: row.metadata ? JSON.parse(row.metadata as string) : undefined,
@@ -97,12 +90,11 @@ export class MemoryStore {
       }
 
       await this.db.db.exec(
-        `INSERT OR REPLACE INTO messages (id, thread_id, user_id, role, content, created_at)
-          VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT OR REPLACE INTO messages (id, thread_id, role, content, created_at)
+          VALUES (?, ?, ?, ?, ?)`,
         [
           message.id,
           threadId,
-          this.user_id,
           message.role,
           JSON.stringify(message),
           metadata.createdAt || new Date().toISOString(),
@@ -120,16 +112,18 @@ export class MemoryStore {
     limit?: number;
     since?: string;
   }): Promise<AssistantUIMessage[]> {
-    let sql = `SELECT * FROM messages WHERE user_id = ?`;
-    const args: (string | number)[] = [this.user_id];
+    let sql = `SELECT * FROM messages`;
+    const args: (string | number)[] = [];
+    let whereAdded = false;
 
     if (threadId) {
-      sql += ` AND thread_id = ?`;
+      sql += ` WHERE thread_id = ?`;
       args.push(threadId);
+      whereAdded = true;
     }
 
     if (since) {
-      sql += ` AND created_at > ?`;
+      sql += whereAdded ? ` AND created_at > ?` : ` WHERE created_at > ?`;
       args.push(since);
     }
 
@@ -185,8 +179,7 @@ export class MemoryStore {
 
   async getResource(): Promise<Resource | null> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT * FROM resources WHERE id = ?`,
-      [this.user_id]
+      `SELECT * FROM resources LIMIT 1`
     );
 
     if (!results || results.length === 0) {
@@ -209,11 +202,13 @@ export class MemoryStore {
     metadata?: Record<string, unknown>
   ): Promise<void> {
     const now = new Date();
+    // Use a fixed ID since we only have one resource per database now
+    const resourceId = "default";
     await this.db.db.exec(
       `INSERT OR REPLACE INTO resources (id, workingMemory, metadata, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?)`,
       [
-        this.user_id,
+        resourceId,
         workingMemory,
         JSON.stringify(metadata || {}),
         now.toISOString(),

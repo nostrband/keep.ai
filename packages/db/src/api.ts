@@ -20,10 +20,10 @@ export class KeepDbApi {
   constructor(db: KeepDb, userId: string) {
     this.#db = db;
     this.#userId = userId;
-    this.#memoryStore = new MemoryStore(db, userId);
-    this.#chatStore = new ChatStore(db, userId);
-    this.#noteStore = new NoteStore(db, userId);
-    this.#taskStore = new TaskStore(db, userId);
+    this.#memoryStore = new MemoryStore(db);
+    this.#chatStore = new ChatStore(db);
+    this.#noteStore = new NoteStore(db);
+    this.#taskStore = new TaskStore(db);
   }
 
   get db() {
@@ -60,7 +60,6 @@ export class KeepDbApi {
       const newThread: Thread = {
         id: input.threadId,
         title: input.threadId,
-        user_id: this.userId,
         created_at: now,
         updated_at: now,
         metadata: {},

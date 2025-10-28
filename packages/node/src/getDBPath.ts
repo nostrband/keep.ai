@@ -3,13 +3,23 @@ import * as path from 'path';
 import * as os from 'os';
 
 /**
+ * Gets the Keep.ai directory path
+ * @param homePath - Optional home path, defaults to os.homedir()
+ * @returns The path to the .keep.ai directory
+ */
+export function getKeepaiDir(homePath?: string): string {
+  const homeDir = homePath || os.homedir();
+  return path.join(homeDir, '.keep.ai');
+}
+
+/**
  * Gets the current user's pubkey from ~/.keep.ai/current_user.txt
  * @param homePath - Optional home path, defaults to ~/.keep.ai
  * @returns Promise that resolves to the current user's pubkey
  * @throws Error if current_user.txt is not found or empty
  */
 export async function getCurrentUser(homePath?: string): Promise<string> {
-  const keepAiDir = homePath || path.join(os.homedir(), '.keep.ai');
+  const keepAiDir = getKeepaiDir(homePath);
   const currentUserFile = path.join(keepAiDir, 'current_user.txt');
   
   // Check if current_user.txt exists
@@ -35,7 +45,7 @@ export async function getCurrentUser(homePath?: string): Promise<string> {
  * @returns The path to the user's database file
  */
 export function getDBPath(pubkey: string, homePath?: string): string {
-  const keepAiDir = homePath || path.join(os.homedir(), '.keep.ai');
+  const keepAiDir = getKeepaiDir(homePath);
   
   // Create user directory if it doesn't exist
   const userDir = path.join(keepAiDir, pubkey);

@@ -293,7 +293,6 @@ export class KeepWorker {
         if (!thread) {
           thread = {
             id: threadId,
-            user_id: this.api.userId,
             created_at: now,
             updated_at: now,
             title: "",

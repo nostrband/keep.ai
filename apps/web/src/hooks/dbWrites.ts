@@ -35,7 +35,6 @@ export function useAddMessage() {
     //   const optimistic = {
     //     id: `opt_${Date.now()}`,
     //     thread_id: threadId,
-    //     user_id: userId,
     //     role,
     //     content,
     //     created_at: new Date().toISOString()
