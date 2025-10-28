@@ -1,5 +1,5 @@
 import { z } from "zod";
-import Exa from "exa-js";
+import { Exa } from "exa-js";
 import { tool } from "ai";
 import { getEnv } from "../env";
 import debug from "debug";

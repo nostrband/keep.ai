@@ -1,13 +1,6 @@
 import fastify from "fastify";
-import { TransportServerFastify, createDBNode } from "@app/node";
-import {
-  ChatStore,
-  KeepDb,
-  KeepDbApi,
-  MemoryStore,
-  NoteStore,
-  TaskStore,
-} from "@app/db";
+import { TransportServerFastify, createDBNode, getCurrentUser, getDBPath } from "@app/node";
+import { KeepDb, KeepDbApi } from "@app/db";
 import { KeepWorker, setEnv, type Env } from "@app/agent";
 import debug from "debug";
 import path from "path";
@@ -21,7 +14,6 @@ const debugServer = debug("server:server");
 // Setup configuration directory and environment
 const configDir = path.join(os.homedir(), ".keep.ai");
 const envPath = path.join(configDir, ".env");
-const dbPath = path.join(configDir, "keepai.db");
 
 // Ensure config directory exists
 if (!fs.existsSync(configDir)) {
@@ -66,6 +58,10 @@ async function createKeepWorker(keepDB: KeepDb) {
 
 const start = async () => {
   try {
+
+    const pubkey = await getCurrentUser();
+    const dbPath = getDBPath(pubkey);
+
     debugServer("Config directory:", configDir);
     debugServer("Database path:", dbPath);
     debugServer("Environment file:", envPath);
@@ -85,7 +81,7 @@ const start = async () => {
     const check = async () => {
       await peer.checkLocalChanges();
       setTimeout(check, 1000);
-    }
+    };
     check();
 
     // Performs background operations

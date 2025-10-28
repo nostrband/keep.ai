@@ -1,13 +1,10 @@
 import { Command } from 'commander';
-import { createDBNode } from '@app/node';
+import { createDBNode, getCurrentUser, getDBPath } from '@app/node';
 import { KeepDb, KeepDbApi } from '@app/db';
 import { AssistantUIMessage } from '@app/proto';
-import * as path from 'path';
-import * as os from 'os';
-import * as fs from 'fs';
+;
 import * as readline from 'readline';
 import debug from 'debug';
-import { KEEPAI_DB_FILE, KEEPAI_DIR } from '../const';
 
 const debugChat = debug('cli:chat');
 
@@ -30,15 +27,9 @@ function printMessage(msg: AssistantUIMessage): void {
 
 async function runChatCommand(): Promise<void> {
   try {
-    // Ensure ~/.keep.ai directory exists
-    const keepAiDir = path.join(os.homedir(), KEEPAI_DIR);
-    if (!fs.existsSync(keepAiDir)) {
-      fs.mkdirSync(keepAiDir, { recursive: true });
-      debugChat('Created directory:', keepAiDir);
-    }
-
-    // Create database connection
-    const dbPath = path.join(keepAiDir, KEEPAI_DB_FILE);
+    // Get database path based on current user
+    const pubkey = await getCurrentUser();
+    const dbPath = getDBPath(pubkey);
     debugChat('Connecting to database:', dbPath);
     
     const dbInterface = await createDBNode(dbPath);

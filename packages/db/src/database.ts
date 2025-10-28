@@ -55,18 +55,25 @@ export class KeepDb implements CRSqliteDB {
     ]);
 
     const readVersion = async () => {
-      const result = await db.execO<{ user_version: number }>("PRAGMA user_version");
+      const result = await db.execO<{ user_version: number }>(
+        "PRAGMA user_version"
+      );
       return result?.length ? Number(result[0].user_version) || 0 : 0;
     };
 
     // Get current database version
     const currentVersion = await readVersion();
-    
+
     debugDatabase(`Current database version: ${currentVersion}`);
 
     // Apply migrations starting from current version + 1
     const maxVersion = Math.max(...migrations.keys());
-    
+    if (currentVersion > maxVersion) {
+      throw new Error(
+        `DB is newer than our code, db version ${currentVersion}, code version ${maxVersion}`
+      );
+    }
+
     for (let version = currentVersion + 1; version <= maxVersion; version++) {
       const migrationFn = migrations.get(version);
       if (!migrationFn) {
@@ -74,7 +81,7 @@ export class KeepDb implements CRSqliteDB {
       }
 
       debugDatabase(`Applying migration v${version}...`);
-      
+
       try {
         await db.tx(async (tx) => {
           await migrationFn(tx);
@@ -82,9 +89,11 @@ export class KeepDb implements CRSqliteDB {
 
         // Verify the version was set correctly
         const newVersion = await readVersion();
-        
+
         if (newVersion !== version) {
-          throw new Error(`Migration v${version} failed: expected version ${version}, got ${newVersion}`);
+          throw new Error(
+            `Migration v${version} failed: expected version ${version}, got ${newVersion}`
+          );
         }
 
         debugDatabase(`Migration v${version} applied successfully`);
@@ -97,7 +106,9 @@ export class KeepDb implements CRSqliteDB {
     if (currentVersion === maxVersion) {
       debugDatabase("Database is up to date");
     } else {
-      debugDatabase(`Database migrated from version ${currentVersion} to ${maxVersion}`);
+      debugDatabase(
+        `Database migrated from version ${currentVersion} to ${maxVersion}`
+      );
     }
 
     this.started = true;

@@ -1,11 +1,7 @@
 import { Command } from "commander";
-import { createDBNode } from "@app/node";
+import { createDBNode, getCurrentUser, getDBPath } from "@app/node";
 import { KeepWorker } from "@app/agent";
-import * as path from "path";
-import * as os from "os";
-import * as fs from "fs";
 import debug from "debug";
-import { KEEPAI_DB_FILE, KEEPAI_DIR } from "../const";
 import { KeepDb, KeepDbApi } from "@app/db";
 
 const debugWorker = debug("cli:worker");
@@ -54,15 +50,9 @@ function setupGlobalErrorHandlers(): void {
 
 async function runWorkerCommand(): Promise<void> {
   try {
-    // Ensure ~/.keep.ai directory exists
-    const keepAiDir = path.join(os.homedir(), KEEPAI_DIR);
-    if (!fs.existsSync(keepAiDir)) {
-      fs.mkdirSync(keepAiDir, { recursive: true });
-      debugWorker("Created directory:", keepAiDir);
-    }
-
-    // Create database connection
-    const dbPath = path.join(keepAiDir, KEEPAI_DB_FILE);
+    // Get database path based on current user
+    const pubkey = await getCurrentUser();
+    const dbPath = getDBPath(pubkey);
     debugWorker("Connecting to database:", dbPath);
 
     const dbInterface = await createDBNode(dbPath);
