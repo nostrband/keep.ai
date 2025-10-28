@@ -23,5 +23,9 @@ export type { Note, NoteListItem } from "./note-store";
 export { TaskStore } from "./task-store";
 export type { Task } from "./task-store";
 
+// Nostr peer store
+export { NostrPeerStore } from "./nostr-peer-store";
+export type { NostrPeer, NostrPeerCursor } from "./nostr-peer-store";
+
 // Api
 export * from "./api";

@@ -17,7 +17,7 @@
  */
 
 import { DBInterface } from "@app/db";
-import { PeerMessage, Change, PeerChange, Cursor, serializeCursor } from "./messages";
+import { PeerMessage, Change, PeerChange, Cursor, serializeCursor, serializeChanges, deserializeChanges } from "./messages";
 import debug from "debug";
 import { EventEmitter } from "tseep/lib/ee-safe";
 import { bytesToHex, hexToBytes } from "nostr-tools/utils";
@@ -333,17 +333,17 @@ export class Peer extends EventEmitter<{
     try {
       // FIXME split into batches?
       await this.db.tx(async (tx: DBInterface) => {
-        for (const change of changes) {
+        for (const change of deserializeChanges(changes)) {
           await tx.exec(
             `INSERT INTO crsql_changes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               change.table,
-              hexToBytes(change.pk),
+              change.pk,
               change.cid,
               change.val,
               change.col_version,
               change.db_version,
-              hexToBytes(change.site_id),
+              change.site_id,
               change.cl,
               change.seq,
             ]
@@ -394,17 +394,6 @@ export class Peer extends EventEmitter<{
     }
   }
 
-  private fromDbChanges(dbChanges: Change[]) {
-    return dbChanges.map(
-      (c) =>
-        ({
-          ...c,
-          pk: bytesToHex(c.pk),
-          site_id: bytesToHex(c.site_id),
-        } as PeerChange)
-    );
-  }
-
   private async broadcastLocalChanges(): Promise<void> {
     try {
       const lastDbVersion = this.cursor.peers.get(this.id) || 0;
@@ -420,7 +409,7 @@ export class Peer extends EventEmitter<{
         );
 
         // Convert to network-friendly format
-        const changes = this.fromDbChanges(dbChanges);
+        const changes = serializeChanges(dbChanges);
 
         // Update our own cursor
         this.updateCursor(this.cursor, changes);
@@ -494,7 +483,7 @@ export class Peer extends EventEmitter<{
           [db_version, hexToBytes(site_id)]
         );
 
-        if (dbChanges) changes.push(...this.fromDbChanges(dbChanges));
+        if (dbChanges) changes.push(...serializeChanges(dbChanges));
       }
 
       // Collect changes from third-parties that peer didn't know about
@@ -504,7 +493,7 @@ export class Peer extends EventEmitter<{
         `SELECT * FROM crsql_changes WHERE site_id NOT IN (${bindString})`,
         [peer.id, ...peer.cursor.peers.keys()].map((site_id) => hexToBytes(site_id))
       );
-      if (dbChanges) changes.push(...this.fromDbChanges(dbChanges));
+      if (dbChanges) changes.push(...serializeChanges(dbChanges));
 
       // Convert to peer changes
       if (changes.length > 0) {

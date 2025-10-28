@@ -1,3 +1,5 @@
+import { bytesToHex, hexToBytes } from "nostr-tools/utils";
+
 export interface Change {
   table: string;
   pk: Uint8Array;
@@ -43,32 +45,19 @@ export interface TransportMessage {
   error?: string;
 }
 
-// Serializable version of Change with Uint8Array fields converted to number[]
-export interface SerializableChange {
-  table: string;
-  pk: number[];
-  cid: string;
-  val: any;
-  col_version: number;
-  db_version: number;
-  site_id: number[];
-  cl: number;
-  seq: number;
-}
-
-function serializeChanges(changes: Change[]) {
+export function serializeChanges(changes: Change[]): PeerChange[] {
   return changes.map((change) => ({
     ...change,
-    pk: Array.from(change.pk),
-    site_id: Array.from(change.site_id),
+    pk: bytesToHex(change.pk),
+    site_id: bytesToHex(change.site_id),
   }));
 }
 
-function deserializeChanges(changes: SerializableChange[]) {
+export function deserializeChanges(changes: PeerChange[]): Change[] {
   return changes.map((change) => ({
     ...change,
-    pk: new Uint8Array(change.pk),
-    site_id: new Uint8Array(change.site_id),
+    pk: hexToBytes(change.pk),
+    site_id: hexToBytes(change.site_id),
   }));
 }
 
