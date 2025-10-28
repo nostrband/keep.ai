@@ -24,7 +24,7 @@
     "ai": "^5.0.76",
     "croner": "^9.1.0",
     "debug": "^4.3.4",
-    "exa-js": "^1.10.2"
+    "exa-js": "^2.0.0"
   },
   "devDependencies": {
     "tsup": "^7.2.0",

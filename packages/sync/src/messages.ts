@@ -25,6 +25,7 @@ export interface PeerChange {
 export interface PeerMessage {
   type: "changes" | "eose";
   data: PeerChange[];
+  schemaVersion?: number;
 }
 
 export interface SerializableCursor {

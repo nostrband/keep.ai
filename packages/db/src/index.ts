@@ -24,4 +24,4 @@ export { TaskStore } from "./task-store";
 export type { Task } from "./task-store";
 
 // Api
-export { KeepDbApi } from "./api";
+export * from "./api";

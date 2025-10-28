@@ -24,4 +24,7 @@ export const qk = {
   allNotes: () => [{ scope: "allNotes" }] as const,
   note: (noteId: string) => [{ scope: "note", noteId }] as const,
   searchNotes: (query?: { keywords?: string[]; tags?: string[]; regexp?: string; }) => [{ scope: "searchNotes", query }] as const,
+  
+  // Agent-related queries
+  agentStatus: () => [{ scope: "agentStatus" }] as const,
 };

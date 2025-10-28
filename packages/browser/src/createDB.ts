@@ -65,6 +65,10 @@ export async function createDBBrowser(
     // Open database
     const db = await sqlite.open(file);
 
+    db.exec("PRAGMA journal_mode = WAL");
+    db.exec("PRAGMA synchronous = NORMAL");
+    db.exec("PRAGMA busy_timeout=10000;")
+
     // Wrap the DB instance
     const wrappedDB = new CRSqliteDBWrapper(db);
 

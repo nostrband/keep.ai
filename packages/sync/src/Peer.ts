@@ -39,9 +39,11 @@ export class Peer extends EventEmitter<{
   connect: (peerId: string) => void;
   sync: (peerId: string) => void;
   eose: (peerId: string) => void;
+  outdated: (schemaVersion: number, peerId: string) => void;
 }> {
   #db: DBInterface | (() => DBInterface);
   #id: string = "";
+  #schemaVersion: number = 0;
   protected isStarted = false;
   private transports: Transport[];
   private cursor = new Cursor();
@@ -59,6 +61,10 @@ export class Peer extends EventEmitter<{
 
   get id(): string {
     return this.#id;
+  }
+
+  get schemaVersion(): number {
+    return this.#schemaVersion;
   }
 
   async start(): Promise<void> {
@@ -143,6 +149,10 @@ export class Peer extends EventEmitter<{
       console.error("onSync for unknown peer", peerId);
       throw new Error("Peer not found");
     }
+    if (peer.transport !== transport) {
+      console.error("onSync wrong transport for peer", peerId);
+      throw new Error("Wrong transport for peerr");
+    }
 
     // activate
     peer.active = true;
@@ -162,10 +172,19 @@ export class Peer extends EventEmitter<{
     msg: PeerMessage
   ): Promise<void> {
     // Apply everything peer sent us
-    debugPeer(`Received from peer '${peerId}' changes ${msg.data.length}`);
+    debugPeer(`Received from peer '${peerId}' changes ${msg.data.length} schema ${msg.schemaVersion}`);
 
     // Assume peer knows everything they sent us
     this.updatePeerCursor(peerId, msg.data);
+
+    // Peer schema newer?
+    if ((msg.schemaVersion || 0) > this.schemaVersion) {
+      debugPeer(
+        `Ignoring updates from peer '${peerId}', need schema update ${this.schemaVersion} => ${msg.schemaVersion}`
+      );
+      this.emit("outdated", msg.schemaVersion!, peerId);
+      return;
+    }
 
     // Stuff we haven't yet seen
     const newChanges = msg.data.filter((c) => {
@@ -202,6 +221,15 @@ export class Peer extends EventEmitter<{
     peerId: string,
     msg: PeerMessage
   ): Promise<void> {
+    const peer = this.peers.get(peerId);
+    if (!peer) {
+      console.error("onSync for unknown peer", peerId);
+      throw new Error("Peer not found");
+    }
+    if (peer.transport !== transport) {
+      console.error("onSync wrong transport for peer", peerId);
+      throw new Error("Wrong transport for peerr");
+    }
     switch (msg.type) {
       case "changes":
         return await this.onReceiveChanges(peerId, msg);
@@ -353,6 +381,12 @@ export class Peer extends EventEmitter<{
       );
       this.#id = bytesToHex(siteId?.[0]?.site_id || new Uint8Array());
       debugPeer(`Initialized our peer id to ${this.id}`);
+
+      const schemaVersion = await this.db.execO<{ user_version: number }>(
+        "PRAGMA user_version;"
+      );
+      this.#schemaVersion = schemaVersion?.[0]?.user_version || 0;
+      debugPeer(`Initialized our schema version to ${this.schemaVersion}`);
     } catch (error) {
       debugPeer("Error initializing last db version:", error);
       this.cursor = new Cursor();
@@ -423,6 +457,7 @@ export class Peer extends EventEmitter<{
     await peer.transport.send(peer.id, {
       type: "changes",
       data: changes,
+      schemaVersion: this.schemaVersion,
     });
     debugPeer(`Sent to peer '${peer.id}' changes ${changes.length}`);
   }

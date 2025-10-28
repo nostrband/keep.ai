@@ -62,7 +62,7 @@ export const MessageItem = React.memo(function MessageItem({
   );
 
   return (
-    <div>
+    <div className={!showActions ? "pb-4" : ""}>
       {/* Sources - only show when full=true */}
       {full && message.role === "assistant" && sourceParts.length > 0 && (
         <Sources>

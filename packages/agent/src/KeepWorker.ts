@@ -4,7 +4,8 @@ import { makeToolset } from "./index";
 import { AssistantUIMessage, MessageMetadata, ROUTINE_TASKS } from "@app/proto";
 import { Cron } from "croner";
 import debug from "debug";
-import { KeepDbApi, Task } from "@app/db";
+import { KeepDbApi, MAX_STATUS_TTL, Task } from "@app/db";
+import { AGENT_STATUS } from "./instructions";
 
 const debugKeepWorker = debug("agent:KeepWorker");
 
@@ -89,7 +90,9 @@ export class KeepWorker {
 
         try {
           // Check if a task with this type and non-empty cron already exists
-          const existingTask = await this.api.taskStore.hasCronTaskOfType(taskType);
+          const existingTask = await this.api.taskStore.hasCronTaskOfType(
+            taskType
+          );
 
           if (!existingTask) {
             debugKeepWorker(`No ${taskType} cron task found, creating one`);
@@ -174,6 +177,7 @@ export class KeepWorker {
   }
 
   private async processTask(task: Task): Promise<void> {
+    let statusUpdaterInterval: ReturnType<typeof setInterval> | undefined;
     try {
       if (task.state !== "") {
         debugKeepWorker("Task already processed with state:", task.state);
@@ -193,6 +197,18 @@ export class KeepWorker {
           mode = "user";
           break;
       }
+
+      // Set agent status in db
+      const status: AGENT_STATUS = mode;
+      const update = async () => {
+        debugKeepWorker(`Update agent status: '${status}'`);
+        await this.api.setAgentStatus(status);
+      };
+      statusUpdaterInterval = setInterval(
+        update,
+        Math.max(10000, MAX_STATUS_TTL - 5000)
+      );
+      await update();
 
       // Get existing messages for this thread
       let originalMessages: AssistantUIMessage[] = [];
@@ -350,7 +366,12 @@ export class KeepWorker {
           );
         } else {
           // Single-shot task finished
-          await this.api.taskStore.finishTask(task.id, threadId, responseText, "");
+          await this.api.taskStore.finishTask(
+            task.id,
+            threadId,
+            responseText,
+            ""
+          );
         }
 
         debugKeepWorker(`task processed successfully:`, {
@@ -370,7 +391,7 @@ export class KeepWorker {
         // task: 60 sec,
         // planner: 600 sec
         const retryDelaySeconds =
-          task.type === "message" ? 10 : task.type ? 60 : 600; 
+          task.type === "message" ? 10 : task.type ? 60 : 600;
         const retryTimestamp =
           Math.floor(Date.now() / 1000) + retryDelaySeconds;
 
@@ -398,6 +419,10 @@ export class KeepWorker {
     } catch (error) {
       debugKeepWorker("Task processing error:", error);
       throw error;
+    } finally {
+      if (statusUpdaterInterval) clearInterval(statusUpdaterInterval);
+      debugKeepWorker(`Clear agent status`);
+      await this.api.setAgentStatus("");
     }
   }
 }

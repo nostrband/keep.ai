@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import {
   Button,
 } from "../ui";
+import { useAgentStatus } from "../hooks/dbApiReads";
 
 // Logo component with "K" design
 const AssistantIcon = () => (
@@ -19,6 +20,7 @@ interface SharedHeaderProps {
 export default function SharedHeader({ title, subtitle }: SharedHeaderProps) {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const { data: agentStatus } = useAgentStatus();
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -38,12 +40,15 @@ export default function SharedHeader({ title, subtitle }: SharedHeaderProps) {
 
   return (
     <div className="sticky top-0 z-40 bg-white border-b border-gray-200 shadow-sm">
-      <div className="max-w-4xl mx-auto px-6 py-4">
+      <div className="max-w-4xl mx-auto px-6 py-2">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
+          <div className="h-10 flex items-center gap-3">
             <AssistantIcon />
             <div>
               <h1 className="text-lg font-bold text-gray-900">{title}</h1>
+              {title === "Assistant" && agentStatus && (
+                <p className="text-xs text-gray-500">Status: {agentStatus}</p>
+              )}
               {subtitle && (
                 <p className="text-sm text-gray-600">{subtitle}</p>
               )}
@@ -78,7 +83,7 @@ export default function SharedHeader({ title, subtitle }: SharedHeaderProps) {
                     className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
                     onClick={() => setIsOpen(false)}
                   >
-                    Chat
+                    Assistant
                   </Link>
                   <Link
                     to="/threads"

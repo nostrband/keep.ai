@@ -2,6 +2,7 @@
 import { DBInterface } from "./interfaces";
 import debug from "debug";
 import { migrateV1 } from "./migrations/v1";
+import { migrateV2 } from "./migrations/v2";
 
 const debugDatabase = debug("db:database");
 
@@ -50,6 +51,7 @@ export class KeepDb implements CRSqliteDB {
     // Migration system
     const migrations = new Map([
       [1, migrateV1],
+      [2, migrateV2],
     ]);
 
     const readVersion = async () => {

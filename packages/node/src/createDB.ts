@@ -120,7 +120,8 @@ export async function createDBNode(file: string): Promise<DBInterface> {
           // Suggested settings for best performance of sqlite
           db.run("PRAGMA journal_mode = WAL");
           db.run("PRAGMA synchronous = NORMAL");
-          
+          db.run("PRAGMA busy_timeout=10000;")
+
           // Load cr-sqlite extension
           db.loadExtension(extensionPath, (err) => {
             if (err) {

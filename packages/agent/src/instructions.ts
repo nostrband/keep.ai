@@ -3,6 +3,7 @@ import debug from "debug";
 const debugInstructions = debug("agent:instructions");
 
 export type AGENT_MODE = "user" | "task" | "planner";
+export type AGENT_STATUS = "user" | "task" | "planner";
 
 function getPrinciples(mode: AGENT_MODE) {
   switch (mode) {
