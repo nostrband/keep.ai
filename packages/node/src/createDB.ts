@@ -55,6 +55,7 @@ class Sqlite3DBWrapper implements DBInterface {
           await this.exec("COMMIT");
           resolve(result);
         } catch (error) {
+          debugNode("tx error", error);
           await this.exec("ROLLBACK");
           reject(error);
         }

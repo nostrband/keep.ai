@@ -8,11 +8,11 @@ export async function migrateV3(tx: DBInterface["tx"] extends (fn: (tx: infer T)
   // Nostr peers table
   await tx.exec(`CREATE TABLE IF NOT EXISTS nostr_peers (
     peer_pubkey TEXT NOT NULL PRIMARY KEY,
-    peer_id TEXT NOT NULL,
-    connection_pubkey TEXT NOT NULL,
-    device_info TEXT NOT NULL,
-    timestamp TEXT NOT NULL,
-    relays TEXT NOT NULL DEFAULT ''
+    peer_id TEXT DEFAULT '',
+    connection_pubkey TEXT DEFAULT '',
+    device_info TEXT DEFAULT '',
+    timestamp TEXT DEFAULT '',
+    relays TEXT DEFAULT ''
   )`);
 
   // Index for timestamp-based queries
@@ -25,11 +25,13 @@ export async function migrateV3(tx: DBInterface["tx"] extends (fn: (tx: infer T)
   // Nostr peer cursors table (not synced across devices)
   await tx.exec(`CREATE TABLE IF NOT EXISTS nostr_peer_cursors (
     peer_pubkey TEXT NOT NULL PRIMARY KEY,
-    last_cursor TEXT NOT NULL DEFAULT '',
-    last_cursor_event_id TEXT NOT NULL DEFAULT '',
-    last_changes_event_id TEXT NOT NULL DEFAULT '',
-    peer_cursor_event_id TEXT NOT NULL DEFAULT '',
-    peer_cursor TEXT NOT NULL DEFAULT '',
-    peer_changes_event_id TEXT NOT NULL DEFAULT ''
+    send_cursor TEXT NOT NULL DEFAULT '',
+    send_cursor_id TEXT NOT NULL DEFAULT '',
+    send_changes_event_id TEXT NOT NULL DEFAULT '',
+    send_changes_timestamp number NOT NULL DEFAULT '',
+    recv_cursor TEXT NOT NULL DEFAULT '',
+    recv_cursor_id TEXT NOT NULL DEFAULT '',
+    recv_changes_event_id TEXT NOT NULL DEFAULT '',
+    recv_changes_timestamp number NOT NULL DEFAULT ''
   )`);
 }

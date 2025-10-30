@@ -1,26 +1,55 @@
-import {
-  SimplePool,
-  getPublicKey,
-  nip44,
-  Event,
-  Filter,
-  UnsignedEvent,
-} from "nostr-tools";
+/**
+ * CR-Sqlite sync over Nostr:
+ *
+ * Events:
+ * - CURSOR - contains our cursor for peer to know when to start the stream
+ * - CHANGES - contains changes + link to prev CHANGES event + link to CURSOR event
+ *
+ * Cursors:
+ * - both peers maintain 2 sets of cursors: send & recv.
+ * - send is initialized from peer's CURSOR event
+ * - send tracks which cursor we've already sent, used to call onSync when we're restarting
+ * - send is reset if peer publishes new CURSOR event asking us to reset our stream
+ * - recv is initialized from first sync(cursor) call by our db
+ * - recv tracks which cursor we've already received, used to fetch newer changes and call onReceive
+ * - recv is reset if sync(cursor) is called with older cursor, will publish a new CURSOR event
+ *
+ * Stream:
+ * - CHANGES events form a single-linked list (new event links to prev one)
+ * - tags: r - CURSOR stream id, e? - prev CHANGES event id (empty on first event in stream)
+ * - created_at of CHANGES events must always increase (same timestamp not allowed for 2 events)
+ * - peer starts downloading from newest CHANGES and tracks previous one by 'r' tag
+ * - if prev one isn't found, stream is considered broken and new CURSOR must be published to request new stream
+ *
+ * Both CURSOR and CHANGES are encrypted with nip44. No visible links exist between parties' events,
+ * they don't tag each other, CURSOR has encrypted 'stream_id' which is then tagged in CHANGES, so it's unclear which
+ * pubkey the changes are targeting.
+ */
+
+import { SimplePool, Event, Filter, UnsignedEvent } from "nostr-tools";
 import { Transport, TransportCallbacks } from "../Transport";
 import {
   Cursor,
   deserializeCursor,
-  PeerChange,
   PeerMessage,
   SerializableCursor,
   serializeCursor,
 } from "../messages";
-import { NostrPeer, NostrPeerCursor, NostrPeerStore } from "packages/db/dist";
+import { NostrPeer, NostrPeerStore } from "packages/db/dist";
 import debug from "debug";
 import { KIND_CHANGES, KIND_CURSOR } from ".";
+import { SubCloser } from "nostr-tools/abstract-pool";
+import { isCursorOlder, updateCursor } from "../Peer";
+import { bytesToHex } from "nostr-tools/utils";
+import { randomBytes } from "@noble/hashes/utils";
 
 const debugNostrTransport = debug("sync:NostrTransport");
+const debugPeerRecv = debug("sync:NostrTransport:PeerRecv");
+const debugPeerSend = debug("sync:NostrTransport:PeerSend");
 
+const MAX_RECV_BUFFER_SIZE = 10000;
+
+// Signer, connecting the transport with key storage
 export interface NostrSigner {
   // NOTE: event.pubkey must be set to choose matching key
   signEvent(event: UnsignedEvent): Promise<Event>;
@@ -38,6 +67,7 @@ export interface NostrSigner {
 
 interface CursorPayload {
   peer_id: string;
+  stream_id: string;
   cursor: SerializableCursor;
 }
 
@@ -47,180 +77,795 @@ interface ChangesPayload {
 }
 
 export class NostrTransport implements Transport {
-  #store?: NostrPeerStore;
-  private signer: NostrSigner;
-  private pool: SimplePool = new SimplePool();
-  private localPeerId?: string;
+  public readonly store: NostrPeerStore;
+  public readonly signer: NostrSigner;
+  public readonly pool: SimplePool = new SimplePool();
+  #localPeerId?: string;
   private callbacks?: TransportCallbacks;
   private peers: NostrPeer[] = [];
+  private sends = new Map<string, PeerSend>();
+  private recvs = new Map<string, PeerRecv>();
 
   constructor(store: NostrPeerStore, signer: NostrSigner) {
-    this.#store = store;
+    this.store = store;
     this.signer = signer;
   }
 
-  get store() {
-    if (!this.#store) throw new Error("Store required");
-    return this.#store;
+  get localPeerId() {
+    if (!this.#localPeerId)
+      throw new Error("Not started yet, no local peer id");
+    return this.#localPeerId;
+  }
+
+  onSync(peerId: string, peerCursor: Cursor) {
+    return this.callbacks!.onSync(this, peerId, peerCursor);
+  }
+
+  onReceive(peerId: string, msg: PeerMessage) {
+    return this.callbacks!.onReceive(this, peerId, msg);
   }
 
   async start(
     config: { localPeerId: string } & TransportCallbacks
   ): Promise<void> {
-    this.localPeerId = config.localPeerId;
+    this.#localPeerId = config.localPeerId;
     this.callbacks = config;
 
     // Init connect on all peers
     this.peers = await this.store.listPeers();
     for (const p of this.peers) {
+      this.sends.set(p.peer_id, new PeerSend(this, p));
+      this.recvs.set(p.peer_id, new PeerRecv(this, p));
       this.callbacks!.onConnect(this, p.peer_id);
     }
 
-    // FIXME fetch CURSOR events by peers,
-    // update nostr peer cursors if those have changed
+    // Start the sends, recvs will be initiated by 'sync' calls
+    for (const s of this.sends.values()) s.start();
   }
 
   async sync(peerId: string, localCursor: Cursor): Promise<void> {
-    const peer = this.peers.find((p) => p.peer_id === peerId);
-    if (!peer) throw new Error("Peer not found " + peerId);
-
-    // Peer sync state
-    const nostrPeerCursor = await this.store.getNostrPeerCursor(
-      peer.peer_pubkey
-    );
-    let lastCursor: Cursor | undefined;
-    let lastCursorEventId: string | undefined;
-    try {
-      if (nostrPeerCursor) {
-        lastCursor = deserializeCursor(JSON.parse(nostrPeerCursor.last_cursor));
-        lastCursorEventId = nostrPeerCursor.last_cursor_event_id;
-      }
-    } catch (e) {
-      debugNostrTransport("Bad last cursor", nostrPeerCursor?.last_cursor, e);
-    }
-
-    // Need to ask peer to resync from our cursor
-    let needResync = !lastCursor || isCursorLess(localCursor, lastCursor);
-
-    // Can proceed fetching since last cursor event?
-    if (!needResync) {
-      if (!lastCursorEventId) throw new Error("Last cursor event id empty");
-      const filter: Filter = {
-        kinds: [KIND_CURSOR],
-        "#p": [peer.connection_pubkey],
-        "#e": [lastCursorEventId],
-      };
-
-      // fetch all CHANGES events from relays up until last_changes_event_id,
-
-      // if not found - publish new CURSOR event and update in db,
-      // if found - process loaded events one by one from oldest to newest:
-      // - call onReceive on the changes
-      // - write last_changes_event_id after processed
-    }
-
-    // No cursor or stream interrupted?
-    if (needResync) {
-      await this.resync(peer, nostrPeerCursor, localCursor);
-    }
+    const recv = this.recvs.get(peerId);
+    if (!recv) throw new Error("Peer not found " + peerId);
+    return recv.sync(localCursor);
   }
 
   async send(peerId: string, changes: PeerMessage): Promise<void> {
-    const peer = this.peers.find((p) => p.peer_id === peerId);
-    if (!peer) throw new Error("Peer not found " + peerId);
+    const send = this.sends.get(peerId);
+    if (!send) throw new Error("Peer not found " + peerId);
+    return send.send(changes);
+  }
 
+  // async finish() {
+  //   await Promise.all([
+  //     ...[...this.sends.values()].map((s) => s.finish()),
+  //     ...[...this.recvs.values()].map((r) => r.finish()),
+  //   ]);
+  // }
+
+  async stop() {
+    for (const r of this.recvs.values()) await r.stop();
+    for (const s of this.sends.values()) await s.stop();
+    this.pool.destroy();
+  }
+}
+
+interface RecvCursor {
+  recv_cursor: Cursor;
+  recv_cursor_id: string;
+  recv_changes_event_id: string;
+  recv_changes_timestamp: number;
+}
+
+interface RecvMessage {
+  event_id: string;
+  prev_event_id: string;
+  created_at: number;
+  msg: PeerMessage;
+}
+
+class PeerRecv {
+  public readonly peer: NostrPeer;
+  public readonly relays: string[];
+  private readonly parent: NostrTransport;
+  private localCursor?: Cursor;
+  private sub?: SubCloser;
+  private recvCursor?: RecvCursor;
+  private buffer = new Map<string, RecvMessage>();
+  private processBufferPromise?: Promise<void>;
+
+  constructor(parent: NostrTransport, peer: NostrPeer) {
+    this.peer = peer;
+    this.parent = parent;
+    this.relays = this.peer.relays.split(",");
+    if (!this.relays.length) throw new Error("No relays for PeerRecv");
+  }
+
+  async sync(localCursor: Cursor): Promise<void> {
+    if (this.localCursor) throw new Error("Already syncing");
+
+    // Store for future reference
+    this.localCursor = localCursor;
+
+    // Read our recv cursor from db
+    await this.readRecvCursor();
+
+    // Need to ask peer to resync from our cursor
+    const needResync =
+      !this.recvCursor ||
+      isCursorOlder(this.localCursor, this.recvCursor.recv_cursor) ||
+      !(await this.havePublishedCursor());
+
+    if (needResync) {
+      // No cursor or stream interrupted?
+      // (Re-)publish the CURSOR event and subscribe
+      await this.resync();
+    } else {
+      // Subscribe to proceed with existing CURSOR event
+      await this.subscribe();
+    }
+  }
+
+  private async havePublishedCursor() {
+    const events = await this.parent.pool.querySync(
+      this.relays,
+      {
+        kinds: [KIND_CURSOR],
+        authors: [this.peer.connection_pubkey],
+        limit: 1,
+      },
+      {
+        maxWait: 10000,
+      }
+    );
+    return events.length > 0;
+  }
+
+  private async readRecvCursor() {
     // Peer sync state
-    const nostrPeerCursor = await this.store.getNostrPeerCursor(
-      peer.peer_pubkey
+    const c = await this.parent.store.getNostrPeerCursorRecv(
+      this.peer.peer_pubkey
     );
-    if (!nostrPeerCursor)
-      throw new Error("No nostr peer cursor for " + peer.peer_pubkey);
+    if (!c) return;
 
-    const peerCursor = deserializeCursor(
-      JSON.parse(nostrPeerCursor.peer_cursor)
+    try {
+      const recv_cursor = deserializeCursor(JSON.parse(c.recv_cursor));
+      this.recvCursor = {
+        recv_cursor,
+        recv_cursor_id: c.recv_cursor_id,
+        recv_changes_event_id: c.recv_changes_event_id,
+        recv_changes_timestamp: c.recv_changes_timestamp,
+      };
+    } catch (e) {
+      debugPeerRecv("Bad last cursor", c?.recv_cursor, e);
+    }
+  }
+
+  private async fetch(filter: Filter) {
+    let until: number | undefined;
+    let buffer: Event[] = [];
+    do {
+      const events = await this.parent.pool.querySync(
+        this.relays,
+        {
+          ...filter,
+          until,
+        },
+        {
+          maxWait: 10000,
+        }
+      );
+      if (!events.length) {
+        // We expect the first event and none were published yet? That's ok
+        if (!buffer.length && !this.recvCursor!.recv_changes_event_id)
+          return [];
+
+        // We got some events but haven't found the next one
+        break;
+      }
+
+      // Ensure sort order
+      events.sort((a, b) => b.created_at - a.created_at);
+
+      // Find the next expected event
+      const nextIndex = events.findIndex((e) => {
+        const prev = tv(e, "e") || "";
+        return prev === this.recvCursor!.recv_changes_event_id;
+      });
+      debugPeerRecv(
+        "Changes from peer",
+        this.peer.peer_pubkey,
+        "batch",
+        events.length,
+        "total",
+        buffer.length,
+        "next",
+        nextIndex
+      );
+
+      // Got it?
+      if (nextIndex >= 0) {
+        buffer.push(...events.slice(0, nextIndex + 1));
+        return buffer;
+      }
+
+      // Push everything to buffer and proceed
+      buffer.push(...events);
+
+      // Next fetch until the oldest timestamp
+      until = events.at(-1)!.created_at - 1;
+
+      // Do not go crazy, >10k events should result in re-sync
+    } while (buffer.length < MAX_RECV_BUFFER_SIZE);
+
+    debugPeerRecv(
+      "Failed to find next change event for peer",
+      this.peer.peer_pubkey
+    );
+    return undefined;
+  }
+
+  private async subscribe() {
+    if (this.sub) throw new Error("Already subscribed");
+    if (!this.recvCursor || !this.recvCursor.recv_cursor_id)
+      throw new Error("Last cursor event id empty");
+
+    // Changes filter
+    const filter: Filter = {
+      kinds: [KIND_CHANGES],
+      authors: [this.peer.peer_pubkey],
+      "#r": [this.recvCursor.recv_cursor_id],
+      limit: 500,
+    };
+    // Changes must have non-decreasing timestamp
+    if (this.recvCursor.recv_changes_timestamp)
+      filter.since = this.recvCursor.recv_changes_timestamp;
+
+    // Fetch events already stored on relays
+    const storedEvents = await this.fetch(filter);
+    debugPeerRecv(
+      "Stored events from peer",
+      this.peer.peer_pubkey,
+      "events",
+      storedEvents?.length,
+      "stream",
+      this.recvCursor.recv_cursor_id
+    );
+    if (!storedEvents) {
+      // Stream interrupted
+      return this.restart();
+    }
+
+    // Decrypt stored events and put them to buffer
+    for (const e of storedEvents) await this.handleChangesEvent(e);
+
+    // Wait until they're all processed
+    await this.processBuffer();
+
+    // Send EOSE after we're handled all stored events
+    await this.parent.onReceive(this.peer.peer_id, {
+      type: "eose",
+      data: [],
+    });
+
+    // Subscribe for future events
+    if (this.recvCursor.recv_changes_timestamp)
+      filter.since = this.recvCursor.recv_changes_timestamp;
+    this.sub = this.parent.pool.subscribeMany(this.relays, filter, {
+      onevent: async (e) => {
+        await this.handleChangesEvent(e);
+
+        // Launch processing loop if not working yet
+        if (!this.processBufferPromise) this.processBuffer();
+      },
+    });
+  }
+
+  private async processBuffer() {
+    const promise = new Promise<void>(async (ok, rej) => {
+      try {
+        // Check buffer size
+        if (this.buffer.size >= MAX_RECV_BUFFER_SIZE) {
+          debugPeerRecv(
+            "Too many buffered events, restarting for peer",
+            this.peer.peer_pubkey
+          );
+
+          // Async restart
+          this.restart();
+          return;
+        }
+
+        do {
+          // Aborted?
+          if (!this.recvCursor) break;
+
+          const next = this.buffer.get(this.recvCursor.recv_changes_event_id);
+          if (!next) break;
+
+          // Take next one from buffer
+          this.buffer.delete(next.prev_event_id);
+
+          // Process it
+          await this.processMessage(next);
+
+          // While not aborted
+        } while (this.recvCursor && this.buffer.size);
+
+        // Drop old messages from buffer
+        if (this.recvCursor) {
+          for (const [k, m] of this.buffer.entries()) {
+            if (m.created_at < this.recvCursor.recv_changes_timestamp)
+              this.buffer.delete(k);
+          }
+        }
+
+        ok();
+      } catch (e) {
+        rej(e);
+      }
+    });
+
+    // Store the promise, and make sure it clears itself
+    // from 'this' after it finishes
+    this.processBufferPromise = promise;
+    promise.finally(() => {
+      if (promise === this.processBufferPromise)
+        this.processBufferPromise = undefined;
+    });
+
+    return promise;
+  }
+
+  private async handleChangesEvent(event: Event) {
+    if (event.pubkey !== this.peer.peer_pubkey) {
+      debugPeerRecv(
+        "Ignoring changes from",
+        event.pubkey,
+        "expected",
+        this.peer.peer_pubkey
+      );
+      return;
+    }
+
+    if (!this.recvCursor) {
+      debugPeerRecv("Ignoring changes from", event.pubkey, " - no recv cursor");
+      return;
+    }
+
+    try {
+      const decryptedContent = await this.parent.signer.decrypt({
+        ciphertext: event.content,
+        receiverPubkey: this.peer.connection_pubkey,
+        senderPubkey: this.peer.peer_pubkey,
+      });
+      const payload: ChangesPayload = JSON.parse(decryptedContent);
+      if (payload.peer_id !== this.peer.peer_id)
+        throw new Error("Wrong peer id in changes");
+
+      const prev_event_id = tv(event, "e") || "";
+
+      debugPeerRecv(
+        "Recv changes from peer",
+        this.peer.peer_pubkey,
+        "eid",
+        event.id,
+        "prev",
+        prev_event_id,
+        "changes",
+        payload.msg.data.length
+      );
+
+      // Final check to make sure we aren't aborted
+      const cursor_event_id = tv(event, "r");
+      if (cursor_event_id !== this.recvCursor!.recv_cursor_id) {
+        debugPeerRecv(
+          "Ignoring changes from",
+          event.pubkey,
+          "cursor",
+          cursor_event_id,
+          "expected",
+          this.recvCursor!.recv_cursor_id
+        );
+        return;
+      }
+
+      // Put to buffer
+      this.buffer.set(prev_event_id, {
+        event_id: event.id,
+        prev_event_id,
+        created_at: event.created_at,
+        msg: payload.msg,
+      });
+    } catch (e) {
+      debugPeerRecv(
+        "Bad changes event from peer",
+        this.peer.peer_pubkey,
+        event,
+        e
+      );
+      this.restart();
+    }
+  }
+
+  private async processMessage(msg: RecvMessage) {
+    // Aborted
+    if (!this.recvCursor) return;
+
+    try {
+      // Notify the Peer
+      await this.parent.onReceive(this.peer.peer_id, msg.msg);
+
+      // Update cursor and last event id
+      updateCursor(this.recvCursor.recv_cursor, msg.msg.data);
+      this.recvCursor.recv_changes_event_id = msg.event_id;
+      this.recvCursor.recv_changes_timestamp = msg.created_at;
+
+      // Write the new cursor info
+      await this.writeRecvCursor();
+    } catch (e) {
+      debugPeerRecv(
+        "Abort, failed to process changes from peer",
+        this.peer.peer_pubkey,
+        msg,
+        e
+      );
+
+      // Make no sense to restart, we have to figure out the issue, otherwise
+      // we'll be sending changes back and forth and failing in an infinite loop.
+      // Do not await - it will recursively await on itself
+      this.abort();
+    }
+  }
+
+  private async restart() {
+    debugPeerRecv("Restarting recv from peer", this.peer.peer_pubkey);
+    await this.abort();
+    try {
+      await this.resync();
+    } catch (e) {
+      debugPeerRecv("Abort, failed to restart for peer", this.peer.peer_pubkey);
+
+      // Can't restart, will stay aborted
+      await this.abort();
+    }
+  }
+
+  // Does not throw, aborts the relay subscription and message processing loop,
+  // resets the cursor and buffer
+  private async abort() {
+    // Stop the sub asap
+    if (this.sub) this.sub.close();
+    this.sub = undefined;
+
+    // Drop the buffer to signal 'abort' to processMessages
+    this.buffer.clear();
+
+    // Await for it to finish properly
+    if (this.processBufferPromise) {
+      try {
+        await this.processBufferPromise;
+      } catch (e) {
+        debugPeerRecv("Error processing buffer while aborting", e);
+      }
+    }
+
+    // Reset cursor
+    this.recvCursor = undefined;
+  }
+
+  private async resync() {
+    if (!this.localCursor) throw new Error("No local cursor");
+
+    // Random stream id
+    const stream_id = bytesToHex(randomBytes(16));
+
+    // Encrypted payload
+    const payload: CursorPayload = {
+      peer_id: this.parent.localPeerId,
+      stream_id,
+      cursor: serializeCursor(this.localCursor),
+    };
+
+    // Encrypt for peer
+    const content = await this.parent.signer.encrypt({
+      plaintext: JSON.stringify(payload),
+      receiverPubkey: this.peer.peer_pubkey,
+      senderPubkey: this.peer.connection_pubkey,
+    });
+    // Prepare event, it's replaceable - new one will overwrite existing one
+    const cursorEvent: UnsignedEvent = {
+      kind: KIND_CURSOR,
+      pubkey: this.peer.connection_pubkey,
+      created_at: Math.floor(Date.now() / 1000),
+      tags: [],
+      content,
+    };
+    // Sign
+    debugPeerRecv(
+      "Signing cursor for peer",
+      this.peer.peer_pubkey,
+      "by connection pubkey",
+      this.peer.connection_pubkey
+    );
+    const signedEvent = await this.parent.signer.signEvent(cursorEvent);
+
+    // Publish to all relays
+    await Promise.all(this.parent.pool.publish(this.relays, signedEvent));
+    debugPeerRecv(
+      "Sent cursor to peer",
+      this.peer.peer_pubkey,
+      "cursor",
+      JSON.stringify(serializeCursor(this.localCursor)),
+      "event id",
+      signedEvent.id
     );
 
+    // Init recv cursor
+    this.recvCursor = {
+      recv_cursor: this.localCursor,
+      recv_cursor_id: stream_id,
+      recv_changes_event_id: "",
+      recv_changes_timestamp: 0,
+    };
+
+    // Write the new cursor info
+    await this.writeRecvCursor();
+
+    // Subscribe with new cursor
+    await this.subscribe();
+  }
+
+  private async writeRecvCursor() {
+    if (!this.recvCursor) throw new Error("No recv cursor");
+    await this.parent.store.setNostrPeerCursorRecv({
+      peer_pubkey: this.peer.peer_pubkey,
+      recv_cursor: JSON.stringify(serializeCursor(this.recvCursor.recv_cursor)),
+      recv_cursor_id: this.recvCursor.recv_cursor_id,
+      recv_changes_event_id: this.recvCursor.recv_changes_event_id,
+      recv_changes_timestamp: this.recvCursor.recv_changes_timestamp,
+    });
+  }
+
+  async stop() {
+    await this.abort();
+  }
+}
+
+interface SendCursor {
+  send_cursor: Cursor;
+  send_cursor_id: string;
+  send_changes_event_id: string;
+  send_changes_timestamp: number;
+}
+
+class PeerSend {
+  public readonly peer: NostrPeer;
+  public readonly relays: string[];
+  private readonly parent: NostrTransport;
+  private sendCursor?: SendCursor;
+  private sub?: SubCloser;
+
+  constructor(parent: NostrTransport, peer: NostrPeer) {
+    this.peer = peer;
+    this.parent = parent;
+    this.relays = this.peer.relays.split(",");
+    if (!this.relays.length) throw new Error("No relays for PeerSend");
+  }
+
+  async start() {
+    // Recover our stream state
+    await this.readSendCursor();
+
+    // Subscribe to CURSOR events by receiver
+    await this.subscribe();
+  }
+
+  async stop() {
+    if (this.sub) this.sub.close();
+    this.sub = undefined;
+    this.sendCursor = undefined;
+  }
+
+  private async readSendCursor() {
+    // Peer sync state
+    const c = await this.parent.store.getNostrPeerCursorSend(
+      this.peer.peer_pubkey
+    );
+    if (!c) return;
+
+    try {
+      const send_cursor = deserializeCursor(JSON.parse(c.send_cursor));
+      this.sendCursor = {
+        send_cursor,
+        send_cursor_id: c.send_cursor_id,
+        send_changes_event_id: c.send_changes_event_id,
+        send_changes_timestamp: c.send_changes_timestamp,
+      };
+    } catch (e) {
+      debugPeerSend("Bad last cursor", c?.send_cursor, e);
+    }
+  }
+
+  private async subscribe() {
+    const filter: Filter = {
+      kinds: [KIND_CURSOR],
+      authors: [this.peer.peer_pubkey],
+    };
+
+    // Subscribe for cursor events
+    let last_created_at = 0;
+    this.sub = this.parent.pool.subscribeMany(this.relays, filter, {
+      onevent: async (e) => {
+        // ignore old events
+        if (e.created_at < last_created_at) return;
+
+        const { valid, restart } = await this.handleCursorEvent(e);
+        if (valid) last_created_at = e.created_at;
+
+        if (restart)
+          this.parent.onSync(this.peer.peer_id, this.sendCursor!.send_cursor);
+      },
+    });
+
+    // Have stored cursor? Launch immediately
+    if (this.sendCursor)
+      this.parent.onSync(this.peer.peer_id, this.sendCursor.send_cursor);
+  }
+
+  private async handleCursorEvent(event: Event) {
+    if (event.pubkey !== this.peer.peer_pubkey) {
+      debugPeerSend(
+        "Ignoring cursor from",
+        event.pubkey,
+        "expected",
+        this.peer.peer_pubkey
+      );
+      return {
+        valid: false,
+        restart: false,
+      };
+    }
+
+    try {
+      const decryptedContent = await this.parent.signer.decrypt({
+        ciphertext: event.content,
+        receiverPubkey: this.peer.connection_pubkey,
+        senderPubkey: this.peer.peer_pubkey,
+      });
+      const payload: CursorPayload = JSON.parse(decryptedContent);
+      if (payload.peer_id !== this.peer.peer_id)
+        throw new Error("Wrong peer id in cursor");
+
+      // Same cursor? Ok, we'll proceed with our stream
+      if (
+        this.sendCursor &&
+        this.sendCursor.send_cursor_id === payload.stream_id
+      ) {
+        debugPeerSend(
+          "Reuse cursor for peer",
+          this.peer.peer_pubkey,
+          "stream",
+          payload.stream_id,
+          this.sendCursor
+        );
+        return {
+          valid: true,
+          restart: false,
+        };
+      } else {
+        // New cursor
+        this.sendCursor = {
+          send_cursor: deserializeCursor(payload.cursor),
+          send_cursor_id: payload.stream_id,
+          send_changes_event_id: "",
+          send_changes_timestamp: 0,
+        };
+        debugPeerSend(
+          "New cursor for peer",
+          this.peer.peer_pubkey,
+          "stream",
+          payload.stream_id,
+          this.sendCursor
+        );
+        return {
+          valid: true,
+          restart: true,
+        };
+      }
+    } catch (e) {
+      debugPeerSend(
+        "Bad cursor event from peer",
+        this.peer.peer_pubkey,
+        event,
+        e
+      );
+    }
+
+    return {
+      valid: false,
+      restart: false,
+    };
+  }
+
+  async send(changes: PeerMessage): Promise<void> {
+    if (!this.sendCursor) throw new Error("No send cursor");
+
+    // Do not send 'EOSE', we have synthetic event for that
+    if (changes.type === "eose") return;
     // FIXME split changes into batches < 20Kb
 
     const payload: ChangesPayload = {
-      peer_id: this.localPeerId!,
+      peer_id: this.parent.localPeerId!,
       msg: changes,
     };
 
     // Encrypt the message
-    const content = await this.signer.encrypt({
+    const content = await this.parent.signer.encrypt({
       plaintext: JSON.stringify(payload),
-      receiverPubkey: peer.peer_pubkey,
-      senderPubkey: peer.connection_pubkey,
+      receiverPubkey: this.peer.peer_pubkey,
+      senderPubkey: this.peer.connection_pubkey,
     });
 
     // Prepare nostr event
     const changesEvent: UnsignedEvent = {
       kind: KIND_CHANGES,
-      pubkey: peer.connection_pubkey,
-      created_at: Math.floor(Date.now() / 10000),
+      pubkey: this.peer.connection_pubkey,
+      created_at: Math.floor(Date.now() / 1000),
       tags: [
-        ["p", peer.peer_pubkey],
-        ["e", nostrPeerCursor.peer_cursor_event_id],
+        ["r", this.sendCursor.send_cursor_id],
+        ...(this.sendCursor.send_changes_event_id
+          ? [["e", this.sendCursor.send_changes_event_id]]
+          : []),
       ],
       content,
     };
-    const signedEvent = await this.signer.signEvent(changesEvent);
+
+    // Ensure the timestamp never goes back
+    if (changesEvent.created_at < this.sendCursor.send_changes_timestamp)
+      changesEvent.created_at = this.sendCursor.send_changes_timestamp;
+
+    debugPeerRecv(
+      "Signing changes for peer",
+      this.peer.peer_pubkey,
+      "by connection pubkey",
+      this.peer.connection_pubkey
+    );
+    const signedEvent = await this.parent.signer.signEvent(changesEvent);
 
     // Publish to all relays
-    await Promise.all(this.pool.publish(peer.relays.split(","), signedEvent));
+    await Promise.all(this.parent.pool.publish(this.relays, signedEvent));
+    debugPeerRecv(
+      "Sent to peer",
+      this.peer.peer_pubkey,
+      "changes",
+      changes.data.length,
+      "event",
+      signedEvent.id,
+      "stream",
+      this.sendCursor.send_cursor_id
+    );
 
     // Advance peer cursor
-    const newCursor = applyChangeToCursor(peerCursor, changes.data);
+    updateCursor(this.sendCursor.send_cursor, changes.data);
+    this.sendCursor.send_changes_event_id = signedEvent.id;
+    this.sendCursor.send_changes_timestamp = signedEvent.created_at;
 
-    // Write the updated cursor event info
-    const newNostrPeerCursor: NostrPeerCursor = {
-      ...nostrPeerCursor,
-      peer_cursor: JSON.stringify(serializeCursor(newCursor)),
-      peer_changes_event_id: signedEvent.id,
-    };
-    await this.store.setNostrPeerCursor(newNostrPeerCursor);
+    // Write to db
+    await this.writeSendCursor();
   }
 
-  private async resync(
-    peer: NostrPeer,
-    nostrPeerCursor: NostrPeerCursor | null,
-    localCursor: Cursor
-  ) {
-    const payload: CursorPayload = {
-      peer_id: this.localPeerId!,
-      cursor: serializeCursor(localCursor),
-    };
-    const content = await this.signer.encrypt({
-      plaintext: JSON.stringify(payload),
-      receiverPubkey: peer.peer_pubkey,
-      senderPubkey: peer.connection_pubkey,
+  private async writeSendCursor() {
+    if (!this.sendCursor) throw new Error("No send cursor");
+    await this.parent.store.setNostrPeerCursorSend({
+      peer_pubkey: this.peer.peer_pubkey,
+      send_cursor: JSON.stringify(serializeCursor(this.sendCursor.send_cursor)),
+      send_cursor_id: this.sendCursor.send_cursor_id,
+      send_changes_event_id: this.sendCursor.send_changes_event_id,
+      send_changes_timestamp: this.sendCursor.send_changes_timestamp,
     });
-    const cursorEvent: UnsignedEvent = {
-      kind: KIND_CURSOR,
-      pubkey: peer.connection_pubkey,
-      created_at: Math.floor(Date.now() / 1000),
-      tags: [["p", peer.peer_pubkey]],
-      content,
-    };
-    const signedEvent = await this.signer.signEvent(cursorEvent);
-
-    // Publish to all relays
-    await Promise.all(this.pool.publish(peer.relays.split(","), signedEvent));
-
-    // Write the new cursor event info
-    const newNostrPeerCursor: NostrPeerCursor = {
-      ...(nostrPeerCursor || {
-        last_changes_event_id: "",
-        peer_changes_event_id: "",
-        peer_cursor: "",
-        peer_cursor_event_id: "",
-      }),
-      peer_pubkey: peer.peer_pubkey,
-      last_cursor: JSON.stringify(serializeCursor(localCursor)),
-      last_cursor_event_id: signedEvent.id,
-    };
-
-    await this.store.setNostrPeerCursor(newNostrPeerCursor);
   }
+}
+
+function tv(e: Event, tag: string) {
+  return e.tags.find((t) => t.length >= 2 && t[0] === tag)?.[1];
 }

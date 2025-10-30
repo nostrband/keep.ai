@@ -9,14 +9,20 @@ export interface NostrPeer {
   relays: string;
 }
 
-export interface NostrPeerCursor {
+export interface NostrPeerCursorSend {
   peer_pubkey: string;
-  last_cursor: string;
-  last_cursor_event_id: string;
-  last_changes_event_id: string;
-  peer_cursor: string;
-  peer_cursor_event_id: string;
-  peer_changes_event_id: string;
+  send_cursor: string;
+  send_cursor_id: string;
+  send_changes_event_id: string;
+  send_changes_timestamp: number;
+}
+
+export interface NostrPeerCursorRecv {
+  peer_pubkey: string;
+  recv_cursor: string;
+  recv_cursor_id: string;
+  recv_changes_event_id: string;
+  recv_changes_timestamp: number;
 }
 
 export class NostrPeerStore {
@@ -80,31 +86,45 @@ export class NostrPeerStore {
     ]);
   }
 
-  async setNostrPeerCursor(nostrPeerCursor: NostrPeerCursor): Promise<void> {
+  async setNostrPeerCursorSend(c: NostrPeerCursorSend): Promise<void> {
     await this.db.db.exec(
       `INSERT OR REPLACE INTO nostr_peer_cursors (
         peer_pubkey, 
-        last_cursor, last_cursor_event_id, last_changes_event_id, 
-        peer_cursor, peer_cursor_event_id, peer_changes_event_id
+        send_cursor, send_cursor_id, send_changes_event_id, send_changes_timestamp 
        )
-       VALUES (?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?)`,
       [
-        nostrPeerCursor.peer_pubkey,
-        nostrPeerCursor.last_cursor,
-        nostrPeerCursor.last_cursor_event_id,
-        nostrPeerCursor.last_changes_event_id,
-        nostrPeerCursor.peer_cursor,
-        nostrPeerCursor.peer_cursor_event_id,
-        nostrPeerCursor.peer_changes_event_id,
+        c.peer_pubkey,
+        c.send_cursor,
+        c.send_cursor_id,
+        c.send_changes_event_id,
+        c.send_changes_timestamp
       ]
     );
   }
 
-  async getNostrPeerCursor(
+  async setNostrPeerCursorRecv(c: NostrPeerCursorRecv): Promise<void> {
+    await this.db.db.exec(
+      `INSERT OR REPLACE INTO nostr_peer_cursors (
+        peer_pubkey, 
+        recv_cursor, recv_cursor_id, recv_changes_event_id, recv_changes_timestamp
+       )
+       VALUES (?, ?, ?, ?, ?)`,
+      [
+        c.peer_pubkey,
+        c.recv_cursor,
+        c.recv_cursor_id,
+        c.recv_changes_event_id,
+        c.recv_changes_timestamp
+      ]
+    );
+  }
+
+  async getNostrPeerCursorSend(
     peerPubkey: string
-  ): Promise<NostrPeerCursor | null> {
-    const results = await this.db.db.execO<NostrPeerCursor>(
-      "SELECT * FROM nostr_peer_cursors WHERE peer_pubkey = ?",
+  ): Promise<NostrPeerCursorSend | null> {
+    const results = await this.db.db.execO<NostrPeerCursorSend>(
+      "SELECT peer_pubkey, send_cursor, send_cursor_id, send_changes_event_id, send_changes_timestamp FROM nostr_peer_cursors WHERE peer_pubkey = ?",
       [peerPubkey]
     );
 
@@ -115,15 +135,30 @@ export class NostrPeerStore {
     return results[0];
   }
 
-  async listNostrPeerCursors(): Promise<NostrPeerCursor[]> {
-    const results = await this.db.db.execO<NostrPeerCursor>(
-      "SELECT * FROM nostr_peer_cursors ORDER BY peer_pubkey"
+  async getNostrPeerCursorRecv(
+    peerPubkey: string
+  ): Promise<NostrPeerCursorRecv | null> {
+    const results = await this.db.db.execO<NostrPeerCursorRecv>(
+      "SELECT peer_pubkey, recv_cursor, recv_cursor_id, recv_changes_event_id, recv_changes_timestamp FROM nostr_peer_cursors WHERE peer_pubkey = ?",
+      [peerPubkey]
     );
 
-    if (!results) return [];
+    if (!results || results.length === 0) {
+      return null;
+    }
 
-    return results;
+    return results[0];
   }
+
+  // async listNostrPeerCursors(): Promise<NostrPeerCursor[]> {
+  //   const results = await this.db.db.execO<NostrPeerCursor>(
+  //     "SELECT * FROM nostr_peer_cursors ORDER BY peer_pubkey"
+  //   );
+
+  //   if (!results) return [];
+
+  //   return results;
+  // }
 
   async deleteNostrPeerCursor(peerPubkey: string): Promise<void> {
     await this.db.db.exec(

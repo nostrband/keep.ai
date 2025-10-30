@@ -20,6 +20,7 @@ const CONNECTION_TIMEOUT = 30 * 1000; // 30 seconds in milliseconds
 export interface ConnectionStringInfo {
   key: Uint8Array;
   secret: string;
+  nonce: string;
   relays: string[];
   expiration: number;
   str: string;
@@ -55,26 +56,29 @@ export class NostrConnector {
    * Generate a connection string for peer discovery
    */
   async generateConnectionString(
-    relays: string[]
+    relays: string[],
+    key?: Uint8Array,
   ): Promise<ConnectionStringInfo> {
     if (!relays || relays.length === 0) {
       throw new Error("At least one relay is required");
     }
 
-    const key = generateSecretKey();
+    key = key || generateSecretKey();
     const pubkey = getPublicKey(key);
     const secret = bytesToHex(randomBytes(16));
+    const nonce = bytesToHex(randomBytes(16));
     const expiration = Date.now() + CONN_STRING_TTL;
 
     // Build the connection string
     const relayParams = relays
       .map((relay) => `relay=${encodeURIComponent(relay)}`)
       .join("&");
-    const str = `nostr+keepai://${pubkey}?${relayParams}&secret=${secret}`;
+    const str = `nostr+keepai://${pubkey}?${relayParams}&secret=${secret}&nonce=${nonce}`;
 
     return {
       key,
       secret,
+      nonce,
       relays,
       expiration,
       str,
@@ -87,14 +91,15 @@ export class NostrConnector {
   async connect(
     connString: string,
     localPeerId: string,
-    deviceInfo: string
+    deviceInfo: string,
+    key?: Uint8Array
   ): Promise<NostrPeerInfo> {
     // Parse the connection string
     const parsed = this.parseConnectionString(connString);
-    const { peerPubkey, relays, secret } = parsed;
+    const { peerPubkey, relays, secret, nonce } = parsed;
 
     // Generate our own key
-    const key = generateSecretKey();
+    key = key || generateSecretKey();
     const ourPubkey = getPublicKey(key);
 
     // Create the connection payload
@@ -116,7 +121,7 @@ export class NostrConnector {
       kind: KIND_CONNECT,
       pubkey: ourPubkey,
       created_at: Math.floor(Date.now() / 1000),
-      tags: [["p", peerPubkey]],
+      tags: [["n", nonce]],
       content: encryptedContent,
       id: "",
       sig: "",
@@ -128,7 +133,6 @@ export class NostrConnector {
     // Subscribe for replies before publishing the request
     const filter: Filter = {
       kinds: [KIND_CONNECT],
-      "#p": [ourPubkey],
       authors: [peerPubkey],
     };
 
@@ -205,7 +209,7 @@ export class NostrConnector {
     // Subscribe for connection requests
     const filter: Filter = {
       kinds: [KIND_CONNECT],
-      "#p": [ourPubkey],
+      "#n": [info.nonce],
     };
 
     let timeout: ReturnType<typeof setTimeout> | undefined;
@@ -252,7 +256,7 @@ export class NostrConnector {
                   kind: KIND_CONNECT,
                   pubkey: ourPubkey,
                   created_at: Math.floor(Date.now() / 1000),
-                  tags: [["p", event.pubkey]],
+                  tags: [],
                   content: encryptedReply,
                   id: "",
                   sig: "",
@@ -311,6 +315,7 @@ export class NostrConnector {
     peerPubkey: string;
     relays: string[];
     secret: string;
+    nonce: string;
   } {
     if (!connString.startsWith("nostr+keepai://")) {
       throw new Error("Invalid connection string format");
@@ -325,18 +330,19 @@ export class NostrConnector {
     relays.push(...relayParams);
 
     const secret = url.searchParams.get("secret");
+    const nonce = url.searchParams.get("nonce");
 
-    if (!peerPubkey || relays.length === 0 || !secret) {
+    if (!peerPubkey || relays.length === 0 || !secret || !nonce) {
       throw new Error("Invalid connection string: missing required parameters");
     }
 
-    return { peerPubkey, relays, secret };
+    return { peerPubkey, relays, secret, nonce };
   }
 
   /**
    * Close the transport and cleanup resources
    */
   close(): void {
-    this.pool.close([]);
+    this.pool.destroy();
   }
 }

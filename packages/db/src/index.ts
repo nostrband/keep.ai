@@ -25,7 +25,7 @@ export type { Task } from "./task-store";
 
 // Nostr peer store
 export { NostrPeerStore } from "./nostr-peer-store";
-export type { NostrPeer, NostrPeerCursor } from "./nostr-peer-store";
+export type { NostrPeer, NostrPeerCursorSend, NostrPeerCursorRecv } from "./nostr-peer-store";
 
 // Api
 export * from "./api";

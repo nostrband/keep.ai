@@ -17,7 +17,15 @@
  */
 
 import { DBInterface } from "@app/db";
-import { PeerMessage, Change, PeerChange, Cursor, serializeCursor, serializeChanges, deserializeChanges } from "./messages";
+import {
+  PeerMessage,
+  Change,
+  PeerChange,
+  Cursor,
+  serializeCursor,
+  serializeChanges,
+  deserializeChanges,
+} from "./messages";
 import debug from "debug";
 import { EventEmitter } from "tseep/lib/ee-safe";
 import { bytesToHex, hexToBytes } from "nostr-tools/utils";
@@ -172,7 +180,9 @@ export class Peer extends EventEmitter<{
     msg: PeerMessage
   ): Promise<void> {
     // Apply everything peer sent us
-    debugPeer(`Received from peer '${peerId}' changes ${msg.data.length} schema ${msg.schemaVersion}`);
+    debugPeer(
+      `Received from peer '${peerId}' changes ${msg.data.length} schema ${msg.schemaVersion}`
+    );
 
     // Assume peer knows everything they sent us
     this.updatePeerCursor(peerId, msg.data);
@@ -201,7 +211,7 @@ export class Peer extends EventEmitter<{
       await this.applyChanges(newChanges);
 
       // We ourselves now know these new changes
-      this.updateCursor(this.cursor, newChanges);
+      updateCursor(this.cursor, newChanges);
 
       // Notify clients
       this.emitChanges(newChanges);
@@ -374,7 +384,9 @@ export class Peer extends EventEmitter<{
         for (const c of cursorData)
           this.cursor.peers.set(bytesToHex(c.site_id), c.db_version);
       }
-      debugPeer(`Initialized cursor to ${JSON.stringify(serializeCursor(this.cursor))}`);
+      debugPeer(
+        `Initialized cursor to ${JSON.stringify(serializeCursor(this.cursor))}`
+      );
 
       const siteId = await this.db.execO<{ site_id: Uint8Array }>(
         "SELECT crsql_site_id() as site_id;"
@@ -412,7 +424,7 @@ export class Peer extends EventEmitter<{
         const changes = serializeChanges(dbChanges);
 
         // Update our own cursor
-        this.updateCursor(this.cursor, changes);
+        updateCursor(this.cursor, changes);
 
         // Send to everyone
         await this.broadcastChanges(changes);
@@ -425,21 +437,18 @@ export class Peer extends EventEmitter<{
     }
   }
 
-  private updateCursor(cursor: Cursor, changes: PeerChange[]) {
-    for (const c of changes) {
-      const db_version = cursor.peers.get(c.site_id) || 0;
-      cursor.peers.set(c.site_id, Math.max(db_version, c.db_version));
-    }
-  }
-
   private updatePeerCursor(peerId: string, changes: PeerChange[]) {
     const peer = this.peers.get(peerId);
     if (!peer) throw new Error("Unknown peer");
 
     // We know peer knows these changes
-    this.updateCursor(peer.cursor, changes);
+    updateCursor(peer.cursor, changes);
 
-    debugPeer(`Update cursor peer '${peerId}' cursor ${JSON.stringify(serializeCursor(peer.cursor))}`);
+    debugPeer(
+      `Update cursor peer '${peerId}' cursor ${JSON.stringify(
+        serializeCursor(peer.cursor)
+      )}`
+    );
   }
 
   private async sendChanges(peer: PeerInfo, changes: PeerChange[]) {
@@ -467,7 +476,9 @@ export class Peer extends EventEmitter<{
   private async syncPeer(peer: PeerInfo): Promise<void> {
     try {
       debugPeer(
-        `Syncing peer ${peer.id} cursor ${JSON.stringify(serializeCursor(peer.cursor))}`
+        `Syncing peer ${peer.id} cursor ${JSON.stringify(
+          serializeCursor(peer.cursor)
+        )}`
       );
       // for each site_id:db_version of peer cursor,
       // fetch known changes since then,
@@ -487,11 +498,15 @@ export class Peer extends EventEmitter<{
       }
 
       // Collect changes from third-parties that peer didn't know about
-      const excludePeerIds = [peer.id, ...peer.cursor.peers.keys()].map((site_id) => hexToBytes(site_id));
+      const excludePeerIds = [peer.id, ...peer.cursor.peers.keys()].map(
+        (site_id) => hexToBytes(site_id)
+      );
       const bindString = new Array(excludePeerIds.length).fill("?").join(",");
       const dbChanges = await this.db.execO<Change>(
         `SELECT * FROM crsql_changes WHERE site_id NOT IN (${bindString})`,
-        [peer.id, ...peer.cursor.peers.keys()].map((site_id) => hexToBytes(site_id))
+        [peer.id, ...peer.cursor.peers.keys()].map((site_id) =>
+          hexToBytes(site_id)
+        )
       );
       if (dbChanges) changes.push(...serializeChanges(dbChanges));
 
@@ -519,4 +534,23 @@ export class Peer extends EventEmitter<{
       throw error;
     }
   }
+}
+
+export function updateCursor(cursor: Cursor, changes: PeerChange[]) {
+  for (const c of changes) {
+    const db_version = cursor.peers.get(c.site_id) || 0;
+    cursor.peers.set(c.site_id, Math.max(db_version, c.db_version));
+  }
+}
+
+export function isCursorOlder(a: Cursor, b: Cursor) {
+  for (const [id, av] of a.peers.entries()) {
+    const bv = b.peers.get(id);
+    // b has no info on this id?
+    if (bv === undefined) return true;
+    // b has newer version than a?
+    if (bv > av) return true;
+  }
+  // b covers all peers and it's versions are smaller
+  return false;
 }

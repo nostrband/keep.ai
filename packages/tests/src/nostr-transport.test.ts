@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { NostrConnector, ConnectionStringInfo, NostrPeerInfo } from '@app/sync';
+import { NostrConnector } from '@app/sync';
 import { getPublicKey } from 'nostr-tools';
 
 describe('NostrTransport', () => {
@@ -32,18 +32,20 @@ describe('NostrTransport', () => {
     const relays = ['wss://relay.damus.io'];
     const deviceInfo1 = 'Device 1 - Listener';
     const deviceInfo2 = 'Device 2 - Connector';
+    const peer1 = 'peer1';
+    const peer2 = 'peer2';
 
     // Transport 1 generates connection string and starts listening
     const connInfo = await transport1.generateConnectionString(relays);
     
     // Start listening in the background
-    const listenerPromise = transport1.listen(connInfo, deviceInfo1);
+    const listenerPromise = transport1.listen(connInfo, peer1, deviceInfo1);
     
     // Give a small delay to ensure listener is ready
     await new Promise(resolve => setTimeout(resolve, 100));
     
     // Transport 2 connects using the connection string
-    const connectorPromise = transport2.connect(connInfo.str, deviceInfo2);
+    const connectorPromise = transport2.connect(connInfo.str, peer2, deviceInfo2);
     
     // Wait for both operations to complete
     const [listenerResult, connectorResult] = await Promise.all([
@@ -74,6 +76,8 @@ describe('NostrTransport', () => {
     const relays = ['wss://relay.damus.io'];
     const deviceInfo1 = 'Device 1 - Listener';
     const deviceInfo2 = 'Device 2 - Connector';
+    const peer1 = 'peer1';
+    const peer2 = 'peer2';
 
     // Transport 1 generates connection string
     const connInfo = await transport1.generateConnectionString(relays);
@@ -82,13 +86,13 @@ describe('NostrTransport', () => {
     const invalidConnString = connInfo.str.replace(/secret=[0-9a-f]{32}/, 'secret=deadbeefdeadbeefdeadbeefdeadbeef');
     
     // Start listening with a shorter timeout for testing
-    const listenerPromise = transport1.listen(connInfo, deviceInfo1);
+    const listenerPromise = transport1.listen(connInfo, peer1, deviceInfo1);
     
     // Give a small delay to ensure listener is ready
     await new Promise(resolve => setTimeout(resolve, 100));
     
     // Transport 2 tries to connect with invalid secret
-    const connectorPromise = transport2.connect(invalidConnString, deviceInfo2);
+    const connectorPromise = transport2.connect(invalidConnString, peer2, deviceInfo2);
     
     // Both should timeout since the secret doesn't match
     await expect(connectorPromise).rejects.toThrow('Connection timeout');
@@ -111,8 +115,9 @@ describe('NostrTransport', () => {
 
   it('should throw error when parsing invalid connection string', async () => {
     const deviceInfo = 'Test Device';
+    const peer = 'peer';
     
-    await expect(transport2.connect('invalid://connection', deviceInfo)).rejects.toThrow('Invalid connection string format');
-    await expect(transport2.connect('nostr+keepai://pubkey', deviceInfo)).rejects.toThrow('Invalid connection string: missing required parameters');
+    await expect(transport2.connect('invalid://connection', peer, deviceInfo)).rejects.toThrow('Invalid connection string format');
+    await expect(transport2.connect('nostr+keepai://pubkey', peer, deviceInfo)).rejects.toThrow('Invalid connection string: missing required parameters');
   });
 });
