@@ -31,8 +31,6 @@ import { EventEmitter } from "tseep/lib/ee-safe";
 import { bytesToHex, hexToBytes } from "nostr-tools/utils";
 import { Transport } from "./Transport";
 
-const debugPeer = debug("worker:Peer");
-
 interface PeerInfo {
   id: string;
   cursor: Cursor;
@@ -56,6 +54,7 @@ export class Peer extends EventEmitter<{
   private transports: Transport[];
   private cursor = new Cursor();
   private peers = new Map<string, PeerInfo>();
+  #debug?: ReturnType<typeof debug>;
 
   constructor(db: DBInterface | (() => DBInterface), transports: Transport[]) {
     super();
@@ -75,19 +74,24 @@ export class Peer extends EventEmitter<{
     return this.#schemaVersion;
   }
 
+  private get debug() {
+    if (!this.#debug) throw new Error("Debug not initialized");
+    return this.#debug;
+  }
+
   async start(): Promise<void> {
     if (this.isStarted) return;
     this.isStarted = true;
 
     try {
-      debugPeer("Starting...");
+      debug("sync:Peer")("Starting...");
 
       // Initialize last db version before starting to send messages
       await this.initialize();
 
-      debugPeer("Started successfully");
+      this.debug("Started successfully");
     } catch (error) {
-      debugPeer("Failed to start:", error);
+      this.debug("Failed to start:", error);
       this.stop();
       throw error;
     }
@@ -124,7 +128,7 @@ export class Peer extends EventEmitter<{
         try {
           await transport.stop();
         } catch (error) {
-          debugPeer("Error stopping transport:", error);
+          this.debug("Error stopping transport:", error);
         }
       }
     }
@@ -138,7 +142,7 @@ export class Peer extends EventEmitter<{
       transport: transport,
     };
     this.peers.set(peerId, peer);
-    debugPeer(`Peer '${peerId}' connected`);
+    this.debug(`Peer '${peerId}' connected`);
 
     // Start sync with peer
     await transport.sync(peerId, this.cursor);
@@ -180,7 +184,7 @@ export class Peer extends EventEmitter<{
     msg: PeerMessage
   ): Promise<void> {
     // Apply everything peer sent us
-    debugPeer(
+    this.debug(
       `Received from peer '${peerId}' changes ${msg.data.length} schema ${msg.schemaVersion}`
     );
 
@@ -189,7 +193,7 @@ export class Peer extends EventEmitter<{
 
     // Peer schema newer?
     if ((msg.schemaVersion || 0) > this.schemaVersion) {
-      debugPeer(
+      this.debug(
         `Ignoring updates from peer '${peerId}', need schema update ${this.schemaVersion} => ${msg.schemaVersion}`
       );
       this.emit("outdated", msg.schemaVersion!, peerId);
@@ -199,11 +203,15 @@ export class Peer extends EventEmitter<{
     // Stuff we haven't yet seen
     const newChanges = msg.data.filter((c) => {
       const lastDbVersion = this.cursor.peers.get(c.site_id) || 0;
-      return c.db_version > lastDbVersion;
+      // "Or equal" bcs one tx with save db version might be split
+      // into several change records
+      return c.db_version >= lastDbVersion;
     });
 
-    debugPeer(
-      `Applying from peer '${peerId}' new changes ${newChanges.length} out of ${msg.data.length}`
+    this.debug(
+      `Applying from peer '${peerId}' new changes ${newChanges.length} out of ${
+        msg.data.length
+      } cursor ${JSON.stringify(serializeCursor(this.cursor))}`
     );
 
     if (newChanges.length) {
@@ -212,6 +220,10 @@ export class Peer extends EventEmitter<{
 
       // We ourselves now know these new changes
       updateCursor(this.cursor, newChanges);
+      this.debug(
+        "Updated our cursor on remote changes",
+        JSON.stringify(serializeCursor(this.cursor))
+      );
 
       // Notify clients
       this.emitChanges(newChanges);
@@ -222,7 +234,7 @@ export class Peer extends EventEmitter<{
   }
 
   private async onReceiveEOSE(peerId: string, msg: PeerMessage): Promise<void> {
-    debugPeer(`Got EOSE message peer '${peerId}'`);
+    this.debug(`Got EOSE message peer '${peerId}'`);
     this.emit("eose", peerId);
   }
 
@@ -246,7 +258,7 @@ export class Peer extends EventEmitter<{
       case "eose":
         return await this.onReceiveEOSE(peerId, msg);
       default:
-        debugPeer(`Got unknown message peer '${peerId}' type '${msg.type}'`);
+        this.debug(`Got unknown message peer '${peerId}' type '${msg.type}'`);
     }
   }
 
@@ -255,7 +267,7 @@ export class Peer extends EventEmitter<{
     peerId: string
   ): Promise<void> {
     this.peers.delete(peerId);
-    debugPeer(`Peer '${peerId}' disconnected`);
+    this.debug(`Peer '${peerId}' disconnected`);
   }
 
   private validateChange(change: any): asserts change is PeerChange {
@@ -360,9 +372,9 @@ export class Peer extends EventEmitter<{
           );
         }
       });
-      debugPeer(`Successfully applied changes ${changes.length}`);
+      this.debug(`Successfully applied changes ${changes.length}`);
     } catch (error) {
-      debugPeer("Error applying changes to database:", error);
+      this.debug("Error applying changes to database:", error);
       throw error;
     }
   }
@@ -384,25 +396,28 @@ export class Peer extends EventEmitter<{
         for (const c of cursorData)
           this.cursor.peers.set(bytesToHex(c.site_id), c.db_version);
       }
-      debugPeer(
-        `Initialized cursor to ${JSON.stringify(serializeCursor(this.cursor))}`
-      );
 
       const siteId = await this.db.execO<{ site_id: Uint8Array }>(
         "SELECT crsql_site_id() as site_id;"
       );
       this.#id = bytesToHex(siteId?.[0]?.site_id || new Uint8Array());
-      debugPeer(`Initialized our peer id to ${this.id}`);
+      this.#debug = debug("sync:Peer:L" + this.id.substring(0, 4));
+
+      this.debug(
+        `Initialized cursor to ${JSON.stringify(serializeCursor(this.cursor))}`
+      );
+
+      this.debug(`Initialized our peer id to ${this.id}`);
 
       const schemaVersion = await this.db.execO<{ user_version: number }>(
         "PRAGMA user_version;"
       );
       this.#schemaVersion = schemaVersion?.[0]?.user_version || 0;
-      debugPeer(`Initialized our schema version to ${this.schemaVersion}`);
+      this.debug(`Initialized our schema version to ${this.schemaVersion}`);
+
     } catch (error) {
-      debugPeer("Error initializing last db version:", error);
-      this.cursor = new Cursor();
-      this.#id = "";
+      console.error("Error initializing last db version:", error);
+      throw error;
     }
   }
 
@@ -416,7 +431,7 @@ export class Peer extends EventEmitter<{
 
       // Convert to peer changes
       if (dbChanges && dbChanges.length > 0) {
-        debugPeer(
+        this.debug(
           `Broadcasting since version ${lastDbVersion} changes ${dbChanges.length}`
         );
 
@@ -425,6 +440,10 @@ export class Peer extends EventEmitter<{
 
         // Update our own cursor
         updateCursor(this.cursor, changes);
+        this.debug(
+          "Updated our cursor on local changes",
+          JSON.stringify(serializeCursor(this.cursor))
+        );
 
         // Send to everyone
         await this.broadcastChanges(changes);
@@ -433,7 +452,7 @@ export class Peer extends EventEmitter<{
         this.emitChanges(changes);
       }
     } catch (error) {
-      debugPeer("Error broadcasting changes:", error);
+      this.debug("Error broadcasting changes:", error);
     }
   }
 
@@ -444,7 +463,7 @@ export class Peer extends EventEmitter<{
     // We know peer knows these changes
     updateCursor(peer.cursor, changes);
 
-    debugPeer(
+    this.debug(
       `Update cursor peer '${peerId}' cursor ${JSON.stringify(
         serializeCursor(peer.cursor)
       )}`
@@ -457,7 +476,7 @@ export class Peer extends EventEmitter<{
       data: changes,
       schemaVersion: this.schemaVersion,
     });
-    debugPeer(`Sent to peer '${peer.id}' changes ${changes.length}`);
+    this.debug(`Sent to peer '${peer.id}' changes ${changes.length}`);
   }
 
   private async broadcastChanges(changes: PeerChange[], exceptPeerId?: string) {
@@ -475,7 +494,7 @@ export class Peer extends EventEmitter<{
 
   private async syncPeer(peer: PeerInfo): Promise<void> {
     try {
-      debugPeer(
+      this.debug(
         `Syncing peer ${peer.id} cursor ${JSON.stringify(
           serializeCursor(peer.cursor)
         )}`
@@ -512,7 +531,7 @@ export class Peer extends EventEmitter<{
 
       // Convert to peer changes
       if (changes.length > 0) {
-        debugPeer(`Sync to peer '${peer.id}' changes ${changes.length}`);
+        this.debug(`Sync to peer '${peer.id}' changes ${changes.length}`);
 
         // Send to peer
         await this.sendChanges(peer, changes);
@@ -522,15 +541,15 @@ export class Peer extends EventEmitter<{
           type: "eose",
           data: [],
         });
-        debugPeer(`Sent to peer '${peer.id}' EOSE`);
+        this.debug(`Sent to peer '${peer.id}' EOSE`);
 
         // Assume peer knows these changes now
         this.updatePeerCursor(peer.id, changes);
       } else {
-        debugPeer(`No changes to sync for peer ${peer.id}`);
+        this.debug(`No changes to sync for peer ${peer.id}`);
       }
     } catch (error) {
-      debugPeer("Error sending changes to", peer, error);
+      this.debug("Error sending changes to", peer, error);
       throw error;
     }
   }
@@ -544,13 +563,13 @@ export function updateCursor(cursor: Cursor, changes: PeerChange[]) {
 }
 
 export function isCursorOlder(a: Cursor, b: Cursor) {
-  for (const [id, av] of a.peers.entries()) {
-    const bv = b.peers.get(id);
-    // b has no info on this id?
-    if (bv === undefined) return true;
-    // b has newer version than a?
-    if (bv > av) return true;
+  for (const [id, bv] of b.peers.entries()) {
+    const av = a.peers.get(id);
+    // a has no info on this id?
+    if (av === undefined) return true;
+    // a has older version than b?
+    if (av < bv) return true;
   }
-  // b covers all peers and it's versions are smaller
+  // a covers all b's peers, and a's versions are not less
   return false;
 }

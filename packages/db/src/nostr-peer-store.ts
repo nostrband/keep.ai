@@ -3,7 +3,8 @@ import { CRSqliteDB } from "./database";
 export interface NostrPeer {
   peer_pubkey: string;
   peer_id: string;
-  connection_pubkey: string;
+  local_pubkey: string;
+  local_id: string;
   device_info: string;
   timestamp: string;
   relays: string;
@@ -55,29 +56,14 @@ export class NostrPeerStore {
     return results[0];
   }
 
-  async addPeer(
-    peerPubkey: string,
-    peerId: string,
-    connectionPubkey: string,
-    deviceInfo: string,
-    relays: string = ""
-  ): Promise<NostrPeer> {
-    const timestamp = new Date().toISOString();
+  async addPeer(p: NostrPeer): Promise<void> {
+    p.timestamp = p.timestamp || new Date().toISOString();
 
     await this.db.db.exec(
-      `INSERT OR REPLACE INTO nostr_peers (peer_pubkey, peer_id, connection_pubkey, device_info, timestamp, relays)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [peerPubkey, peerId, connectionPubkey, deviceInfo, timestamp, relays]
+      `INSERT OR REPLACE INTO nostr_peers (peer_pubkey, peer_id, local_pubkey, local_id, device_info, timestamp, relays)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [p.peer_pubkey, p.peer_id, p.local_pubkey, p.local_id, p.device_info, p.timestamp, p.relays]
     );
-
-    return {
-      peer_pubkey: peerPubkey,
-      peer_id: peerId,
-      connection_pubkey: connectionPubkey,
-      device_info: deviceInfo,
-      timestamp,
-      relays,
-    };
   }
 
   async deletePeer(peerPubkey: string): Promise<void> {
@@ -88,11 +74,16 @@ export class NostrPeerStore {
 
   async setNostrPeerCursorSend(c: NostrPeerCursorSend): Promise<void> {
     await this.db.db.exec(
-      `INSERT OR REPLACE INTO nostr_peer_cursors (
-        peer_pubkey, 
-        send_cursor, send_cursor_id, send_changes_event_id, send_changes_timestamp 
+      `INSERT INTO nostr_peer_cursors (
+        peer_pubkey,
+        send_cursor, send_cursor_id, send_changes_event_id, send_changes_timestamp
        )
-       VALUES (?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(peer_pubkey) DO UPDATE SET
+        send_cursor = excluded.send_cursor,
+        send_cursor_id = excluded.send_cursor_id,
+        send_changes_event_id = excluded.send_changes_event_id,
+        send_changes_timestamp = excluded.send_changes_timestamp`,
       [
         c.peer_pubkey,
         c.send_cursor,
@@ -105,11 +96,16 @@ export class NostrPeerStore {
 
   async setNostrPeerCursorRecv(c: NostrPeerCursorRecv): Promise<void> {
     await this.db.db.exec(
-      `INSERT OR REPLACE INTO nostr_peer_cursors (
-        peer_pubkey, 
+      `INSERT INTO nostr_peer_cursors (
+        peer_pubkey,
         recv_cursor, recv_cursor_id, recv_changes_event_id, recv_changes_timestamp
        )
-       VALUES (?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(peer_pubkey) DO UPDATE SET
+        recv_cursor = excluded.recv_cursor,
+        recv_cursor_id = excluded.recv_cursor_id,
+        recv_changes_event_id = excluded.recv_changes_event_id,
+        recv_changes_timestamp = excluded.recv_changes_timestamp`,
       [
         c.peer_pubkey,
         c.recv_cursor,

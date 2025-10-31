@@ -1,14 +1,26 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { DBInterface, NostrPeerStore, KeepDb } from '@app/db';
-import { createDBNode } from '@app/node';
-import { NostrTransport, NostrSigner, NostrConnector, Peer } from '@app/sync';
-import { generateSecretKey, getPublicKey, finalizeEvent, nip44, UnsignedEvent, Event } from 'nostr-tools';
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { DBInterface, NostrPeerStore, KeepDb } from "@app/db";
+import { createDBNode } from "@app/node";
+import { NostrTransport, NostrSigner, NostrConnector, Peer } from "@app/sync";
+import {
+  generateSecretKey,
+  getPublicKey,
+  finalizeEvent,
+  nip44,
+  UnsignedEvent,
+  Event,
+} from "nostr-tools";
 import debug from "debug";
 debug.enable("*");
 
 // Mock NostrSigner implementation for testing
 class TestNostrSigner implements NostrSigner {
-  constructor(private privateKey: Uint8Array) {}
+  constructor(private privateKey: Uint8Array) {
+  }
+
+  getPublicKey() {
+    return getPublicKey(this.privateKey);
+  }
 
   async signEvent(event: UnsignedEvent): Promise<Event> {
     return finalizeEvent(event, this.privateKey);
@@ -19,8 +31,12 @@ class TestNostrSigner implements NostrSigner {
     receiverPubkey: string;
     senderPubkey: string;
   }): Promise<string> {
-    if (getPublicKey(this.privateKey) !== req.senderPubkey) throw new Error("Failed to encrypt, wrong sender pubkey");
-    const conversationKey = nip44.getConversationKey(this.privateKey, req.receiverPubkey);
+    if (getPublicKey(this.privateKey) !== req.senderPubkey)
+      throw new Error("Failed to encrypt, wrong sender pubkey");
+    const conversationKey = nip44.getConversationKey(
+      this.privateKey,
+      req.receiverPubkey
+    );
     return nip44.encrypt(req.plaintext, conversationKey);
   }
 
@@ -29,16 +45,20 @@ class TestNostrSigner implements NostrSigner {
     receiverPubkey: string;
     senderPubkey: string;
   }): Promise<string> {
-    if (getPublicKey(this.privateKey) !== req.receiverPubkey) throw new Error("Failed to decrypt, wrong receiver pubkey");
-    const conversationKey = nip44.getConversationKey(this.privateKey, req.senderPubkey);
+    if (getPublicKey(this.privateKey) !== req.receiverPubkey)
+      throw new Error("Failed to decrypt, wrong receiver pubkey");
+    const conversationKey = nip44.getConversationKey(
+      this.privateKey,
+      req.senderPubkey
+    );
     return nip44.decrypt(req.ciphertext, conversationKey);
   }
 }
 
 // Helper function to wait for async operations
-const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-describe('NostrTransport Synchronization', () => {
+describe("NostrTransport Synchronization", () => {
   let db1: DBInterface;
   let db2: DBInterface;
   let keepDb1: KeepDb;
@@ -60,8 +80,8 @@ describe('NostrTransport Synchronization', () => {
 
   beforeEach(async () => {
     // Create two in-memory databases
-    db1 = await createDBNode(':memory:');
-    db2 = await createDBNode(':memory:');
+    db1 = await createDBNode(":memory:");
+    db2 = await createDBNode(":memory:");
 
     // Create KeepDb wrappers
     keepDb1 = new KeepDb(db1);
@@ -101,14 +121,13 @@ describe('NostrTransport Synchronization', () => {
     await peer1.start();
     await peer2.start();
 
-
     // Establish peer connection using NostrConnector
     await establishPeerConnection(peer1.id, peer2.id, privateKey1, privateKey2);
 
-    const peers1 = await nostrPeerStore1.listPeers();
-    const peers2 = await nostrPeerStore2.listPeers();
-    console.log("peers1", peers1);
-    console.log("peers2", peers2);
+    // const peers1 = await nostrPeerStore1.listPeers();
+    // const peers2 = await nostrPeerStore2.listPeers();
+    // console.log("peers1", peers1);
+    // console.log("peers2", peers2);
 
     // Start transports
     await transport1.start(peer1.getConfig());
@@ -124,8 +143,8 @@ describe('NostrTransport Synchronization', () => {
     // Stop peers and transports
     if (peer1) await peer1.stop();
     if (peer2) await peer2.stop();
-    if (transport1) await transport1.stop();
-    if (transport2) await transport2.stop();
+    // if (transport1) await transport1.stop();
+    // if (transport2) await transport2.stop();
     if (connector1) connector1.close();
     if (connector2) connector2.close();
 
@@ -134,44 +153,57 @@ describe('NostrTransport Synchronization', () => {
     if (db2) await db2.close();
   });
 
-
-  async function establishPeerConnection(peerId1: string, peerId2: string, pk1: Uint8Array, pk2: Uint8Array) {
-    const relays = ['wss://relay.primal.net'];
-    const deviceInfo1 = 'Test Device 1';
-    const deviceInfo2 = 'Test Device 2';
+  async function establishPeerConnection(
+    peerId1: string,
+    peerId2: string,
+    pk1: Uint8Array,
+    pk2: Uint8Array
+  ) {
+    const relays = ["wss://relay.primal.net"];
+    const deviceInfo1 = "Test Device 1";
+    const deviceInfo2 = "Test Device 2";
 
     // Generate connection string
     const connInfo = await connector1.generateConnectionString(relays, pk1);
-    
+
     // Start listening and connecting
     const listenerPromise = connector1.listen(connInfo, peerId1, deviceInfo1);
-    
+
     // Give a small delay to ensure listener is ready
     await wait(100);
-    
-    const connectorPromise = connector2.connect(connInfo.str, peerId2, deviceInfo2, pk2);
-    
+
+    const connectorPromise = connector2.connect(
+      connInfo.str,
+      peerId2,
+      deviceInfo2,
+      pk2
+    );
+
     // Wait for both operations to complete
     const [listenerResult, connectorResult] = await Promise.all([
       listenerPromise,
-      connectorPromise
+      connectorPromise,
     ]);
 
     // Add peers to stores
-    await nostrPeerStore1.addPeer(
-      listenerResult.peer_pubkey,
-      listenerResult.peer_id,
-      getPublicKey(listenerResult.key),
-      listenerResult.peer_device_info,
-      relays.join(',')
-    );
-    await nostrPeerStore2.addPeer(
-      connectorResult.peer_pubkey,
-      connectorResult.peer_id,
-      getPublicKey(connectorResult.key),
-      connectorResult.peer_device_info,
-      relays.join(',')
-    );
+    await nostrPeerStore1.addPeer({
+      peer_pubkey: listenerResult.peer_pubkey,
+      peer_id: listenerResult.peer_id,
+      local_pubkey: getPublicKey(listenerResult.key),
+      local_id: peerId1,
+      device_info: listenerResult.peer_device_info,
+      relays: relays.join(","),
+      timestamp: "",
+    });
+    await nostrPeerStore2.addPeer({
+      peer_pubkey: connectorResult.peer_pubkey,
+      peer_id: connectorResult.peer_id,
+      local_pubkey: getPublicKey(connectorResult.key),
+      local_id: peerId2,
+      device_info: connectorResult.peer_device_info,
+      relays: relays.join(","),
+      timestamp: "",
+    });
   }
 
   async function getTableData(db: DBInterface, table: string): Promise<any[]> {
@@ -195,20 +227,20 @@ describe('NostrTransport Synchronization', () => {
     await peer1.checkLocalChanges();
     await wait(3000); // Wait for nostr relay propagation
 
-    // // Insert data on peer2 using the actual KeepDB schema
-    // await db2.exec(
-    //   "INSERT INTO notes (id, title, content, tags, priority) VALUES (?, ?, ?, ?, ?)",
-    //   ["note2", "Peer2 Note", "Content from peer2", "", "high"]
-    // );
+    // Insert data on peer2 using the actual KeepDB schema
+    await db2.exec(
+      "INSERT INTO notes (id, title, content, tags, priority) VALUES (?, ?, ?, ?, ?)",
+      ["note2", "Peer2 Note", "Content from peer2", "", "high"]
+    );
 
-    // await db2.exec(
-    //   "INSERT INTO tasks (id, timestamp, task, title) VALUES (?, ?, ?, ?)",
-    //   ["task2", Date.now(), "Peer2 Task", "Peer2 Task"]
-    // );
+    await db2.exec(
+      "INSERT INTO tasks (id, timestamp, task, title) VALUES (?, ?, ?, ?)",
+      ["task2", Date.now(), "Peer2 Task", "Peer2 Task"]
+    );
 
-    // // Trigger sync from peer2
-    // await peer2.checkLocalChanges();
-    // await wait(2000); // Wait for nostr relay propagation
+    // Trigger sync from peer2
+    await peer2.checkLocalChanges();
+    await wait(2000); // Wait for nostr relay propagation
 
     // Verify both databases have all data
     const db1Notes = await getTableData(db1, "notes");
@@ -217,222 +249,254 @@ describe('NostrTransport Synchronization', () => {
     const db2Tasks = await getTableData(db2, "tasks");
 
     // Both databases should have 1 notes and 1 tasks
-    expect(db1Notes).toHaveLength(1);
-    expect(db2Notes).toHaveLength(1);
-    expect(db1Tasks).toHaveLength(1);
-    expect(db2Tasks).toHaveLength(1);
+    expect(db1Notes).toHaveLength(2);
+    expect(db2Notes).toHaveLength(2);
+    expect(db1Tasks).toHaveLength(2);
+    expect(db2Tasks).toHaveLength(2);
 
     // Verify specific data
     expect(db1Notes.find(n => n.id === "note1")).toBeDefined();
-    // expect(db1Notes.find(n => n.id === "note2")).toBeDefined();
+    expect(db1Notes.find(n => n.id === "note2")).toBeDefined();
     expect(db2Notes.find(n => n.id === "note1")).toBeDefined();
-    // expect(db2Notes.find(n => n.id === "note2")).toBeDefined();
+    expect(db2Notes.find(n => n.id === "note2")).toBeDefined();
 
     expect(db1Tasks.find(t => t.id === "task1")).toBeDefined();
-    // expect(db1Tasks.find(t => t.id === "task2")).toBeDefined();
+    expect(db1Tasks.find(t => t.id === "task2")).toBeDefined();
     expect(db2Tasks.find(t => t.id === "task1")).toBeDefined();
-    // expect(db2Tasks.find(t => t.id === "task2")).toBeDefined();
+    expect(db2Tasks.find(t => t.id === "task2")).toBeDefined();
   }, 30000); // 30 second timeout for network operations
 
-  // it('should synchronize updates between peers', async () => {
-  //   // Insert initial data on peer1
-  //   await db1.exec(
-  //     "INSERT INTO notes (id, title, content, tags, priority) VALUES (?, ?, ?, ?, ?)",
-  //     ["note1", "Original Title", "Original content", "", "normal"]
-  //   );
+  it('should synchronize updates between peers', async () => {
+    // Insert initial data on peer1
+    await db1.exec(
+      "INSERT INTO notes (id, title, content, tags, priority) VALUES (?, ?, ?, ?, ?)",
+      ["note1", "Original Title", "Original content", "", "normal"]
+    );
 
-  //   await peer1.checkLocalChanges();
-  //   await wait(2000);
+    await peer1.checkLocalChanges();
+    await wait(2000);
 
-  //   // Verify peer2 has the data
-  //   let db2Notes = await getTableData(db2, "notes");
-  //   expect(db2Notes).toHaveLength(1);
-  //   expect(db2Notes[0].title).toBe("Original Title");
+    // Verify peer2 has the data
+    let db2Notes = await getTableData(db2, "notes");
+    expect(db2Notes).toHaveLength(1);
+    expect(db2Notes[0].title).toBe("Original Title");
 
-  //   // Update the note on peer2
-  //   await db2.exec(
-  //     "UPDATE notes SET title = ?, content = ? WHERE id = ?",
-  //     ["Updated Title", "Updated content", "note1"]
-  //   );
+    // Update the note on peer2
+    await db2.exec(
+      "UPDATE notes SET title = ?, content = ? WHERE id = ?",
+      ["Updated Title", "Updated content", "note1"]
+    );
 
-  //   await peer2.checkLocalChanges();
-  //   await wait(500);
+    await peer2.checkLocalChanges();
+    await wait(2000);
 
-  //   // Verify peer1 has the updated data
-  //   const db1Notes = await getTableData(db1, "notes");
-  //   expect(db1Notes).toHaveLength(1);
-  //   expect(db1Notes[0].title).toBe("Updated Title");
-  //   expect(db1Notes[0].content).toBe("Updated content");
+    // Verify peer1 has the updated data
+    const db1Notes = await getTableData(db1, "notes");
+    expect(db1Notes).toHaveLength(1);
+    expect(db1Notes[0].title).toBe("Updated Title");
+    expect(db1Notes[0].content).toBe("Updated content");
 
-  //   // Verify peer2 still has the updated data
-  //   db2Notes = await getTableData(db2, "notes");
-  //   expect(db2Notes).toHaveLength(1);
-  //   expect(db2Notes[0].title).toBe("Updated Title");
-  //   expect(db2Notes[0].content).toBe("Updated content");
-  // }, 30000);
+    // Verify peer2 still has the updated data
+    db2Notes = await getTableData(db2, "notes");
+    expect(db2Notes).toHaveLength(1);
+    expect(db2Notes[0].title).toBe("Updated Title");
+    expect(db2Notes[0].content).toBe("Updated content");
+  }, 30000);
 
-  // it('should handle termination and restart with continued sync', async () => {
-  //   // Phase 1: Initial sync
-  //   await db1.exec(
-  //     "INSERT INTO notes (id, title, content, tags, priority) VALUES (?, ?, ?, ?, ?)",
-  //     ["note1", "Initial Note", "Initial content", "", "normal"]
-  //   );
+  it("should handle termination and restart with continued sync", async () => {
+    // Phase 1: Initial sync
+    await db1.exec(
+      "INSERT INTO notes (id, title, content, tags, priority) VALUES (?, ?, ?, ?, ?)",
+      ["note1", "Initial Note", "Initial content", "", "normal"]
+    );
 
-  //   await db1.exec(
-  //     "INSERT INTO tasks (id, timestamp, task, title) VALUES (?, ?, ?, ?)",
-  //     ["task1", Date.now(), "Initial Task", "Initial Task"]
-  //   );
+    await db1.exec(
+      "INSERT INTO tasks (id, timestamp, task, title) VALUES (?, ?, ?, ?)",
+      ["task1", Date.now(), "Initial Task", "Initial Task"]
+    );
 
-  //   await peer1.checkLocalChanges();
-  //   await wait(2000);
+    await peer1.checkLocalChanges();
+    await wait(2000);
 
-  //   // Verify initial sync
-  //   let db2Notes = await getTableData(db2, "notes");
-  //   let db2Tasks = await getTableData(db2, "tasks");
-  //   expect(db2Notes).toHaveLength(1);
-  //   expect(db2Tasks).toHaveLength(1);
+    // Verify initial sync
+    let db2Notes = await getTableData(db2, "notes");
+    let db2Tasks = await getTableData(db2, "tasks");
+    expect(db2Notes).toHaveLength(1);
+    expect(db2Tasks).toHaveLength(1);
 
-  //   // Phase 2: Stop transports (simulate termination)
-  //   transport1.stop();
-  //   transport2.stop();
-  //   await wait(1000);
+    // Phase 3: Make changes while disconnected
+    await db1.exec(
+      "INSERT INTO notes (id, title, content, tags, priority) VALUES (?, ?, ?, ?, ?)",
+      ["note2", "Offline Note 1", "Content while offline", "", "normal"]
+    );
 
-  //   // Phase 3: Make changes while disconnected
-  //   await db1.exec(
-  //     "INSERT INTO notes (id, title, content, tags, priority) VALUES (?, ?, ?, ?, ?)",
-  //     ["note2", "Offline Note 1", "Content while offline", "", "normal"]
-  //   );
+    await db2.exec(
+      "INSERT INTO tasks (id, timestamp, task, title) VALUES (?, ?, ?, ?)",
+      ["task2", Date.now(), "Offline Task 2", "Offline Task 2"]
+    );
 
-  //   await db2.exec(
-  //     "INSERT INTO tasks (id, timestamp, task, title) VALUES (?, ?, ?, ?)",
-  //     ["task2", Date.now(), "Offline Task 2", "Offline Task 2"]
-  //   );
+    // Phase 2: Stop transports (simulate termination)
+    await peer1.stop();
+    await peer2.stop();
+    // transports stopped by peer
+    // await transport1.stop();
+    // await transport2.stop();
 
-  //   // Phase 4: Restart transports with same database objects
-  //   transport1 = new NostrTransport(nostrPeerStore1, signer1);
-  //   transport2 = new NostrTransport(nostrPeerStore2, signer2);
+    // Phase 4: Restart transports with same database objects
+    transport1 = new NostrTransport(nostrPeerStore1, signer1);
+    transport2 = new NostrTransport(nostrPeerStore2, signer2);
 
-  //   // Update peer objects with new transports
-  //   peer1 = new Peer(db1, [transport1]);
-  //   peer2 = new Peer(db2, [transport2]);
+    // Update peer objects with new transports
+    peer1 = new Peer(db1, [transport1]);
+    peer2 = new Peer(db2, [transport2]);
 
-  //   await peer1.start();
-  //   await peer2.start();
+    await peer1.start();
+    await peer2.start();
 
-  //   await transport1.start(peer1.getConfig());
-  //   await transport2.start(peer2.getConfig());
+    await transport1.start(peer1.getConfig());
+    await transport2.start(peer2.getConfig());
 
-  //   await wait(2000);
+    await wait(2000);
 
-  //   // Phase 5: Trigger sync after restart
-  //   await peer1.checkLocalChanges();
-  //   await peer2.checkLocalChanges();
-  //   await wait(2000); // Wait longer for full sync
+    // Phase 5: Trigger sync after restart
+    await peer1.checkLocalChanges();
+    await peer2.checkLocalChanges();
+    await wait(2000); // Wait longer for full sync
 
-  //   // Phase 6: Add more changes after restart
-  //   await db1.exec(
-  //     "INSERT INTO notes (id, title, content, tags, priority) VALUES (?, ?, ?, ?, ?)",
-  //     ["note3", "Post-restart Note", "Content after restart", "", "normal"]
-  //   );
+    const middleDb1Notes = await getTableData(db1, "notes");
+    const middleDb2Notes = await getTableData(db2, "notes");
+    const middleDb1Tasks = await getTableData(db1, "tasks");
+    const middleDb2Tasks = await getTableData(db2, "tasks");
 
-  //   await db2.exec(
-  //     "INSERT INTO tasks (id, timestamp, task, title) VALUES (?, ?, ?, ?)",
-  //     ["task3", Date.now(), "Post-restart Task", "Post-restart Task"]
-  //   );
+    // Both databases should have all 2 notes and 2 tasks
+    expect(middleDb1Notes).toHaveLength(2);
+    expect(middleDb2Notes).toHaveLength(2);
+    expect(middleDb1Tasks).toHaveLength(2);
+    expect(middleDb2Tasks).toHaveLength(2);
 
-  //   await peer1.checkLocalChanges();
-  //   await peer2.checkLocalChanges();
-  //   await wait(1000);
+    // Phase 6: Add more changes after restart
+    await db1.exec(
+      "INSERT INTO notes (id, title, content, tags, priority) VALUES (?, ?, ?, ?, ?)",
+      ["note3", "Post-restart Note", "Content after restart", "", "normal"]
+    );
+    await db1.exec(
+      "INSERT INTO notes (id, title, content, tags, priority) VALUES (?, ?, ?, ?, ?)",
+      ["note4", "Post-restart Note", "Content after restart", "", "normal"]
+    );
+    await peer1.checkLocalChanges();
 
-  //   // Phase 7: Verify all data is synchronized
-  //   const finalDb1Notes = await getTableData(db1, "notes");
-  //   const finalDb2Notes = await getTableData(db2, "notes");
-  //   const finalDb1Tasks = await getTableData(db1, "tasks");
-  //   const finalDb2Tasks = await getTableData(db2, "tasks");
+    await db2.exec(
+      "INSERT INTO tasks (id, timestamp, task, title) VALUES (?, ?, ?, ?)",
+      ["task3", Date.now(), "Post-restart Task", "Post-restart Task"]
+    );
+    await db2.exec(
+      "INSERT INTO tasks (id, timestamp, task, title) VALUES (?, ?, ?, ?)",
+      ["task4", Date.now(), "Post-restart Task", "Post-restart Task"]
+    );
+    await peer2.checkLocalChanges();
 
-  //   // Both databases should have all 3 notes and 3 tasks
-  //   expect(finalDb1Notes).toHaveLength(3);
-  //   expect(finalDb2Notes).toHaveLength(3);
-  //   expect(finalDb1Tasks).toHaveLength(3);
-  //   expect(finalDb2Tasks).toHaveLength(3);
+    await db1.exec(
+      "INSERT INTO notes (id, title, content, tags, priority) VALUES (?, ?, ?, ?, ?)",
+      ["note5", "Post-restart Note", "Content after restart", "", "normal"]
+    );
+    await db2.exec(
+      "INSERT INTO notes (id, title, content, tags, priority) VALUES (?, ?, ?, ?, ?)",
+      ["note5", "Post-restart Note", "Content after restart", "", "normal"]
+    );
+    await peer1.checkLocalChanges();
+    await peer2.checkLocalChanges();
 
-  //   // Verify specific data exists on both sides
-  //   const expectedNoteIds = ["note1", "note2", "note3"];
-  //   const expectedTaskIds = ["task1", "task2", "task3"];
+    await wait(3000);
 
-  //   for (const noteId of expectedNoteIds) {
-  //     expect(finalDb1Notes.find(n => n.id === noteId)).toBeDefined();
-  //     expect(finalDb2Notes.find(n => n.id === noteId)).toBeDefined();
-  //   }
+    // Phase 7: Verify all data is synchronized
+    const finalDb1Notes = await getTableData(db1, "notes");
+    const finalDb2Notes = await getTableData(db2, "notes");
+    const finalDb1Tasks = await getTableData(db1, "tasks");
+    const finalDb2Tasks = await getTableData(db2, "tasks");
 
-  //   for (const taskId of expectedTaskIds) {
-  //     expect(finalDb1Tasks.find(t => t.id === taskId)).toBeDefined();
-  //     expect(finalDb2Tasks.find(t => t.id === taskId)).toBeDefined();
-  //   }
-  // }, 45000); // 45 second timeout for complex restart scenario
+    // Both databases should have all 3 notes and 3 tasks
+    expect(finalDb1Notes).toHaveLength(5);
+    expect(finalDb2Notes).toHaveLength(5);
+    expect(finalDb1Tasks).toHaveLength(4);
+    expect(finalDb2Tasks).toHaveLength(4);
 
-  // it('should handle deletions between peers', async () => {
-  //   // Insert data on both peers
-  //   await db1.exec(
-  //     "INSERT INTO notes (id, title, content, tags, priority) VALUES (?, ?, ?, ?, ?)",
-  //     ["note1", "Note 1", "Content 1", "", "normal"]
-  //   );
+    // Verify specific data exists on both sides
+    const expectedNoteIds = ["note1", "note2", "note3", "note4", "note5"];
+    const expectedTaskIds = ["task1", "task2", "task3", "task4"];
 
-  //   await db2.exec(
-  //     "INSERT INTO notes (id, title, content, tags, priority) VALUES (?, ?, ?, ?, ?)",
-  //     ["note2", "Note 2", "Content 2", "", "normal"]
-  //   );
+    for (const noteId of expectedNoteIds) {
+      expect(finalDb1Notes.find(n => n.id === noteId)).toBeDefined();
+      expect(finalDb2Notes.find(n => n.id === noteId)).toBeDefined();
+    }
 
-  //   // Sync both
-  //   await peer1.checkLocalChanges();
-  //   await peer2.checkLocalChanges();
-  //   await wait(500);
+    for (const taskId of expectedTaskIds) {
+      expect(finalDb1Tasks.find(t => t.id === taskId)).toBeDefined();
+      expect(finalDb2Tasks.find(t => t.id === taskId)).toBeDefined();
+    }
+  }, 45000); // 45 second timeout for complex restart scenario
 
-  //   // Verify both have 2 notes
-  //   let db1Notes = await getTableData(db1, "notes");
-  //   let db2Notes = await getTableData(db2, "notes");
-  //   expect(db1Notes).toHaveLength(2);
-  //   expect(db2Notes).toHaveLength(2);
+  it('should handle deletions between peers', async () => {
+    // Insert data on both peers
+    await db1.exec(
+      "INSERT INTO notes (id, title, content, tags, priority) VALUES (?, ?, ?, ?, ?)",
+      ["note1", "Note 1", "Content 1", "", "normal"]
+    );
 
-  //   // Delete note1 on peer1
-  //   await db1.exec("DELETE FROM notes WHERE id = ?", ["note1"]);
-  //   await peer1.checkLocalChanges();
-  //   await wait(500);
+    await db2.exec(
+      "INSERT INTO notes (id, title, content, tags, priority) VALUES (?, ?, ?, ?, ?)",
+      ["note2", "Note 2", "Content 2", "", "normal"]
+    );
 
-  //   // Verify both databases now have only 1 note
-  //   db1Notes = await getTableData(db1, "notes");
-  //   db2Notes = await getTableData(db2, "notes");
-  //   expect(db1Notes).toHaveLength(1);
-  //   expect(db2Notes).toHaveLength(1);
-  //   expect(db1Notes[0].id).toBe("note2");
-  //   expect(db2Notes[0].id).toBe("note2");
-  // }, 30000);
+    // Sync both
+    await peer1.checkLocalChanges();
+    await peer2.checkLocalChanges();
+    await wait(500);
 
-  // it('should emit change events when data is synchronized', async () => {
-  //   const peer1Changes: string[][] = [];
-  //   const peer2Changes: string[][] = [];
+    // Verify both have 2 notes
+    let db1Notes = await getTableData(db1, "notes");
+    let db2Notes = await getTableData(db2, "notes");
+    expect(db1Notes).toHaveLength(2);
+    expect(db2Notes).toHaveLength(2);
 
-  //   // Listen for change events
-  //   peer1.on("change", (tables: string[]) => peer1Changes.push(tables));
-  //   peer2.on("change", (tables: string[]) => peer2Changes.push(tables));
+    // Delete note1 on peer1
+    await db1.exec("DELETE FROM notes WHERE id = ?", ["note1"]);
+    await peer1.checkLocalChanges();
+    await wait(500);
 
-  //   // Insert data on peer1
-  //   await db1.exec(
-  //     "INSERT INTO notes (id, title, content, tags, priority) VALUES (?, ?, ?, ?, ?)",
-  //     ["note1", "Test Note", "Content", "", "normal"]
-  //   );
+    // Verify both databases now have only 1 note
+    db1Notes = await getTableData(db1, "notes");
+    db2Notes = await getTableData(db2, "notes");
+    expect(db1Notes).toHaveLength(1);
+    expect(db2Notes).toHaveLength(1);
+    expect(db1Notes[0].id).toBe("note2");
+    expect(db2Notes[0].id).toBe("note2");
+  }, 30000);
 
-  //   await peer1.checkLocalChanges();
-  //   await wait(500);
+  it('should emit change events when data is synchronized', async () => {
+    const peer1Changes: string[][] = [];
+    const peer2Changes: string[][] = [];
 
-  //   // Verify change events were emitted
-  //   expect(peer1Changes.length).toBeGreaterThan(0);
-  //   expect(peer2Changes.length).toBeGreaterThan(0);
+    // Listen for change events
+    peer1.on("change", (tables: string[]) => peer1Changes.push(tables));
+    peer2.on("change", (tables: string[]) => peer2Changes.push(tables));
 
-  //   // Verify the correct table was mentioned in the change event
-  //   const allPeer1Tables = peer1Changes.flat();
-  //   const allPeer2Tables = peer2Changes.flat();
-  //   expect(allPeer1Tables).toContain("notes");
-  //   expect(allPeer2Tables).toContain("notes");
-  // }, 30000);
+    // Insert data on peer1
+    await db1.exec(
+      "INSERT INTO notes (id, title, content, tags, priority) VALUES (?, ?, ?, ?, ?)",
+      ["note1", "Test Note", "Content", "", "normal"]
+    );
+
+    await peer1.checkLocalChanges();
+    await wait(500);
+
+    // Verify change events were emitted
+    expect(peer1Changes.length).toBeGreaterThan(0);
+    expect(peer2Changes.length).toBeGreaterThan(0);
+
+    // Verify the correct table was mentioned in the change event
+    const allPeer1Tables = peer1Changes.flat();
+    const allPeer2Tables = peer2Changes.flat();
+    expect(allPeer1Tables).toContain("notes");
+    expect(allPeer2Tables).toContain("notes");
+  }, 30000);
 });

@@ -9,7 +9,8 @@ export async function migrateV3(tx: DBInterface["tx"] extends (fn: (tx: infer T)
   await tx.exec(`CREATE TABLE IF NOT EXISTS nostr_peers (
     peer_pubkey TEXT NOT NULL PRIMARY KEY,
     peer_id TEXT DEFAULT '',
-    connection_pubkey TEXT DEFAULT '',
+    local_pubkey TEXT DEFAULT '',
+    local_id TEXT DEFAULT '',
     device_info TEXT DEFAULT '',
     timestamp TEXT DEFAULT '',
     relays TEXT DEFAULT ''
