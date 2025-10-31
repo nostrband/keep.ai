@@ -195,6 +195,12 @@ const start = async () => {
     const peer = new Peer(dbInstance, [http, nostr]);
     await peer.start();
     await http.start(peer.getConfig());
+    await nostr.start(peer.getConfig());
+
+    // Notify nostr transport if peer set changes
+    peer.on("change", (tables) => {
+      if (tables.includes("nostr_peers")) nostr.updatePeers();
+    });
 
     // Check regularly for changes by other processes to db
     const check = async () => {

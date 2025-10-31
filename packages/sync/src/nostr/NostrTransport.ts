@@ -136,14 +136,19 @@ export class NostrTransport implements Transport {
     // Find removed peers, match by pubkey - we might connect
     // multiple times to the same device, thus have same peer_id but different
     // peer_pubkey
-    const removedPeers = this.peers.filter(peer => !peers.find(p => p.peer_pubkey === peer.peer_pubkey));
+    const removedPeers = this.peers.filter(
+      (peer) => !peers.find((p) => p.peer_pubkey === peer.peer_pubkey)
+    );
 
     // Update the stored peer list
     this.peers = peers;
 
     // Stop removed peers
     for (const p of removedPeers) {
-      // FIXME send onDisconnect !
+      // Notify
+      this.callbacks!.onDisconnect(this, p.peer_id);
+
+      // Stop the send/recv sides
       await this.sends.get(p.peer_id)!.stop();
       await this.recvs.get(p.peer_id)!.stop();
     }
