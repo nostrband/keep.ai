@@ -87,10 +87,8 @@ export function QueryProvider({
       await keepDB.start();
       setDb(keepDB);
 
-      // Create store instances with a default user_id
-      // TODO: Replace 'default-user' with actual user ID when user management is implemented
-      const defaultUserId = "cli-user";
-      const api = new KeepDbApi(keepDB, defaultUserId);
+      // Create store instance
+      const api = new KeepDbApi(keepDB);
       setApi(api);
 
       // Create and configure tab sync with callback

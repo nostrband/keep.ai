@@ -110,8 +110,8 @@ describe("NostrTransport Synchronization", () => {
     signer2 = new TestNostrSigner(privateKey2);
 
     // Create NostrTransport instances
-    transport1 = new NostrTransport(nostrPeerStore1, signer1);
-    transport2 = new NostrTransport(nostrPeerStore2, signer2);
+    transport1 = new NostrTransport({ store: nostrPeerStore1, signer: signer1 });
+    transport2 = new NostrTransport({ store: nostrPeerStore2, signer: signer2 });
 
     // Create Peer instances
     peer1 = new Peer(db1, [transport1]);
@@ -343,8 +343,8 @@ describe("NostrTransport Synchronization", () => {
     // await transport2.stop();
 
     // Phase 4: Restart transports with same database objects
-    transport1 = new NostrTransport(nostrPeerStore1, signer1);
-    transport2 = new NostrTransport(nostrPeerStore2, signer2);
+    transport1 = new NostrTransport({ store: nostrPeerStore1, signer: signer1 });
+    transport2 = new NostrTransport({ store: nostrPeerStore2, signer: signer2 });
 
     // Update peer objects with new transports
     peer1 = new Peer(db1, [transport1]);

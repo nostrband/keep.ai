@@ -44,7 +44,7 @@ export async function getCurrentUser(homePath?: string): Promise<string> {
  * @param homePath - Optional home path, defaults to ~/.keep.ai
  * @returns The path to the user's database file
  */
-export function getDBPath(pubkey: string, homePath?: string): string {
+export function getUserPath(pubkey: string, homePath?: string): string {
   const keepAiDir = getKeepaiDir(homePath);
   
   // Create user directory if it doesn't exist
@@ -52,6 +52,20 @@ export function getDBPath(pubkey: string, homePath?: string): string {
   if (!fs.existsSync(userDir)) {
     fs.mkdirSync(userDir, { recursive: true });
   }
+
+  return userDir;
+}
+
+/**
+ * Gets the database path for a specific user pubkey
+ * @param pubkey - The user's public key
+ * @param homePath - Optional home path, defaults to ~/.keep.ai
+ * @returns The path to the user's database file
+ */
+export function getDBPath(pubkey: string, homePath?: string): string {
+
+  // User's sub dir
+  const userDir = getUserPath(pubkey, homePath);
   
   // Return the path to the user's database file
   return path.join(userDir, 'data.db');

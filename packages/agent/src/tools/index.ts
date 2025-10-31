@@ -20,14 +20,13 @@ export interface ToolsetStores {
   memoryStore: MemoryStore;
   noteStore: NoteStore;
   taskStore: TaskStore;
-  userId: string;
 }
 
 export function makeToolset(stores: ToolsetStores) {
-  const { chatStore, memoryStore, noteStore, taskStore, userId } = stores;
+  const { chatStore, memoryStore, noteStore, taskStore } = stores;
 
   return {
-    sendMessageTool: makeSendMessageTool(chatStore, memoryStore, userId),
+    sendMessageTool: makeSendMessageTool(chatStore, memoryStore),
     listChatsTool: makeListChatsTool(chatStore),
     addTaskTool: makeAddTaskTool(taskStore),
     listTasksTool: makeListTasksTool(taskStore),

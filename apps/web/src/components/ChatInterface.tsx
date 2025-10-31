@@ -16,7 +16,7 @@ function ScrollToBottomDetector({
   readChat
 }: {
   chatId: string;
-  readChat: UseMutationResult<void, Error, { chatId: string; userId?: string; }, unknown>;
+  readChat: UseMutationResult<void, Error, { chatId: string }, unknown>;
 }) {
   // Check if user is at bottom of page
   useEffect(() => {

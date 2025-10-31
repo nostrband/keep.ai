@@ -12,7 +12,7 @@ interface Thread {
   metadata: string;
 }
 
-export function useThreadMessages(threadId: string, userId?: string) {
+export function useThreadMessages(threadId: string) {
   const { api } = useCRSqliteQuery();
   return useQuery({
     queryKey: qk.threadMessages(threadId),
@@ -49,7 +49,7 @@ export function useAllThreads() {
   });
 }
 
-export function useThread(threadId: string, userId?: string) {
+export function useThread(threadId: string) {
   const { api } = useCRSqliteQuery();
   return useQuery({
     queryKey: qk.thread(threadId),

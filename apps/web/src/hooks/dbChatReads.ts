@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { qk } from "./queryKeys";
 import { useCRSqliteQuery } from "../QueryProvider";
 
-export function useChatMessages(chatId: string, userId?: string) {
+export function useChatMessages(chatId: string) {
   const { api } = useCRSqliteQuery();
   return useQuery({
     queryKey: qk.chatMessages(chatId),
@@ -33,7 +33,7 @@ export function useAllChats() {
   });
 }
 
-export function useChat(chatId: string, userId?: string) {
+export function useChat(chatId: string) {
   const { api } = useCRSqliteQuery();
   return useQuery({
     queryKey: qk.chat(chatId),

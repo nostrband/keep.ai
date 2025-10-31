@@ -1,13 +1,21 @@
 import fastify from "fastify";
-import { TransportServerFastify, createDBNode, getCurrentUser, getDBPath } from "@app/node";
-import { KeepDb, KeepDbApi } from "@app/db";
+import {
+  TransportServerFastify,
+  createDBNode,
+  getCurrentUser,
+  getDBPath,
+  getUserPath,
+} from "@app/node";
+import { DBInterface, KeepDb, KeepDbApi, NostrPeerStore } from "@app/db";
 import { KeepWorker, setEnv, type Env } from "@app/agent";
 import debug from "debug";
 import path from "path";
 import os from "os";
 import fs from "fs";
 import dotenv from "dotenv";
-import { Peer } from "@app/sync";
+import { NostrSigner, NostrTransport, Peer, NostrConnector } from "@app/sync";
+import { UnsignedEvent, Event, getPublicKey, finalizeEvent, nip44 } from "nostr-tools";
+import { bytesToHex, hexToBytes } from "nostr-tools/utils";
 
 const debugServer = debug("server:server");
 
@@ -33,6 +41,19 @@ const env: Env = {
   EXA_API_KEY: process.env.EXA_API_KEY,
 };
 
+// Parse NOSTR_RELAYS environment variable
+const getNostrRelays = (): string[] => {
+  const relaysEnv = process.env.NOSTR_RELAYS;
+  if (!relaysEnv) {
+    // Default relays if not configured
+    return ["wss://relay.primal.net", "wss://relay.damus.io"];
+  }
+  return relaysEnv
+    .split(",")
+    .map((relay) => relay.trim())
+    .filter((relay) => relay.length > 0);
+};
+
 // Set environment in agent package
 setEnv(env);
 
@@ -42,8 +63,7 @@ const __dirname = process.cwd();
 const app = fastify({ logger: true });
 
 async function createKeepWorker(keepDB: KeepDb) {
-  const userId = "cli-user";
-  const api = new KeepDbApi(keepDB, userId);
+  const api = new KeepDbApi(keepDB);
 
   // Create KeepWorker
   const worker = new KeepWorker({
@@ -56,10 +76,99 @@ async function createKeepWorker(keepDB: KeepDb) {
   return worker;
 }
 
+class KeyStore implements NostrSigner {
+  private readonly dbPath: string;
+  private db?: DBInterface;
+  private keys = new Map<string, Uint8Array>();
+
+  constructor(dbPath: string) {
+    this.dbPath = dbPath;
+  }
+
+  async start() {
+    this.db = await createDBNode(this.dbPath);
+
+    // Create keys table if it doesn't exist
+    await this.db.exec(`
+      CREATE TABLE IF NOT EXISTS keys (
+        pubkey TEXT NOT NULL PRIMARY KEY,
+        key TEXT NOT NULL,
+        timestamp TEXT NOT NULL
+      )
+    `);
+
+    // Read existing keys from database
+    const results = await this.db.execO<{
+      pubkey: string;
+      key: string;
+      timestamp: string;
+    }>("SELECT pubkey, key, timestamp FROM keys");
+
+    if (results) {
+      for (const row of results) {
+        const keyBytes = hexToBytes(row.key);
+        this.keys.set(row.pubkey, keyBytes);
+      }
+    }
+  }
+
+  async stop() {
+    return this.db?.close();
+  }
+
+  async addKey(key: Uint8Array) {
+    const pubkey = getPublicKey(key);
+    this.keys.set(pubkey, key);
+
+    // Write to database
+    const keyHex = bytesToHex(key);
+    const timestamp = new Date().toISOString();
+    
+    await this.db!.exec(
+      "INSERT OR REPLACE INTO keys (pubkey, key, timestamp) VALUES (?, ?, ?)",
+      [pubkey, keyHex, timestamp]
+    );
+  }
+
+  key(pubkey: string): Uint8Array {
+    const key = this.keys.get(pubkey);
+    if (!key) throw new Error("No key for pubkey " + pubkey);
+    return key;
+  }
+
+  async signEvent(event: UnsignedEvent): Promise<Event> {
+    return finalizeEvent(event, this.key(event.pubkey));
+  }
+
+  async encrypt(req: {
+    plaintext: string;
+    receiverPubkey: string;
+    senderPubkey: string;
+  }): Promise<string> {
+    const conversationKey = nip44.getConversationKey(
+      this.key(req.senderPubkey),
+      req.receiverPubkey
+    );
+    return nip44.encrypt(req.plaintext, conversationKey);
+  }
+
+  async decrypt(req: {
+    ciphertext: string;
+    receiverPubkey: string;
+    senderPubkey: string;
+  }): Promise<string> {
+    const conversationKey = nip44.getConversationKey(
+      this.key(req.receiverPubkey),
+      req.senderPubkey
+    );
+    return nip44.decrypt(req.ciphertext, conversationKey);
+  }
+}
+
 const start = async () => {
   try {
-
     const pubkey = await getCurrentUser();
+    const userPath = getUserPath(pubkey);
     const dbPath = getDBPath(pubkey);
 
     debugServer("Config directory:", configDir);
@@ -71,11 +180,21 @@ const start = async () => {
     const keepDB = new KeepDb(dbInstance);
     await keepDB.start();
 
+    // For sync over nostr
+    const peerStore = new NostrPeerStore(keepDB);
+    const keyStore = new KeyStore(path.join(userPath, "keys.db"));
+    await keyStore.start();
+
     // Talks to peers over http server
-    const transport = new TransportServerFastify();
-    const peer = new Peer(dbInstance, [transport]);
+    const http = new TransportServerFastify();
+    const nostr = new NostrTransport({
+      store: peerStore,
+      signer: keyStore,
+    });
+
+    const peer = new Peer(dbInstance, [http, nostr]);
     await peer.start();
-    await transport.start(peer.getConfig());
+    await http.start(peer.getConfig());
 
     // Check regularly for changes by other processes to db
     const check = async () => {
@@ -91,10 +210,69 @@ const start = async () => {
     await app.register(
       async function (fastify) {
         // @ts-ignore
-        await transport.registerRoutes(fastify);
+        await http.registerRoutes(fastify);
       },
       { prefix: "/api/worker" }
     );
+
+    // Add /api/connect endpoint
+    app.post("/api/connect", async (request, reply) => {
+      try {
+        // Get relays from environment
+        const relays = getNostrRelays();
+
+        // Create NostrConnector instance
+        const connector = new NostrConnector();
+
+        // Generate connection string
+        const connectionInfo = await connector.generateConnectionString(relays);
+
+        // Device info placeholder
+        const deviceInfo = "test info";
+
+        // Launch listen() asynchronously - don't wait for it to complete
+        (async () => {
+          try {
+            const result = await connector.listen(
+              connectionInfo,
+              peer.id,
+              deviceInfo
+            );
+            console.log("NostrConnector listen completed:", {
+              peer_pubkey: result.peer_pubkey,
+              peer_id: result.peer_id,
+              peer_device_info: result.peer_device_info,
+              relays: result.relays,
+            });
+
+            // Write to key store
+            await keyStore.addKey(result.key);
+
+            // Write the peer info
+            await peerStore.addPeer({
+              peer_pubkey: result.peer_pubkey,
+              peer_id: result.peer_id,
+              device_info: result.peer_device_info,
+              local_pubkey: getPublicKey(result.key),
+              relays: relays.join(","),
+              local_id: peer.id,
+              timestamp: "",
+            });
+          } catch (error) {
+            console.error("NostrConnector listen failed:", error);
+          }
+        })();
+
+        // Return connection string to client
+        reply.send({ str: connectionInfo.str });
+      } catch (error) {
+        console.error("Error in /api/connect:", error);
+        reply.status(500).send({
+          error: "Failed to create connection string",
+          message: error instanceof Error ? error.message : "Unknown error",
+        });
+      }
+    });
 
     // Serve static files from public directory
     await app.register(require("@fastify/static"), {

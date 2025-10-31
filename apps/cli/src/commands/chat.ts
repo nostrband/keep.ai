@@ -40,8 +40,7 @@ async function runChatCommand(): Promise<void> {
     debugChat('Database initialized');
 
     // Create store instances
-    const userId = 'cli-user';
-    const api = new KeepDbApi(keepDB, userId);
+    const api = new KeepDbApi(keepDB);
 
     // Print invitation and recent messages
     console.log('\n🤖 Welcome to Keep AI Assistant!');

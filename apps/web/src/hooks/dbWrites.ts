@@ -12,11 +12,8 @@ export function useAddMessage() {
       threadId: string;
       role: "user" | "assistant";
       content: string;
-      userId?: string;
     }) => {
       if (!api) throw new Error("Memory store not available");
-      if (input.userId && api.userId !== input.userId)
-        throw new Error("Wrong user id");
 
       const message = await api.addMessage({
         threadId: input.threadId,
@@ -69,11 +66,8 @@ export function useReadChat() {
   return useMutation({
     mutationFn: async (input: {
       chatId: string;
-      userId?: string;
     }) => {
       if (!api) throw new Error("Chat store not available");
-      if (input.userId && api.userId !== input.userId)
-        throw new Error("Wrong user id");
 
       await api.chatStore.readChat(input.chatId);
     },

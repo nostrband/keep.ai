@@ -9,7 +9,6 @@ const debugSendMessage = debug("agent:send-message");
 export function makeSendMessageTool(
   chatStore: ChatStore,
   memoryStore: MemoryStore,
-  userId: string
 ) {
   return tool({
     description:
@@ -70,7 +69,6 @@ export function makeSendMessageTool(
           metadata: {
             createdAt: now.toISOString(),
             threadId: chatId,
-            userId: userId,
           },
         };
 

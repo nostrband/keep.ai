@@ -260,7 +260,6 @@ export class KeepWorker {
           metadata: {
             createdAt: new Date().toISOString(),
             threadId,
-            userId: this.api.userId,
           },
         };
 
@@ -276,7 +275,6 @@ export class KeepWorker {
         memoryStore: this.api.memoryStore,
         noteStore: this.api.noteStore,
         taskStore: this.api.taskStore,
-        userId: this.api.userId,
       });
 
       const agent = await makeAgent({
@@ -303,7 +301,6 @@ export class KeepWorker {
         // Use task.task as input message to the agent
         const result = agent.stream({ messages });
 
-        const userId = this.api.userId;
         const newMessages: AssistantUIMessage[] = [];
         let responseId = "";
         await new Promise<void>(async (ok) => {
@@ -314,7 +311,6 @@ export class KeepWorker {
               return {
                 createdAt: new Date().toISOString(),
                 threadId,
-                userId,
               };
             },
             // onError: (e) => {

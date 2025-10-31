@@ -27,4 +27,8 @@ export const qk = {
   
   // Agent-related queries
   agentStatus: () => [{ scope: "agentStatus" }] as const,
+  
+  // Nostr peer-related queries
+  allNostrPeers: () => [{ scope: "allNostrPeers" }] as const,
+  nostrPeer: (peerPubkey: string) => [{ scope: "nostrPeer", peerPubkey }] as const,
 };

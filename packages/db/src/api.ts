@@ -6,43 +6,25 @@ import { NoteStore } from "./note-store";
 import { TaskStore } from "./task-store";
 import { bytesToHex } from "@noble/ciphers/utils";
 import { randomBytes } from "@noble/ciphers/crypto";
+import { NostrPeerStore } from "./nostr-peer-store";
 
 export const MAX_STATUS_TTL = 60 * 1000; // 1 minute in milliseconds
 
 export class KeepDbApi {
-  #db: KeepDb;
-  #userId: string;
-  #memoryStore: MemoryStore;
-  #chatStore: ChatStore;
-  #noteStore: NoteStore;
-  #taskStore: TaskStore;
+  public readonly db: KeepDb;
+  public readonly memoryStore: MemoryStore;
+  public readonly chatStore: ChatStore;
+  public readonly noteStore: NoteStore;
+  public readonly taskStore: TaskStore;
+  public readonly nostrPeerStore: NostrPeerStore;
 
-  constructor(db: KeepDb, userId: string) {
-    this.#db = db;
-    this.#userId = userId;
-    this.#memoryStore = new MemoryStore(db);
-    this.#chatStore = new ChatStore(db);
-    this.#noteStore = new NoteStore(db);
-    this.#taskStore = new TaskStore(db);
-  }
-
-  get db() {
-    return this.#db;
-  }
-  get userId() {
-    return this.#userId;
-  }
-  get memoryStore() {
-    return this.#memoryStore;
-  }
-  get chatStore() {
-    return this.#chatStore;
-  }
-  get noteStore() {
-    return this.#noteStore;
-  }
-  get taskStore() {
-    return this.#taskStore;
+  constructor(db: KeepDb) {
+    this.db = db;
+    this.memoryStore = new MemoryStore(db);
+    this.chatStore = new ChatStore(db);
+    this.noteStore = new NoteStore(db);
+    this.taskStore = new TaskStore(db);
+    this.nostrPeerStore = new NostrPeerStore(db);
   }
 
   async addMessage(input: {
@@ -74,7 +56,6 @@ export class KeepDbApi {
       parts: [{ type: "text", text: input.content }],
       metadata: {
         threadId: input.threadId,
-        userId: this.userId,
         createdAt: now.toISOString(),
       },
     };
@@ -120,7 +101,7 @@ export class KeepDbApi {
       ORDER BY m.created_at
     `;
     
-    const result = await this.#db.db.execO<Record<string, unknown>>(sql);
+    const result = await this.db.db.execO<Record<string, unknown>>(sql);
     if (!result) return [];
 
     return result
@@ -144,14 +125,14 @@ export class KeepDbApi {
       INSERT OR REPLACE INTO agent_state (key, value, timestamp)
       VALUES ('status', ?, ?)
     `;
-    await this.#db.db.exec(sql, [value, timestamp]);
+    await this.db.db.exec(sql, [value, timestamp]);
   }
 
   async getAgentStatus(): Promise<string> {
     const sql = `
       SELECT value, timestamp FROM agent_state WHERE key = 'status'
     `;
-    const result = await this.#db.db.execO<{ value: string; timestamp: string }>(sql);
+    const result = await this.db.db.execO<{ value: string; timestamp: string }>(sql);
     
     if (!result || result.length === 0) {
       return '';

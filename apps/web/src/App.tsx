@@ -10,6 +10,7 @@ import TasksPage from "./components/TasksPage";
 import TaskDetailPage from "./components/TaskDetailPage";
 import NotesPage from "./components/NotesPage";
 import NoteDetailPage from "./components/NoteDetailPage";
+import DevicesPage from "./components/DevicesPage";
 
 function App() {
   const { dbStatus, error } = useCRSqliteQuery();
@@ -43,6 +44,7 @@ function App() {
         <Route path="/tasks/:id" element={<TaskDetailPage />} />
         <Route path="/notes" element={<NotesPage />} />
         <Route path="/notes/:id" element={<NoteDetailPage />} />
+        <Route path="/devices" element={<DevicesPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>

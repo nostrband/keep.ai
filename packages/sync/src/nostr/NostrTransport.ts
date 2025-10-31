@@ -35,7 +35,7 @@ import {
   SerializableCursor,
   serializeCursor,
 } from "../messages";
-import { NostrPeer, NostrPeerStore } from "packages/db/dist";
+import { NostrPeer, NostrPeerStore } from "@app/db";
 import debug from "debug";
 import { KIND_CHANGES, KIND_CURSOR } from ".";
 import { SubCloser } from "nostr-tools/abstract-pool";
@@ -76,6 +76,7 @@ export class NostrTransport implements Transport {
   public readonly store: NostrPeerStore;
   public readonly signer: NostrSigner;
   public readonly pool: SimplePool = new SimplePool();
+  public readonly expiryPeriod: number;
   #localPeerId?: string;
   private callbacks?: TransportCallbacks;
   private peers: NostrPeer[] = [];
@@ -83,12 +84,23 @@ export class NostrTransport implements Transport {
   private recvs = new Map<string, PeerRecv>();
   #debug?: ReturnType<typeof debug>;
 
-  constructor(store: NostrPeerStore, signer: NostrSigner) {
+  constructor({
+    store,
+    signer,
+    expiryPeriod = 7 * 24 * 3600,
+  }: {
+    store: NostrPeerStore;
+    signer: NostrSigner;
+    expiryPeriod?: number;
+  }) {
     this.store = store;
     this.signer = signer;
+    this.expiryPeriod = expiryPeriod;
   }
 
-  get debug() { return this.#debug; }
+  get debug() {
+    return this.#debug;
+  }
 
   get localPeerId() {
     if (!this.#localPeerId)
@@ -109,21 +121,49 @@ export class NostrTransport implements Transport {
   ): Promise<void> {
     this.#localPeerId = config.localPeerId;
     this.callbacks = config;
-    this.#debug = debug("sync:Nostr:"+config.localPeerId.substring(0, 4));
+    this.#debug = debug("sync:Nostr:" + config.localPeerId.substring(0, 4));
 
+    this.updatePeers();
+  }
+
+  async updatePeers() {
     // All peers, event connected to different device
     const allPeers = await this.store.listPeers();
 
-    // Peers that we have added
-    this.peers = allPeers.filter((p) => p.local_id === this.localPeerId);
-    for (const p of this.peers) {
-      this.sends.set(p.peer_id, new PeerSend(this, p));
-      this.recvs.set(p.peer_id, new PeerRecv(this, p));
-      await this.callbacks!.onConnect(this, p.peer_id);
+    // Peers connected to our device/db
+    const peers = allPeers.filter((p) => p.local_id === this.localPeerId);
+
+    // Find removed peers, match by pubkey - we might connect
+    // multiple times to the same device, thus have same peer_id but different
+    // peer_pubkey
+    const removedPeers = this.peers.filter(peer => !peers.find(p => p.peer_pubkey === peer.peer_pubkey));
+
+    // Update the stored peer list
+    this.peers = peers;
+
+    // Stop removed peers
+    for (const p of removedPeers) {
+      // FIXME send onDisconnect !
+      await this.sends.get(p.peer_id)!.stop();
+      await this.recvs.get(p.peer_id)!.stop();
     }
 
-    // Start the sends, recvs will be initiated by 'sync' calls
-    for (const s of this.sends.values()) await s.start();
+    // Now ensure all peers are initialized
+    for (const p of peers) {
+      // Already started
+      if (this.sends.get(p.peer_id)) continue;
+
+      const send = new PeerSend(this, p);
+      const recv = new PeerRecv(this, p);
+      this.sends.set(p.peer_id, send);
+      this.recvs.set(p.peer_id, recv);
+
+      // Notify the peer, will result in recv.sync() that starts receiving
+      await this.callbacks!.onConnect(this, p.peer_id);
+
+      // Manually start the sending side
+      await send.start();
+    }
   }
 
   async sync(peerId: string, localCursor: Cursor): Promise<void> {
@@ -182,7 +222,12 @@ class PeerRecv {
     this.parent = parent;
     this.relays = this.peer.relays.split(",");
     if (!this.relays.length) throw new Error("No relays for PeerRecv");
-    this.debug = debug("sync:Nostr:Recv:L"+this.parent.localPeerId.substring(0, 4)+":P"+this.peer.peer_id.substring(0, 4));
+    this.debug = debug(
+      "sync:Nostr:Recv:L" +
+        this.parent.localPeerId.substring(0, 4) +
+        ":P" +
+        this.peer.peer_id.substring(0, 4)
+    );
   }
 
   async sync(localCursor: Cursor): Promise<void> {
@@ -681,7 +726,12 @@ class PeerSend {
     this.parent = parent;
     this.relays = this.peer.relays.split(",");
     if (!this.relays.length) throw new Error("No relays for PeerSend");
-    this.debug = debug("sync:Nostr:Send:L"+this.parent.localPeerId.substring(0, 4)+":P"+this.peer.peer_id.substring(0, 4));
+    this.debug = debug(
+      "sync:Nostr:Send:L" +
+        this.parent.localPeerId.substring(0, 4) +
+        ":P" +
+        this.peer.peer_id.substring(0, 4)
+    );
   }
 
   async start() {
@@ -785,12 +835,7 @@ class PeerSend {
         };
       }
     } catch (e) {
-      this.debug(
-        "Bad cursor event from peer",
-        this.peer.peer_pubkey,
-        event,
-        e
-      );
+      this.debug("Bad cursor event from peer", this.peer.peer_pubkey, event, e);
     }
 
     return {
@@ -820,12 +865,14 @@ class PeerSend {
     });
 
     // Prepare nostr event
+    const now = Math.floor(Date.now() / 1000);
     const changesEvent: UnsignedEvent = {
       kind: KIND_CHANGES,
       pubkey: this.peer.local_pubkey,
-      created_at: Math.floor(Date.now() / 1000),
+      created_at: now,
       tags: [
         ["r", this.sendCursor.send_cursor_id],
+        ["expiration", (now + this.parent.expiryPeriod).toString()],
         ...(this.sendCursor.send_changes_event_id
           ? [["e", this.sendCursor.send_changes_event_id]]
           : []),
