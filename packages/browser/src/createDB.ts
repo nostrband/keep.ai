@@ -1,4 +1,5 @@
 // Browser implementation using cr-sqlite wasm
+// @ts-ignore
 import sqliteWasm, { SQLite3, DB } from "@vlcn.io/crsqlite-wasm";
 import { DBInterface } from "@app/db";
 import debug from "debug";

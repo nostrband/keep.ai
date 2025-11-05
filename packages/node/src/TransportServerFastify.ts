@@ -9,8 +9,7 @@ import {
   TransportMessage,
 } from "@app/sync";
 import debug from "debug";
-import { randomBytes } from "@noble/ciphers/crypto";
-import { bytesToHex } from "@noble/ciphers/utils";
+import cors from "@fastify/cors";
 
 const debugTransport = debug("node:TransportServerFastify");
 
@@ -42,7 +41,7 @@ export class TransportServerFastify implements Transport {
 
   async registerRoutes(fastify: FastifyInstance): Promise<void> {
     // Register CORS plugin
-    await fastify.register(import("@fastify/cors"), {
+    await fastify.register(cors, {
       origin: true,
       methods: ["GET", "POST", "OPTIONS"],
       allowedHeaders: ["Content-Type", "Cache-Control"],

@@ -1,6 +1,6 @@
 // Node.js implementation using sqlite3 + cr-sqlite extension
 import sqlite3 from "sqlite3";
-import { extensionPath } from "@vlcn.io/crsqlite";
+import { extensionPath } from "@nostrband/crsqlite";
 import { DBInterface } from '@app/db';
 import debug from "debug";
 
