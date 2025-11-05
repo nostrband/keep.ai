@@ -7,12 +7,15 @@ import {
   ReactNode,
 } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { startWorker, WorkerTransport } from "@app/browser";
+import { startWorker, WorkerTransport, WorkerPort } from "@app/browser";
 import { KeepDb, KeepDbApi } from "@app/db";
 import { Peer, Transport, TransportClientHttp } from "@app/sync";
 import { createDB } from "./db";
 
-type DbStatus = "initializing" | "ready" | "error";
+// Serverless mode (nostr-sync with main device)
+const isServerless = (import.meta as any).env?.VITE_FLAVOR === "serverless";
+
+type DbStatus = "initializing" | "syncing" | "ready" | "error" | "disconnected";
 
 interface QueryContextType {
   dbStatus: DbStatus;
@@ -22,7 +25,8 @@ interface QueryContextType {
   setError: (error: string | null) => void;
   retryInitialization: () => Promise<void>;
   getWorkerSiteId: () => string | null;
-  api: KeepDbApi | null
+  api: KeepDbApi | null;
+  connectDevice: (connectionString: string) => Promise<void>;
 }
 
 const QueryContext = createContext<QueryContextType | undefined>(undefined);
@@ -51,6 +55,7 @@ export function QueryProvider({
   const [db, setDb] = useState<KeepDb | null>(null);
   const [peer, setPeer] = useState<Peer | null>(null);
   const [api, setApi] = useState<KeepDbApi | null>(null);
+  const [workerPort, setWorkerPort] = useState<WorkerPort | null>(null);
 
   useEffect(() => {
     initializeDatabase();
@@ -92,25 +97,74 @@ export function QueryProvider({
       setApi(api);
 
       // Create and configure tab sync with callback
-      console.log("starting worker", {
+      console.log("[QueryProvider] Starting worker", {
         backendUrl,
         sharedWorkerUrl,
         dedicatedWorkerUrl,
+        isServerless,
       });
       let transport: Transport | undefined;
+      let workerPort: WorkerPort | undefined;
 
-      if (backendUrl) {
+      if (backendUrl && !isServerless) {
+        // This is a debug-only mode to bypass local worker
         transport = new TransportClientHttp(backendUrl);
       } else {
-        const workerPort = await startWorker({
-          dedicatedWorkerUrl,
-          sharedWorkerUrl,
+        // Main mode: shared (where available) worker doing
+        // persistence, while local peer is memory db with fast access
+        workerPort = await startWorker({
+          dedicatedWorkerUrl: isServerless
+            ? dedicatedWorkerUrl?.replace("worker.ts", "worker.serverless.ts")
+            : dedicatedWorkerUrl,
+          sharedWorkerUrl: isServerless
+            ? sharedWorkerUrl?.replace(
+                "shared-worker.ts",
+                "shared-worker.serverless.ts"
+              )
+            : sharedWorkerUrl,
         });
-        console.log("Worker started and message port obtained");
+        console.log("[QueryProvider] Worker started and message port obtained");
+        setWorkerPort(workerPort);
 
         // Create transport and add message handler to port
         const workerTransport = new WorkerTransport();
         workerTransport.addMessagePort(workerPort);
+
+        // Since our tab's peer is only a local cache,
+        // we're interested in worker's status and need to
+        // listen to it's events to update our state
+        workerPort.addEventListener("message", (event) => {
+          console.log("worker message", event);
+          const { type } = event.data;
+          if (type === "worker_sync") {
+            // Worker started sync
+            console.log("[QueryProvider] Sync message received");
+            setDbStatus("syncing");
+          } else if (type === "worker_eose") {
+            // Worker finished sync
+            console.log("[QueryProvider] EOSE message received");
+            setDbStatus("ready");
+          }
+        });
+
+        // In serverless mode we have additional worker-tab protocol
+        // to initialize the connection
+        if (isServerless) {
+          workerPort.addEventListener("message", (event) => {
+            const { type, data } = event.data;
+            if (type === "local_key") {
+              // If connection establishment was initialized (below)
+              // and worker connects successfully, it will send
+              // us a local connection key to store in localstore,
+              // as workers don't have localstore access and indexeddb is too heavy for this
+              localStorage.setItem("local_key", data.key);
+              console.log("[QueryProvider] Stored local key");
+            } else if (type === "connect_error") {
+              setError(data.error);
+              console.error("[QueryProvider] Connection error:", data.error);
+            }
+          });
+        }
 
         // Can start receiving messages now
         await workerPort.start();
@@ -123,34 +177,54 @@ export function QueryProvider({
       const peer = new Peer(db, [transport]);
 
       // Notify reactive components on changes
-      peer.addListener("change", (tables: string[]) => onRemoteChanges(tables, api));
-      // Set up event handlers
-      peer.addListener("sync", () => {
-        // Additional sync data handling if needed
-        console.log("[QueryProvider] Sync message received");
-      });
-      peer.addListener("eose", () => {
-        // Additional sync data handling if needed
-        console.log("[QueryProvider] EOSE message received");
-      });
+      peer.addListener("change", (tables: string[]) =>
+        onRemoteChanges(tables, api)
+      );
 
-      // FIXME error handler?
-      // sync.onErrorOccurred((errorMsg) => {
-      //   setError(errorMsg);
-      // });
+      // For direct backend connection we use peer's events
+      // to update db status
+      if (backendUrl && !isServerless) {
+        // Started sync
+        peer.addListener("sync", () => {
+          console.log("[QueryProvider] Sync message received");
+          setDbStatus("syncing");
+        });
+        // Finished sync
+        peer.addListener("eose", () => {
+          console.log("[QueryProvider] EOSE message received");
+          setDbStatus("ready");
+        });
+      }
 
-      // Can start now
+      // Peer can start now
       await peer.start();
       await transport.start(peer.getConfig());
 
       // Set up local changes callback to trigger sync
       setOnLocalChanges(() => {
-        console.log("local changes");
+        console.log("[QueryProvider] Got local changes");
         peer.checkLocalChanges();
       });
 
       setPeer(peer);
-      setDbStatus("ready");
+
+      // Check connection status for serverless mode
+      if (isServerless) {
+        const localKey = localStorage.getItem("local_key");
+        if (!localKey) {
+          setDbStatus("disconnected");
+          console.log(
+            "[QueryProvider] No local key found, setting status to disconnected"
+          );
+        } else {
+          // Send the key to the worker
+          workerPort!.postMessage({
+            type: "local_key",
+            data: { key: localKey },
+          });
+          console.log("[QueryProvider] Sent existing local key to worker");
+        }
+      }
 
       console.log("[CRSqliteQueryProvider] Initialized successfully");
     } catch (err) {
@@ -175,6 +249,33 @@ export function QueryProvider({
     return peer?.id || null;
   };
 
+  const connectDevice = async (connectionString: string): Promise<void> => {
+    if (!workerPort) {
+      throw new Error("Worker not initialized");
+    }
+    if (!isServerless) {
+      throw new Error("Connect device only allowed in serverless mode");
+    }
+
+    try {
+      // Reset
+      setDbStatus("initializing");
+      setError(null);
+
+      // Send connection string to worker
+      workerPort.postMessage({
+        type: "connect_device",
+        data: { connectionString },
+      });
+
+      console.log("[QueryProvider] Sent connect_device message to worker");
+    } catch (err) {
+      setError((err as Error).message);
+      setDbStatus("disconnected");
+      throw err;
+    }
+  };
+
   const contextValue: QueryContextType = {
     dbStatus,
     error,
@@ -184,6 +285,7 @@ export function QueryProvider({
     retryInitialization,
     getWorkerSiteId,
     api,
+    connectDevice,
   };
 
   return (

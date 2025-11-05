@@ -24,6 +24,6 @@ export interface Transport {
   sync(peerId: string, localCursor: Cursor): Promise<void>;
   // Send some changes to peer, shouldn't throw on transport
   // failures, only on invalid input, shouldn't throw if
-  // peer isn't connected
+  // peer isn't connected. 
   send(peerId: string, changes: PeerMessage): Promise<void>;
 }

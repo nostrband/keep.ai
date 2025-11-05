@@ -80,3 +80,21 @@ export function useReadChat() {
     },
   });
 }
+
+export function useDeletePeer() {
+  const { api } = useCRSqliteQuery();
+
+  return useMutation({
+    mutationFn: async (peerPubkey: string) => {
+      if (!api) throw new Error("Nostr peer store not available");
+
+      await api.nostrPeerStore.deletePeer(peerPubkey);
+    },
+    onSuccess: () => {
+      // Invalidate to get fresh data from DB
+      queryClient.invalidateQueries({ queryKey: qk.allNostrPeers() });
+
+      notifyTablesChanged(["nostr_peers"], true, api!);
+    },
+  });
+}

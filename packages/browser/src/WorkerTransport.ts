@@ -244,8 +244,8 @@ export class WorkerTransport implements Transport {
             await this.handleData(message.peerId, message.data);
           }
           break;
-        default:
-          debugTransport(`Unknown message type: ${(message as any).type}`);
+        // Other worker-tab messages that might be used
+        // by clients are left unhandled
       }
     } catch (error) {
       debugTransport(

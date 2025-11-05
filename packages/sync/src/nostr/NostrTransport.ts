@@ -31,19 +31,21 @@ import { Transport, TransportCallbacks } from "../Transport";
 import {
   Cursor,
   deserializeCursor,
+  PeerChange,
   PeerMessage,
   SerializableCursor,
   serializeCursor,
 } from "../messages";
 import { NostrPeer, NostrPeerStore } from "@app/db";
 import debug from "debug";
-import { KIND_CHANGES, KIND_CURSOR } from ".";
+import { KIND_CHANGES, KIND_CURSOR, publish } from ".";
 import { SubCloser } from "nostr-tools/abstract-pool";
 import { isCursorOlder, updateCursor } from "../Peer";
 import { bytesToHex } from "nostr-tools/utils";
 import { randomBytes } from "@noble/hashes/utils";
 
 const MAX_RECV_BUFFER_SIZE = 10000;
+const MAX_BATCH_BYTES = 200000;
 
 // Signer, connecting the transport with key storage
 export interface NostrSigner {
@@ -221,6 +223,7 @@ class PeerRecv {
   private buffer = new Map<string, RecvMessage>();
   private processBufferPromise?: Promise<void>;
   private debug: ReturnType<typeof debug>;
+  private resyncTimer?: ReturnType<typeof setTimeout>;
 
   constructor(parent: NostrTransport, peer: NostrPeer) {
     this.peer = peer;
@@ -576,6 +579,9 @@ class PeerRecv {
   // Does not throw, aborts the relay subscription and message processing loop,
   // resets the cursor and buffer
   private async abort() {
+    if (this.resyncTimer) clearTimeout(this.resyncTimer);
+    this.resyncTimer = undefined;
+
     // Stop the sub asap
     if (this.sub) this.sub.close();
     this.sub = undefined;
@@ -601,6 +607,7 @@ class PeerRecv {
 
     // Random stream id
     const stream_id = bytesToHex(randomBytes(16));
+    this.debug("Resync for peer", this.peer.peer_pubkey, "stream", stream_id);
 
     // Encrypted payload
     const payload: CursorPayload = {
@@ -632,8 +639,24 @@ class PeerRecv {
     );
     const signedEvent = await this.parent.signer.signEvent(cursorEvent);
 
-    // Publish to all relays
-    await Promise.all(this.parent.pool.publish(this.relays, signedEvent));
+    // Publish to relays
+    try {
+      await publish(signedEvent, this.parent.pool, this.relays);
+    } catch (e) {
+      this.debug("Failed to resync, will retry, ", e);
+
+      // Retry later
+      if (!this.resyncTimer) {
+        this.resyncTimer = setTimeout(() => {
+          this.resyncTimer = undefined;
+          if (this.localCursor) this.resync();
+        }, 10000);
+      }
+
+      // Stop, we can't subscribe yet
+      return;
+    }
+
     this.debug(
       "Sent cursor to peer",
       this.peer.peer_pubkey,
@@ -725,6 +748,8 @@ class PeerSend {
   private sendCursor?: SendCursor;
   private sub?: SubCloser;
   private debug: ReturnType<typeof debug>;
+  private pending: PeerChange[] = [];
+  private nextSendTimer?: ReturnType<typeof setTimeout>;
 
   constructor(parent: NostrTransport, peer: NostrPeer) {
     this.peer = peer;
@@ -751,6 +776,9 @@ class PeerSend {
     if (this.sub) this.sub.close();
     this.sub = undefined;
     this.sendCursor = undefined;
+    if (this.nextSendTimer) clearTimeout(this.nextSendTimer);
+    this.nextSendTimer = undefined;
+    this.pending.length = 0;
   }
 
   private async subscribe() {
@@ -855,12 +883,111 @@ class PeerSend {
     // Do not send 'EOSE', we have synthetic event for that
     if (changes.type === "eose") return;
 
-    // FIXME split changes into batches < 20Kb
+    // Put to send queue
+    this.schedule(changes.data);
+  }
+
+  private schedule(data: PeerChange[]) {
+    this.pending.push(...data);
+    if (!this.nextSendTimer) {
+      // Schedule next send in 100 ms
+      this.nextSendTimer = setTimeout(async () => {
+        await this.publishPending();
+
+        // Reset after sending 
+        this.nextSendTimer = undefined;
+      }, 100);
+    }
+  }
+
+  private async publishPending() {
+    // Split all changes into messages of ~20kb size
+    let batches: PeerMessage[] = [];
+    let batch: PeerMessage | undefined;
+    let size = 0;
+    for (const c of this.pending) {
+      const nextSize = c.cid.length + c.pk.length + c.site_id.length + c.table.length + (c.val?.length || 0);
+      console.log("val", typeof c.val, c.val?.length, nextSize);
+
+      if (batch && (size + nextSize) >= MAX_BATCH_BYTES) {
+        batches.push(batch);
+        batch = undefined;
+        size = 0;
+      }
+
+      if (!batch) {
+        batch = {
+          type: "changes",
+          data: [c],
+        };
+      } else {
+        batch.data.push(c);
+      }
+
+      size += nextSize;
+    }
+    if (batch) batches.push(batch);
+
+    this.debug(
+      "Split changes",
+      this.pending.length,
+      "into batches",
+      batches.length
+    );
+
+    // Clear the buffer
+    this.pending.length = 0;
+
+    // Send batches, watch for stop signal
+    while (batches.length) {
+      const msg = batches.shift()!;
+
+      const ok = await this.publish(msg);
+
+      // Aborted?
+      if (!this.sendCursor) break;
+
+      if (!ok) {
+        this.debug(
+          "Will retry publish changes",
+          msg.data.length,
+          "and batches",
+          batches.length
+        );
+
+        // Put msg and remaining batches back to pending
+        this.pending.push(...msg.data);
+        this.pending.push(...batches.map((b) => b.data).flat());
+
+        // If the next publish is scheduled
+        if (this.nextSendTimer) clearTimeout(this.nextSendTimer);
+
+        // Schedule next try in 10 sec
+        this.nextSendTimer = setTimeout(async () => {
+          await this.publishPending();
+
+          // Reset after sending 
+          this.nextSendTimer = undefined;
+        }, 10000);
+        break;
+      }
+    }
+  }
+
+  private async publish(msg: PeerMessage) {
+    if (!this.sendCursor) throw new Error("No send cursor");
 
     const payload: ChangesPayload = {
       peer_id: this.parent.localPeerId!,
-      msg: changes,
+      msg,
     };
+
+    this.debug(
+      "Encrypting content size",
+      JSON.stringify(msg).length,
+      "batch",
+      msg.data.length
+    );
 
     // Encrypt the message
     const content = await this.parent.signer.encrypt({
@@ -868,6 +995,16 @@ class PeerSend {
       receiverPubkey: this.peer.peer_pubkey,
       senderPubkey: this.peer.local_pubkey,
     });
+
+    // Aborted?
+    if (!this.sendCursor) return;
+
+    this.debug(
+      "Encrypted content size",
+      content.length,
+      "batch",
+      msg.data.length
+    );
 
     // Prepare nostr event
     const now = Math.floor(Date.now() / 1000);
@@ -893,30 +1030,43 @@ class PeerSend {
       "Signing changes for peer",
       this.peer.peer_pubkey,
       "by local pubkey",
-      this.peer.local_pubkey
+      this.peer.local_pubkey,
+      "relays",
+      this.relays
     );
     const signedEvent = await this.parent.signer.signEvent(changesEvent);
 
     // Publish to all relays
-    await Promise.all(this.parent.pool.publish(this.relays, signedEvent));
+    try {
+      await publish(signedEvent, this.parent.pool, this.relays);
+    } catch (e) {
+      this.debug("Failed to publish changes", e);
+      return false;
+    }
+
     this.debug(
       "Sent to peer",
       this.peer.peer_pubkey,
       "changes",
-      changes.data.length,
+      msg.data.length,
       "event",
       signedEvent.id,
       "stream",
       this.sendCursor.send_cursor_id
     );
 
-    // Advance peer cursor
-    updateCursor(this.sendCursor.send_cursor, changes.data);
-    this.sendCursor.send_changes_event_id = signedEvent.id;
-    this.sendCursor.send_changes_timestamp = signedEvent.created_at;
+    // If not aborted
+    if (this.sendCursor) {
+      // Advance peer cursor
+      updateCursor(this.sendCursor.send_cursor, msg.data);
+      this.sendCursor.send_changes_event_id = signedEvent.id;
+      this.sendCursor.send_changes_timestamp = signedEvent.created_at;
 
-    // Write to db
-    await this.writeSendCursor();
+      // Write to db
+      await this.writeSendCursor();
+    }
+
+    return true;
   }
 
   private async readSendCursor() {

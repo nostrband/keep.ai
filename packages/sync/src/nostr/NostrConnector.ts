@@ -2,7 +2,6 @@ import {
   SimplePool,
   generateSecretKey,
   getPublicKey,
-  nip44,
   Event,
   Filter,
   finalizeEvent,
@@ -10,7 +9,8 @@ import {
 import { bytesToHex, randomBytes } from "@noble/hashes/utils";
 import { SubCloser } from "nostr-tools/abstract-pool";
 import debug from "debug";
-import { KIND_CONNECT } from ".";
+import { KIND_CONNECT, publish } from ".";
+import { nip44_v3 } from "./nip44-v3";
 
 // Constants
 const CONN_STRING_TTL = 10 * 60 * 1000; // 10 minutes in milliseconds
@@ -110,8 +110,8 @@ export class NostrConnector {
     };
 
     // Encrypt the payload
-    const conversationKey = nip44.getConversationKey(key, peerPubkey);
-    const encryptedContent = nip44.encrypt(
+    const conversationKey = nip44_v3.getConversationKey(key, peerPubkey);
+    const encryptedContent = nip44_v3.encrypt(
       JSON.stringify(payload),
       conversationKey
     );
@@ -154,8 +154,8 @@ export class NostrConnector {
         onevent: async (event) => {
           try {
             // Decrypt the response
-            const conversationKey = nip44.getConversationKey(key, peerPubkey);
-            const decryptedContent = nip44.decrypt(
+            const conversationKey = nip44_v3.getConversationKey(key, peerPubkey);
+            const decryptedContent = nip44_v3.decrypt(
               event.content,
               conversationKey
             );
@@ -189,7 +189,7 @@ export class NostrConnector {
     });
 
     // Publish the event to relays, we're ready to get replies
-    await Promise.all(this.pool.publish(relays, signedEvent));
+    await publish(signedEvent, this.pool, relays);
 
     // Result of the sub
     return result;
@@ -226,11 +226,11 @@ export class NostrConnector {
           onevent: async (event) => {
             try {
               // Decrypt the incoming request
-              const conversationKey = nip44.getConversationKey(
+              const conversationKey = nip44_v3.getConversationKey(
                 info.key,
                 event.pubkey
               );
-              const decryptedContent = nip44.decrypt(
+              const decryptedContent = nip44_v3.decrypt(
                 event.content,
                 conversationKey
               );
@@ -247,7 +247,7 @@ export class NostrConnector {
                 };
 
                 // Reuse same conversation key
-                const encryptedReply = nip44.encrypt(
+                const encryptedReply = nip44_v3.encrypt(
                   JSON.stringify(replyPayload),
                   conversationKey
                 );
@@ -265,7 +265,7 @@ export class NostrConnector {
                 const signedReply = finalizeEvent(replyEvent, info.key);
 
                 // Publish the reply
-                await Promise.all(this.pool.publish(info.relays, signedReply));
+                await publish(signedReply, this.pool, info.relays);
 
                 if (timeout) {
                   clearTimeout(timeout);

@@ -11,6 +11,7 @@ import TaskDetailPage from "./components/TaskDetailPage";
 import NotesPage from "./components/NotesPage";
 import NoteDetailPage from "./components/NoteDetailPage";
 import DevicesPage from "./components/DevicesPage";
+import { ConnectDeviceDialog } from "./components/ConnectDeviceDialog";
 
 function App() {
   const { dbStatus, error } = useCRSqliteQuery();
@@ -23,10 +24,26 @@ function App() {
     );
   }
 
+  if (dbStatus === "syncing") {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div>Updating database...</div>
+      </div>
+    );
+  }
+
   if (dbStatus === "error") {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div>Database error: {error}</div>
+      </div>
+    );
+  }
+
+  if (dbStatus === "disconnected") {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <ConnectDeviceDialog />
       </div>
     );
   }

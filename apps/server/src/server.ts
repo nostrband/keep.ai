@@ -13,8 +13,8 @@ import path from "path";
 import os from "os";
 import fs from "fs";
 import dotenv from "dotenv";
-import { NostrSigner, NostrTransport, Peer, NostrConnector } from "@app/sync";
-import { UnsignedEvent, Event, getPublicKey, finalizeEvent, nip44 } from "nostr-tools";
+import { NostrSigner, NostrTransport, Peer, NostrConnector, nip44_v3 } from "@app/sync";
+import { UnsignedEvent, Event, getPublicKey, finalizeEvent } from "nostr-tools";
 import { bytesToHex, hexToBytes } from "nostr-tools/utils";
 
 const debugServer = debug("server:server");
@@ -46,7 +46,7 @@ const getNostrRelays = (): string[] => {
   const relaysEnv = process.env.NOSTR_RELAYS;
   if (!relaysEnv) {
     // Default relays if not configured
-    return ["wss://relay.primal.net", "wss://relay.damus.io"];
+    return ["wss://relay1.getkeep.ai", "wss://relay2.getkeep.ai"];
   }
   return relaysEnv
     .split(",")
@@ -145,11 +145,11 @@ class KeyStore implements NostrSigner {
     receiverPubkey: string;
     senderPubkey: string;
   }): Promise<string> {
-    const conversationKey = nip44.getConversationKey(
+    const conversationKey = nip44_v3.getConversationKey(
       this.key(req.senderPubkey),
       req.receiverPubkey
     );
-    return nip44.encrypt(req.plaintext, conversationKey);
+    return nip44_v3.encrypt(req.plaintext, conversationKey);
   }
 
   async decrypt(req: {
@@ -157,11 +157,11 @@ class KeyStore implements NostrSigner {
     receiverPubkey: string;
     senderPubkey: string;
   }): Promise<string> {
-    const conversationKey = nip44.getConversationKey(
+    const conversationKey = nip44_v3.getConversationKey(
       this.key(req.receiverPubkey),
       req.senderPubkey
     );
-    return nip44.decrypt(req.ciphertext, conversationKey);
+    return nip44_v3.decrypt(req.ciphertext, conversationKey);
   }
 }
 

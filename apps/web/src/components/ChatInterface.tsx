@@ -1,53 +1,85 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useChatMessages } from "../hooks/dbChatReads";
 import { useAddMessage, useReadChat } from "../hooks/dbWrites";
-import {
-  MessageList,
-} from "..//ui";
+import { MessageList } from "..//ui";
 import type { UseMutationResult } from "@tanstack/react-query";
+import React from "react";
 
 interface ChatInterfaceProps {
   chatId?: string;
 }
 
-// Component to detect when user scrolls to bottom and mark chat as read
-function ScrollToBottomDetector({
+type ReadChatMutation = UseMutationResult<void, Error, { chatId: string }, unknown>;
+
+/** Detects when the user is near the bottom of the page and marks the chat as read. */
+const ScrollToBottomDetector = React.memo(function ScrollToBottomDetector({
   chatId,
-  readChat
+  readChat,
+  bottomThreshold = 30,
 }: {
   chatId: string;
-  readChat: UseMutationResult<void, Error, { chatId: string }, unknown>;
+  readChat: ReadChatMutation;
+  bottomThreshold?: number;
 }) {
-  // Check if user is at bottom of page
+  // Keep latest values without retriggering effects
+  const chatIdRef = useRef(chatId);
+  const mutateRef = useRef(readChat.mutate);
+  const pendingRef = useRef(readChat.isPending);
+
+  useEffect(() => { chatIdRef.current = chatId; }, [chatId]);
+  useEffect(() => { mutateRef.current = readChat.mutate; }, [readChat.mutate]);
+  useEffect(() => { pendingRef.current = readChat.isPending; }, [readChat.isPending]);
+
+  // Throttling via rAF
+  const rafRef = useRef<number | null>(null);
+
   useEffect(() => {
-    const handleScroll = () => {
-      const isAtBottom = window.innerHeight + window.scrollY >= document.body.offsetHeight - 100;
-      if (isAtBottom && chatId) {
-        readChat.mutate({ chatId });
+    const el = document.documentElement;
+
+    const checkBottomAndMarkRead = () => {
+      const { scrollTop, clientHeight, scrollHeight } = el;
+      const distanceFromBottom = scrollHeight - (scrollTop + clientHeight);
+      const isAtBottom = distanceFromBottom <= bottomThreshold;
+
+      if (isAtBottom && chatIdRef.current && !pendingRef.current) {
+        // console.log("isAtBottom", true);
+        mutateRef.current({ chatId: chatIdRef.current });
       }
     };
 
-    window.addEventListener('scroll', handleScroll);
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, [chatId, readChat]);
-
-  // Also mark as read when the component becomes visible (user navigates to chat)
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (!document.hidden && chatId) {
-        readChat.mutate({ chatId });
-        console.log("readChat on visibility");
-      }
+    const onScroll = () => {
+      if (rafRef.current != null) return;
+      rafRef.current = requestAnimationFrame(() => {
+        rafRef.current = null;
+        checkBottomAndMarkRead();
+      });
     };
 
-    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener("scroll", onScroll, { passive: true });
+    // Run once on mount in case we land already at bottom
+    checkBottomAndMarkRead();
+
     return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+      window.removeEventListener("scroll", onScroll);
     };
-  }, [chatId, readChat]);
+    // Empty deps: attach once; use refs for latest values
+  }, [bottomThreshold]);
 
-  return null; // This component doesn't render anything
-}
+  // Also mark as read when the tab becomes visible
+  useEffect(() => {
+    const onVis = () => {
+      if (!document.hidden && chatIdRef.current && !pendingRef.current) {
+        // console.log("visibilityChange");
+        mutateRef.current({ chatId: chatIdRef.current });
+      }
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, []);
+
+  return null;
+});
 
 export default function ChatInterface({ chatId: propChatId }: ChatInterfaceProps) {
   const chatId = propChatId || "main";
@@ -57,10 +89,14 @@ export default function ChatInterface({ chatId: propChatId }: ChatInterfaceProps
   const addMessage = useAddMessage();
   const readChat = useReadChat();
 
+  // Only re-create the status string when needed
+  const status = useMemo(() => (addMessage.isPending ? "streaming" : "ready"), [addMessage.isPending]);
+
   // Scroll to bottom when messages change
   useEffect(() => {
     if (messages.length > 0) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      // Use 'auto' for large jumps to avoid long smooth scrolls on big histories
+      messagesEndRef.current?.scrollIntoView({ behavior: messages.length < 50 ? "smooth" : "auto" });
     }
   }, [messages]);
 
@@ -74,11 +110,7 @@ export default function ChatInterface({ chatId: propChatId }: ChatInterfaceProps
 
   return (
     <div className="max-w-4xl mx-auto px-6">
-      <MessageList
-        messages={messages}
-        status={addMessage.isPending ? "streaming" : "ready"}
-        full={false}
-      />
+      <MessageList messages={messages} status={status} full={false} />
       <div ref={messagesEndRef} />
       <ScrollToBottomDetector chatId={chatId} readChat={readChat} />
     </div>

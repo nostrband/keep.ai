@@ -159,7 +159,7 @@ describe("NostrTransport Synchronization", () => {
     pk1: Uint8Array,
     pk2: Uint8Array
   ) {
-    const relays = ["wss://relay.primal.net"];
+    const relays = ["wss://relay1.getkeep.ai"];
     const deviceInfo1 = "Test Device 1";
     const deviceInfo2 = "Test Device 2";
 

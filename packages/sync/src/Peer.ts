@@ -42,10 +42,10 @@ interface PeerInfo {
 
 export class Peer extends EventEmitter<{
   change: (tables: string[]) => void;
-  connect: (peerId: string) => void;
-  sync: (peerId: string) => void;
-  eose: (peerId: string) => void;
-  outdated: (schemaVersion: number, peerId: string) => void;
+  connect: (peerId: string, transport: Transport) => void;
+  sync: (peerId: string, transport: Transport) => void;
+  eose: (peerId: string, transport: Transport) => void;
+  outdated: (schemaVersion: number, peerId: string, transport: Transport) => void;
 }> {
   #db: DBInterface | (() => DBInterface);
   #id: string = "";
@@ -144,11 +144,12 @@ export class Peer extends EventEmitter<{
     this.peers.set(peerId, peer);
     this.debug(`Peer '${peerId}' connected`);
 
+    // Notify clients immediately before 'sync',
+    // bcs sync might send "EOSE" immediately
+    this.emit("connect", peerId, transport);
+
     // Start sync with peer
     await transport.sync(peerId, this.cursor);
-
-    // Notify clients
-    this.emit("connect", peerId);
   }
 
   private async onSync(
@@ -173,7 +174,7 @@ export class Peer extends EventEmitter<{
     peer.cursor = peerCursor;
 
     // Notify about peer sync start
-    this.emit("sync", peerId);
+    this.emit("sync", peerId, transport);
 
     // send changes since cursor
     await this.syncPeer(peer);
@@ -181,7 +182,8 @@ export class Peer extends EventEmitter<{
 
   private async onReceiveChanges(
     peerId: string,
-    msg: PeerMessage
+    msg: PeerMessage,
+    transport: Transport
   ): Promise<void> {
     // Apply everything peer sent us
     this.debug(
@@ -196,7 +198,7 @@ export class Peer extends EventEmitter<{
       this.debug(
         `Ignoring updates from peer '${peerId}', need schema update ${this.schemaVersion} => ${msg.schemaVersion}`
       );
-      this.emit("outdated", msg.schemaVersion!, peerId);
+      this.emit("outdated", msg.schemaVersion!, peerId, transport);
       return;
     }
 
@@ -233,9 +235,9 @@ export class Peer extends EventEmitter<{
     }
   }
 
-  private async onReceiveEOSE(peerId: string, msg: PeerMessage): Promise<void> {
-    this.debug(`Got EOSE message peer '${peerId}'`);
-    this.emit("eose", peerId);
+  private async onReceiveEOSE(peerId: string, msg: PeerMessage, transport: Transport): Promise<void> {
+    this.debug(`Got EOSE message peer '${peerId}' msg ${msg}`);
+    this.emit("eose", peerId, transport);
   }
 
   private async onReceive(
@@ -254,9 +256,9 @@ export class Peer extends EventEmitter<{
     }
     switch (msg.type) {
       case "changes":
-        return await this.onReceiveChanges(peerId, msg);
+        return await this.onReceiveChanges(peerId, msg, transport);
       case "eose":
-        return await this.onReceiveEOSE(peerId, msg);
+        return await this.onReceiveEOSE(peerId, msg, transport);
       default:
         this.debug(`Got unknown message peer '${peerId}' type '${msg.type}'`);
     }
@@ -414,7 +416,6 @@ export class Peer extends EventEmitter<{
       );
       this.#schemaVersion = schemaVersion?.[0]?.user_version || 0;
       this.debug(`Initialized our schema version to ${this.schemaVersion}`);
-
     } catch (error) {
       console.error("Error initializing last db version:", error);
       throw error;
@@ -536,18 +537,19 @@ export class Peer extends EventEmitter<{
         // Send to peer
         await this.sendChanges(peer, changes);
 
-        // Send EOSE
-        await peer.transport.send(peer.id, {
-          type: "eose",
-          data: [],
-        });
-        this.debug(`Sent to peer '${peer.id}' EOSE`);
-
         // Assume peer knows these changes now
         this.updatePeerCursor(peer.id, changes);
       } else {
         this.debug(`No changes to sync for peer ${peer.id}`);
       }
+
+      // Send EOSE
+      await peer.transport.send(peer.id, {
+        type: "eose",
+        data: [],
+      });
+      this.debug(`Sent to peer '${peer.id}' EOSE`);
+
     } catch (error) {
       this.debug("Error sending changes to", peer, error);
       throw error;

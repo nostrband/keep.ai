@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { useNostrPeers } from "../hooks/dbNostrPeerReads";
+import { useDeletePeer } from "../hooks/dbWrites";
 import SharedHeader from "./SharedHeader";
 import { Button, Badge } from "../ui";
 import QRCode from "qrcode";
@@ -87,9 +88,12 @@ function QRModal({ isOpen, onClose, qrString }: QRModalProps) {
 
 export default function DevicesPage() {
   const { data: peers = [], isLoading } = useNostrPeers();
+  const deletePeerMutation = useDeletePeer();
   const [isConnecting, setIsConnecting] = useState(false);
   const [qrModalOpen, setQrModalOpen] = useState(false);
   const [connectionString, setConnectionString] = useState("");
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [peerToDelete, setPeerToDelete] = useState<{ pubkey: string; deviceInfo: string } | null>(null);
 
   const handleConnectDevice = async () => {
     setIsConnecting(true);
@@ -125,6 +129,29 @@ export default function DevicesPage() {
   const formatPubkey = (pubkey: string) => {
     if (pubkey.length <= 16) return pubkey;
     return `${pubkey.slice(0, 8)}...${pubkey.slice(-8)}`;
+  };
+
+  const handleDeleteClick = (peer: { peer_pubkey: string; device_info: string }) => {
+    setPeerToDelete({ pubkey: peer.peer_pubkey, deviceInfo: peer.device_info || "Unknown Device" });
+    setConfirmDeleteOpen(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!peerToDelete) return;
+    
+    try {
+      await deletePeerMutation.mutateAsync(peerToDelete.pubkey);
+      setConfirmDeleteOpen(false);
+      setPeerToDelete(null);
+    } catch (error) {
+      console.error("Error deleting peer:", error);
+      alert("Failed to delete peer. Please try again.");
+    }
+  };
+
+  const handleCancelDelete = () => {
+    setConfirmDeleteOpen(false);
+    setPeerToDelete(null);
   };
 
   return (
@@ -212,6 +239,30 @@ export default function DevicesPage() {
                             </div>
                           </div>
                         </div>
+                        
+                        {/* Delete button */}
+                        <div className="ml-4">
+                          <button
+                            onClick={() => handleDeleteClick(peer)}
+                            disabled={deletePeerMutation.isPending}
+                            className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors disabled:opacity-50"
+                            title="Delete peer"
+                          >
+                            <svg
+                              className="w-5 h-5"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M6 18L18 6M6 6l12 12"
+                              />
+                            </svg>
+                          </button>
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -228,6 +279,39 @@ export default function DevicesPage() {
         onClose={() => setQrModalOpen(false)}
         qrString={connectionString}
       />
+
+      {/* Confirmation Dialog */}
+      {confirmDeleteOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-sm w-full mx-4">
+            <div className="mb-4">
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">
+                Delete Peer
+              </h3>
+              <p className="text-sm text-gray-600">
+                Delete peer {peerToDelete?.deviceInfo}?
+              </p>
+            </div>
+
+            <div className="flex justify-end gap-3">
+              <Button
+                onClick={handleCancelDelete}
+                variant="outline"
+                disabled={deletePeerMutation.isPending}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleConfirmDelete}
+                disabled={deletePeerMutation.isPending}
+                className="bg-red-600 hover:bg-red-700 text-white"
+              >
+                {deletePeerMutation.isPending ? "Deleting..." : "Delete"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
