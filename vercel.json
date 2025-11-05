@@ -1,6 +1,6 @@
 {
   "installCommand": "npm ci",
-  "buildCommand": "npm exec turbo run build --filter=@app/web...",
+  "buildCommand": "npm exec turbo run build -- --filter=...@app/web",
   "outputDirectory": "apps/web/dist/serverless",
   "rewrites": [
     { "source": "/(.*)", "destination": "/index.html" }
