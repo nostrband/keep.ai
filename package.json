@@ -16,7 +16,7 @@
   "devDependencies": {
     "@types/debug": "^4.1.12",
     "tsup": "^8.5.0",
-    "turbo": "^1.10.0",
+    "turbo": "^2.6.0",
     "typescript": "^5.2.0"
   },
   "engines": {
@@ -26,5 +26,6 @@
   "dependencies": {
     "debug": "^4.4.3",
     "sqlite3": "^5.1.7"
-  }
+  },
+  "packageManager": "npm@11.4.2"
 }
