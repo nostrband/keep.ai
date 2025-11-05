@@ -49,7 +49,6 @@ interface ReplyPayload {
 const debugNostrConnector = debug("sync:NostrConnector");
 
 export class NostrConnector {
-
   private pool: SimplePool = new SimplePool();
 
   /**
@@ -57,7 +56,7 @@ export class NostrConnector {
    */
   async generateConnectionString(
     relays: string[],
-    key?: Uint8Array,
+    key?: Uint8Array
   ): Promise<ConnectionStringInfo> {
     if (!relays || relays.length === 0) {
       throw new Error("At least one relay is required");
@@ -95,7 +94,7 @@ export class NostrConnector {
     key?: Uint8Array
   ): Promise<NostrPeerInfo> {
     // Parse the connection string
-    const parsed = this.parseConnectionString(connString);
+    const parsed = parseConnectionString(connString);
     const { peerPubkey, relays, secret, nonce } = parsed;
 
     // Generate our own key
@@ -154,7 +153,10 @@ export class NostrConnector {
         onevent: async (event) => {
           try {
             // Decrypt the response
-            const conversationKey = nip44_v3.getConversationKey(key, peerPubkey);
+            const conversationKey = nip44_v3.getConversationKey(
+              key,
+              peerPubkey
+            );
             const decryptedContent = nip44_v3.decrypt(
               event.content,
               conversationKey
@@ -214,7 +216,6 @@ export class NostrConnector {
 
     let timeout: ReturnType<typeof setTimeout> | undefined;
     return new Promise((resolve, reject) => {
-
       // Aborter
       abort?.then(() => reject("Aborted"));
 
@@ -311,38 +312,38 @@ export class NostrConnector {
   /**
    * Parse a nostr+keepai connection string
    */
-  private parseConnectionString(connString: string): {
-    peerPubkey: string;
-    relays: string[];
-    secret: string;
-    nonce: string;
-  } {
-    if (!connString.startsWith("nostr+keepai://")) {
-      throw new Error("Invalid connection string format");
-    }
-
-    const url = new URL(connString);
-    // Safari parses it into pathname as //pubkey
-    const peerPubkey = url.hostname || url.pathname.split("//")[1];
-
-    const relays: string[] = [];
-    const relayParams = url.searchParams.getAll("relay");
-    relays.push(...relayParams);
-
-    const secret = url.searchParams.get("secret");
-    const nonce = url.searchParams.get("nonce");
-
-    if (!peerPubkey || relays.length === 0 || !secret || !nonce) {
-      throw new Error("Invalid connection string: missing required parameters");
-    }
-
-    return { peerPubkey, relays, secret, nonce };
-  }
-
   /**
    * Close the transport and cleanup resources
    */
   close(): void {
     this.pool.destroy();
   }
+}
+
+export function parseConnectionString(connString: string): {
+  peerPubkey: string;
+  relays: string[];
+  secret: string;
+  nonce: string;
+} {
+  if (!connString.startsWith("nostr+keepai://")) {
+    throw new Error("Invalid connection string format");
+  }
+
+  const url = new URL(connString);
+  // Safari parses it into pathname as //pubkey
+  const peerPubkey = url.hostname || url.pathname.split("//")[1];
+
+  const relays: string[] = [];
+  const relayParams = url.searchParams.getAll("relay");
+  relays.push(...relayParams);
+
+  const secret = url.searchParams.get("secret");
+  const nonce = url.searchParams.get("nonce");
+
+  if (!peerPubkey || relays.length === 0 || !secret || !nonce) {
+    throw new Error("Invalid connection string: missing required parameters");
+  }
+
+  return { peerPubkey, relays, secret, nonce };
 }

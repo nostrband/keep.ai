@@ -1,17 +1,25 @@
-import React, { useState } from "react";
+import React, { useCallback, useState } from "react";
+import QRCode from "qrcode";
+import { Loader2 } from "lucide-react";
+import { parseConnectionString } from "@app/sync";
 import { useNostrPeers } from "../hooks/dbNostrPeerReads";
 import { useDeletePeer } from "../hooks/dbWrites";
 import SharedHeader from "./SharedHeader";
 import { Button, Badge } from "../ui";
-import QRCode from "qrcode";
 
 interface QRModalProps {
   isOpen: boolean;
   onClose: () => void;
   qrString: string;
+  isWaitingForPeer: boolean;
 }
 
-function QRModal({ isOpen, onClose, qrString }: QRModalProps) {
+function QRModal({
+  isOpen,
+  onClose,
+  qrString,
+  isWaitingForPeer,
+}: QRModalProps) {
   const [qrDataUrl, setQrDataUrl] = React.useState<string>("");
 
   React.useEffect(() => {
@@ -66,9 +74,17 @@ function QRModal({ isOpen, onClose, qrString }: QRModalProps) {
           </p>
 
           {qrDataUrl && (
-            <div className="inline-block border border-gray-200 rounded p-2">
-              <img src={qrDataUrl} alt="QR Code" className="block" />
-            </div>
+            <>
+              <div className="inline-block border border-gray-200 rounded p-2">
+                <img src={qrDataUrl} alt="QR Code" className="block" />
+              </div>
+              {isWaitingForPeer && (
+                <div className="mt-4 flex flex-col items-center gap-2 text-sm text-gray-500">
+                  <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
+                  <span>Waiting for connection...</span>
+                </div>
+              )}
+            </>
           )}
 
           <div className="mt-4 p-2 bg-gray-50 rounded text-xs font-mono break-all">
@@ -94,6 +110,15 @@ export default function DevicesPage() {
   const [connectionString, setConnectionString] = useState("");
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [peerToDelete, setPeerToDelete] = useState<{ pubkey: string; deviceInfo: string } | null>(null);
+  const [expectedPeerPubkey, setExpectedPeerPubkey] = useState<string | null>(null);
+  const [isAwaitingPeer, setIsAwaitingPeer] = useState(false);
+
+  const handleCloseQrModal = useCallback(() => {
+    setQrModalOpen(false);
+    setConnectionString("");
+    setExpectedPeerPubkey(null);
+    setIsAwaitingPeer(false);
+  }, []);
 
   const handleConnectDevice = async () => {
     setIsConnecting(true);
@@ -109,6 +134,15 @@ export default function DevicesPage() {
 
       const data = await response.json();
       setConnectionString(data.str);
+      try {
+        const parsed = parseConnectionString(data.str);
+        setExpectedPeerPubkey(parsed.peerPubkey);
+        setIsAwaitingPeer(true);
+      } catch (parseError) {
+        console.error("Failed to parse connection string:", parseError);
+        setExpectedPeerPubkey(null);
+        setIsAwaitingPeer(false);
+      }
       setQrModalOpen(true);
     } catch (error) {
       console.error("Error connecting device:", error);
@@ -138,7 +172,7 @@ export default function DevicesPage() {
 
   const handleConfirmDelete = async () => {
     if (!peerToDelete) return;
-    
+
     try {
       await deletePeerMutation.mutateAsync(peerToDelete.pubkey);
       setConfirmDeleteOpen(false);
@@ -153,6 +187,20 @@ export default function DevicesPage() {
     setConfirmDeleteOpen(false);
     setPeerToDelete(null);
   };
+
+  React.useEffect(() => {
+    if (!qrModalOpen || !expectedPeerPubkey) {
+      return;
+    }
+
+    const hasMatchingPeer = peers.some(
+      (peer) => peer.local_pubkey === expectedPeerPubkey
+    );
+
+    if (hasMatchingPeer) {
+      handleCloseQrModal();
+    }
+  }, [peers, expectedPeerPubkey, qrModalOpen, handleCloseQrModal]);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -276,8 +324,9 @@ export default function DevicesPage() {
       {/* QR Modal */}
       <QRModal
         isOpen={qrModalOpen}
-        onClose={() => setQrModalOpen(false)}
+        onClose={handleCloseQrModal}
         qrString={connectionString}
+        isWaitingForPeer={isAwaitingPeer}
       />
 
       {/* Confirmation Dialog */}
