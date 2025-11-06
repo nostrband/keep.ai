@@ -7,5 +7,5 @@ export default defineConfig({
   treeshake: true,
   platform: "browser",
   external: ['@app/db', '@app/sync'],
-  noExternal: ['@vlcn.io/crsqlite-wasm'],
+  // noExternal: ['@vlcn.io/crsqlite-wasm'],
 });
