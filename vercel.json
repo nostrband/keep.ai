@@ -1,5 +1,5 @@
 {
-  "installCommand": "npm ci --workspaces --include=dev",
+  "installCommand": "npm ci --workspaces --include=dev --include-workspace-root",
   "buildCommand": "npm exec turbo run build -- --filter=...@app/web",
   "outputDirectory": "apps/web/dist/serverless",
   "rewrites": [

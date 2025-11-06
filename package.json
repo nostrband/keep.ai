@@ -20,12 +20,11 @@
     "typescript": "^5.2.0"
   },
   "engines": {
-    "node": ">=18.0.0",
-    "npm": ">=9.0.0"
+    "node": ">=12.0.0",
+    "npm": ">=11.0.0"
   },
   "dependencies": {
-    "debug": "^4.4.3",
-    "sqlite3": "^5.1.7"
+    "debug": "^4.4.3"
   },
   "packageManager": "npm@11.4.2"
 }
