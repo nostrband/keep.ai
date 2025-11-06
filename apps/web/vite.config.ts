@@ -13,16 +13,6 @@ export default defineConfig(({ mode }) => {
     resolve: {
       alias: {
         "@app": path.resolve(__dirname, "../../packages"),
-        // Flavor-specific aliasing for workers
-        ...(isServerless
-          ? {
-              "@/worker": path.resolve(__dirname, "src/worker.serverless.ts"),
-              "@/shared-worker": path.resolve(__dirname, "src/shared-worker.serverless.ts")
-            }
-          : {
-              "@/worker": path.resolve(__dirname, "src/worker.ts"),
-              "@/shared-worker": path.resolve(__dirname, "src/shared-worker.ts")
-            }),
       },
     },
     define: {
