@@ -65,7 +65,7 @@ export class ReplWorker {
       if (routerItems.length > 0) {
         await this.ensureTask("router");
       }
-    }
+    };
     try {
       await ensureTask("router");
       await ensureTask("replier");

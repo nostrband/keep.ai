@@ -197,7 +197,7 @@ export class TaskStore {
     await this.db.db.exec(
       `UPDATE tasks
           SET reply = ?, state = ?, thread_id = ?, error = ?
-          WHERE id = ? AND (deleted IS NULL OR deleted = FALSE) AND reply = ''`,
+          WHERE id = ? AND (deleted IS NULL OR deleted = FALSE)`,
       [reply, state, thread_id, error, id]
     );
 
