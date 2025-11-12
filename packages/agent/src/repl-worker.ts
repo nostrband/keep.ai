@@ -1,18 +1,18 @@
-import { generateId, UIMessage } from "ai";
+import { generateId } from "ai";
 import {
-  AGENT_MODE,
   getMessageText,
   getModelName,
   getOpenRouter,
   ReplAgent,
 } from "./index";
 import { AssistantUIMessage } from "@app/proto";
-import { Cron } from "croner";
 import debug from "debug";
-import { KeepDbApi, MAX_STATUS_TTL, Task } from "@app/db";
+import { InboxItemTarget, KeepDbApi, MAX_STATUS_TTL, Task } from "@app/db";
 import { AGENT_STATUS } from "./instructions";
 import { createAgentSandbox } from "./agent-sandbox";
 import { StepOutput, TaskType } from "./task-agent";
+import { bytesToHex } from "@noble/ciphers/utils";
+import { randomBytes } from "@noble/ciphers/crypto";
 
 export interface ReplWorkerConfig {
   api: KeepDbApi;
@@ -38,11 +38,43 @@ export class ReplWorker {
     this.isShuttingDown = true;
   }
 
-  public async checkTasks(): Promise<void> {
+  public async checkWork(): Promise<void> {
     if (this.isShuttingDown) return;
     if (this.isRunning) return;
     this.isRunning = true;
 
+    // Auto-create router and replier tasks
+    await this.checkInbox();
+
+    // Any tasks?
+    const more = await this.checkTasks();
+
+    // Done
+    this.isRunning = false;
+
+    // Retry immediately in case more jobs might be incoming
+    if (more) this.checkWork();
+  }
+
+  private async checkInbox() {
+    const ensureTask = async (type: InboxItemTarget) => {
+      const routerItems = await this.api.inboxStore.listInboxItems({
+        target: type,
+        handled: false,
+      });
+      if (routerItems.length > 0) {
+        await this.ensureTask("router");
+      }
+    }
+    try {
+      await ensureTask("router");
+      await ensureTask("replier");
+    } catch (err) {
+      this.debug("checkInbox error:", err);
+    }
+  }
+
+  private async checkTasks(): Promise<boolean> {
     let task: Task | null = null;
     try {
       this.debug(`checking @ ${new Date().toISOString()}`);
@@ -64,14 +96,10 @@ export class ReplWorker {
         }
       }
     } catch (err) {
-      this.debug("error:", err);
+      this.debug("checkTasks error:", err);
     }
 
-    // Done
-    this.isRunning = false;
-
-    // Retry immediately in case more jobs might be incoming
-    if (task) this.checkTasks();
+    return task !== null;
   }
 
   private async processTask(task: Task): Promise<void> {
@@ -84,23 +112,37 @@ export class ReplWorker {
         return;
       }
 
-      let taskType: TaskType = "worker";
-      switch (task.type) {
-        case "message":
-          taskType = "router";
-          break;
-        case "reply":
-          taskType = "replier";
-          break;
-        default:
-          this.debug("Unsupported task type", task.type);
-          await this.api.taskStore.finishTask(
-            task.id,
-            task.thread_id,
-            "Wrong type",
-            "Unsupported task type"
-          );
-          return;
+      // Type check
+      if (
+        task.type !== "worker" &&
+        task.type !== "router" &&
+        task.type !== "replier"
+      ) {
+        this.debug("Unsupported task type", task.type);
+        await this.api.taskStore.finishTask(
+          task.id,
+          task.thread_id,
+          "Wrong type",
+          "Unsupported task type"
+        );
+        return;
+      }
+      const taskType: TaskType = task.type;
+
+      // Fill inbox
+      const inboxItems = await this.api.inboxStore.listInboxItems({
+        target: taskType,
+        handled: false,
+      });
+      const inbox = inboxItems.map((i) => i.content);
+      if (taskType !== "worker" && !inbox.length) {
+        await this.api.taskStore.finishTask(
+          task.id,
+          task.thread_id,
+          "Empty inbox",
+          "Empty inbox"
+        );
+        return;
       }
 
       // New thread for each attempt
@@ -116,34 +158,11 @@ export class ReplWorker {
         type: taskType,
       });
 
-      let sourceMessage: AssistantUIMessage | undefined;
-      let input = "";
-      if (taskType === "router") {
-        // 'task' field is used to store message id
-        try {
-          sourceMessage = await this.getSourceMessage(task.task);
-        } catch (e: any) {
-          await this.api.taskStore.finishTask(
-            task.id,
-            threadId,
-            "",
-            e?.toString() || "Message not found"
-          );
-          return;
-        }
-
-        // That's what we're working with now
-        input = getMessageText(sourceMessage);
-      } else {
-        // Task text is input
-        input = task.task;
-      }
-
       try {
         // Use task.task as input message to the agent
         const result = await agent.loop("start", {
           // Pass the input text to agent
-          inbox: [input],
+          inbox,
           onStep: async (step) => {
             return { proceed: step < this.stepLimit };
           },
@@ -158,7 +177,7 @@ export class ReplWorker {
         await this.ensureThread(threadId, taskType);
         await this.saveHistory(agent.agent.history, threadId);
 
-        if (sourceMessage && result.reply) {
+        if (taskType === "router" && result.reply) {
           // Send reply to user's thread
           // FIXME Replier agent will be doing it later
           this.debug("Save user reply", result.reply);
@@ -168,7 +187,8 @@ export class ReplWorker {
               role: "assistant",
               metadata: {
                 createdAt: new Date().toISOString(),
-                threadId: sourceMessage.metadata!.threadId,
+                // FIXME not good!
+                threadId: "main",
               },
               parts: [
                 {
@@ -185,6 +205,11 @@ export class ReplWorker {
 
         // Single-shot task finished
         await this.api.taskStore.finishTask(task.id, threadId, taskReply, "");
+
+        // Mark items as finished
+        const now = new Date().toISOString();
+        for (const item of inboxItems)
+          await this.api.inboxStore.handleInboxItem(item.id, now, threadId);
 
         this.debug(`task processed successfully:`, {
           success: true,
@@ -328,5 +353,22 @@ ${result.reasoning || ""}
 ===REPLY===
 ${result.reply || ""}
 `;
+  }
+
+  private async ensureTask(target: InboxItemTarget) {
+    const tasks = await this.api.taskStore.listTasks();
+    if (tasks.find((t) => t.type === target)) return;
+
+    const taskId = bytesToHex(randomBytes(16));
+    const timestamp = Math.floor(Date.now() / 1000) - 1; // -1 - force to run immediately
+    await this.api.taskStore.addTask(
+      taskId,
+      timestamp,
+      "", // task content
+      target, // type
+      "", // Empty thread id, task has it's own thread
+      "Router", // title
+      "" // cron
+    );
   }
 }

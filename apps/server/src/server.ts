@@ -218,11 +218,12 @@ const start = async () => {
     // Notify nostr transport if peer set changes
     peer.on("change", (tables) => {
       if (tables.includes("nostr_peers")) nostr.updatePeers();
-      if (tables.includes("tasks")) worker.checkTasks();
+      if (tables.includes("tasks") || tables.includes("inbox"))
+        worker.checkWork();
     });
 
     // Check immediately
-    worker.checkTasks();
+    worker.checkWork();
 
     // Check regularly for changes
     // FIXME call it on every mutation endpoint

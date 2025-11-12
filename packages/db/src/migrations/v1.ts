@@ -16,6 +16,7 @@ export async function migrateV1(tx: DBInterface["tx"] extends (fn: (tx: infer T)
   )`);
 
   // Tasks table with all final columns
+  // FIXME deprecate deleted, cron and task fields
   await tx.exec(`CREATE TABLE IF NOT EXISTS tasks (
     id TEXT PRIMARY KEY NOT NULL,
     timestamp INTEGER NOT NULL DEFAULT 0,

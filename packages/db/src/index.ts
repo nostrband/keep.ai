@@ -27,5 +27,9 @@ export type { Task } from "./task-store";
 export { NostrPeerStore } from "./nostr-peer-store";
 export type { NostrPeer, NostrPeerCursorSend, NostrPeerCursorRecv } from "./nostr-peer-store";
 
+// Inbox store
+export { InboxStore } from "./inbox-store";
+export type { InboxItem, InboxItemSource, InboxItemTarget } from "./inbox-store";
+
 // Api
 export * from "./api";

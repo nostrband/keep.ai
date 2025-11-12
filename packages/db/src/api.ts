@@ -7,6 +7,7 @@ import { TaskStore } from "./task-store";
 import { bytesToHex } from "@noble/ciphers/utils";
 import { randomBytes } from "@noble/ciphers/crypto";
 import { NostrPeerStore } from "./nostr-peer-store";
+import { InboxItem, InboxStore } from "./inbox-store";
 
 export const MAX_STATUS_TTL = 60 * 1000; // 1 minute in milliseconds
 
@@ -17,6 +18,7 @@ export class KeepDbApi {
   public readonly noteStore: NoteStore;
   public readonly taskStore: TaskStore;
   public readonly nostrPeerStore: NostrPeerStore;
+  public readonly inboxStore: InboxStore;
 
   constructor(db: KeepDb) {
     this.db = db;
@@ -25,6 +27,7 @@ export class KeepDbApi {
     this.noteStore = new NoteStore(db);
     this.taskStore = new TaskStore(db);
     this.nostrPeerStore = new NostrPeerStore(db);
+    this.inboxStore = new InboxStore(db);
   }
 
   async addMessage(input: {
@@ -75,18 +78,18 @@ export class KeepDbApi {
 
     // Create task for agent to process the user message
     if (role === "user") {
-      // Create task with type='message' and message_id in 'task' field
-      const taskId = bytesToHex(randomBytes(16));
-      const timestamp = Math.floor(Date.now() / 1000);
-      await this.taskStore.addTask(
-        taskId,
-        timestamp,
-        message.id, // message_id placed into 'task' field
-        "message", // type='message'
-        "", // Empty thread id, task has it's own thread
-        "", // title
-        "" // cron
-      );
+      const inboxItem: InboxItem = {
+        id: message.id,
+        source: "user",
+        source_id: message.id,
+        target: "router",
+        target_id: "",
+        timestamp: new Date().toISOString(),
+        content: JSON.stringify(message),
+        handler_thread_id: "",
+        handler_timestamp: ""
+      }
+      await this.inboxStore.saveInbox(inboxItem);
     }
 
     return message;
