@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "tsup src/server.ts --format cjs --out-dir dist",
-    "postbuild": "cp -r ../web/dist/frontend/* ./public",
+    "postbuild": "mkdir -p public; cp -r ../web/dist/frontend/* ./public",
     "dev": "tsx src/server.ts",
     "start": "node dist/server.cjs",
     "type-check": "tsc --noEmit"

@@ -27,6 +27,7 @@
     "@nostrband/crsqlite": "^0.16.3",
     "debug": "^4.3.4",
     "fastify": "^5.6.1",
+    "quickjs-emscripten": "^0.31.0",
     "sqlite3": "^5.1.7"
   },
   "devDependencies": {

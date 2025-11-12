@@ -1,0 +1,94 @@
+import { Command } from "commander";
+import { createDBNode, getCurrentUser, getDBPath } from "@app/node";
+import type { Sandbox } from "@app/node";
+import * as readline from "readline";
+import debug from "debug";
+import { createAgentSandbox, makeGetWeatherTool } from "@app/agent";
+import { KeepDb, KeepDbApi } from "@app/db";
+
+const debugSandbox = debug("cli:sandbox");
+
+export function registerSandboxCommand(program: Command): void {
+  program
+    .command("sandbox")
+    .description("Evaluate JavaScript code using the embedded sandbox runtime")
+    .action(async () => {
+      await runSandboxCommand();
+    });
+}
+
+async function runSandboxCommand(): Promise<void> {
+  process.stdin.setEncoding("utf8");
+
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout.isTTY ? process.stdout : undefined,
+    crlfDelay: Infinity,
+    terminal: process.stdin.isTTY,
+  });
+
+  let sandbox: Sandbox | undefined;
+  let encounteredError = false;
+
+  const pubkey = await getCurrentUser();
+  const dbPath = getDBPath(pubkey);
+  debugSandbox("Connecting to database:", dbPath);
+
+  const dbInterface = await createDBNode(dbPath);
+  const keepDB = new KeepDb(dbInterface);
+
+  // Initialize database
+  await keepDB.start();
+  debugSandbox("Database initialized");
+
+  // Create store instances
+  const api = new KeepDbApi(keepDB);
+
+  try {
+    sandbox = await createAgentSandbox(api);
+    debugSandbox("Sandbox initialized, env: ", sandbox.env);
+
+    for await (const line of rl) {
+      const source = normalizeSource(line);
+      if (source === undefined) {
+        continue;
+      }
+
+      try {
+        const evaluation = await sandbox.eval(source, { timeoutMs: 5000 });
+        if (evaluation.ok) {
+          console.log(JSON.stringify(evaluation.result, null, 2));
+        } else {
+          encounteredError = true;
+          console.error(`Error: ${evaluation.error}`);
+        }
+      } catch (error) {
+        encounteredError = true;
+        console.error("Unexpected sandbox error:", error);
+        debugSandbox("Unexpected sandbox error", error);
+      }
+    }
+  } catch (error) {
+    encounteredError = true;
+    console.error("❌ Sandbox command failed:", error);
+    debugSandbox("Sandbox command failed", error);
+  } finally {
+    rl.close();
+    sandbox?.[Symbol.dispose]?.();
+    debugSandbox("Sandbox disposed");
+    if (encounteredError) {
+      process.exitCode = 1;
+    }
+  }
+}
+
+function normalizeSource(line: string): string | undefined {
+  if (!line) {
+    return undefined;
+  }
+  const trimmed = line.trim();
+  if (trimmed.length === 0) {
+    return undefined;
+  }
+  return line;
+}

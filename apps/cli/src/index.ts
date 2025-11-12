@@ -4,12 +4,15 @@ import { Command } from 'commander';
 import { registerChatCommand } from './commands/chat';
 import { registerWorkerCommand } from './commands/worker';
 import { registerInitCommand } from './commands/init';
+import { registerSandboxCommand } from './commands/sandbox';
+import { KEEPAI_DIR } from './const';
 import { Env, setEnv } from '@app/agent';
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
 import * as dotenv from 'dotenv';
 import debug from 'debug';
+import { registerAgentCommand } from './commands/agent';
 
 const debugCli = debug('cli:index');
 
@@ -61,6 +64,8 @@ program
 registerInitCommand(program);
 registerChatCommand(program);
 registerWorkerCommand(program);
+registerSandboxCommand(program);
+registerAgentCommand(program);
 
 // Parse command line arguments
 program.parse(process.argv);

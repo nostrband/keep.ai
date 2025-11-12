@@ -7,13 +7,19 @@ import {
   getUserPath,
 } from "@app/node";
 import { DBInterface, KeepDb, KeepDbApi, NostrPeerStore } from "@app/db";
-import { KeepWorker, setEnv, type Env } from "@app/agent";
+import { KeepWorker, ReplWorker, setEnv, type Env } from "@app/agent";
 import debug from "debug";
 import path from "path";
 import os from "os";
 import fs from "fs";
 import dotenv from "dotenv";
-import { NostrSigner, NostrTransport, Peer, NostrConnector, nip44_v3 } from "@app/sync";
+import {
+  NostrSigner,
+  NostrTransport,
+  Peer,
+  NostrConnector,
+  nip44_v3,
+} from "@app/sync";
 import { UnsignedEvent, Event, getPublicKey, finalizeEvent } from "nostr-tools";
 import { bytesToHex, hexToBytes } from "nostr-tools/utils";
 
@@ -76,6 +82,15 @@ async function createKeepWorker(keepDB: KeepDb) {
   return worker;
 }
 
+async function createReplWorker(keepDB: KeepDb) {
+  const worker = new ReplWorker({
+    api: new KeepDbApi(keepDB),
+    stepLimit: 20,
+  });
+
+  return worker;
+}
+
 class KeyStore implements NostrSigner {
   private readonly dbPath: string;
   private db?: DBInterface;
@@ -123,7 +138,7 @@ class KeyStore implements NostrSigner {
     // Write to database
     const keyHex = bytesToHex(key);
     const timestamp = new Date().toISOString();
-    
+
     await this.db!.exec(
       "INSERT OR REPLACE INTO keys (pubkey, key, timestamp) VALUES (?, ?, ?)",
       [pubkey, keyHex, timestamp]
@@ -197,20 +212,25 @@ const start = async () => {
     await http.start(peer.getConfig());
     await nostr.start(peer.getConfig());
 
+    // Performs background operations
+    const worker = await createReplWorker(keepDB);
+
     // Notify nostr transport if peer set changes
     peer.on("change", (tables) => {
       if (tables.includes("nostr_peers")) nostr.updatePeers();
+      if (tables.includes("tasks")) worker.checkTasks();
     });
 
-    // Check regularly for changes by other processes to db
+    // Check immediately
+    worker.checkTasks();
+
+    // Check regularly for changes
+    // FIXME call it on every mutation endpoint
     const check = async () => {
       await peer.checkLocalChanges();
       setTimeout(check, 1000);
     };
     check();
-
-    // Performs background operations
-    const keepWorker = await createKeepWorker(keepDB);
 
     // Register worker routes under /api/worker prefix
     await app.register(

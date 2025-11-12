@@ -907,7 +907,7 @@ class PeerSend {
     let size = 0;
     for (const c of this.pending) {
       const nextSize = c.cid.length + c.pk.length + c.site_id.length + c.table.length + (c.val?.length || 0);
-      console.log("val", typeof c.val, c.val?.length, nextSize);
+      // console.log("val", typeof c.val, c.val?.length, nextSize);
 
       if (batch && (size + nextSize) >= MAX_BATCH_BYTES) {
         batches.push(batch);

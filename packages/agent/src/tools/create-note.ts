@@ -4,12 +4,17 @@ import { NoteStore } from "@app/db";
 
 export function makeCreateNoteTool(noteStore: NoteStore) {
   return tool({
-    description: `Create a new note with title, content, tags, and priority.
-ALWAYS check using searchNotesTool first if closely relevant note already exists and prefer updating existing one, only create new notes if no existing note fits or if asked explicitly by user.
+    description: `Create a new note with id, title, content, tags, and priority.
+ALWAYS check if closely relevant note already exists and prefer updating existing one, only create new notes if no existing note fits or if asked explicitly by user.
 Notes are useful for you (the assistant) to store project-specific information, reminders, ideas, or any other text-based content.
 Tags help organize and categorize notes for easy retrieval later.
 Maximum 500 notes, and title+content+tags size must not exceed 50KB.`,
     inputSchema: z.object({
+      id: z
+        .string()
+        .min(1)
+        .max(100)
+        .describe("Human-readable note ID, i.e. 'topics.diy' or 'user.profile'"),
       title: z
         .string()
         .min(1)
@@ -28,7 +33,7 @@ Maximum 500 notes, and title+content+tags size must not exceed 50KB.`,
         .describe("Priority level of the note (optional, default: low)"),
     }),
     execute: async (context) => {
-      const { title, content, tags, priority } = context;
+      const { title, content, tags, priority, id } = context;
 
       try {
         // Validate input and create note directly
@@ -37,7 +42,7 @@ Maximum 500 notes, and title+content+tags size must not exceed 50KB.`,
         await noteStore.validateCreateNote(title, content, finalTags);
 
         // Generate ID for the note
-        const noteId = generateId();
+        const noteId = id || generateId();
 
         // Create the note directly in the database
         await noteStore.createNote(

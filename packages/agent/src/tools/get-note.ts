@@ -9,8 +9,22 @@ export function makeGetNoteTool(noteStore: NoteStore) {
     inputSchema: z.object({
       noteId: z.string().describe("The ID of the note to retrieve"),
     }),
+    outputSchema: z.object({
+      success: z.boolean().describe("Whether the operation succeeded"),
+      note: z.object({
+        id: z.string().describe("Unique note identifier"),
+        title: z.string().describe("Note title"),
+        content: z.string().describe("Full note content"),
+        tags: z.array(z.string()).describe("Array of tag strings"),
+        priority: z.enum(["low", "medium", "high"]).describe("Note priority level"),
+        created: z.string().describe("ISO timestamp when note was created"),
+        updated: z.string().describe("ISO timestamp when note was last updated"),
+      }).optional().describe("Complete note object including content (only present when success is true)"),
+      error: z.string().optional().describe("Error message if success is false"),
+    }),
     execute: async (context) => {
       const { noteId } = context;
+      if (!noteId) throw new Error("Param 'noteId' required");
 
       try {
         // Get note from database

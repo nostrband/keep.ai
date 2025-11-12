@@ -105,10 +105,12 @@ export class MemoryStore {
 
   async getMessages({
     threadId,
+    messageId,
     limit = 50,
     since,
   }: {
     threadId?: string;
+    messageId?: string;
     limit?: number;
     since?: string;
   }): Promise<AssistantUIMessage[]> {
@@ -119,6 +121,12 @@ export class MemoryStore {
     if (threadId) {
       sql += ` WHERE thread_id = ?`;
       args.push(threadId);
+      whereAdded = true;
+    }
+
+    if (messageId) {
+      sql += whereAdded ? ` AND id = ?` : ` WHERE id = ?`;
+      args.push(messageId);
       whereAdded = true;
     }
 

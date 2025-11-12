@@ -1,6 +1,17 @@
+import { UIMessage } from "ai";
+import { AssistantUIMessage } from "packages/proto/dist";
+
 // src/lib/utils.ts
 export function getWeekDay(date = new Date()) {
-  const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  const days = [
+    "Sunday",
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+  ];
   return days[date.getDay()];
 }
 
@@ -15,4 +26,11 @@ export function createPlannerTaskPrompt() {
 7. Make sure to take into account user's feedback on your daily proactive messages.
 8. After changing task list, use list-tasks tool to confirm that all changes were applied properly.
 `;
+}
+
+export function getMessageText(msg: UIMessage) {
+  return msg.parts
+    .filter((p) => p.type === "text")
+    .map((p) => p.text)
+    .join("");
 }

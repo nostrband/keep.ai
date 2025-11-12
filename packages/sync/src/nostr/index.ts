@@ -23,11 +23,13 @@ export async function publish(
   for (const r of relays) {
     const relay = await pool.ensureRelay(r);
     relay.onnotice = (msg) => console.log("NOTICE: ", msg);
+    relay.publishTimeout = 10000;
   }
   // Publish in parallel
   const results = await Promise.allSettled(pool.publish(relays, event));
   for (const r of results) {
     if (r.status === "fulfilled") c++;
+    else console.error("Publish error", r.reason);
   }
   if (!c)
     throw new Error(

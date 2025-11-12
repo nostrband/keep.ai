@@ -21,6 +21,7 @@
       "@app/agent/*": ["packages/agent/src/*"],
       "@app/db/*": ["packages/db/src/*"],
       "@app/sync/*": ["packages/sync/src/*"],
+      "@app/node/*": ["packages/node/src/*"],
       "@app/ui/*": ["packages/ui/src/*"],
       "@app/cli/*": ["apps/cli/src/*"],
       "@app/web/*": ["apps/web/src/*"],

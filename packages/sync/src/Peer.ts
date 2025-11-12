@@ -236,7 +236,7 @@ export class Peer extends EventEmitter<{
   }
 
   private async onReceiveEOSE(peerId: string, msg: PeerMessage, transport: Transport): Promise<void> {
-    this.debug(`Got EOSE message peer '${peerId}' msg ${msg}`);
+    this.debug(`Got EOSE message peer '${peerId}'`);
     this.emit("eose", peerId, transport);
   }
 

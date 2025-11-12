@@ -36,8 +36,26 @@ Use this to browse through notes or get an overview of what notes exist.`,
           "Number of notes to skip for pagination (optional, default: 0)"
         ),
     }),
+    outputSchema: z.object({
+      success: z.boolean().describe("Whether the operation succeeded"),
+      notes: z.array(z.object({
+        id: z.string().describe("Unique note identifier"),
+        title: z.string().describe("Note title"),
+        tags: z.array(z.string()).describe("Array of tag strings"),
+        priority: z.enum(["low", "medium", "high"]).describe("Note priority level"),
+        created: z.string().describe("ISO timestamp when note was created"),
+        updated: z.string().describe("ISO timestamp when note was last updated"),
+      })).describe("Array of note objects (metadata only, no content)"),
+      total_count: z.number().int().min(0).describe("Number of notes returned"),
+      pagination: z.object({
+        limit: z.number().int().min(1).describe("Maximum number of notes requested"),
+        offset: z.number().int().min(0).describe("Number of notes skipped"),
+        has_more: z.boolean().describe("Whether there are more notes available beyond this page"),
+      }).optional().describe("Pagination information for successful responses"),
+      error: z.string().optional().describe("Error message if success is false"),
+    }),
     execute: async (context) => {
-      const { priority, limit, offset } = context;
+      const { priority, limit, offset } = context || {};
 
       try {
         const options: {
@@ -71,9 +89,6 @@ Use this to browse through notes or get an overview of what notes exist.`,
             limit: finalLimit,
             offset: finalOffset,
             has_more: formattedNotes.length === finalLimit, // Simplified check
-          },
-          filters: {
-            priority,
           },
         };
       } catch (error) {

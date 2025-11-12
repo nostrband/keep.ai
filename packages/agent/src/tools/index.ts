@@ -45,3 +45,10 @@ export function makeToolset(stores: ToolsetStores) {
 }
 
 export type Toolset = ReturnType<typeof makeToolset>;
+export { makeGetWeatherTool } from "./get-weather";
+export { makeCreateNoteTool } from "./create-note";
+export { makeUpdateNoteTool } from "./update-note";
+export { makeDeleteNoteTool } from "./delete-note";
+export { makeGetNoteTool } from "./get-note";
+export { makeSearchNotesTool } from "./search-notes";
+export { makeListNotesTool } from "./list-notes";

@@ -83,7 +83,7 @@ export class KeepDbApi {
         timestamp,
         message.id, // message_id placed into 'task' field
         "message", // type='message'
-        input.threadId,
+        "", // Empty thread id, task has it's own thread
         "", // title
         "" // cron
       );
