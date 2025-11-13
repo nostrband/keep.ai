@@ -1,15 +1,16 @@
 import { Command } from "commander";
-import { initSandbox } from "@app/agent";
+import { initSandbox, ReplEnv } from "@app/agent";
 import type { Sandbox } from "@app/agent";
 import * as readline from "readline";
 import debug from "debug";
 import {
   getOpenRouter,
-  makeGetWeatherTool,
   ReplAgent,
   Task,
-} from "packages/agent/dist";
+} from "@app/agent";
 import { z, ZodFirstPartyTypeKind as K } from "zod";
+import { createDBNode, getCurrentUser, getDBPath } from "@app/node";
+import { KeepDb, KeepDbApi } from "@app/db";
 
 type Any = z.ZodTypeAny;
 
@@ -131,6 +132,20 @@ export const print = (schema: Any): string => {
 async function runAgentCommand(modelName: string): Promise<void> {
   process.stdin.setEncoding("utf8");
 
+  const pubkey = await getCurrentUser();
+  const dbPath = getDBPath(pubkey);
+  debugAgent("Connecting to database:", dbPath);
+
+  const dbInterface = await createDBNode(dbPath);
+  const keepDB = new KeepDb(dbInterface);
+
+  // Initialize database
+  await keepDB.start();
+  debugAgent("Database initialized");
+
+  // Create store instances
+  const api = new KeepDbApi(keepDB);
+
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout.isTTY ? process.stdout : undefined,
@@ -145,32 +160,19 @@ async function runAgentCommand(modelName: string): Promise<void> {
     sandbox = await initSandbox();
     debugAgent("Sandbox initialized");
 
-    const getWeatherTool = makeGetWeatherTool();
-    const docs: any = {};
-    const addTool = (global: any, ns: string, name: string, tool: any) => {
-      if (!(ns in global)) global[ns] = {};
-      global[ns][name] = tool.execute;
-      if (!("docs" in global)) global["docs"] = {};
-      if (!(ns in global["docs"])) global["docs"][ns] = {};
-      let desc = ["===Description===", tool.description];
-      if (tool.inputSchema)
-        desc.push(...["===Input===", print(tool.inputSchema)]);
-      if (tool.outputSchema)
-        desc.push(...["===Output===", print(tool.outputSchema)]);
-      docs[ns + "." + name] = desc.join("\n");
+    sandbox.context = {
+      step: 0,
+      taskId: "",
+      taskThreadId: "",
+      type: "router",
     };
 
-    const global: any = {};
-    // Docs function
-    global.docs = (name: string) => {
-      return docs[name];
-    };
-    // Tools
-    addTool(global, "tools", "getWeatherAsync", getWeatherTool);
+    const env = new ReplEnv(api, "router", () => sandbox!.context!);
+    const sandboxGlobal = env.createGlobal();
+    sandbox.setGlobal(sandboxGlobal);
 
-    console.log("global", global);
-    sandbox.setGlobal(global);
-    console.log("tools", sandbox.tools);
+    console.log("global", sandboxGlobal);
+    console.log("tools", env.tools);
 
     // const test = await sandbox.eval("return docs('tools.getWeatherAsync')\n");
     // console.log("test", test);
@@ -187,7 +189,7 @@ async function runAgentCommand(modelName: string): Promise<void> {
       const task: Task = {
         type: "router",
       };
-      const agent = new ReplAgent(model, sandbox, task);
+      const agent = new ReplAgent(model, env, sandbox, task);
 
       try {
         const reply = await agent.loop("start", {

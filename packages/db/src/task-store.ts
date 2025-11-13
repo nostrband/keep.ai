@@ -13,6 +13,14 @@ export interface Task {
   cron: string;
 }
 
+export interface TaskState {
+  id: string;
+  goal: string;
+  notes: string;
+  plan: string;
+  asks: string;
+}
+
 export class TaskStore {
   private db: CRSqliteDB;
 
@@ -54,8 +62,9 @@ export class TaskStore {
 
     // Filter by state if not including finished tasks
     if (!include_finished) {
-      conditions.push("state != ?");
+      conditions.push("state != ? AND state != ?");
       args.push("finished");
+      args.push("error");
     }
 
     // Always filter out deleted tasks
@@ -257,5 +266,37 @@ export class TaskStore {
     tomorrow.setDate(tomorrow.getDate() + 1);
     tomorrow.setHours(0, 1, 0, 0); // 00:01 to make sure "today" means today
     return Math.floor(tomorrow.getTime() / 1000);
+  }
+
+  // Save task state - overwrites by id if it exists
+  async saveState(taskState: TaskState): Promise<void> {
+    await this.db.db.exec(
+      `INSERT OR REPLACE INTO task_states (id, goal, notes, plan, asks)
+          VALUES (?, ?, ?, ?, ?)`,
+      [taskState.id, taskState.goal, taskState.notes, taskState.plan, taskState.asks]
+    );
+  }
+
+  // Get task state by id
+  async getState(id: string): Promise<TaskState | null> {
+    const results = await this.db.db.execO<Record<string, unknown>>(
+      `SELECT id, goal, notes, plan, asks
+          FROM task_states
+          WHERE id = ?`,
+      [id]
+    );
+
+    if (!results || results.length === 0) {
+      return null;
+    }
+
+    const row = results[0];
+    return {
+      id: row.id as string,
+      goal: row.goal as string,
+      notes: row.notes as string,
+      plan: row.plan as string,
+      asks: row.asks as string,
+    };
   }
 }

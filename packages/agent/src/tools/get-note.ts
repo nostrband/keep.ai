@@ -23,7 +23,8 @@ export function makeGetNoteTool(noteStore: NoteStore) {
       error: z.string().optional().describe("Error message if success is false"),
     }),
     execute: async (context) => {
-      const { noteId } = context;
+      let { noteId } = context;
+      if (typeof context === 'string') noteId = context;
       if (!noteId) throw new Error("Param 'noteId' required");
 
       try {

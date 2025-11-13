@@ -3,7 +3,7 @@ import { createDBNode, getCurrentUser, getDBPath } from "@app/node";
 import type { Sandbox } from "@app/agent";
 import * as readline from "readline";
 import debug from "debug";
-import { createAgentSandbox } from "@app/agent";
+import { initSandbox, ReplEnv } from "@app/agent";
 import { KeepDb, KeepDbApi } from "@app/db";
 
 const debugSandbox = debug("cli:sandbox");
@@ -45,8 +45,20 @@ async function runSandboxCommand(): Promise<void> {
   const api = new KeepDbApi(keepDB);
 
   try {
-    sandbox = await createAgentSandbox(api);
-    debugSandbox("Sandbox initialized, tools: ", sandbox.tools);
+    sandbox = await initSandbox();
+    sandbox.context = {
+      step: 0,
+      taskId: "",
+      taskThreadId: "",
+      type: "router",
+    };
+
+    const env = new ReplEnv(api, "router", () => sandbox!.context!);
+    const gl = await env.createGlobal();
+    console.log("global", gl);
+    sandbox.setGlobal(gl);
+
+    debugSandbox("Sandbox initialized, tools: ", env.tools);
 
     for await (const line of rl) {
       const source = normalizeSource(line);

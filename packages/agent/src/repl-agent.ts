@@ -4,29 +4,38 @@ import {
   StepOutput,
   StepReason,
   Task,
-  TaskAgent,
-} from "./task-agent";
-import { LanguageModel } from "ai";
+  TaskState,
+} from "./repl-agent-types";
+import { convertToModelMessages, generateId, LanguageModel, ModelMessage, readUIMessageStream, streamText, UIMessage } from "ai";
 import { AssistantUIMessage } from "@app/proto";
 import debug from "debug";
+import { ReplEnv } from "./repl-env";
+import { MspParser } from "./msp-parser";
+import { getMessageText } from "./utils";
 
 // Hard limit
 const MAX_STEPS = 100;
 
 export class ReplAgent {
-  public readonly agent: TaskAgent;
+  public readonly history: AssistantUIMessage[] = [];
+  private model: LanguageModel;
+  private env: ReplEnv;
   private sandbox: Sandbox;
-  private debug = debug("ReplAgent");
+  private state?: TaskState;
+  private parser: MspParser;
+  private debug = debug("agent:ReplAgent");
 
-  constructor(model: LanguageModel, sandbox: Sandbox, task: Task) {
+  constructor(
+    model: LanguageModel,
+    env: ReplEnv,
+    sandbox: Sandbox,
+    task: Task
+  ) {
+    this.model = model;
     this.sandbox = sandbox;
-    this.agent = new TaskAgent({
-      model,
-      task,
-      env: {
-        tools: [...sandbox.tools],
-      },
-    });
+    this.env = env;
+    this.parser = new MspParser(task.type);
+    if (task.state) this.state = { ...task.state };
   }
 
   async loop(
@@ -43,7 +52,7 @@ export class ReplAgent {
     }
   ) {
     // Prepare context
-    if (opts?.history) this.agent.history.push(...opts.history);
+    if (opts?.history) this.history.push(...opts.history);
     let inbox = [...(opts?.inbox || [])];
 
     // Step state
@@ -67,11 +76,11 @@ export class ReplAgent {
       this.debug("step", step, "input", input);
       let output: StepOutput | undefined;
       try {
-        output = await this.agent.runStep(input);
+        output = await this.runStep(input);
         this.debug("step", step, "output", output);
 
         switch (output.kind) {
-          case "step": {
+          case "code": {
             // Update step in contexxt
             if (this.sandbox.context)
               this.sandbox.context = {
@@ -112,10 +121,73 @@ export class ReplAgent {
       }
 
       // Done?
-      if (output?.kind !== "step") return output;
+      if (output?.kind !== "code") return output;
 
       // Next step
-      stepReason = "step";
+      stepReason = "code";
     }
+  }
+
+  async runStep(input: StepInput): Promise<StepOutput> {
+    const system = await this.env.buildSystem();
+    const user = await this.env.buildUser(input, this.state);
+
+    // New user message
+    const userMessage: AssistantUIMessage = {
+      id: generateId(),
+      role: "user",
+      parts: [{ type: "text", text: user }],
+      metadata: {
+        createdAt: new Date().toISOString(),
+      },
+    };
+
+    // Put user message to history
+    this.history.push(userMessage);
+
+    // Input messages
+    const messages: ModelMessage[] = [
+      { role: "system", content: system },
+      ...convertToModelMessages(this.history),
+    ];
+    console.log("llm request messages", JSON.stringify(messages, null, 2));
+
+    // Call LLM
+    const result = streamText({
+      model: this.model,
+      temperature: this.env.temperature,
+      toolChoice: "none",
+      messages,
+    });
+
+    // Read reply into UIMessage
+    let newMessage: UIMessage | undefined;
+    for await (const uiMessage of readUIMessageStream({
+      stream: result.toUIMessageStream(),
+    })) {
+      newMessage = uiMessage;
+    }
+    if (!newMessage) throw new Error("Failed to get streamed reply");
+
+    this.debug("llm response message:", JSON.stringify(newMessage, null, 2));
+
+    // Put reply to history
+    this.history.push({
+      ...newMessage,
+      id: generateId(),
+      metadata: {
+        createdAt: new Date().toISOString(),
+      },
+    });
+
+    // Reply text
+    const text = getMessageText(newMessage);
+    this.debug("LLM response text", text);
+
+    // Parse reply text into output
+    const output = this.parser.parse(input.step + 1, text);
+    this.debug("LLM response output", output);
+
+    return output;
   }
 }

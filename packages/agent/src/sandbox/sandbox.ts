@@ -6,7 +6,14 @@ import {
   QuickJSWASMModule,
   shouldInterruptAfterDeadline,
 } from "quickjs-emscripten";
-import { TaskType } from "../task-agent";
+import { TaskType } from "../repl-agent-types";
+
+export interface EvalGlobal {
+  memory: any,
+  tools: any,
+  tasks: any,
+  docs: (tool: string) => string;
+}
 
 export type EvalResult =
   | { ok: true; result: unknown }
@@ -47,7 +54,6 @@ export class Sandbox {
   #running = false;
   #abortedReason?: string;
   #abortedCallback?: () => void;
-  #tools: string[] = [];
   #context?: EvalContext;
 
   constructor(qjs: QuickJSWASMModule, options: SandboxOptions = {}) {
@@ -75,10 +81,6 @@ export class Sandbox {
     this.#abortedCallback = undefined;
   }
 
-  get tools() {
-    return this.#tools;
-  }
-
   get context(): EvalContext | undefined {
     return this.#context;
   }
@@ -87,7 +89,7 @@ export class Sandbox {
     this.#context = context;;
   }
 
-  setGlobal(bindings: Record<PropertyKey, unknown> | object): void {
+  setGlobal(bindings: EvalGlobal): void {
     this.#assertIdle();
     if (bindings === null || typeof bindings !== "object") {
       throw new TypeError("Sandbox globals must be provided as an object");
@@ -300,8 +302,6 @@ export class Sandbox {
     source: Record<PropertyKey, unknown> | object,
     target: QuickJSHandle
   ): void {
-    // Clear
-    this.#tools.length = 0;
 
     const table = source as Record<PropertyKey, unknown>;
     for (const rawKey of Reflect.ownKeys(table)) {
@@ -310,7 +310,6 @@ export class Sandbox {
         typeof rawKey === "string" || typeof rawKey === "number"
           ? rawKey
           : String(rawKey);
-      this.#tools.push(key);
       const handle = this.hostValueToHandle(ctx, value, key || "property");
       try {
         ctx.setProp(target, key, handle);
@@ -430,7 +429,6 @@ export class Sandbox {
   ): QuickJSHandle {
     const objectHandle = ctx.newObject();
     for (const [key, entry] of Object.entries(obj)) {
-      this.#tools.push(`${label}.${key}`);
       const propertyHandle = this.hostValueToHandle(
         ctx,
         entry,

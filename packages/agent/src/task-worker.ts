@@ -1,10 +1,5 @@
 import { generateId } from "ai";
-import {
-  getMessageText,
-  getModelName,
-  getOpenRouter,
-  ReplAgent,
-} from "./index";
+import { getModelName, getOpenRouter, initSandbox, ReplAgent } from "./index";
 import { AssistantUIMessage } from "@app/proto";
 import debug from "debug";
 import {
@@ -15,28 +10,29 @@ import {
   Task,
 } from "@app/db";
 import { AGENT_STATUS } from "./instructions";
-import { createAgentSandbox } from "./agent-sandbox";
-import { StepOutput, TaskType } from "./task-agent";
+import { StepOutput, TaskType } from "./repl-agent-types";
 import { bytesToHex } from "@noble/ciphers/utils";
 import { randomBytes } from "@noble/ciphers/crypto";
+import { ReplEnv } from "./repl-env";
 
-export interface ReplWorkerConfig {
+export interface TaskWorkerConfig {
   api: KeepDbApi;
   stepLimit?: number; // default 50
 }
 
-export class ReplWorker {
+export class TaskWorker {
   private api: KeepDbApi;
   private stepLimit: number;
 
   private isRunning: boolean = false;
   private isShuttingDown: boolean = false;
 
-  private debug = debug("ReplWorker");
+  private debug = debug("agent:TaskWorker");
 
-  constructor(config: ReplWorkerConfig) {
+  constructor(config: TaskWorkerConfig) {
     this.api = config.api;
     this.stepLimit = config.stepLimit || 50;
+    this.debug("Constructed");
   }
 
   async close(): Promise<void> {
@@ -45,6 +41,12 @@ export class ReplWorker {
   }
 
   public async checkWork(): Promise<void> {
+    this.debug(
+      "checkWork, running",
+      this.isRunning,
+      "shuttingDown",
+      this.isShuttingDown
+    );
     if (this.isShuttingDown) return;
     if (this.isRunning) return;
     this.isRunning = true;
@@ -158,19 +160,23 @@ export class ReplWorker {
       // Set agent status in db
       statusUpdaterInterval = await this.startStatusUpdater(taskType);
 
-      // Create agent
-      const sandbox = await createAgentSandbox(this.api);
+      // Sandbox
+      const sandbox = await initSandbox();
 
       // Init context
       sandbox.context = {
         step: 0,
         taskId: task.id,
         type: taskType,
-        taskThreadId: threadId
+        taskThreadId: threadId,
       };
 
+      // Env
+      const env = new ReplEnv(this.api, taskType, () => sandbox.context!);
+      sandbox.setGlobal(await env.createGlobal());
+
       const model = getOpenRouter()(getModelName());
-      const agent = new ReplAgent(model, sandbox, {
+      const agent = new ReplAgent(model, env, sandbox, {
         type: taskType,
       });
 
@@ -189,9 +195,9 @@ export class ReplWorker {
         }
 
         // Save task messages
-        this.debug("Save task messages", agent.agent.history);
+        this.debug("Save task messages", agent.history);
         await this.ensureThread(threadId, taskType);
-        await this.saveHistory(agent.agent.history, threadId);
+        await this.saveHistory(agent.history, threadId);
 
         const now = new Date().toISOString();
         if (taskType === "router" && result.reply) {
@@ -375,18 +381,17 @@ ${result.reply || ""}
   private async sendToReplier(reply: string, threadId: string) {
     this.debug("Send reply to replier", reply);
     // Send router's reply to replier
-    const inboxItem: InboxItem = {
+    await this.api.inboxStore.saveInbox({
       id: threadId,
       source: "router",
       source_id: threadId,
       target: "replier",
       target_id: "",
       timestamp: new Date().toISOString(),
-      content: reply,
+      content: JSON.stringify({ role: "assistant", content: reply }),
       handler_thread_id: "",
       handler_timestamp: "",
-    };
-    await this.api.inboxStore.saveInbox(inboxItem);
+    });
   }
 
   private async sendToUser(reply: string) {

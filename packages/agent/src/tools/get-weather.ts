@@ -25,6 +25,7 @@ export function makeGetWeatherTool() {
     execute: async (context) => {
       let { place, days = 1 } = context;
       if (typeof context === 'string') place = context;
+      if (!place) place = (context as any).location; // good guess by llm
 
       try {
         if (!place || typeof place !== "string") {

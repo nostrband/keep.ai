@@ -7,7 +7,7 @@ import {
   getUserPath,
 } from "@app/node";
 import { DBInterface, KeepDb, KeepDbApi, NostrPeerStore } from "@app/db";
-import { KeepWorker, ReplWorker, setEnv, type Env } from "@app/agent";
+import { KeepWorker, setEnv, TaskWorker, type Env } from "@app/agent";
 import debug from "debug";
 import path from "path";
 import os from "os";
@@ -83,7 +83,7 @@ async function createKeepWorker(keepDB: KeepDb) {
 }
 
 async function createReplWorker(keepDB: KeepDb) {
-  const worker = new ReplWorker({
+  const worker = new TaskWorker({
     api: new KeepDbApi(keepDB),
     stepLimit: 20,
   });

@@ -1,5 +1,4 @@
 import { UIMessage } from "ai";
-import { AssistantUIMessage } from "packages/proto/dist";
 
 // src/lib/utils.ts
 export function getWeekDay(date = new Date()) {

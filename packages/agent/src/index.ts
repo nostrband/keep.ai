@@ -36,18 +36,17 @@ export { type Memory } from "./interfaces";
 export { ReplAgent } from "./repl-agent";
 
 export {
-  TaskAgent,
   type Task,
   type StepInput,
   type StepOutput,
   type TaskState,
-} from "./task-agent";
+} from "./repl-agent-types";
 
-export { ReplWorker, type ReplWorkerConfig } from "./repl-worker";
-
-export { createAgentSandbox } from "./agent-sandbox"
+export { TaskWorker, type TaskWorkerConfig as ReplWorkerConfig } from "./task-worker";
 
 export { initSandbox } from './sandbox/sandbox';
+
+export { ReplEnv } from './repl-env';
 
 export type {
   Sandbox,
