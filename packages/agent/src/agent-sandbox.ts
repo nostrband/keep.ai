@@ -1,4 +1,4 @@
-import { initSandbox } from "./sandbox/sandbox";
+import { EvalContext, initSandbox } from "./sandbox/sandbox";
 import {
   makeCreateNoteTool,
   makeDeleteNoteTool,
@@ -10,6 +10,7 @@ import {
 } from "./tools";
 import { z, ZodFirstPartyTypeKind as K } from "zod";
 import { KeepDbApi } from "@app/db";
+import { generateId } from "ai";
 
 export async function createAgentSandbox(api: KeepDbApi) {
   const sandbox = await initSandbox();
@@ -42,34 +43,14 @@ export async function createAgentSandbox(api: KeepDbApi) {
     throw new Error("Not found " + name);
   };
   // Tools
-  addTool(global, "tools", "getWeatherAsync", makeGetWeatherTool());
-  addTool(global, "memory", "getNoteAsync", makeGetNoteTool(api.noteStore));
-  addTool(global, "memory", "listNotesAsync", makeListNotesTool(api.noteStore));
-  addTool(
-    global,
-    "memory",
-    "searchNotesAsync",
-    makeSearchNotesTool(api.noteStore)
-  );
-  addTool(
-    global,
-    "memory",
-    "createNoteAsync",
-    makeCreateNoteTool(api.noteStore)
-  );
-  addTool(
-    global,
-    "memory",
-    "updateNoteAsync",
-    makeUpdateNoteTool(api.noteStore)
-  );
-  addTool(
-    global,
-    "memory",
-    "deleteNoteAsync",
-    makeDeleteNoteTool(api.noteStore)
-  );
-  addTool(global, "memory", "listMessagesAsync", {
+  addTool(global, "tools", "weather", makeGetWeatherTool());
+  addTool(global, "memory", "getNote", makeGetNoteTool(api.noteStore));
+  addTool(global, "memory", "listNotes", makeListNotesTool(api.noteStore));
+  addTool(global, "memory", "searchNotes", makeSearchNotesTool(api.noteStore));
+  addTool(global, "memory", "createNote", makeCreateNoteTool(api.noteStore));
+  addTool(global, "memory", "updateNote", makeUpdateNoteTool(api.noteStore));
+  addTool(global, "memory", "deleteNote", makeDeleteNoteTool(api.noteStore));
+  addTool(global, "memory", "listMessages", {
     execute: async (opts?: { limit: number }) => {
       return await api.memoryStore.getMessages({
         // default limit
@@ -105,6 +86,159 @@ export async function createAgentSandbox(api: KeepDbApi) {
         ),
       })
     ),
+  });
+
+  // Tasks
+  addTool(global, "tasks", "add", {
+    execute: async (opts: { title: string; goal?: string; notes?: string }) => {
+      const id = generateId();
+      return await api.taskStore.addTask(
+        id,
+        Math.floor(Date.now() / 1000),
+        "",
+        "worker",
+        "",
+        opts.title
+      );
+      // FIXME also store state
+    },
+    description: "Create a background task",
+    inputSchema: z.object({
+      title: z.string().describe("Task title for task management and audit"),
+      goal: z
+        .string()
+        .optional()
+        .nullable()
+        .describe("Task goal for worker agent"),
+      notes: z
+        .string()
+        .optional()
+        .nullable()
+        .describe("Task notes for worker agent"),
+    }),
+    outputSchema: z.array(z.string().describe("Task id")),
+  });
+
+  addTool(global, "tasks", "get", {
+    execute: async (id: string) => {
+      const task = await api.taskStore.getTask(id);
+      // FIXME also get state
+      return {
+        id: task.id,
+        title: task.title,
+        state: task.state,
+        error: task.error,
+        runTime: new Date(task.timestamp * 1000),
+      };
+    },
+    description: "Get a background task",
+    inputSchema: z.string().describe("Task id"),
+    outputSchema: z.array(
+      z.object({
+        id: z.string(),
+        title: z.string(),
+        state: z.string(),
+        error: z.string(),
+        runTime: z.string().describe("Date time when task is scheduled to run"),
+      })
+    ),
+  });
+
+  addTool(global, "tasks", "list", {
+    execute: async (opts?: { include_finished?: boolean; until?: string }) => {
+      const tasks = await api.taskStore.listTasks(
+        opts?.include_finished,
+        "worker",
+        opts?.until
+          ? Math.floor(new Date(opts.until).getTime() / 1000)
+          : undefined
+      );
+      return tasks.map((task) => ({
+        id: task.id,
+        title: task.title,
+        state: task.state,
+        error: task.error,
+      }));
+    },
+    description: "List background tasks",
+    inputSchema: z.object({
+      include_finished: z
+        .boolean()
+        .optional()
+        .nullable()
+        .describe("Include finished tasks to the list"),
+      until: z
+        .string()
+        .optional()
+        .nullable()
+        .describe(
+          "Max runTime field of task, can be used for pagination through older tasks"
+        ),
+    }),
+    outputSchema: z.array(
+      z.object({
+        id: z.string(),
+        title: z.string(),
+        state: z.string(),
+        error: z.string(),
+        runTime: z.string().describe("Date time when task is scheduled to run"),
+      })
+    ),
+  });
+
+  addTool(global, "tasks", "cancel", {
+    execute: async (opts: { id: string; reason?: string }) => {
+      let { id, reason } = opts;
+      if (typeof opts === "string") id = opts;
+
+      const task = await api.taskStore.getTask(id);
+      if (!task) throw new Error("Task not found");
+
+      await api.taskStore.finishTask(
+        id,
+        "",
+        "Cancelled",
+        reason || "Cancelled"
+      );
+    },
+    description: "Cancel a task.",
+    inputSchema: z.object({
+      id: z.string(),
+      reason: z
+        .string()
+        .optional()
+        .nullable()
+        .describe("Cancel reason for audit traces"),
+    }),
+  });
+
+  addTool(global, "tasks", "sendToTaskInbox", {
+    execute: async (opts: { id: string; message: string }) => {
+      const task = await api.taskStore.getTask(opts.id);
+      if (!task) throw new Error("Task not found");
+
+      const context = sandbox.context;
+      if (!context) throw new Error("No eval context");
+      if (context.type === "replier")
+        throw new Error("Replier can't send to inbox");
+
+      await api.inboxStore.saveInbox({
+        id: `${context.taskThreadId}.${context.step}.${generateId()}`,
+        source: context.type,
+        source_id: context.taskId,
+        target: "worker",
+        target_id: opts.id,
+        timestamp: new Date().toISOString(),
+        content: opts.message,
+        handler_thread_id: "",
+        handler_timestamp: "",
+      });
+    },
+    description: "Send a message to task inbox",
+    inputSchema: z.object({
+      id: z.string().describe("Task id"),
+      message: z.string().describe("Message for the task handler"),
+    }),
   });
 
   sandbox.setGlobal(global);

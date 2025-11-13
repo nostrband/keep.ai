@@ -160,6 +160,15 @@ export class ReplWorker {
 
       // Create agent
       const sandbox = await createAgentSandbox(this.api);
+
+      // Init context
+      sandbox.context = {
+        step: 0,
+        taskId: task.id,
+        type: taskType,
+        taskThreadId: threadId
+      };
+
       const model = getOpenRouter()(getModelName());
       const agent = new ReplAgent(model, sandbox, {
         type: taskType,

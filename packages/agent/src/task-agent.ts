@@ -189,6 +189,7 @@ JS code guidelines:
 - you MUST 'return' the value you need to receive (must be convertible to JSON)
 - no 'fetch', no console.log/error, no direct network or disk
 - do not wrap your code in '(async () => {...})()' - that's already done for you
+- all tools are async and must be await-ed
 `;
           break;
         }

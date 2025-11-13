@@ -48,6 +48,7 @@ Note that scheduled time is returned in LOCAL timezone, which might differ from 
 
         const tasks = await taskStore.listTasks(
           !!include_finished,
+          undefined,
           untilTimestamp
         );
 

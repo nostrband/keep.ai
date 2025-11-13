@@ -10,7 +10,7 @@ export function useTasks(includeFinished: boolean = true) {
     queryKey: qk.allTasks(includeFinished),
     queryFn: async () => {
       if (!api) return [];
-      const tasks = await api.taskStore.listTasks(includeFinished);
+      const tasks = await api.taskStore.listTasks(includeFinished, 'worker');
       return tasks;
     },
     meta: { tables: ["tasks"] },

@@ -43,6 +43,7 @@ export class TaskStore {
   // List tasks - returns up to 100 most recent tasks
   async listTasks(
     include_finished: boolean = false,
+    type?: string,
     until?: number
   ): Promise<Task[]> {
     let sql = `SELECT id, timestamp, task, reply, state, thread_id, error, type, title, cron
@@ -53,14 +54,18 @@ export class TaskStore {
 
     // Filter by state if not including finished tasks
     if (!include_finished) {
-      conditions.push("state = ''");
+      conditions.push("state != ?");
+      args.push("finished");
     }
 
     // Always filter out deleted tasks
     conditions.push("(deleted IS NULL OR deleted = FALSE)");
 
-    // Always filter out planner tasks (only show regular tasks to users)
-    conditions.push("(type IS NULL OR type = '')");
+    // Only show worker tasks
+    if (type) {
+      conditions.push("type = ?");
+      args.push(type);
+    }
 
     // Filter by until timestamp if provided
     if (until !== undefined) {
@@ -139,7 +144,7 @@ export class TaskStore {
     }));
 
     // First, look for tasks with 'message' type
-    const messageTask = tasks.find(task => task.type === 'message');
+    const messageTask = tasks.find((task) => task.type === "message");
     if (messageTask) {
       return messageTask;
     }

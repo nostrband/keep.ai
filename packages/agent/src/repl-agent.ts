@@ -32,7 +32,7 @@ export class ReplAgent {
   async loop(
     reason?: "start" | "input" | "timer",
     opts?: {
-      history?: AssistantUIMessage[],
+      history?: AssistantUIMessage[];
       inbox?: string[];
       onStep?: (
         step: number,
@@ -42,11 +42,10 @@ export class ReplAgent {
       ) => Promise<{ proceed: boolean; inbox?: string[] }>;
     }
   ) {
-
     // Prepare context
     if (opts?.history) this.agent.history.push(...opts.history);
     let inbox = [...(opts?.inbox || [])];
-    
+
     // Step state
     let stepReason: StepReason = reason || "start";
     let stepResult: EvalResult | undefined;
@@ -73,6 +72,14 @@ export class ReplAgent {
 
         switch (output.kind) {
           case "step": {
+            // Update step in contexxt
+            if (this.sandbox.context)
+              this.sandbox.context = {
+                ...this.sandbox.context,
+                step,
+              };
+
+            // Eval
             stepResult = await this.sandbox.eval(output.code, {
               timeoutMs: 1000,
             });

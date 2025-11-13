@@ -6,6 +6,7 @@ import {
   QuickJSWASMModule,
   shouldInterruptAfterDeadline,
 } from "quickjs-emscripten";
+import { TaskType } from "../task-agent";
 
 export type EvalResult =
   | { ok: true; result: unknown }
@@ -32,6 +33,13 @@ export async function initSandbox(
   return new Sandbox(qjs, options);
 }
 
+export interface EvalContext {
+  taskThreadId: string;
+  step: number;
+  type: TaskType;
+  taskId: string;
+}
+
 export class Sandbox {
   #rt: QuickJSRuntime;
   #ctx: QuickJSContext;
@@ -40,6 +48,7 @@ export class Sandbox {
   #abortedReason?: string;
   #abortedCallback?: () => void;
   #tools: string[] = [];
+  #context?: EvalContext;
 
   constructor(qjs: QuickJSWASMModule, options: SandboxOptions = {}) {
     this.#rt = qjs.newRuntime();
@@ -68,6 +77,14 @@ export class Sandbox {
 
   get tools() {
     return this.#tools;
+  }
+
+  get context(): EvalContext | undefined {
+    return this.#context;
+  }
+
+  set context(context: EvalContext) {
+    this.#context = context;;
   }
 
   setGlobal(bindings: Record<PropertyKey, unknown> | object): void {

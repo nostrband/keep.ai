@@ -133,17 +133,19 @@ export function QueryProvider({
         // Since our tab's peer is only a local cache,
         // we're interested in worker's status and need to
         // listen to it's events to update our state
+        let wasReady = false;
         workerPort.addEventListener("message", (event) => {
           console.log("worker message", event);
           const { type } = event.data;
           if (type === "worker_sync") {
             // Worker started sync
             console.log("[QueryProvider] Sync message received");
-            setDbStatus("syncing");
+            if (!wasReady) setDbStatus("syncing");
           } else if (type === "worker_eose") {
             // Worker finished sync
             console.log("[QueryProvider] EOSE message received");
             setDbStatus("ready");
+            wasReady = true;
           }
         });
 
