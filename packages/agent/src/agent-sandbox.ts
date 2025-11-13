@@ -73,7 +73,7 @@ export async function createAgentSandbox(api: KeepDbApi) {
     execute: async (opts?: { limit: number }) => {
       return await api.memoryStore.getMessages({
         // default limit
-        limit: 10,
+        limit: 3,
         // copy other options
         ...opts,
         // override thread

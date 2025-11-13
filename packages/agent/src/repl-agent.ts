@@ -8,6 +8,7 @@ import {
 } from "./task-agent";
 import { LanguageModel } from "ai";
 import { AssistantUIMessage } from "@app/proto";
+import debug from "debug";
 
 // Hard limit
 const MAX_STEPS = 100;
@@ -15,6 +16,7 @@ const MAX_STEPS = 100;
 export class ReplAgent {
   public readonly agent: TaskAgent;
   private sandbox: Sandbox;
+  private debug = debug("ReplAgent");
 
   constructor(model: LanguageModel, sandbox: Sandbox, task: Task) {
     this.sandbox = sandbox;
@@ -63,18 +65,18 @@ export class ReplAgent {
       inbox.length = 0;
 
       // Run the step
-      console.log("step", step, "input", input);
+      this.debug("step", step, "input", input);
       let output: StepOutput | undefined;
       try {
         output = await this.agent.runStep(input);
-        console.log("step", step, "output", output);
+        this.debug("step", step, "output", output);
 
         switch (output.kind) {
           case "step": {
             stepResult = await this.sandbox.eval(output.code, {
               timeoutMs: 1000,
             });
-            console.log("step", step, "result", stepResult);
+            this.debug("step", step, "result", stepResult);
             break;
           }
           case "done": {
@@ -86,6 +88,7 @@ export class ReplAgent {
           }
         }
       } catch (e: any) {
+        this.debug("Step error", e);
         stepResult = {
           ok: false,
           error: e.toString(),

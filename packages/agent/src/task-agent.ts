@@ -34,7 +34,7 @@ export type StepInput = {
 
 export type StepKind = "done" | "step" | "wait";
 
-export type StepOutput = { steps: number, reasoning?: string } & (
+export type StepOutput = { steps: number; reasoning?: string } & (
   | { kind: "done"; reply: string; patch?: TaskState }
   | { kind: "step"; code: string; patch?: TaskState }
   | { kind: "wait"; patch: TaskState }
@@ -86,16 +86,13 @@ export class TaskAgent {
       parts: [{ type: "text", text: user }],
       metadata: {
         createdAt: new Date().toISOString(),
-      }
+      },
     });
     const messages: ModelMessage[] = [
       { role: "system", content: system },
       ...convertToModelMessages(this.history),
     ];
-    console.log(
-      "llm request messages",
-      JSON.stringify(messages, null, 2)
-    );
+    console.log("llm request messages", JSON.stringify(messages, null, 2));
 
     const result = streamText({
       model,
@@ -124,14 +121,16 @@ export class TaskAgent {
       ...newMessage,
       id: generateId(),
       metadata: {
-        createdAt: new Date().toISOString()
-      }
+        createdAt: new Date().toISOString(),
+      },
     });
 
     const text = getMessageText(newMessage);
+    this.debug("LLM response text", text);
     this.args.task.onTrace?.({ phase: "llm-output", data: { text } });
 
     const output = this.parseMSP(input.step + 1, text);
+    this.debug("LLM response output", output);
     this.args.task.onTrace?.({ phase: "step-output", data: output });
 
     return output;
@@ -217,7 +216,8 @@ ${tools.join("\n")}
       case "router":
         break;
       case "replier":
-        job = `
+        if (input.step === 0)
+          job = `
 Some background tasks have submitted their reply drafts for user into your TASK_INBOX. Your job is to check the user message history
 and prepare a context-aware reply for user, maintaining a natural flow of the conversation. You might need to deduplicate the
 drafts, or even suppress some of them if the draft is no longer relevant/answered according to recent message history. Leave TASK_REPLY empty 
@@ -268,7 +268,7 @@ in case all drafts should be suppressed, but explain your reasoning in STEP_REAS
       body += [
         "",
         `===${input.result.ok ? "PREV_STEP_RESULT" : "PREV_STEP_ERROR"}===`,
-        safeStringify(input.result.result || input.result.error, 4000),
+        safeStringify(input.result.result || input.result.error, 10000),
       ].join("\n");
     }
 
@@ -278,6 +278,7 @@ in case all drafts should be suppressed, but explain your reasoning in STEP_REAS
   private parseMSP(steps: number, text: string): StepOutput {
     const kind = getSection(text, "STEP_KIND")?.trim();
     switch (this.args.task.type) {
+      case "replier":
       case "router": {
         if (kind !== "done" && kind !== "step")
           throw new Error("STEP_KIND must be 'step' or 'done'");

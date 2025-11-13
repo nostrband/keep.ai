@@ -7,7 +7,13 @@ import {
 } from "./index";
 import { AssistantUIMessage } from "@app/proto";
 import debug from "debug";
-import { InboxItemTarget, KeepDbApi, MAX_STATUS_TTL, Task } from "@app/db";
+import {
+  InboxItem,
+  InboxItemTarget,
+  KeepDbApi,
+  MAX_STATUS_TTL,
+  Task,
+} from "@app/db";
 import { AGENT_STATUS } from "./instructions";
 import { createAgentSandbox } from "./agent-sandbox";
 import { StepOutput, TaskType } from "./task-agent";
@@ -58,12 +64,13 @@ export class ReplWorker {
 
   private async checkInbox() {
     const ensureTask = async (type: InboxItemTarget) => {
-      const routerItems = await this.api.inboxStore.listInboxItems({
+      const items = await this.api.inboxStore.listInboxItems({
         target: type,
         handled: false,
       });
-      if (routerItems.length > 0) {
-        await this.ensureTask("router");
+      this.debug("Inbox items", items.length, "target", type);
+      if (items.length > 0) {
+        await this.ensureTask(type);
       }
     };
     try {
@@ -177,27 +184,11 @@ export class ReplWorker {
         await this.ensureThread(threadId, taskType);
         await this.saveHistory(agent.agent.history, threadId);
 
+        const now = new Date().toISOString();
         if (taskType === "router" && result.reply) {
-          // Send reply to user's thread
-          // FIXME Replier agent will be doing it later
-          this.debug("Save user reply", result.reply);
-          await this.api.memoryStore.saveMessages([
-            {
-              id: generateId(),
-              role: "assistant",
-              metadata: {
-                createdAt: new Date().toISOString(),
-                // FIXME not good!
-                threadId: "main",
-              },
-              parts: [
-                {
-                  type: "text",
-                  text: result.reply,
-                },
-              ],
-            },
-          ]);
+          await this.sendToReplier(result.reply, threadId);
+        } else if (taskType === "replier" && result.reply) {
+          await this.sendToUser(result.reply);
         }
 
         // Task reply for audit traces
@@ -207,7 +198,6 @@ export class ReplWorker {
         await this.api.taskStore.finishTask(task.id, threadId, taskReply, "");
 
         // Mark items as finished
-        const now = new Date().toISOString();
         for (const item of inboxItems)
           await this.api.inboxStore.handleInboxItem(item.id, now, threadId);
 
@@ -359,6 +349,7 @@ ${result.reply || ""}
     const tasks = await this.api.taskStore.listTasks();
     if (tasks.find((t) => t.type === target)) return;
 
+    this.debug("Creating task: ", target);
     const taskId = bytesToHex(randomBytes(16));
     const timestamp = Math.floor(Date.now() / 1000) - 1; // -1 - force to run immediately
     await this.api.taskStore.addTask(
@@ -367,8 +358,46 @@ ${result.reply || ""}
       "", // task content
       target, // type
       "", // Empty thread id, task has it's own thread
-      "Router", // title
+      target, // title
       "" // cron
     );
+  }
+
+  private async sendToReplier(reply: string, threadId: string) {
+    this.debug("Send reply to replier", reply);
+    // Send router's reply to replier
+    const inboxItem: InboxItem = {
+      id: threadId,
+      source: "router",
+      source_id: threadId,
+      target: "replier",
+      target_id: "",
+      timestamp: new Date().toISOString(),
+      content: reply,
+      handler_thread_id: "",
+      handler_timestamp: "",
+    };
+    await this.api.inboxStore.saveInbox(inboxItem);
+  }
+
+  private async sendToUser(reply: string) {
+    this.debug("Save user reply", reply);
+    await this.api.memoryStore.saveMessages([
+      {
+        id: generateId(),
+        role: "assistant",
+        metadata: {
+          createdAt: new Date().toISOString(),
+          // FIXME not good!
+          threadId: "main",
+        },
+        parts: [
+          {
+            type: "text",
+            text: reply,
+          },
+        ],
+      },
+    ]);
   }
 }

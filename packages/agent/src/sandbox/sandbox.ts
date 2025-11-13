@@ -126,7 +126,7 @@ export class Sandbox {
     });
 
     const filename = options.filename ?? "code.js";
-    const wrappedSource = `(async () => { ${code} })()`;
+    const wrappedSource = `(async () => { ${code}\n })()`; // \n in case code ends with // comment
 
     try {
       // console.log("code", wrappedSource);
