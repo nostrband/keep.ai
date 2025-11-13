@@ -46,3 +46,12 @@ export {
 export { ReplWorker, type ReplWorkerConfig } from "./repl-worker";
 
 export { createAgentSandbox } from "./agent-sandbox"
+
+export { initSandbox } from './sandbox/sandbox';
+
+export type {
+  Sandbox,
+  SandboxOptions,
+  EvalOptions,
+  EvalResult,
+} from './sandbox/sandbox';

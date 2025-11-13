@@ -1,9 +1,9 @@
 import { Command } from "commander";
 import { createDBNode, getCurrentUser, getDBPath } from "@app/node";
-import type { Sandbox } from "@app/node";
+import type { Sandbox } from "@app/agent";
 import * as readline from "readline";
 import debug from "debug";
-import { createAgentSandbox, makeGetWeatherTool } from "@app/agent";
+import { createAgentSandbox } from "@app/agent";
 import { KeepDb, KeepDbApi } from "@app/db";
 
 const debugSandbox = debug("cli:sandbox");
@@ -46,7 +46,7 @@ async function runSandboxCommand(): Promise<void> {
 
   try {
     sandbox = await createAgentSandbox(api);
-    debugSandbox("Sandbox initialized, env: ", sandbox.env);
+    debugSandbox("Sandbox initialized, tools: ", sandbox.tools);
 
     for await (const line of rl) {
       const source = normalizeSource(line);
@@ -74,7 +74,7 @@ async function runSandboxCommand(): Promise<void> {
     debugSandbox("Sandbox command failed", error);
   } finally {
     rl.close();
-    sandbox?.[Symbol.dispose]?.();
+    sandbox?.dispose();
     debugSandbox("Sandbox disposed");
     if (encounteredError) {
       process.exitCode = 1;

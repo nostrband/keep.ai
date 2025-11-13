@@ -19,13 +19,14 @@
   },
   "dependencies": {
     "@app/db": "file:../db",
-    "@app/proto": "file:../proto",
     "@app/node": "file:../node",
+    "@app/proto": "file:../proto",
     "@openrouter/ai-sdk-provider": "^1.2.0",
     "ai": "^5.0.76",
     "croner": "^9.1.0",
     "debug": "^4.3.4",
-    "exa-js": "^2.0.0"
+    "exa-js": "^2.0.0",
+    "quickjs-emscripten": "^0.31.0"
   },
   "devDependencies": {
     "tsup": "^7.2.0",

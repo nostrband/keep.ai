@@ -1,6 +1,6 @@
 import { Command } from "commander";
-import { initSandbox } from "@app/node";
-import type { Sandbox } from "@app/node";
+import { initSandbox } from "@app/agent";
+import type { Sandbox } from "@app/agent";
 import * as readline from "readline";
 import debug from "debug";
 import {
@@ -170,7 +170,7 @@ async function runAgentCommand(modelName: string): Promise<void> {
 
     console.log("global", global);
     sandbox.setGlobal(global);
-    console.log("env", sandbox.env);
+    console.log("tools", sandbox.tools);
 
     // const test = await sandbox.eval("return docs('tools.getWeatherAsync')\n");
     // console.log("test", test);
@@ -188,10 +188,11 @@ async function runAgentCommand(modelName: string): Promise<void> {
         type: "router",
       };
       const agent = new ReplAgent(model, sandbox, task);
-      agent.setInbox([source]);
 
       try {
-        const reply = await agent.loop();
+        const reply = await agent.loop("start", {
+          inbox: [source],
+        });
         console.log("reply", reply);
       } catch (error) {
         encounteredError = true;
@@ -205,7 +206,7 @@ async function runAgentCommand(modelName: string): Promise<void> {
     debugAgent("Agent failed", error);
   } finally {
     rl.close();
-    sandbox?.[Symbol.dispose]?.();
+    sandbox?.dispose();
     debugAgent("Sandbox disposed");
     if (encounteredError) {
       process.exitCode = 1;

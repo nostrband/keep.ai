@@ -1,4 +1,4 @@
-import { EvalResult, Sandbox } from "@app/node";
+import { EvalResult, Sandbox } from "./sandbox/sandbox";
 import {
   StepInput,
   StepOutput,
@@ -7,7 +7,7 @@ import {
   TaskAgent,
 } from "./task-agent";
 import { LanguageModel } from "ai";
-import { AssistantUIMessage } from "packages/proto/dist";
+import { AssistantUIMessage } from "@app/proto";
 
 // Hard limit
 const MAX_STEPS = 100;
@@ -32,7 +32,7 @@ export class ReplAgent {
     opts?: {
       history?: AssistantUIMessage[],
       inbox?: string[];
-      onStep: (
+      onStep?: (
         step: number,
         input: StepInput,
         output?: StepOutput,

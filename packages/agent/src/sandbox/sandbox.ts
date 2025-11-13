@@ -60,7 +60,7 @@ export class Sandbox {
     this.#defaultTimeoutMs = options.timeoutMs ?? 300;
   }
 
-  [Symbol.dispose](): void {
+  dispose(): void {
     this.#ctx.dispose();
     this.#rt.dispose();
     this.#abortedCallback = undefined;

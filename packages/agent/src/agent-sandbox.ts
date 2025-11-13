@@ -1,4 +1,4 @@
-import { initSandbox } from "@app/node";
+import { initSandbox } from "./sandbox/sandbox";
 import {
   makeCreateNoteTool,
   makeDeleteNoteTool,
@@ -9,7 +9,7 @@ import {
   makeUpdateNoteTool,
 } from "./tools";
 import { z, ZodFirstPartyTypeKind as K } from "zod";
-import { KeepDbApi } from "packages/db/dist";
+import { KeepDbApi } from "@app/db";
 
 export async function createAgentSandbox(api: KeepDbApi) {
   const sandbox = await initSandbox();

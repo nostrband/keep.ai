@@ -1,5 +1,5 @@
 import { beforeEach, afterEach, describe, expect, it } from "vitest";
-import { initSandbox, Sandbox } from "../../node/src/sandbox/sandbox";
+import { initSandbox, Sandbox } from "../../agent/src/sandbox/sandbox";
 
 async function expectOk<T>(result: { ok: boolean; result?: T; error?: string }): Promise<T> {
   if (!result.ok) {
