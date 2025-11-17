@@ -156,7 +156,8 @@ export class KeepWorker {
       debugKeepWorker(`checking @ ${new Date().toISOString()}`);
 
       // Get the next task for the user (only returns tasks ready to trigger)
-      const task = await this.api.taskStore.getNextTask();
+      const tasks = await this.api.taskStore.getTodoTasks();
+      const task = tasks[0];
 
       if (task) {
         debugKeepWorker(

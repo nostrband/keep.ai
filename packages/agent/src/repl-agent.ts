@@ -3,10 +3,18 @@ import {
   StepInput,
   StepOutput,
   StepReason,
-  Task,
+  AgentTask,
   TaskState,
 } from "./repl-agent-types";
-import { convertToModelMessages, generateId, LanguageModel, ModelMessage, readUIMessageStream, streamText, UIMessage } from "ai";
+import {
+  convertToModelMessages,
+  generateId,
+  LanguageModel,
+  ModelMessage,
+  readUIMessageStream,
+  streamText,
+  UIMessage,
+} from "ai";
 import { AssistantUIMessage } from "@app/proto";
 import debug from "debug";
 import { ReplEnv } from "./repl-env";
@@ -29,7 +37,7 @@ export class ReplAgent {
     model: LanguageModel,
     env: ReplEnv,
     sandbox: Sandbox,
-    task: Task
+    task: AgentTask
   ) {
     this.model = model;
     this.sandbox = sandbox;
@@ -79,29 +87,19 @@ export class ReplAgent {
         output = await this.runStep(input);
         this.debug("step", step, "output", output);
 
-        switch (output.kind) {
-          case "code": {
-            // Update step in contexxt
-            if (this.sandbox.context)
-              this.sandbox.context = {
-                ...this.sandbox.context,
-                step,
-              };
+        if (output.kind === "code") {
+          // Update step in context
+          if (this.sandbox.context)
+            this.sandbox.context = {
+              ...this.sandbox.context,
+              step,
+            };
 
-            // Eval
-            stepResult = await this.sandbox.eval(output.code, {
-              timeoutMs: 1000,
-            });
-            this.debug("step", step, "result", stepResult);
-            break;
-          }
-          case "done": {
-            // noop, just return below
-            break;
-          }
-          default: {
-            throw new Error("Not implemented " + output.kind);
-          }
+          // Eval
+          stepResult = await this.sandbox.eval(output.code, {
+            timeoutMs: 1000,
+          });
+          this.debug("step", step, "result", stepResult);
         }
       } catch (e: any) {
         this.debug("Step error", e);

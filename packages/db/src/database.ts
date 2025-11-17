@@ -6,6 +6,7 @@ import { migrateV2 } from "./migrations/v2";
 import { migrateV3 } from "./migrations/v3";
 import { migrateV4 } from "./migrations/v4";
 import { migrateV5 } from "./migrations/v5";
+import { migrateV6 } from "./migrations/v6";
 
 const debugDatabase = debug("db:database");
 
@@ -58,6 +59,7 @@ export class KeepDb implements CRSqliteDB {
       [3, migrateV3],
       [4, migrateV4],
       [5, migrateV5],
+      [6, migrateV6],
     ]);
 
     const readVersion = async () => {

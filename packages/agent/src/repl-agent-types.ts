@@ -7,7 +7,6 @@ export type TaskState = {
   notes?: string;
   plan?: string;
   asks?: string;
-  resumeAt?: string;
 };
 
 export type StepInput = {
@@ -25,10 +24,10 @@ export type StepInput = {
 export type StepOutput = { steps: number; reasoning?: string } & (
   | { kind: "done"; reply: string; patch?: TaskState }
   | { kind: "code"; code: string; patch?: TaskState }
-  | { kind: "wait"; patch: TaskState }
+  | { kind: "wait"; reply?: string; resumeAt?: string; patch?: TaskState }
 );
 
-export type Task = {
+export type AgentTask = {
   type: TaskType;
   state?: TaskState;
 };

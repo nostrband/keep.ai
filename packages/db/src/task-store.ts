@@ -21,6 +21,65 @@ export interface TaskState {
   asks: string;
 }
 
+export interface TaskRun {
+  id: string;
+  task_id: string;
+  type: string;
+  start_timestamp: string;
+  thread_id: string;
+  reason: string; // start | input | timer
+  inbox: string;
+  model: string;
+  input_goal: string;
+  input_notes: string;
+  input_plan: string;
+  input_asks: string;
+  output_goal: string;
+  output_notes: string;
+  output_plan: string;
+  output_asks: string;
+  end_timestamp: string;
+  state: string; // error | done | wait
+  reply: string;
+  error: string;
+  steps: number;
+  run_sec: number;
+  input_tokens: number;
+  output_tokens: number;
+  cached_tokens: number;
+}
+
+export interface TaskRunStart {
+  id: string;
+  task_id: string;
+  type: string;
+  start_timestamp: string;
+  thread_id: string;
+  reason: string; // start | input | timer
+  inbox: string;
+  input_goal: string;
+  input_notes: string;
+  input_plan: string;
+  input_asks: string;
+  model: string;
+}
+
+export interface TaskRunEnd {
+  id: string;
+  end_timestamp: string;
+  output_goal: string;
+  output_notes: string;
+  output_plan: string;
+  output_asks: string;
+  state: string; // done | wait
+  reply: string;
+  steps: number;
+  run_sec: number;
+  input_tokens: number;
+  output_tokens: number;
+  cached_tokens: number;
+}
+
 export class TaskStore {
   private db: CRSqliteDB;
 
@@ -122,21 +181,19 @@ export class TaskStore {
 
   // Get task with oldest timestamp with reply '' for this user that is ready to trigger (timestamp <= now)
   // Prioritizes tasks with 'message' type over other types
-  async getNextTask(): Promise<Task | null> {
+  async getTodoTasks(): Promise<Task[]> {
     const currentTimeSeconds = Math.floor(Date.now() / 1000); // Convert milliseconds to seconds
 
     // Fetch all pending tasks (no LIMIT 1)
     const results = await this.db.db.execO<Record<string, unknown>>(
       `SELECT id, timestamp, task, reply, state, thread_id, error, type, title, cron
           FROM tasks
-          WHERE state = '' AND timestamp <= ? AND (deleted IS NULL OR deleted = FALSE)
+          WHERE (state = '' OR state = 'wait') AND timestamp <= ? AND (deleted IS NULL OR deleted = FALSE)
           ORDER BY timestamp ASC`,
       [currentTimeSeconds]
     );
 
-    if (!results || results.length === 0) {
-      return null;
-    }
+    if (!results) return [];
 
     // Convert results to Task objects
     const tasks: Task[] = results.map((row) => ({
@@ -152,14 +209,7 @@ export class TaskStore {
       cron: (row.cron as string) || "",
     }));
 
-    // First, look for tasks with 'message' type
-    const messageTask = tasks.find((task) => task.type === "message");
-    if (messageTask) {
-      return messageTask;
-    }
-
-    // If no 'message' type task found, return the oldest task (first in the ordered list)
-    return tasks[0];
+    return tasks;
   }
 
   // Get task by id
@@ -188,6 +238,38 @@ export class TaskStore {
       title: (row.title as string) || "",
       cron: (row.cron as string) || "",
     };
+  }
+
+  // Get tasks by IDs
+  async getTasks(ids: string[]): Promise<Task[]> {
+    if (ids.length === 0) {
+      return [];
+    }
+
+    // Create placeholders for the IN clause (?, ?, ?, ...)
+    const placeholders = ids.map(() => '?').join(', ');
+    
+    const sql = `SELECT id, timestamp, task, reply, state, thread_id, error, type, title, cron
+                 FROM tasks
+                 WHERE id IN (${placeholders}) AND (deleted IS NULL OR deleted = FALSE)
+                 ORDER BY timestamp DESC`;
+
+    const results = await this.db.db.execO<Record<string, unknown>>(sql, ids);
+
+    if (!results) return [];
+
+    return results.map((row) => ({
+      id: row.id as string,
+      timestamp: row.timestamp as number,
+      task: row.task as string,
+      reply: row.reply as string,
+      state: row.state as string,
+      thread_id: row.thread_id as string,
+      error: row.error as string,
+      type: (row.type as string) || "",
+      title: (row.title as string) || "",
+      cron: (row.cron as string) || "",
+    }));
   }
 
   // Finish task - error if id not found or already reply !== '', error if input reply === ''
@@ -273,7 +355,13 @@ export class TaskStore {
     await this.db.db.exec(
       `INSERT OR REPLACE INTO task_states (id, goal, notes, plan, asks)
           VALUES (?, ?, ?, ?, ?)`,
-      [taskState.id, taskState.goal, taskState.notes, taskState.plan, taskState.asks]
+      [
+        taskState.id,
+        taskState.goal,
+        taskState.notes,
+        taskState.plan,
+        taskState.asks,
+      ]
     );
   }
 
@@ -297,6 +385,178 @@ export class TaskStore {
       notes: row.notes as string,
       plan: row.plan as string,
       asks: row.asks as string,
+    };
+  }
+
+  // Create a new task run
+  async createTaskRun(runStart: TaskRunStart): Promise<void> {
+    await this.db.db.exec(
+      `INSERT INTO task_runs (
+        id, task_id, type, start_timestamp, thread_id, reason, inbox, model,
+        input_goal, input_notes, input_plan, input_asks,
+        output_goal, output_notes, output_plan, output_asks,
+        end_timestamp, state, reply, error, steps, run_sec,
+        input_tokens, output_tokens, cached_tokens
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', '', '', '', '', '', '', 0, 0, 0, 0, 0)`,
+      [
+        runStart.id,
+        runStart.task_id,
+        runStart.type,
+        runStart.start_timestamp,
+        runStart.thread_id,
+        runStart.reason,
+        runStart.inbox,
+        runStart.model,
+        runStart.input_goal,
+        runStart.input_notes,
+        runStart.input_plan,
+        runStart.input_asks,
+      ]
+    );
+  }
+
+  // Finish a task run by updating it with end data
+  async finishTaskRun(runEnd: TaskRunEnd): Promise<void> {
+    await this.db.db.exec(
+      `UPDATE task_runs SET
+        end_timestamp = ?,
+        output_goal = ?,
+        output_notes = ?,
+        output_plan = ?,
+        output_asks = ?,
+        state = ?,
+        reply = ?,
+        steps = ?,
+        run_sec = ?,
+        input_tokens = ?,
+        output_tokens = ?,
+        cached_tokens = ?
+      WHERE id = ?`,
+      [
+        runEnd.end_timestamp,
+        runEnd.output_goal,
+        runEnd.output_notes,
+        runEnd.output_plan,
+        runEnd.output_asks,
+        runEnd.state,
+        runEnd.reply,
+        runEnd.steps,
+        runEnd.run_sec,
+        runEnd.input_tokens,
+        runEnd.output_tokens,
+        runEnd.cached_tokens,
+        runEnd.id,
+      ]
+    );
+  }
+
+
+  // Finish a task run by updating it with end data
+  async errorTaskRun(id: string, end_timestamp: string, error: string): Promise<void> {
+    await this.db.db.exec(
+      `UPDATE task_runs SET
+        end_timestamp = ?,
+        error = ?
+      WHERE id = ?`,
+      [
+        end_timestamp,
+        error,
+        id,
+      ]
+    );
+  }
+
+  // List all task runs for a specific task
+  async listTaskRuns(taskId: string): Promise<TaskRun[]> {
+    const results = await this.db.db.execO<Record<string, unknown>>(
+      `SELECT
+        id, task_id, type, start_timestamp, thread_id, reason, inbox, model,
+        input_goal, input_notes, input_plan, input_asks,
+        output_goal, output_notes, output_plan, output_asks,
+        end_timestamp, state, reply, error, steps, run_sec,
+        input_tokens, output_tokens, cached_tokens
+      FROM task_runs
+      WHERE task_id = ?
+      ORDER BY start_timestamp DESC`,
+      [taskId]
+    );
+
+    if (!results) return [];
+
+    return results.map((row) => ({
+      id: row.id as string,
+      task_id: row.task_id as string,
+      type: row.type as string,
+      start_timestamp: row.start_timestamp as string,
+      thread_id: row.thread_id as string,
+      reason: row.reason as string,
+      inbox: row.inbox as string,
+      model: row.model as string,
+      input_goal: row.input_goal as string,
+      input_notes: row.input_notes as string,
+      input_plan: row.input_plan as string,
+      input_asks: row.input_asks as string,
+      output_goal: row.output_goal as string,
+      output_notes: row.output_notes as string,
+      output_plan: row.output_plan as string,
+      output_asks: row.output_asks as string,
+      end_timestamp: row.end_timestamp as string,
+      state: row.state as string,
+      reply: row.reply as string,
+      error: row.error as string,
+      steps: row.steps as number,
+      run_sec: row.run_sec as number,
+      input_tokens: row.input_tokens as number,
+      output_tokens: row.output_tokens as number,
+      cached_tokens: row.cached_tokens as number,
+    }));
+  }
+
+  // Get a specific task run by ID
+  async getTaskRun(runId: string): Promise<TaskRun> {
+    const results = await this.db.db.execO<Record<string, unknown>>(
+      `SELECT
+        id, task_id, type, start_timestamp, thread_id, reason, inbox, model,
+        input_goal, input_notes, input_plan, input_asks,
+        output_goal, output_notes, output_plan, output_asks,
+        end_timestamp, state, reply, error, steps, run_sec,
+        input_tokens, output_tokens, cached_tokens
+      FROM task_runs
+      WHERE id = ?`,
+      [runId]
+    );
+
+    if (!results || results.length === 0) {
+      throw new Error("Task run not found");
+    }
+
+    const row = results[0];
+    return {
+      id: row.id as string,
+      task_id: row.task_id as string,
+      type: row.type as string,
+      start_timestamp: row.start_timestamp as string,
+      thread_id: row.thread_id as string,
+      reason: row.reason as string,
+      inbox: row.inbox as string,
+      model: row.model as string,
+      input_goal: row.input_goal as string,
+      input_notes: row.input_notes as string,
+      input_plan: row.input_plan as string,
+      input_asks: row.input_asks as string,
+      output_goal: row.output_goal as string,
+      output_notes: row.output_notes as string,
+      output_plan: row.output_plan as string,
+      output_asks: row.output_asks as string,
+      end_timestamp: row.end_timestamp as string,
+      state: row.state as string,
+      reply: row.reply as string,
+      error: row.error as string,
+      steps: row.steps as number,
+      run_sec: row.run_sec as number,
+      input_tokens: row.input_tokens as number,
+      output_tokens: row.output_tokens as number,
+      cached_tokens: row.cached_tokens as number,
     };
   }
 }

@@ -12,12 +12,14 @@ import { z, ZodFirstPartyTypeKind as K } from "zod";
 import { generateId } from "ai";
 import { EvalContext, EvalGlobal } from "./sandbox/sandbox";
 import { StepInput, TaskState, TaskType } from "./repl-agent-types";
+import debug from "debug";
 
 export class ReplEnv {
   private api: KeepDbApi;
   private type: TaskType;
   private getContext: () => EvalContext;
-  #tools: string[] = [];
+  #tools = new Map<string, string>();
+  private debug = debug("ReplEnv");
 
   constructor(api: KeepDbApi, type: TaskType, getContext: () => EvalContext) {
     this.api = api;
@@ -33,6 +35,7 @@ export class ReplEnv {
     switch (this.type) {
       case "router":
       case "worker":
+        return 0.1;
       case "replier":
         return 0.2;
     }
@@ -43,7 +46,6 @@ export class ReplEnv {
     const addTool = (global: any, ns: string, name: string, tool: any) => {
       if (!(ns in global)) global[ns] = {};
       global[ns][name] = tool.execute;
-      this.tools.push(`${ns}.${name}`);
 
       if (!("docs" in global)) global["docs"] = {};
       if (!(ns in global["docs"])) global["docs"][ns] = {};
@@ -52,7 +54,10 @@ export class ReplEnv {
         desc.push(...["===Input===", printSchema(tool.inputSchema)]);
       if (tool.outputSchema)
         desc.push(...["===Output===", printSchema(tool.outputSchema)]);
-      docs[ns + "." + name] = desc.join("\n");
+
+      const doc = desc.join("\n");
+      docs[ns + "." + name] = doc;
+      this.tools.set(`${ns}.${name}`, doc);
     };
 
     const global: any = {};
@@ -70,38 +75,52 @@ export class ReplEnv {
     };
 
     // Tools
-    addTool(global, "tools", "weather", makeGetWeatherTool());
-    addTool(global, "memory", "getNote", makeGetNoteTool(this.api.noteStore));
-    addTool(
-      global,
-      "memory",
-      "listNotes",
-      makeListNotesTool(this.api.noteStore)
-    );
-    addTool(
-      global,
-      "memory",
-      "searchNotes",
-      makeSearchNotesTool(this.api.noteStore)
-    );
-    addTool(
-      global,
-      "memory",
-      "createNote",
-      makeCreateNoteTool(this.api.noteStore)
-    );
-    addTool(
-      global,
-      "memory",
-      "updateNote",
-      makeUpdateNoteTool(this.api.noteStore)
-    );
-    addTool(
-      global,
-      "memory",
-      "deleteNote",
-      makeDeleteNoteTool(this.api.noteStore)
-    );
+    if (this.type !== "replier") {
+      addTool(global, "tools", "weather", makeGetWeatherTool());
+    }
+
+    // Memory
+
+    if (this.type !== "replier") {
+      // Notes
+      addTool(global, "memory", "getNote", makeGetNoteTool(this.api.noteStore));
+      addTool(
+        global,
+        "memory",
+        "listNotes",
+        makeListNotesTool(this.api.noteStore)
+      );
+      addTool(
+        global,
+        "memory",
+        "searchNotes",
+        makeSearchNotesTool(this.api.noteStore)
+      );
+
+      // Worker only
+      if (this.type === "worker") {
+        addTool(
+          global,
+          "memory",
+          "createNote",
+          makeCreateNoteTool(this.api.noteStore)
+        );
+        addTool(
+          global,
+          "memory",
+          "updateNote",
+          makeUpdateNoteTool(this.api.noteStore)
+        );
+        addTool(
+          global,
+          "memory",
+          "deleteNote",
+          makeDeleteNoteTool(this.api.noteStore)
+        );
+      }
+    }
+
+    // Message history available for all agent types
     addTool(global, "memory", "listMessages", {
       execute: async (opts?: { limit: number }) => {
         return await this.api.memoryStore.getMessages({
@@ -114,7 +133,7 @@ export class ReplEnv {
         });
       },
       description:
-        "Get list of messages exchanged with user, most-recent-first.",
+        "Get list of recent messages exchanged with user, oldest-first.",
       inputSchema: z.object({
         limit: z
           .number()
@@ -142,186 +161,215 @@ export class ReplEnv {
     });
 
     // Tasks
-    addTool(global, "tasks", "add", {
-      execute: async (opts: {
-        title: string;
-        goal?: string;
-        notes?: string;
-      }) => {
-        const id = generateId();
-        await this.api.taskStore.addTask(
-          id,
-          Math.floor(Date.now() / 1000),
-          "",
-          "worker",
-          "",
-          opts.title
-        );
-        await this.api.taskStore.saveState({
-          id,
-          goal: opts.goal || "",
-          notes: opts.notes || "",
-          asks: "",
-          plan: "",
-        });
-      },
-      description: "Create a background task",
-      inputSchema: z.object({
-        title: z.string().describe("Task title for task management and audit"),
-        goal: z
-          .string()
-          .optional()
-          .nullable()
-          .describe("Task goal for worker agent"),
-        notes: z
-          .string()
-          .optional()
-          .nullable()
-          .describe("Task notes for worker agent"),
-      }),
-      outputSchema: z.array(z.string().describe("Task id")),
-    });
 
-    addTool(global, "tasks", "get", {
-      execute: async (id: string) => {
-        const task = await this.api.taskStore.getTask(id);
-        const state = await this.api.taskStore.getState(id);
-        return {
-          id: task.id,
-          title: task.title,
-          state: task.state,
-          error: task.error,
-          runTime: new Date(task.timestamp * 1000),
-          goal: state?.goal || "",
-          notes: state?.notes || "",
-          plan: state?.plan || "",
-          asks: state?.asks || "",
-        };
-      },
-      description: "Get a background task",
-      inputSchema: z.string().describe("Task id"),
-      outputSchema: z.array(
-        z.object({
-          id: z.string(),
-          title: z.string(),
-          state: z.string(),
-          error: z.string(),
-          runTime: z
+    // Router or Worker
+    if (this.type !== "replier") {
+      addTool(global, "tasks", "add", {
+        execute: async (opts: {
+          title: string;
+          goal?: string;
+          notes?: string;
+          startAt?: string;
+        }) => {
+          const id = generateId();
+          const timestamp = Math.floor(
+            (opts.startAt ? new Date(opts.startAt).getTime() : Date.now()) /
+              1000
+          );
+          await this.api.taskStore.addTask(
+            id,
+            timestamp,
+            "",
+            "worker",
+            "",
+            opts.title
+          );
+          await this.api.taskStore.saveState({
+            id,
+            goal: opts.goal || "",
+            notes: opts.notes || "",
+            asks: "",
+            plan: "",
+          });
+          return {
+            id,
+            ...opts,
+          };
+        },
+        description: "Create a background task",
+        inputSchema: z.object({
+          title: z
             .string()
-            .describe("Date time when task is scheduled to run"),
-        })
-      ),
-    });
-
-    addTool(global, "tasks", "list", {
-      execute: async (opts?: {
-        include_finished?: boolean;
-        until?: string;
-      }) => {
-        const tasks = await this.api.taskStore.listTasks(
-          opts?.include_finished,
-          "worker",
-          opts?.until
-            ? Math.floor(new Date(opts.until).getTime() / 1000)
-            : undefined
-        );
-        return tasks.map((task) => ({
-          id: task.id,
-          title: task.title,
-          state: task.state,
-          error: task.error,
-        }));
-      },
-      description: "List background tasks",
-      inputSchema: z.object({
-        include_finished: z
-          .boolean()
-          .optional()
-          .nullable()
-          .describe("Include finished tasks to the list"),
-        until: z
-          .string()
-          .optional()
-          .nullable()
-          .describe(
-            "Max runTime field of task, can be used for pagination through older tasks"
-          ),
-      }),
-      outputSchema: z.array(
-        z.object({
-          id: z.string(),
-          title: z.string(),
-          state: z.string(),
-          error: z.string(),
-          runTime: z
+            .describe("Task title for task management and audit"),
+          goal: z
             .string()
-            .describe("Date time when task is scheduled to run"),
-        })
-      ),
-    });
+            .optional()
+            .nullable()
+            .describe("Task goal for worker agent"),
+          notes: z
+            .string()
+            .optional()
+            .nullable()
+            .describe("Task notes for worker agent"),
+          startAt: z
+            .string()
+            .optional()
+            .nullable()
+            .describe("ISO date-time when task should be launched"),
+        }),
+        outputSchema: z.array(z.string().describe("Task id")),
+      });
 
-    addTool(global, "tasks", "cancel", {
-      execute: async (opts: { id: string; reason?: string }) => {
-        let { id, reason } = opts;
-        if (typeof opts === "string") id = opts;
+      addTool(global, "tasks", "get", {
+        execute: async (id: string) => {
+          const task = await this.api.taskStore.getTask(id);
+          const state = await this.api.taskStore.getState(id);
+          return {
+            id: task.id,
+            title: task.title,
+            state: task.state,
+            error: task.error,
+            runTime: new Date(task.timestamp * 1000),
+            goal: state?.goal || "",
+            notes: state?.notes || "",
+            plan: state?.plan || "",
+            asks: state?.asks || "",
+          };
+        },
+        description: "Get a background task",
+        inputSchema: z.string().describe("Task id"),
+        outputSchema: z.array(
+          z.object({
+            id: z.string(),
+            title: z.string(),
+            state: z.string(),
+            error: z.string(),
+            runTime: z
+              .string()
+              .describe("Date time when task is scheduled to run"),
+          })
+        ),
+      });
 
-        const task = await this.api.taskStore.getTask(id);
-        if (!task) throw new Error("Task not found");
+      addTool(global, "tasks", "list", {
+        execute: async (opts?: {
+          include_finished?: boolean;
+          until?: string;
+        }) => {
+          const tasks = await this.api.taskStore.listTasks(
+            opts?.include_finished,
+            "worker",
+            opts?.until
+              ? Math.floor(new Date(opts.until).getTime() / 1000)
+              : undefined
+          );
+          return tasks.map((task) => ({
+            id: task.id,
+            title: task.title,
+            state: task.state,
+            error: task.error,
+          }));
+        },
+        description: "List background tasks",
+        inputSchema: z.object({
+          include_finished: z
+            .boolean()
+            .optional()
+            .nullable()
+            .describe("Include finished tasks to the list"),
+          until: z
+            .string()
+            .optional()
+            .nullable()
+            .describe(
+              "Max runTime field of task, can be used for pagination through older tasks"
+            ),
+        }),
+        outputSchema: z.array(
+          z.object({
+            id: z.string(),
+            title: z.string(),
+            state: z.string(),
+            error: z.string(),
+            runTime: z
+              .string()
+              .describe("Date time when task is scheduled to run"),
+          })
+        ),
+      });
 
-        await this.api.taskStore.finishTask(
-          id,
-          "",
-          "Cancelled",
-          reason || "Cancelled"
-        );
-      },
-      description: "Cancel a task.",
-      inputSchema: z.object({
-        id: z.string(),
-        reason: z
-          .string()
-          .optional()
-          .nullable()
-          .describe("Cancel reason for audit traces"),
-      }),
-    });
+      if (this.type === "worker") {
+        //   addTool(global, "tasks", "cancelCurrentTask", {
+        //     execute: async (opts: { reason?: string }) => {
+        //       let { reason } = opts;
+        //       if (typeof opts === "string") reason = opts;
+        //       const context = this.getContext();
+        //       if (!context) throw new Error("No eval context");
+        //       if (context.type !== "worker")
+        //         throw new Error("Only worker can cancel it's own task");
+        //       this.debug("Cancel task", context.taskId);
+        //       await this.api.taskStore.finishTask(
+        //         context.taskId,
+        //         "",
+        //         "Cancelled",
+        //         reason || "Cancelled"
+        //       );
+        //     },
+        //     description: "Cancel this current task.",
+        //     inputSchema: z.object({
+        //       reason: z
+        //         .string()
+        //         .optional()
+        //         .nullable()
+        //         .describe("Cancel reason for audit traces"),
+        //     }),
+        //   });
+      }
 
-    addTool(global, "tasks", "sendToTaskInbox", {
-      execute: async (opts: { id: string; message: string }) => {
-        const task = await this.api.taskStore.getTask(opts.id);
-        if (!task) throw new Error("Task not found");
+      addTool(global, "tasks", "sendToTaskInbox", {
+        execute: async (opts: { id: string; message: string }) => {
+          const task = await this.api.taskStore.getTask(opts.id);
+          if (!task) throw new Error("Task not found");
 
-        const context = this.getContext();
-        if (!context) throw new Error("No eval context");
-        if (context.type === "replier")
-          throw new Error("Replier can't send to inbox");
+          const context = this.getContext();
+          if (!context) throw new Error("No eval context");
+          if (context.type === "replier")
+            throw new Error("Replier can't send to inbox");
 
-        await this.api.inboxStore.saveInbox({
-          id: `${context.taskThreadId}.${context.step}.${generateId()}`,
-          source: context.type,
-          source_id: context.taskId,
-          target: "worker",
-          target_id: opts.id,
-          timestamp: new Date().toISOString(),
-          content: JSON.stringify({ role: "assistant", content: opts.message }),
-          handler_thread_id: "",
-          handler_timestamp: "",
-        });
-      },
-      description: "Send a message to task inbox",
-      inputSchema: z.object({
-        id: z.string().describe("Task id"),
-        message: z.string().describe("Message for the task handler"),
-      }),
-    });
-
+          const id = `${context.taskThreadId}.${context.step}.${generateId()}`;
+          await this.api.inboxStore.saveInbox({
+            id,
+            source: context.type,
+            source_id: context.taskId,
+            target: "worker",
+            target_id: opts.id,
+            timestamp: new Date().toISOString(),
+            content: JSON.stringify({
+              id,
+              role: "assistant",
+              content: opts.message,
+            }),
+            handler_thread_id: "",
+            handler_timestamp: "",
+          });
+        },
+        description: "Send a message to task inbox",
+        inputSchema: z.object({
+          id: z.string().describe("Task id"),
+          message: z.string().describe("Message for the task handler"),
+        }),
+      });
+    }
     return global;
   }
 
   async buildSystem(): Promise<string> {
     let systemPrompt = "";
     switch (this.type) {
-      case "replier":
+      case "replier": {
+        systemPrompt = this.replierSystemPrompt();
+        break;
+      }
       case "router": {
         systemPrompt = this.routerSystemPrompt();
         break;
@@ -346,20 +394,43 @@ ${systemPrompt}
     if (input.step === 0) {
       switch (this.type) {
         case "router":
-          // FIXME parse user query, only one-shot replies, create tasks for anything else
           job.push(
             ...[
-              "Read user messages in TASK_INBOX and act accordingly. Use memory.* tools to understand the context better.",
+              "===INSTRUCTIONS===",
+              "Your job is to understand the new input in TASK_INBOX and manage background tasks accordingly.",
+              "- You may use `memory.*` tools to read context (read-only).",
+              "- You may NOT update notes or make other side-effects directly; create tasks for that using `tasks.*`.",
+              "- If a relevant task exists and the user message adds information → use `tasks.sendToTaskInbox`.",
+              "- Before creating a new task ALWAYS check for existing relevant task.",
+              "- If user's goal is unclear → create a task with a proper goal to clarify the input.",
+              "- You may answer directly ONLY for simple one-shot read-only queries (e.g., 'what time is it?', 'calc 456*9876' etc), ",
+              "otherwise route/spawn and keep the user reply minimal (emoji or a short confirmation).",
             ]
           );
           break;
         case "replier":
           job.push(
             ...[
-              "Some background tasks have submitted their reply drafts for user into your TASK_INBOX. Your job is to check the user message history",
-              "and prepare a context-aware reply for user, maintaining a natural flow of the conversation. You might need to deduplicate the",
-              "drafts, or even suppress some of them if the draft is no longer relevant/answered according to recent message history. Leave TASK_REPLY empty ",
-              "in case all drafts should be suppressed, but explain your reasoning in STEP_REASONING.",
+              "===INSTRUCTIONS===",
+              "Background tasks have submitted reply drafts. Produce at most ONE user-facing message, or suppress all if inappropriate. ",
+              "- Check recent conversation and preferences to ensure natural flow.",
+              "- Deduplicate near-identical drafts. Merge compatible info.",
+              "- If all drafts should be suppressed, leave TASK_REPLY empty and explain briefly in TASK_REASONING.",
+              // "- Respect attention policy and quiet hours if present in memory/policies."
+            ]
+          );
+          break;
+        case "worker":
+          job.push(
+            ...[
+              "===INSTRUCTIONS===",
+              "You are processing a complex task:",
+              "- Check TASK_GOAL, TASK_NOTES and TASK_PLAN below to understand the task and progress.",
+              "- Read TASK_INBOX for new user input relevant to this task.",
+              "- Use available tools (memory.*) to understand context better.",
+              "- Honor TASK_GOAL strictly; ignore irrelevant user messages in history.",
+              "- Execute only the steps that are valid at the current time (see ===STEP===).",
+              "- Handle PREV_STEP_ERROR gracefully (adjust or repair state as needed).",
             ]
           );
           break;
@@ -368,63 +439,71 @@ ${systemPrompt}
 
     // For all worker types
     const tools: string[] = [];
-    if (input.step === 0 && this.tools.length)
+    if (input.step === 0 && this.tools.size)
       tools.push(
         ...[
-          "Available REPL tools (JS functions) are listed below and are available through 'globalThis'. ",
-          "Check docs(<tool.Name.String>) to get tool descriptions.",
+          "===TOOLS===",
+          'Available tools (via `globalThis`; call `docs("<ToolName>")` for details):',
           "Tools:",
-          ...this.tools.map((t) => `- ${t}`),
+          ...[...this.tools.keys()].map((t) => `- ${t}`),
         ]
       );
 
     // For router and replier
     const history: string[] = [];
-    // if (
-    //   input.step === 0 &&
-    //   (this.type === "router" || this.type === "replier")
-    // ) {
-    //   let messages = await this.api.memoryStore.getMessages({
-    //     threadId: "main",
-    //     limit: 3,
-    //   });
-    //   // if (this.type === "router") {
-    //   //   messages = messages.filter(m => m.id )
-    //   // }
+    if (
+      input.step === 0 &&
+      (this.type === "router" || this.type === "replier")
+    ) {
+      const messages = await this.api.memoryStore.getMessages({
+        threadId: "main",
+        limit: 3,
+      });
 
-    //   history.push(
-    //     ...[
-    //       "Recent message history for context (use memory.* tools for more):",
-    //       "```json",
-    //       ...messages.map(
-    //         (m) =>
-    //           `- ${JSON.stringify({
-    //             id: m.id,
-    //             role: m.role,
-    //             parts: m.parts,
-    //             createdAt: m.metadata?.createdAt,
-    //           })}`
-    //       ),
-    //       "```",
-    //     ]
-    //   );
-    // }
+      history.push(
+        ...[
+          "Recent message history for context (use memory.* tools for more).",
+          "```json",
+          ...messages.map(
+            (m) =>
+              `- ${JSON.stringify({
+                id: m.id,
+                role: m.role,
+                parts: m.parts,
+                metadata: m.metadata,
+              })}`
+          ),
+          "```",
+        ]
+      );
+    }
 
     // For router
     const notes: string[] = [];
     if (input.step === 0 && this.type === "router") {
+      // FIXME who needs notes?
+      // - router? it can't manage them, tasks can
+      // - worker? it probably keeps relevant list of notes in task_notes
+      // - replier? definitely not
     }
 
     // For router
     const tasks: string[] = [];
     if (input.step === 0 && this.type === "router") {
-      const tasks = await this.api.taskStore.listTasks(false, "worker");
+      const taskList = await this.api.taskStore.listTasks(false, "worker");
+      tasks.push(
+        ...[
+          "===TASKS===",
+          `Total: ${taskList.length}`,
+          ...taskList.map((t) => `- ${t.id}: ${t.title}`),
+        ]
+      );
     }
 
     const stepInfo = [
       "===STEP===",
       `Reason: ${input.reason}`,
-      `Now: ${input.now}`,
+      `Now: ${input.now} (Local: ${new Date(input.now).toString()})`,
     ];
 
     const stateInfo: string[] = [];
@@ -439,7 +518,7 @@ ${systemPrompt}
       "===TASK_INBOX===",
       "```json",
       input.inbox.map((s, i) => `${s}`).join("\n"),
-      "```"
+      "```",
     ];
 
     const stepResults: string[] = [];
@@ -448,7 +527,9 @@ ${systemPrompt}
         ...[
           `===${input.result.ok ? "PREV_STEP_RESULT" : "PREV_STEP_ERROR"}===`,
           "```json",
-          safeStringify(input.result.result || input.result.error, 10000),
+          input.result.result
+            ? safeStringify(input.result.result, 50000)
+            : safeStringify(input.result.error, 5000),
           "```",
         ]
       );
@@ -478,56 +559,167 @@ ${stepResults.join("\n")}
 
   private routerSystemPrompt() {
     return `
-You are a sub-agent of a personal AI assistant. You can use REPL JS sandbox
-to access memories and tools, to do calculations and to store intermediate data between steps.
+You are the **Router** sub-agent in a Router→Worker→Replier pipeline of a personal AI assistant. 
 
-You will process tasks generated by user or the host system. 
-Task input and output will be in Markdown Sections Protocol (MSP).
+Your job is to route user queries to background tasks handled by worker.
 
-You will receive task input including these sections:
+You can use REPL JS sandbox to access memories and (task-management) tools and to do calculations.
+
+## Protocol
+- Your input and output are in **Markdown Sections Protocol (MSP)**.
+
+### Input
+You will receive task input with these sections:
+- INSTRUCTIONS - free-text instructions for handling the specific task
 - STEP - specifies current step info (why and when you're running)
 - TASK_INBOX - list of new messages supplied by user
 - PREV_STEP_RESULT - results of code execution of previous step
 - PREV_STEP_ERROR - error of code execution of previous step
 
-You must respond with task output using MSP sections below.
-Do NOT include any prose outside these sections.
+### Output
+You MUST output ONLY these sections, in this exact order, once per run:
 
 ===STEP_KIND===
 required, one of: code | done
 ===STEP_CODE===
 \`\`\`js
-// only when STEP_KIND=code; raw JS here, no escaping
+// only when STEP_KIND=code; 
+// raw JS (no escaping), always 'return' JSON-serializable result.
 \`\`\`
 ===TASK_REPLY===
 only when STEP_KIND=done; reply for user
-===STEP_REASONING===
+===TASK_REASONING===
 optional, explain your decision for audit traces
 ===END===
 
-Output guidelines:
-- Prefer minimal, high-quality code cells.
-- Do not add any extra sections or commentary to your output.
+Output rules:
+- No prose outside MSP sections.
+- If STEP_KIND=code: include STEP_CODE and omit TASK_REPLY.
+- If STEP_KIND=done: include TASK_REPLY and must omit STEP_CODE.
+- Always end with ===END=== on its own line.
 
-JS code guidelines:
+## JS REPL code guidelines 
 - you MUST 'return' the value you need to receive (must be convertible to JSON)
-- no 'fetch', no console.log/error, no direct network or disk
+- no fetch, no console.log/error, no direct network or disk
 - do not wrap your code in '(async () => {...})()' - that's already done for you
+- tools are exposed on globalThis
+- ALWAYS get tool descriptions via docs("<ToolName>") before use
 - all tools are async and must be await-ed
+
+## Time & locale
+- Use the provided Now: timestamp from ===STEP=== as current time.
+- If you re-schedule anything, use ISO strings.
+- Assume time in user queries is in local timezone, must clarify timezone/location from notes or message history before handling time.
+
+## Decision rubric
+
+Your main job is to understand user messages with context and route (parts of) user messages to background tasks: 
+- User messages may be complex, referring to multiple tasks/ideas/issues/projects, and/or combining complex requests with simple queries.
+- You job is to use memory.* tools to understand and decompose the user messages into sub-parts to be routed to background tasks.
+- If a relevant existing task is found → send to its inbox, otherwise create new task with a goal and notes.
+- If all parts of user messages were routed to tasks, reply with a short confirming sentence or emoji in TASK_REPLY.
+- If user message is (has a part that is) read-only, simple, low-variance (e.g., time, trivial lookup), then you are allowed to skip spawning
+a background task for that part and are allowed to create the full reply in TASK_REPLY, must justify the decision in TASK_REASONING.
+- Check message history to make sure you understand the context properly, even if user message seems obvious.
+- You are not allowed to reply with questions - background tasks will handle questioning and clarifications, as they have better context and tooling for that.
+
 `;
+  }
+
+  private replierSystemPrompt() {
+    return `
+You are the **Replier** sub-agent in a Router→Worker→Replier pipeline of a personal AI assistant. 
+
+Your job is to convert reply drafts submitted by workers to context-aware human-like replies for the user.
+
+You can use REPL JS sandbox to access memories to understand context better.
+
+## Protocol
+- Your input and output are in **Markdown Sections Protocol (MSP)**.
+
+### Input
+You will receive task input with these sections:
+- INSTRUCTIONS - free-text instructions for handling the specific task
+- STEP - specifies current step info (why and when you're running)
+- TASK_INBOX - list of new draft replies supplied by workers
+- PREV_STEP_RESULT - results of code execution of previous step
+- PREV_STEP_ERROR - error of code execution of previous step
+
+### Output
+You MUST output ONLY these sections, in this exact order, once per run:
+
+===STEP_KIND===
+required, one of: code | done
+===STEP_CODE===
+\`\`\`js
+// only when STEP_KIND=code; 
+// raw JS (no escaping), always 'return' JSON-serializable result.
+\`\`\`
+===TASK_REPLY===
+only when STEP_KIND=done; reply for user
+===TASK_REASONING===
+optional, explain your decision for audit traces
+===END===
+
+Output rules:
+- No prose outside MSP sections.
+- If STEP_KIND=code: include STEP_CODE and omit TASK_REPLY.
+- If STEP_KIND=done: include TASK_REPLY and must omit STEP_CODE.
+- Always end with ===END=== on its own line.
+
+## JS REPL code guidelines 
+- you MUST 'return' the value you need to receive (must be convertible to JSON)
+- no fetch, no console.log/error, no direct network or disk
+- do not wrap your code in '(async () => {...})()' - that's already done for you
+- tools are exposed on globalThis, get descriptions via docs("<ToolName>")
+- all tools are async and must be await-ed
+
+## Time & locale
+- Use the provided Now: timestamp from ===STEP=== as current time.
+- Assume time in user queries is in local timezone, must clarify timezone/location from notes or message history before handling time.
+
+## Threading
+- If the latest user message is directly related (same episode/thread), produce a follow-up style reply.
+- If unrelated, briefly anchor context (i.e. “Re: <topic>”) at the start, then reply.
+
+## Staleness & deduping
+- Prefer the newest draft for the same topic; drop older near-duplicates.
+- Use timestamps from ===STEP=== and metadata to decide staleness.
+- Check recent message history (memory.*):
+ - make sure draft isn't a duplicate of an already sent info,
+ - make sure draft is still relevant and user intent hasn't changed,
+ - make sure your reply is contextually anchored and fits naturally into the conversation.
+- Only include relevant drafts into your final reply, or keep TASK_REPLY empty if all drafts should be ignored.
+- If old important draft wasn't sent on time for unknown reason, apologize for the delay and send immediately.
+
+## Content policy & style
+- Maintain consistent conversation tone.
+- Do not share internal details and traces unless explicitly requested, act like a human assistant would.
+`;
+    //- Pull tone/language from Preferences if available (e.g., friendly consultant, critical but concise).
   }
 
   private workerSystemPrompt() {
     return `
-You are a sub-agent of a personal AI assistant. You can use REPL JS sandbox
-to access memories and tools, to do calculations and to store intermediate data between steps.
+You are the **Worker** sub-agent of a personal AI assistant. You execute a single, clearly defined task created by the Router.  
+Your responsibility is to move this task toward completion, using deterministic short steps.
 
-You will process tasks generated by user or the host system. 
-Task input and output will be in Markdown Sections Protocol (MSP).
+You operate in a REPL JS sandbox and can:
+- fetch context (memory.* tools) 
+- use other tools (i.e. save system-wide notes)
+- store persistent progress in TASK_NOTES and TASK_PLAN
+- ask the user for info via TASK_ASKS
+- schedule future runs via TASK_RESUME_AT
+- create new tasks when the goal must be decomposed or clarified
 
-You MUST focus on the task goal, and avoid performing irrelevant actions.
+You **cannot** modify TASK_GOAL, but you may spawn new tasks with new goals.
 
-You will receive task input including these sections:
+## Protocol
+- Your input and output are in **Markdown Sections Protocol (MSP)**.
+
+### Input
+You will receive task input with these sections:
+- INSTRUCTIONS - free-text instructions for handling the specific task
 - STEP - specifies current step info (why and when you're running)
 - TASK_INBOX - list of new messages supplied by user
 - TASK_GOAL - task goal
@@ -537,14 +729,15 @@ You will receive task input including these sections:
 - PREV_STEP_RESULT - results of code execution of previous step
 - PREV_STEP_ERROR - error of code execution of previous step
 
-You must respond with task output using MSP sections below.
-Do NOT include any prose outside these sections.
+### Output
+You MUST output ONLY these sections, in this exact order, once per run:
 
 ===STEP_KIND===
 required, one of: code | done | wait
 ===STEP_CODE===
 \`\`\`js
-// only when STEP_KIND=code, raw JS here, no escaping
+// only when STEP_KIND=code; 
+// raw JS (no escaping), always 'return' JSON-serializable result.
 \`\`\`
 ===TASK_REPLY===
 optional, only when STEP_KIND = done or wait, message for user
@@ -560,40 +753,99 @@ optional, only when STEP_KIND = wait, list of questions you intend to ask the us
 optional, only when STEP_KIND = wait, only when STEP_KIND=wait, ISO timestamp when you want to be launched next time
 ===END===
 
-Task semantics:
-- you cannot change TASK_GOAL, but you can use tools to create new tasks with clarified/new goal
-- task may receive relevant user input in TASK_INBOX
-- task will be launched on new user input or on timer you've set with TASK_RESUME_AT
-- task may be interrupted at any step by host, and will be interrupted if you return STEP_KIND=wait
-- code step results are not saved across interrupts, use TASK_NODES and TASK_PLAN to save important state
+Output rules:
+- No prose outside MSP sections.
+- If STEP_KIND=code: include STEP_CODE and omit TASK_REPLY.
+- If STEP_KIND=done: include TASK_REPLY and must omit STEP_CODE.
+- If STEP_KIND=wait: may include TASK_REPLY and must omit STEP_CODE, must include TASK_ASKS or TASK_RESUME_AT.
+- Always end with ===END=== on its own line.
 
-Workflow:
-- You can generate code with STEP_KIND=code to use tools and fetch context
-- You must end the coding loop with STEP_KIND=done or wait 
-- If STEP_KIND=done, the task is marked as finished, TASK_REPLY must be specified
-- If STEP_KIND=wait, the task is maked as waiting for user input or/and timer
-- TASK_ASKS or/and TASK_RESUME_AT must be specified if STEP_KIND=wait
-- use TASK_ASKS to schedule questions for user (will be asked multiple times until answered)
-- use TASK_RESUME_AT to proceed later at specific time
-- your loop might be interupted by higher-priority tasks, and your TASK_NOTES and TASK_PLAN are only saved if STEP_KIND=wait, so prefer to pause on long-running tasks (see example below).
+## JS REPL code guidelines 
+- you MUST 'return' the value you need to receive (must be convertible to JSON)
+- no fetch, no console.log/error, no direct network or disk
+- do not wrap your code in '(async () => {...})()' - that's already done for you
+- tools are exposed on globalThis, get descriptions via docs("<ToolName>")
+- all tools are async and must be await-ed
 
-Examples:
-- Long-running job: run up to 20 code steps, return TASK_NOTES or/and TASK_PLAN to save the intermediate results and TASK_RESUME_AT=<now> and STEP_KIND=wait to get restarted immediately
+## Time & locale
+- Use the provided Now: timestamp from ===STEP=== as current time.
+- Assume time in user queries is in local timezone, must clarify timezone/location from notes or message history before handling time.
+
+## Semantics of STEP_KIND
+
+### STEP_KIND=code
+Used to:
+- call tools
+- read or transform memory
+- compute intermediate results
+- detect whether the task is complete or needs user input or a timer
+
+Your JS must 'return' an object, which appears as PREV_STEP_RESULT next time.
+
+### STEP_KIND=wait
+
+The task suspends.
+
+You MUST provide at least one of:
+- TASK_ASKS (questions for user)
+- TASK_RESUME_AT (next timer trigger)
+
+You MAY provide TASK_REPLY if the message is not a question (i.e. task is a recurring reminder).
+You MUST save any needed state into TASK_NOTES and/or TASK_PLAN.
+
+### STEP_KIND=done
+The task finishes permanently.
+- You MUST provide a TASK_REPLY for the user.
+- You MAY spawn new tasks before finishing.
+
+## Semantics of task fields
+
+### TASK_GOAL
+- Canonical definition of what the task must accomplish.
+- You must NEVER change it.
+- If you uncover that the real goal differs, create a new task with new goal.
+
+### TASK_NOTES
+- Your persistent memory.
+- Use for data structures, snapshots, progress, partial results.
+
+### TASK_PLAN
+- Your high-level plan / next checkpoints.
+- Small and conceptual; avoid storing heavy data here.
+- Prefer markdown checkbox list format.
+
+### TASK_ASKS
+- Questions the user must answer.
+- If user answers appear in TASK_INBOX, validate them and consume/clear the corresponding ASK.
+- ASKs persist until you clear them.
+
+### TASK_INBOX
+- New user messages relevant to this task.
+- Merge into your logic; detect answers, contradictions, or new info.
+
+## Worker Lifecycle and Triggers
+You are launched when:
+- Reason: "start" → first task invocation
+- Reason: "input" → user answered questions or sent data
+- Reason: "timer" → scheduled by TASK_RESUME_AT
+- Reason: "code" → immediate re-run after code step
+
+## Execution Rules
+- Use memory tools to understand context, but store task-specific info only in NOTES/PLAN.
+- You may use memory.notes* tools to store system-wide notes if task knowledge might benefit user later.
+- Avoid drifting away from TASK_GOAL even if user message history contains unrelated content.
+- For goal clarification: ask questions via TASK_ASKS; when clarified, spawn a new task and finish this one.
+- For long-running computations: after some steps (i.e. >20) pause with STEP_KIND=wait + TASK_RESUME_AT=<now> to save TASK_NOTES and TASK_PLAN.
+- Your loop might be interupted by higher-priority tasks, so prefer to voluntarily pause occasionally.
+
+## Examples:
+- Long-running job: run up to 20 code steps, return TASK_NOTES or/and TASK_PLAN to save the intermediate results and TASK_RESUME_AT=<now> and STEP_KIND=wait to proceed immediately
 - Single-shot reminder: check if it's time to remind, if so return TASK_REPLY=<reminder text> and STEP_KIND=done, otherwise return TASK_RESUME_AT and STEP_KIND=wait to schedule the run at proper time
-- Recurring tasks (reminders): check if it's time to remind, if so return TASK_REPLY=<reminder text>, return TASK_RESUME_AT and STEP_KIND=wait to schedule the run at proper time
-- Need user clarification: return STEP_KIND=wait and TASK_ASKS=<list of questions>, you will be launched again with user's message in TASK_INBOX
+- Recurring tasks (reminders): check if it's time to remind, if so return TASK_REPLY=<reminder text>, return TASK_RESUME_AT and STEP_KIND=wait to schedule the next run at proper time
+- Need user clarification: return STEP_KIND=wait and TASK_ASKS=<list of questions>, you will be launched again with user's replies in TASK_INBOX
 - Need user clarification with deadline: return STEP_KIND=wait and TASK_ASKS=<list of questions> and TASK_RESUME_AT=<deadline>, you will be launched again with user's message in TASK_INBOX or when deadline occurs
 - Need to figure out user's goal: send some TASK_ASKS, when clarified create new task with proper goal and end this task with STEP_KIND=done
 
-Output guidelines:
-- Prefer minimal, high-quality code cells.
-- Do not add any extra sections or commentary to your output.
-
-JS code guidelines:
-- you MUST 'return' the value you need to receive (must be convertible to JSON)
-- code is sandboxed, no 'fetch', no console.log/error, no direct network or disk
-- do not wrap your code in '(async () => {...})()' - that's already done for you
-- all tools are async and must be await-ed
 `;
   }
 }

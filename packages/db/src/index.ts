@@ -21,7 +21,7 @@ export type { Note, NoteListItem } from "./note-store";
 
 // Task store
 export { TaskStore } from "./task-store";
-export type { Task } from "./task-store";
+export type { Task, TaskRun, TaskRunEnd, TaskRunStart, TaskState } from "./task-store";
 
 // Nostr peer store
 export { NostrPeerStore } from "./nostr-peer-store";

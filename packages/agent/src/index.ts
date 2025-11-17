@@ -36,7 +36,7 @@ export { type Memory } from "./interfaces";
 export { ReplAgent } from "./repl-agent";
 
 export {
-  type Task,
+  type AgentTask as Task,
   type StepInput,
   type StepOutput,
   type TaskState,

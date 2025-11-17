@@ -222,8 +222,8 @@ const start = async () => {
         worker.checkWork();
     });
 
-    // Check immediately
-    worker.checkWork();
+    // Start checking timestamped tasks
+    worker.start();
 
     // Check regularly for changes
     // FIXME call it on every mutation endpoint

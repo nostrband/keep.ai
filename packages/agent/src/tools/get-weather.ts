@@ -23,9 +23,9 @@ export function makeGetWeatherTool() {
         .describe("Number of forecast days (1-16, default: 1)"),
     }),
     execute: async (context) => {
-      let { place, days = 1 } = context;
+      let { place, days = 1 } = context || {};
       if (typeof context === 'string') place = context;
-      if (!place) place = (context as any).location; // good guess by llm
+      if (!place) place = (context as any)?.location; // good guess by llm
 
       try {
         if (!place || typeof place !== "string") {

@@ -8,9 +8,10 @@ import {
   KeepDbApi,
   MAX_STATUS_TTL,
   Task,
+  TaskRunEnd,
 } from "@app/db";
 import { AGENT_STATUS } from "./instructions";
-import { StepOutput, TaskType } from "./repl-agent-types";
+import { AgentTask, StepOutput, TaskType } from "./repl-agent-types";
 import { bytesToHex } from "@noble/ciphers/utils";
 import { randomBytes } from "@noble/ciphers/crypto";
 import { ReplEnv } from "./repl-env";
@@ -26,6 +27,7 @@ export class TaskWorker {
 
   private isRunning: boolean = false;
   private isShuttingDown: boolean = false;
+  private interval?: ReturnType<typeof setInterval>;
 
   private debug = debug("agent:TaskWorker");
 
@@ -38,6 +40,15 @@ export class TaskWorker {
   async close(): Promise<void> {
     if (!this.isRunning) return;
     this.isShuttingDown = true;
+    if (this.interval) clearInterval(this.interval);
+  }
+
+  public start() {
+    if (this.interval) return;
+    this.interval = setInterval(() => this.checkWork(), 10000);
+
+    // check immediately
+    this.checkWork();
   }
 
   public async checkWork(): Promise<void> {
@@ -50,47 +61,96 @@ export class TaskWorker {
     if (this.isShuttingDown) return;
     if (this.isRunning) return;
     this.isRunning = true;
+    let processed = false;
 
-    // Auto-create router and replier tasks
-    await this.checkInbox();
+    try {
+      // Auto-create router and replier tasks,
+      // get task ids that have incoming mail
+      const items = await this.checkInbox();
 
-    // Any tasks?
-    const more = await this.checkTasks();
+      // Any tasks?
+      processed = await this.processNextTask(items);
+    } catch (e) {
+      console.error("Error processing task", e);
+    }
 
     // Done
     this.isRunning = false;
 
     // Retry immediately in case more jobs might be incoming
-    if (more) this.checkWork();
+    if (processed) this.checkWork();
   }
 
   private async checkInbox() {
-    const ensureTask = async (type: InboxItemTarget) => {
+    try {
       const items = await this.api.inboxStore.listInboxItems({
-        target: type,
         handled: false,
       });
-      this.debug("Inbox items", items.length, "target", type);
-      if (items.length > 0) {
-        await this.ensureTask(type);
-      }
-    };
-    try {
+      this.debug("Inbox items", items.length, "targets", [
+        ...new Set(items.map((i) => i.target)),
+      ]);
+
+      const ensureTask = async (type: InboxItemTarget) => {
+        const typeItems = items.filter((i) => i.target === type);
+        this.debug("Inbox items", typeItems.length, "target", type);
+        if (typeItems.length > 0) {
+          await this.ensureTask(type);
+        }
+      };
+
       await ensureTask("router");
       await ensureTask("replier");
+
+      return items;
     } catch (err) {
       this.debug("checkInbox error:", err);
+      return [];
     }
   }
 
-  private async checkTasks(): Promise<boolean> {
-    let task: Task | null = null;
+  private async processNextTask(inboxItems: InboxItem[]): Promise<boolean> {
+    let task: Task | undefined;
     try {
       this.debug(`checking @ ${new Date().toISOString()}`);
 
-      // Get the next task for the user (only returns tasks ready to trigger)
-      task = await this.api.taskStore.getNextTask();
+      // Get tasks with expired timers and with non-empty inboxes
+      const todoTasks = await this.api.taskStore.getTodoTasks();
+      const receiverIds = inboxItems
+        .map((i) => i.target_id)
+        .filter((id) => !!id);
+      const receiverTasks =
+        receiverIds.length > 0
+          ? await this.api.taskStore.getTasks(receiverIds)
+          : [];
+      // Dedup tasks
+      const taskMap = new Map<string, Task>();
+      todoTasks.map((t) => taskMap.set(t.id, t));
+      receiverTasks.map((t) => taskMap.set(t.id, t));
 
+      // Uniq tasks array, sorted by timestamp asc
+      const tasks = [...taskMap.values()].sort(
+        (a, b) => a.timestamp - b.timestamp
+      );
+      this.debug("Pending tasks", tasks);
+
+      // Find highest-priority task:
+      // - router - top
+      task = tasks.find((t) => t.type === "router");
+      // - replier after router - next
+      if (!task)
+        task = tasks.find(
+          (t) =>
+            t.type === "replier" &&
+            inboxItems.find(
+              (i) => i.source === "router" && i.target === "replier"
+            )
+        );
+      // - worker
+      if (!task) task = tasks.find((t) => t.type === "worker");
+      // - replier after worker
+      if (!task) task = tasks.find((t) => t.type === "replier");
+
+      // Found anything?
       if (task) {
         this.debug(
           `triggering task at ${new Date(
@@ -108,7 +168,7 @@ export class TaskWorker {
       this.debug("checkTasks error:", err);
     }
 
-    return task !== null;
+    return !!task;
   }
 
   private async processTask(task: Task): Promise<void> {
@@ -116,7 +176,7 @@ export class TaskWorker {
 
     let statusUpdaterInterval: ReturnType<typeof setInterval> | undefined;
     try {
-      if (task.state !== "") {
+      if (task.state !== "" && task.state !== "wait") {
         this.debug("Task already processed with state:", task.state);
         return;
       }
@@ -154,6 +214,9 @@ export class TaskWorker {
         return;
       }
 
+      // Get task state
+      let state = await this.api.taskStore.getState(task.id);
+
       // New thread for each attempt
       const threadId = generateId();
 
@@ -175,58 +238,162 @@ export class TaskWorker {
       const env = new ReplEnv(this.api, taskType, () => sandbox.context!);
       sandbox.setGlobal(await env.createGlobal());
 
-      const model = getOpenRouter()(getModelName());
-      const agent = new ReplAgent(model, env, sandbox, {
+      // Agent task
+      const agentTask: AgentTask = {
         type: taskType,
+        state: {},
+      };
+      if (state?.goal) agentTask.state!.goal = state.goal;
+      if (state?.notes) agentTask.state!.notes = state.notes;
+      if (state?.plan) agentTask.state!.plan = state.plan;
+      if (state?.asks) agentTask.state!.asks = state.asks;
+
+      // Run reason
+      let reason: "start" | "input" | "timer" = "start";
+      if (task.state === "wait") reason = inbox.length > 0 ? "input" : "timer";
+
+      // Model for agent
+      const modelName = getModelName();
+
+      // Start the run
+      const taskRunId = generateId();
+      const runStartTime = new Date();
+      await this.api.taskStore.createTaskRun({
+        id: taskRunId,
+        task_id: task.id,
+        thread_id: threadId,
+        start_timestamp: runStartTime.toISOString(),
+        type: taskType,
+        model: modelName,
+        reason,
+        inbox: JSON.stringify(inbox),
+        input_asks: agentTask.state?.asks || "",
+        input_goal: agentTask.state?.goal || "",
+        input_plan: agentTask.state?.plan || "",
+        input_notes: agentTask.state?.notes || "",
       });
+
+      // Init agent
+      const model = getOpenRouter()(modelName);
+      const agent = new ReplAgent(model, env, sandbox, agentTask);
 
       try {
         // Use task.task as input message to the agent
-        const result = await agent.loop("start", {
+        const result = await agent.loop(reason, {
           // Pass the input text to agent
           inbox,
           onStep: async (step) => {
             return { proceed: step < this.stepLimit };
           },
         });
-        this.debug(`Loop steps ${result?.steps} result ${result}`);
-        if (!result || result.kind !== "done") {
-          throw new Error("Bad result");
-        }
+        this.debug(
+          `Loop steps ${result?.steps} result ${JSON.stringify(result)}`
+        );
+
+        if (!result) throw new Error("Bad result");
+        if (result.kind === "code") throw new Error("Step limit exceeded");
 
         // Save task messages
         this.debug("Save task messages", agent.history);
         await this.ensureThread(threadId, taskType);
         await this.saveHistory(agent.history, threadId);
 
-        const now = new Date().toISOString();
-        if (taskType === "router" && result.reply) {
-          await this.sendToReplier(result.reply, threadId);
-        } else if (taskType === "replier" && result.reply) {
-          await this.sendToUser(result.reply);
+        // Save wait state
+        if (result.kind === "wait" && result.patch) {
+          state = {
+            id: task.id,
+            goal: result.patch.goal || state?.goal || "",
+            notes: result.patch.notes || state?.notes || "",
+            plan: result.patch.plan || state?.plan || "",
+            asks: result.patch.asks || state?.asks || "",
+          };
+          await this.api.taskStore.saveState(state);
         }
 
-        // Task reply for audit traces
-        const taskReply = this.formatTaskReply(result);
-
-        // Single-shot task finished
-        await this.api.taskStore.finishTask(task.id, threadId, taskReply, "");
-
-        // Mark items as finished
+        // Mark inbox items as finished
+        const now = new Date().toISOString();
         for (const item of inboxItems)
           await this.api.inboxStore.handleInboxItem(item.id, now, threadId);
 
-        this.debug(`task processed successfully:`, {
-          success: true,
+        // Prepare run end
+        const runEndTime = new Date();
+        const taskReply = this.formatTaskReply(result);
+        await this.api.taskStore.finishTaskRun({
+          id: taskRunId,
+          run_sec: Math.floor((runEndTime.getTime() - runStartTime.getTime()) / 1000),
+          end_timestamp: runEndTime.toISOString(),
+          steps: result.steps,
+          state: result.kind,
+          output_asks: state?.asks || "",
+          output_goal: state?.goal || "",
+          output_plan: state?.plan || "",
+          output_notes: state?.notes || "",
           reply: taskReply,
-          threadId,
+          // FIXME set
+          input_tokens: 0,
+          cached_tokens: 0,
+          output_tokens: 0,
         });
+
+        // Update task in wait status
+        if (result.kind === "wait") {
+          // Need new timestamp?
+          const timestamp = result.resumeAt
+            ? Math.floor(new Date(result.resumeAt).getTime() / 1000)
+            : task.timestamp;
+          const status = result.resumeAt ? "wait" : "asks";
+
+          this.debug(
+            `Updating ${task.type || ""} task ${
+              task.id
+            } timestamp ${timestamp} (resumeAt '${result.resumeAt}') asks '${
+              result.patch?.asks || ""
+            }' status '${status}'`
+          );
+
+          await this.api.taskStore.updateTask({
+            ...task,
+            timestamp,
+            reply: result.reply || "",
+            state: status,
+            error: "",
+            thread_id: task.thread_id,
+          });
+
+          this.debug(`Task wait:`, {
+            id: task.id,
+            timestamp,
+            threadId,
+            status,
+            asks: state?.asks,
+          });
+        } else {
+          // Single-shot task finished
+          await this.api.taskStore.finishTask(task.id, threadId, taskReply, "");
+
+          this.debug(`Task done:`, {
+            reply: taskReply,
+            threadId,
+          });
+        }
+
+        // Send reply after all done
+        if (result.reply) {
+          if (taskType === "replier") {
+            await this.sendToUser(result.reply);
+          } else {
+            await this.sendToReplier(result.reply, threadId);
+          }
+        }
       } catch (error) {
         this.debug("Task processing error:", error);
 
         // On exception, update the task with error and retry timestamp instead of finish+add
         const errorMessage =
           error instanceof Error ? error.message : "Unknown error occurred";
+
+        // Finish run with error
+        await this.api.taskStore.errorTaskRun(taskRunId, new Date().toISOString(), errorMessage);
 
         // Schedule retry for this task
         await this.retry(task, errorMessage, threadId);
@@ -265,19 +432,6 @@ export class TaskWorker {
     );
     await update();
     return interval;
-  }
-
-  private async getSourceMessage(messageId: string) {
-    const sourceMessages = await this.api.memoryStore.getMessages({
-      messageId,
-    });
-    const sourceMessage = sourceMessages.find((m) => m.id === messageId);
-
-    if (!sourceMessage || sourceMessage.role !== "user") {
-      this.debug("Task message not found", messageId);
-      throw new Error("Message not found");
-    }
-    return sourceMessage;
   }
 
   private async ensureThread(threadId: string, taskType: TaskType) {

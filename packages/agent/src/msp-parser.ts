@@ -28,7 +28,7 @@ export class MspParser {
     switch (kind) {
       case "done": {
         const reply = getSection(text, "TASK_REPLY");
-        if (!reply)
+        if (reply === undefined)
           throw new Error("TASK_REPLY is required for STEP_KIND='done'");
         return {
           steps,
@@ -50,20 +50,22 @@ export class MspParser {
         };
       }
       case "wait": {
-        let resumeAt = getSection(text, "TASK_RESUME_AT");
-        let asks = getSection(text, "TASK_ASKS");
+        const resumeAt = getSection(text, "TASK_RESUME_AT")?.trim();
+        const asks = getSection(text, "TASK_ASKS");
         if (!resumeAt && !asks)
           throw new Error(
             "TASK_RESUME_AT or TASK_ASKS is required for STEP_KIND='wait'"
           );
-        let notes = getSection(text, "TASK_NOTES");
-        let plan = getSection(text, "TASK_PLAN");
+        const notes = getSection(text, "TASK_NOTES");
+        const plan = getSection(text, "TASK_PLAN");
+        const reply = getSection(text, "TASK_REPLY");
         return {
           steps,
           kind,
           reasoning,
+          reply,
+          resumeAt,
           patch: {
-            resumeAt,
             asks,
             notes,
             plan,
@@ -81,12 +83,14 @@ function escapeRegExp(s: string) {
 
 function getSection(text: string, name: string): string | undefined {
   const esc = escapeRegExp(name);
-  // Match: ===NAME=== [optional whitespace] (capture everything lazily)
-  // until the next line that starts with ===SOMETHING=== or end of string.
+  // Match:
+  //  ===NAME===[spaces/tabs]*<newline?>
+  //  capture lazily until next "\n===SOMETHING===" or end of string.
   const re = new RegExp(
-    `===${esc}===\\s*([\\s\\S]*?)(?=(?:\\r?\\n)===.+?===|$)`
+    `===${esc}===[ \\t]*([\\s\\S]*?)(?=\\r?\\n===.+?===|$)`
   );
   const m = text.match(re);
+  // preserve empty string if present; only use undefined when no match at all
   return m ? m[1].trimEnd() : undefined;
 }
 
