@@ -48,6 +48,14 @@ function App() {
     );
   }
 
+  if (dbStatus === "reload") {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div>Please reload the page</div>
+      </div>
+    );
+  }
+
   return (
     <BrowserRouter>
       <Routes>

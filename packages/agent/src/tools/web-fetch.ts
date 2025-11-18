@@ -9,7 +9,7 @@ const debugWebFetch = debug("agent:web-fetch");
 export function makeWebFetchTool() {
   return tool({
     description:
-      "Fetch content from a specific URL using Exa API. Returns the full text content of the webpage. Use live: true to get up-to-date content for time-sensitive data.",
+      "Fetch content from a specific URL using Exa API. Returns the full text content of the webpage or API endpoint. Use live: true to get up-to-date content for time-sensitive data.",
     inputSchema: z.union([
       z.object({
         url: z

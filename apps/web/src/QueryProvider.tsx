@@ -15,7 +15,13 @@ import { createDB } from "./db";
 // Serverless mode (nostr-sync with main device)
 const isServerless = (import.meta as any).env?.VITE_FLAVOR === "serverless";
 
-type DbStatus = "initializing" | "syncing" | "ready" | "error" | "disconnected";
+type DbStatus =
+  | "initializing"
+  | "syncing"
+  | "ready"
+  | "error"
+  | "disconnected"
+  | "reload";
 
 interface QueryContextType {
   dbStatus: DbStatus;
@@ -57,6 +63,10 @@ export function QueryProvider({
   const [api, setApi] = useState<KeepDbApi | null>(null);
   const [workerPort, setWorkerPort] = useState<WorkerPort | null>(null);
 
+  // Ping/pong state
+  const [pingInterval, setPingInterval] = useState<NodeJS.Timeout | null>(null);
+  const [pingTimeout, setPingTimeout] = useState<NodeJS.Timeout | null>(null);
+
   useEffect(() => {
     initializeDatabase();
 
@@ -67,6 +77,8 @@ export function QueryProvider({
   }, []);
 
   const cleanup = async () => {
+    stopPingInterval();
+
     if (peer) {
       peer.stop();
     }
@@ -74,8 +86,57 @@ export function QueryProvider({
       try {
         await db.close();
       } catch (err) {
-        console.error("[CRSqliteQueryProvider] Error closing database:", err);
+        console.error("[QueryProvider] Error closing database:", err);
       }
+    }
+  };
+
+  const startPingInterval = (workerPort: WorkerPort) => {
+    let to: ReturnType<typeof setTimeout> | undefined;
+
+    workerPort.addEventListener("message", (event) => {
+      const { type } = event.data;
+      if (type === "pong") {
+        // Worker responded to ping
+        console.log("[QueryProvider] Received pong from worker");
+        if (to) {
+          clearTimeout(to);
+          setPingTimeout(null);
+        }
+      }
+    });
+
+    const interval = setInterval(() => {
+      // Only send ping if document is not hidden (tab is active)
+      if (!document.hidden && workerPort) {
+        console.log("[QueryProvider] Sending ping to worker");
+        workerPort.postMessage({ type: "ping" });
+
+        // Set timeout for pong response (5 seconds)
+        to = setTimeout(() => {
+          setPingTimeout(null);
+          if (!document.hidden) {
+            console.error(
+              "[QueryProvider] Ping timeout - setting status to reload"
+            );
+            setDbStatus("reload");
+          }
+        }, 5000);
+        setPingTimeout(to);
+      }
+    }, 30000); // Send ping every 30 seconds
+
+    setPingInterval(interval);
+  };
+
+  const stopPingInterval = () => {
+    if (pingInterval) {
+      clearInterval(pingInterval);
+      setPingInterval(null);
+    }
+    if (pingTimeout) {
+      clearTimeout(pingTimeout);
+      setPingTimeout(null);
     }
   };
 
@@ -130,12 +191,14 @@ export function QueryProvider({
         const workerTransport = new WorkerTransport();
         workerTransport.addMessagePort(workerPort);
 
+        // Start pinging
+        startPingInterval(workerPort);
+
         // Since our tab's peer is only a local cache,
         // we're interested in worker's status and need to
         // listen to it's events to update our state
         let wasReady = false;
         workerPort.addEventListener("message", (event) => {
-          console.log("worker message", event);
           const { type } = event.data;
           if (type === "worker_sync") {
             // Worker started sync
@@ -228,11 +291,11 @@ export function QueryProvider({
         }
       }
 
-      console.log("[CRSqliteQueryProvider] Initialized successfully");
+      console.log("[QueryProvider] Initialized successfully");
     } catch (err) {
       setDbStatus("error");
       setError((err as Error).message);
-      console.error("[CRSqliteQueryProvider] Initialization failed:", err);
+      console.error("[QueryProvider] Initialization failed:", err);
     }
   };
 

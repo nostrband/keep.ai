@@ -185,10 +185,10 @@ export class SyncWorker {
             console.error("[Worker] Failed to start with local key:", error);
           }
         });
-
-        // Can start now - will deliver buffered messages
-        this.workerEvents.start();
       }
+
+      // Can start now - will deliver buffered messages
+      this.workerEvents.start();
 
       console.log("[Worker] Initialized successfully");
     } catch (error) {

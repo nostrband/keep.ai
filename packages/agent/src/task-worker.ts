@@ -114,10 +114,14 @@ export class TaskWorker {
 
       // Get tasks with expired timers and with non-empty inboxes
       const todoTasks = await this.api.taskStore.getTodoTasks();
-      if (inboxItems.find(i => i.target === 'router'))
-        todoTasks.push(...await this.api.taskStore.listTasks(false, 'router'));
-      if (inboxItems.find(i => i.target === 'replier'))
-        todoTasks.push(...await this.api.taskStore.listTasks(false, 'replier'));
+      if (inboxItems.find((i) => i.target === "router"))
+        todoTasks.push(
+          ...(await this.api.taskStore.listTasks(false, "router"))
+        );
+      if (inboxItems.find((i) => i.target === "replier"))
+        todoTasks.push(
+          ...(await this.api.taskStore.listTasks(false, "replier"))
+        );
       const receiverIds = inboxItems
         .map((i) => i.target_id)
         .filter((id) => !!id);
@@ -202,10 +206,13 @@ export class TaskWorker {
       const taskType: TaskType = task.type;
 
       // Fill inbox
-      const inboxItems = await this.api.inboxStore.listInboxItems({
-        target: taskType,
-        handled: false,
-      });
+      const inboxItems = (
+        await this.api.inboxStore.listInboxItems({
+          target: taskType,
+          handled: false,
+        })
+      ).filter((i) => !i.target_id || i.target_id === task.id);
+
       const inbox = inboxItems.map((i) => i.content);
       if (taskType !== "worker" && !inbox.length) {
         await this.api.taskStore.finishTask(
@@ -551,7 +558,11 @@ ${result.reply || ""}
     );
   }
 
-  private async sendToReplier(reply: string, taskId: string, taskRunId: string) {
+  private async sendToReplier(
+    reply: string,
+    taskId: string,
+    taskRunId: string
+  ) {
     this.debug("Send reply to replier", reply);
     // Send router's reply to replier
     await this.api.inboxStore.saveInbox({
@@ -561,7 +572,11 @@ ${result.reply || ""}
       target: "replier",
       target_id: "",
       timestamp: new Date().toISOString(),
-      content: JSON.stringify({ role: "assistant", content: reply, sourceTaskId: taskId }),
+      content: JSON.stringify({
+        role: "assistant",
+        content: reply,
+        sourceTaskId: taskId,
+      }),
       handler_thread_id: "",
       handler_timestamp: "",
     });
