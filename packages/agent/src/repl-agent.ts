@@ -29,6 +29,7 @@ export class ReplAgent {
   private model: LanguageModel;
   private env: ReplEnv;
   private sandbox: Sandbox;
+  private readonly taskId: string;
   private state?: TaskState;
   private parser: MspParser;
   private debug = debug("agent:ReplAgent");
@@ -43,6 +44,7 @@ export class ReplAgent {
     this.sandbox = sandbox;
     this.env = env;
     this.parser = new MspParser(task.type);
+    this.taskId = task.id;
     if (task.state) this.state = { ...task.state };
   }
 
@@ -97,7 +99,8 @@ export class ReplAgent {
 
           // Eval
           stepResult = await this.sandbox.eval(output.code, {
-            timeoutMs: 1000,
+            // web search might take long time
+            timeoutMs: 10000,
           });
           this.debug("step", step, "result", stepResult);
         }
@@ -128,7 +131,7 @@ export class ReplAgent {
 
   async runStep(input: StepInput): Promise<StepOutput> {
     const system = await this.env.buildSystem();
-    const user = await this.env.buildUser(input, this.state);
+    const user = await this.env.buildUser(this.taskId, input, this.state);
 
     // New user message
     const userMessage: AssistantUIMessage = {

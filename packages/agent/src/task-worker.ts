@@ -8,7 +8,6 @@ import {
   KeepDbApi,
   MAX_STATUS_TTL,
   Task,
-  TaskRunEnd,
 } from "@app/db";
 import { AGENT_STATUS } from "./instructions";
 import { AgentTask, StepOutput, TaskType } from "./repl-agent-types";
@@ -115,6 +114,10 @@ export class TaskWorker {
 
       // Get tasks with expired timers and with non-empty inboxes
       const todoTasks = await this.api.taskStore.getTodoTasks();
+      if (inboxItems.find(i => i.target === 'router'))
+        todoTasks.push(...await this.api.taskStore.listTasks(false, 'router'));
+      if (inboxItems.find(i => i.target === 'replier'))
+        todoTasks.push(...await this.api.taskStore.listTasks(false, 'replier'));
       const receiverIds = inboxItems
         .map((i) => i.target_id)
         .filter((id) => !!id);
@@ -176,7 +179,7 @@ export class TaskWorker {
 
     let statusUpdaterInterval: ReturnType<typeof setInterval> | undefined;
     try {
-      if (task.state !== "" && task.state !== "wait") {
+      if (task.state === "finished" || task.state === "error") {
         this.debug("Task already processed with state:", task.state);
         return;
       }
@@ -240,6 +243,7 @@ export class TaskWorker {
 
       // Agent task
       const agentTask: AgentTask = {
+        id: task.id,
         type: taskType,
         state: {},
       };
@@ -250,7 +254,7 @@ export class TaskWorker {
 
       // Run reason
       let reason: "start" | "input" | "timer" = "start";
-      if (task.state === "wait") reason = inbox.length > 0 ? "input" : "timer";
+      if (task.state !== "") reason = inbox.length > 0 ? "input" : "timer";
 
       // Model for agent
       const modelName = getModelName();
@@ -320,7 +324,9 @@ export class TaskWorker {
         const taskReply = this.formatTaskReply(result);
         await this.api.taskStore.finishTaskRun({
           id: taskRunId,
-          run_sec: Math.floor((runEndTime.getTime() - runStartTime.getTime()) / 1000),
+          run_sec: Math.floor(
+            (runEndTime.getTime() - runStartTime.getTime()) / 1000
+          ),
           end_timestamp: runEndTime.toISOString(),
           steps: result.steps,
           state: result.kind,
@@ -335,20 +341,29 @@ export class TaskWorker {
           output_tokens: 0,
         });
 
-        // Update task in wait status
-        if (result.kind === "wait") {
+        // Update task in wait status,
+        // Router and Replier always end up in 'wait/asks' status
+        // to reuse the same task for every run
+        const isWait =
+          result.kind === "wait" ||
+          taskType === "replier" ||
+          taskType === "router";
+
+        if (isWait) {
           // Need new timestamp?
-          const timestamp = result.resumeAt
-            ? Math.floor(new Date(result.resumeAt).getTime() / 1000)
-            : task.timestamp;
-          const status = result.resumeAt ? "wait" : "asks";
+          const timestamp =
+            result.kind === "wait" && result.resumeAt
+              ? Math.floor(new Date(result.resumeAt).getTime() / 1000)
+              : task.timestamp;
+          const status =
+            result.kind === "wait" && result.resumeAt ? "wait" : "asks";
 
           this.debug(
             `Updating ${task.type || ""} task ${
               task.id
-            } timestamp ${timestamp} (resumeAt '${result.resumeAt}') asks '${
-              result.patch?.asks || ""
-            }' status '${status}'`
+            } timestamp ${timestamp} (resumeAt '${
+              result.kind === "wait" ? result.resumeAt : ""
+            }') asks '${result.patch?.asks || ""}' status '${status}'`
           );
 
           await this.api.taskStore.updateTask({
@@ -393,7 +408,11 @@ export class TaskWorker {
           error instanceof Error ? error.message : "Unknown error occurred";
 
         // Finish run with error
-        await this.api.taskStore.errorTaskRun(taskRunId, new Date().toISOString(), errorMessage);
+        await this.api.taskStore.errorTaskRun(
+          taskRunId,
+          new Date().toISOString(),
+          errorMessage
+        );
 
         // Schedule retry for this task
         await this.retry(task, errorMessage, threadId);
@@ -506,7 +525,7 @@ export class TaskWorker {
   }
 
   private formatTaskReply(result: StepOutput) {
-    if (result.kind !== "done") throw new Error("Wrong task kind for reply");
+    if (result.kind === "code") throw new Error("Wrong task kind for reply");
     return `===REASONING===
 ${result.reasoning || ""}
 ===REPLY===

@@ -11,10 +11,12 @@ const getStatusBadge = (task: any) => {
     return <Badge variant="default" className="bg-green-100 text-green-800">Finished</Badge>;
   } else if (task.state === "error") {
     return <Badge variant="destructive">Error</Badge>;
-  } else if (task.reply === "") {
-    return <Badge variant="secondary">Pending</Badge>;
+  } else if (task.state === "wait") {
+    return <Badge variant="secondary">Waiting</Badge>;
+  } else if (task.state === "asks") {
+    return <Badge variant="secondary">Asking</Badge>;
   } else {
-    return <Badge variant="outline">Unknown</Badge>;
+    return <Badge variant="outline">Pending</Badge>;
   }
 };
 
@@ -47,7 +49,7 @@ export default function TasksPage() {
                   <div className="flex-1">
                     <div className="flex items-center gap-2 mb-2">
                       <h3 className="font-medium text-gray-900">
-                        {task.title || `Task ${task.id.slice(0, 8)}`}
+                        {task.title || (task.type === 'router' ? 'Router' : task.type === 'replier' ? 'Replier' : `Task ${task.id.slice(0, 8)}`)}
                       </h3>
                       {getStatusBadge(task)}
                     </div>

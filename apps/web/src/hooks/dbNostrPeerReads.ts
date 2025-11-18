@@ -2,7 +2,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { qk } from "./queryKeys";
 import { useCRSqliteQuery } from "../QueryProvider";
-import type { NostrPeer } from "@app/db";
 
 export function useNostrPeers() {
   const { api } = useCRSqliteQuery();

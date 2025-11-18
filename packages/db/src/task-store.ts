@@ -456,10 +456,12 @@ export class TaskStore {
     await this.db.db.exec(
       `UPDATE task_runs SET
         end_timestamp = ?,
+        state = ?,
         error = ?
       WHERE id = ?`,
       [
         end_timestamp,
+        'error',
         error,
         id,
       ]

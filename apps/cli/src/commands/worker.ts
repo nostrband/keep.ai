@@ -1,8 +1,8 @@
 import { Command } from "commander";
 import { createDBNode, getCurrentUser, getDBPath } from "@app/node";
-import { KeepWorker } from "@app/agent";
 import debug from "debug";
 import { KeepDb, KeepDbApi } from "@app/db";
+import { TaskWorker } from "packages/agent/dist";
 
 const debugWorker = debug("cli:worker");
 
@@ -66,10 +66,13 @@ async function runWorkerCommand(): Promise<void> {
     const api = new KeepDbApi(keepDB);
 
     // Create KeepWorker
-    const worker = new KeepWorker({ api });
+    const worker = new TaskWorker({
+      api,
+      stepLimit: 20,
+    });
 
     // Start worker
-    await worker.start();
+    worker.start();
     console.log("🤖 Keep AI Worker started successfully!");
     console.log("Worker is now running and processing tasks...");
     console.log("Press Ctrl+C to stop the worker.");

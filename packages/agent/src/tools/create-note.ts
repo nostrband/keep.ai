@@ -32,40 +32,28 @@ Maximum 500 notes, and title+content+tags size must not exceed 50KB.`,
         .default(null)
         .describe("Priority level of the note (optional, default: low)"),
     }),
+    outputSchema: z.string().describe("ID of the created note"),
     execute: async (context) => {
       const { title, content, tags, priority, id } = context;
 
-      try {
-        // Validate input and create note directly
-        const finalTags = tags || [];
-        const finalPriority = priority || "low";
-        await noteStore.validateCreateNote(title, content, finalTags);
+      // Validate input and create note directly
+      const finalTags = tags || [];
+      const finalPriority = priority || "low";
+      await noteStore.validateCreateNote(title, content, finalTags);
 
-        // Generate ID for the note
-        const noteId = id || generateId();
+      // Generate ID for the note
+      const noteId = id || generateId();
 
-        // Create the note directly in the database
-        await noteStore.createNote(
-          title,
-          content,
-          finalTags,
-          finalPriority,
-          noteId
-        );
+      // Create the note directly in the database
+      await noteStore.createNote(
+        title,
+        content,
+        finalTags,
+        finalPriority,
+        noteId
+      );
 
-        return {
-          success: true,
-          message: "Note created successfully",
-          noteId: noteId,
-        };
-      } catch (error) {
-        console.error("Error creating note:", error);
-        return {
-          success: false,
-          error:
-            error instanceof Error ? error.message : "Unknown error occurred",
-        };
-      }
+      return noteId;
     },
   });
 }

@@ -11,13 +11,14 @@ const debugSandbox = debug("cli:sandbox");
 export function registerSandboxCommand(program: Command): void {
   program
     .command("sandbox")
+    .argument("<type>", "Task type: router | worker | replier")
     .description("Evaluate JavaScript code using the embedded sandbox runtime")
-    .action(async () => {
-      await runSandboxCommand();
+    .action(async (type) => {
+      await runSandboxCommand(type);
     });
 }
 
-async function runSandboxCommand(): Promise<void> {
+async function runSandboxCommand(type: string): Promise<void> {
   process.stdin.setEncoding("utf8");
 
   const rl = readline.createInterface({
@@ -44,16 +45,19 @@ async function runSandboxCommand(): Promise<void> {
   // Create store instances
   const api = new KeepDbApi(keepDB);
 
+  if (type !== "router" && type !== "worker" && type !== "replier") throw new Error("Invalid type");
+  const taskType = type;
+
   try {
     sandbox = await initSandbox();
     sandbox.context = {
       step: 0,
       taskId: "",
       taskThreadId: "",
-      type: "router",
+      type: taskType,
     };
 
-    const env = new ReplEnv(api, "router", () => sandbox!.context!);
+    const env = new ReplEnv(api, taskType, () => sandbox!.context!);
     const gl = await env.createGlobal();
     console.log("global", gl);
     sandbox.setGlobal(gl);

@@ -5,9 +5,9 @@ import HomePage from "./components/HomePage";
 import ChatPage from "./components/ChatPage";
 import ThreadsPage from "./components/ThreadsPage";
 import ThreadDetailPage from "./components/ThreadDetailPage";
-import MemoryPage from "./components/MemoryPage";
 import TasksPage from "./components/TasksPage";
 import TaskDetailPage from "./components/TaskDetailPage";
+import TaskRunDetailPage from "./components/TaskRunDetailPage";
 import NotesPage from "./components/NotesPage";
 import NoteDetailPage from "./components/NoteDetailPage";
 import DevicesPage from "./components/DevicesPage";
@@ -56,9 +56,9 @@ function App() {
         <Route path="/chat/:id" element={<ChatPage />} />
         <Route path="/threads" element={<ThreadsPage />} />
         <Route path="/threads/:id" element={<ThreadDetailPage />} />
-        <Route path="/memory" element={<MemoryPage />} />
         <Route path="/tasks" element={<TasksPage />} />
         <Route path="/tasks/:id" element={<TaskDetailPage />} />
+        <Route path="/tasks/:id/run/:runId" element={<TaskRunDetailPage />} />
         <Route path="/notes" element={<NotesPage />} />
         <Route path="/notes/:id" element={<NoteDetailPage />} />
         <Route path="/devices" element={<DevicesPage />} />

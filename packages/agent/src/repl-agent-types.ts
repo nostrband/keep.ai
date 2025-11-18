@@ -28,6 +28,7 @@ export type StepOutput = { steps: number; reasoning?: string } & (
 );
 
 export type AgentTask = {
+  id: string;
   type: TaskType;
   state?: TaskState;
 };

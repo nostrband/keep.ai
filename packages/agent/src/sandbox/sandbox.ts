@@ -155,7 +155,7 @@ export class Sandbox {
       try {
         const valueHandle = this.#ctx.unwrapResult(evaluation);
         const result = await this.#resolveHandle(valueHandle, deadline);
-        console.log("result", result);
+        // console.log("result", result);
         return { ok: true, result };
       } catch (error) {
         return { ok: false, error: this.#formatError(error) };

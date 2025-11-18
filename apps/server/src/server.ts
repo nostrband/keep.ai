@@ -7,7 +7,7 @@ import {
   getUserPath,
 } from "@app/node";
 import { DBInterface, KeepDb, KeepDbApi, NostrPeerStore } from "@app/db";
-import { KeepWorker, setEnv, TaskWorker, type Env } from "@app/agent";
+import { setEnv, TaskWorker, type Env } from "@app/agent";
 import debug from "debug";
 import path from "path";
 import os from "os";
@@ -67,20 +67,6 @@ setEnv(env);
 const __dirname = process.cwd();
 
 const app = fastify({ logger: true });
-
-async function createKeepWorker(keepDB: KeepDb) {
-  const api = new KeepDbApi(keepDB);
-
-  // Create KeepWorker
-  const worker = new KeepWorker({
-    api,
-  });
-
-  // Start worker
-  await worker.start();
-
-  return worker;
-}
 
 async function createReplWorker(keepDB: KeepDb) {
   const worker = new TaskWorker({

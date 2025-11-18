@@ -11,6 +11,8 @@ import {
 import { z, ZodFirstPartyTypeKind as K } from "zod";
 import { createDBNode, getCurrentUser, getDBPath } from "@app/node";
 import { KeepDb, KeepDbApi } from "@app/db";
+import { bytesToHex } from "nostr-tools/utils";
+import { randomBytes } from "@noble/hashes/utils";
 
 type Any = z.ZodTypeAny;
 
@@ -168,7 +170,7 @@ async function runAgentCommand(modelName: string): Promise<void> {
     };
 
     const env = new ReplEnv(api, "router", () => sandbox!.context!);
-    const sandboxGlobal = env.createGlobal();
+    const sandboxGlobal = await env.createGlobal();
     sandbox.setGlobal(sandboxGlobal);
 
     console.log("global", sandboxGlobal);
@@ -187,6 +189,7 @@ async function runAgentCommand(modelName: string): Promise<void> {
       }
 
       const task: Task = {
+        id: bytesToHex(randomBytes(8)),
         type: "router",
       };
       const agent = new ReplAgent(model, env, sandbox, task);

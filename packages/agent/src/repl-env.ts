@@ -7,9 +7,15 @@ import {
   makeListNotesTool,
   makeSearchNotesTool,
   makeUpdateNoteTool,
+  makeWebFetchTool,
+  makeWebSearchTool,
+  makeListMessagesTool,
+  makeAddTaskTool,
+  makeGetTaskTool,
+  makeListTasksTool,
+  makeSendToTaskInboxTool,
 } from "./tools";
 import { z, ZodFirstPartyTypeKind as K } from "zod";
-import { generateId } from "ai";
 import { EvalContext, EvalGlobal } from "./sandbox/sandbox";
 import { StepInput, TaskState, TaskType } from "./repl-agent-types";
 import debug from "debug";
@@ -44,18 +50,53 @@ export class ReplEnv {
   async createGlobal(): Promise<EvalGlobal> {
     const docs: any = {};
     const addTool = (global: any, ns: string, name: string, tool: any) => {
+      // Format docs
+      const desc = ["===DESCRIPTION===", tool.description];
+      if (tool.inputSchema)
+        desc.push(...["===INPUT===", printSchema(tool.inputSchema)]);
+      if (tool.outputSchema)
+        desc.push(...["===OUTPUT===", printSchema(tool.outputSchema)]);
+      const doc = desc.join("\n");
+
+      // Init ns
       if (!(ns in global)) global[ns] = {};
-      global[ns][name] = tool.execute;
+
+      // Create a wrapper function that validates input and output
+      global[ns][name] = async (input: any) => {
+        // Validate input using inputSchema if present
+        let validatedInput = input;
+        if (tool.inputSchema) {
+          try {
+            validatedInput = tool.inputSchema.parse(input);
+          } catch (error) {
+            // NOTE: do not print zod error codes as those are too verbose, we're
+            // already printing Usage which is more useful.
+            const message = `Invalid input for ${ns}.${name}.\nUsage: ${desc}`;
+            throw new Error(message);
+          }
+        }
+
+        // Execute the tool with validated input
+        try {
+          return await tool.execute(validatedInput);
+        } catch (e) {
+          const message = `Failed at ${ns}.${name}: ${e}.\nUsage: ${desc}`;
+          throw new Error(message);
+        }
+
+        // Validate output using outputSchema if present
+        // FIXME not sure if all tools return all declared fields
+        // if (tool.outputSchema) {
+        //   try {
+        //     tool.outputSchema.parse(result);
+        //   } catch (error) {
+        //     throw new Error(`Invalid output from ${ns}.${name}: ${error instanceof Error ? error.message : 'Unknown validation error'}`);
+        //   }
+        // }
+      };
 
       if (!("docs" in global)) global["docs"] = {};
       if (!(ns in global["docs"])) global["docs"][ns] = {};
-      let desc = ["===Description===", tool.description];
-      if (tool.inputSchema)
-        desc.push(...["===Input===", printSchema(tool.inputSchema)]);
-      if (tool.outputSchema)
-        desc.push(...["===Output===", printSchema(tool.outputSchema)]);
-
-      const doc = desc.join("\n");
       docs[ns + "." + name] = doc;
       this.tools.set(`${ns}.${name}`, doc);
     };
@@ -76,23 +117,27 @@ export class ReplEnv {
 
     // Tools
     if (this.type !== "replier") {
-      addTool(global, "tools", "weather", makeGetWeatherTool());
+      addTool(global, "Tools", "weather", makeGetWeatherTool());
+    }
+    if (this.type === "worker") {
+      addTool(global, "Tools", "webSearch", makeWebSearchTool());
+      addTool(global, "Tools", "webFetch", makeWebFetchTool());
     }
 
     // Memory
 
     if (this.type !== "replier") {
       // Notes
-      addTool(global, "memory", "getNote", makeGetNoteTool(this.api.noteStore));
+      addTool(global, "Memory", "getNote", makeGetNoteTool(this.api.noteStore));
       addTool(
         global,
-        "memory",
-        "listNotes",
+        "Memory",
+        "listNotesMetadata",
         makeListNotesTool(this.api.noteStore)
       );
       addTool(
         global,
-        "memory",
+        "Memory",
         "searchNotes",
         makeSearchNotesTool(this.api.noteStore)
       );
@@ -101,19 +146,19 @@ export class ReplEnv {
       if (this.type === "worker") {
         addTool(
           global,
-          "memory",
+          "Memory",
           "createNote",
           makeCreateNoteTool(this.api.noteStore)
         );
         addTool(
           global,
-          "memory",
+          "Memory",
           "updateNote",
           makeUpdateNoteTool(this.api.noteStore)
         );
         addTool(
           global,
-          "memory",
+          "Memory",
           "deleteNote",
           makeDeleteNoteTool(this.api.noteStore)
         );
@@ -121,244 +166,30 @@ export class ReplEnv {
     }
 
     // Message history available for all agent types
-    addTool(global, "memory", "listMessages", {
-      execute: async (opts?: { limit: number }) => {
-        return await this.api.memoryStore.getMessages({
-          // default limit
-          limit: 3,
-          // copy other options
-          ...opts,
-          // override thread
-          threadId: "main",
-        });
-      },
-      description:
-        "Get list of recent messages exchanged with user, oldest-first.",
-      inputSchema: z.object({
-        limit: z
-          .number()
-          .optional()
-          .default(10)
-          .describe("Number of most recent user messages to fetch"),
-      }),
-      outputSchema: z.array(
-        z.object({
-          id: z.string().describe("Id of message"),
-          metadata: z.object({
-            createdAt: z.string().describe("Date and time of message"),
-          }),
-          role: z
-            .string()
-            .describe("Message author's role - 'user' or 'assistant'"),
-          parts: z.array(
-            z.object({
-              type: z.string().describe("Type of part, 'text' or others"),
-              text: z.string().describe("Text of message part"),
-            })
-          ),
-        })
-      ),
-    });
+    addTool(
+      global,
+      "Memory",
+      "listMessages",
+      makeListMessagesTool(this.api.memoryStore)
+    );
 
     // Tasks
 
     // Router or Worker
     if (this.type !== "replier") {
-      addTool(global, "tasks", "add", {
-        execute: async (opts: {
-          title: string;
-          goal?: string;
-          notes?: string;
-          startAt?: string;
-        }) => {
-          const id = generateId();
-          const timestamp = Math.floor(
-            (opts.startAt ? new Date(opts.startAt).getTime() : Date.now()) /
-              1000
-          );
-          await this.api.taskStore.addTask(
-            id,
-            timestamp,
-            "",
-            "worker",
-            "",
-            opts.title
-          );
-          await this.api.taskStore.saveState({
-            id,
-            goal: opts.goal || "",
-            notes: opts.notes || "",
-            asks: "",
-            plan: "",
-          });
-          return {
-            id,
-            ...opts,
-          };
-        },
-        description: "Create a background task",
-        inputSchema: z.object({
-          title: z
-            .string()
-            .describe("Task title for task management and audit"),
-          goal: z
-            .string()
-            .optional()
-            .nullable()
-            .describe("Task goal for worker agent"),
-          notes: z
-            .string()
-            .optional()
-            .nullable()
-            .describe("Task notes for worker agent"),
-          startAt: z
-            .string()
-            .optional()
-            .nullable()
-            .describe("ISO date-time when task should be launched"),
-        }),
-        outputSchema: z.array(z.string().describe("Task id")),
-      });
-
-      addTool(global, "tasks", "get", {
-        execute: async (id: string) => {
-          const task = await this.api.taskStore.getTask(id);
-          const state = await this.api.taskStore.getState(id);
-          return {
-            id: task.id,
-            title: task.title,
-            state: task.state,
-            error: task.error,
-            runTime: new Date(task.timestamp * 1000),
-            goal: state?.goal || "",
-            notes: state?.notes || "",
-            plan: state?.plan || "",
-            asks: state?.asks || "",
-          };
-        },
-        description: "Get a background task",
-        inputSchema: z.string().describe("Task id"),
-        outputSchema: z.array(
-          z.object({
-            id: z.string(),
-            title: z.string(),
-            state: z.string(),
-            error: z.string(),
-            runTime: z
-              .string()
-              .describe("Date time when task is scheduled to run"),
-          })
-        ),
-      });
-
-      addTool(global, "tasks", "list", {
-        execute: async (opts?: {
-          include_finished?: boolean;
-          until?: string;
-        }) => {
-          const tasks = await this.api.taskStore.listTasks(
-            opts?.include_finished,
-            "worker",
-            opts?.until
-              ? Math.floor(new Date(opts.until).getTime() / 1000)
-              : undefined
-          );
-          return tasks.map((task) => ({
-            id: task.id,
-            title: task.title,
-            state: task.state,
-            error: task.error,
-          }));
-        },
-        description: "List background tasks",
-        inputSchema: z.object({
-          include_finished: z
-            .boolean()
-            .optional()
-            .nullable()
-            .describe("Include finished tasks to the list"),
-          until: z
-            .string()
-            .optional()
-            .nullable()
-            .describe(
-              "Max runTime field of task, can be used for pagination through older tasks"
-            ),
-        }),
-        outputSchema: z.array(
-          z.object({
-            id: z.string(),
-            title: z.string(),
-            state: z.string(),
-            error: z.string(),
-            runTime: z
-              .string()
-              .describe("Date time when task is scheduled to run"),
-          })
-        ),
-      });
-
-      if (this.type === "worker") {
-        //   addTool(global, "tasks", "cancelCurrentTask", {
-        //     execute: async (opts: { reason?: string }) => {
-        //       let { reason } = opts;
-        //       if (typeof opts === "string") reason = opts;
-        //       const context = this.getContext();
-        //       if (!context) throw new Error("No eval context");
-        //       if (context.type !== "worker")
-        //         throw new Error("Only worker can cancel it's own task");
-        //       this.debug("Cancel task", context.taskId);
-        //       await this.api.taskStore.finishTask(
-        //         context.taskId,
-        //         "",
-        //         "Cancelled",
-        //         reason || "Cancelled"
-        //       );
-        //     },
-        //     description: "Cancel this current task.",
-        //     inputSchema: z.object({
-        //       reason: z
-        //         .string()
-        //         .optional()
-        //         .nullable()
-        //         .describe("Cancel reason for audit traces"),
-        //     }),
-        //   });
-      }
-
-      addTool(global, "tasks", "sendToTaskInbox", {
-        execute: async (opts: { id: string; message: string }) => {
-          const task = await this.api.taskStore.getTask(opts.id);
-          if (!task) throw new Error("Task not found");
-
-          const context = this.getContext();
-          if (!context) throw new Error("No eval context");
-          if (context.type === "replier")
-            throw new Error("Replier can't send to inbox");
-
-          const id = `${context.taskThreadId}.${context.step}.${generateId()}`;
-          await this.api.inboxStore.saveInbox({
-            id,
-            source: context.type,
-            source_id: context.taskId,
-            target: "worker",
-            target_id: opts.id,
-            timestamp: new Date().toISOString(),
-            content: JSON.stringify({
-              id,
-              role: "assistant",
-              content: opts.message,
-            }),
-            handler_thread_id: "",
-            handler_timestamp: "",
-          });
-        },
-        description: "Send a message to task inbox",
-        inputSchema: z.object({
-          id: z.string().describe("Task id"),
-          message: z.string().describe("Message for the task handler"),
-        }),
-      });
+      addTool(global, "Tasks", "add", makeAddTaskTool(this.api.taskStore));
+      addTool(global, "Tasks", "get", makeGetTaskTool(this.api.taskStore));
+      addTool(global, "Tasks", "list", makeListTasksTool(this.api.taskStore));
+      addTool(
+        global,
+        "Tasks",
+        "sendToTaskInbox",
+        makeSendToTaskInboxTool(
+          this.api.taskStore,
+          this.api.inboxStore,
+          this.getContext
+        )
+      );
     }
     return global;
   }
@@ -384,7 +215,7 @@ ${systemPrompt}
 `.trim();
   }
 
-  async buildUser(input: StepInput, state?: TaskState): Promise<string> {
+  async buildUser(taskId: string, input: StepInput, state?: TaskState): Promise<string> {
     if (input.reason === "code" && !input.result)
       throw new Error("No step result");
     if (input.reason === "input" && !input.inbox.length)
@@ -398,13 +229,14 @@ ${systemPrompt}
             ...[
               "===INSTRUCTIONS===",
               "Your job is to understand the new input in TASK_INBOX and manage background tasks accordingly.",
-              "- You may use `memory.*` tools to read context (read-only).",
-              "- You may NOT update notes or make other side-effects directly; create tasks for that using `tasks.*`.",
-              "- If a relevant task exists and the user message adds information → use `tasks.sendToTaskInbox`.",
+              "- You may use `Memory.*` tools to read context (read-only).",
+              "- You may NOT update notes or make other side-effects directly; create tasks for that using `Tasks.*`.",
+              "- If a relevant task exists and the user message adds information → use `Tasks.sendToTaskInbox`.",
               "- Before creating a new task ALWAYS check for existing relevant task.",
               "- If user's goal is unclear → create a task with a proper goal to clarify the input.",
               "- You may answer directly ONLY for simple one-shot read-only queries (e.g., 'what time is it?', 'calc 456*9876' etc), ",
               "otherwise route/spawn and keep the user reply minimal (emoji or a short confirmation).",
+              "- Background tasks have access to web search and fetch tools."
             ]
           );
           break;
@@ -427,7 +259,7 @@ ${systemPrompt}
               "You are processing a complex task:",
               "- Check TASK_GOAL, TASK_NOTES and TASK_PLAN below to understand the task and progress.",
               "- Read TASK_INBOX for new user input relevant to this task.",
-              "- Use available tools (memory.*) to understand context better.",
+              "- Use available tools (Memory.*) to understand context better.",
               "- Honor TASK_GOAL strictly; ignore irrelevant user messages in history.",
               "- Execute only the steps that are valid at the current time (see ===STEP===).",
               "- Handle PREV_STEP_ERROR gracefully (adjust or repair state as needed).",
@@ -443,7 +275,7 @@ ${systemPrompt}
       tools.push(
         ...[
           "===TOOLS===",
-          'Available tools (via `globalThis`; call `docs("<ToolName>")` for details):',
+          'Available tools (via `globalThis`; call `docs("<ToolName>")` for docs):',
           "Tools:",
           ...[...this.tools.keys()].map((t) => `- ${t}`),
         ]
@@ -455,16 +287,30 @@ ${systemPrompt}
       input.step === 0 &&
       (this.type === "router" || this.type === "replier")
     ) {
+      const COUNT = 3;
       const messages = await this.api.memoryStore.getMessages({
         threadId: "main",
-        limit: 3,
+        limit: 10,
       });
+      const filtered =
+        this.type === "router"
+          ? messages.filter((m) => {
+              return !input.inbox.find((i) => {
+                // FIXME this is really ugly!
+                try {
+                  return JSON.parse(i).id === m.id;
+                } catch {}
+              });
+            })
+          : messages;
+      // Messages are recent-last, leave last 3 messages
+      if (filtered.length > COUNT) filtered.splice(0, filtered.length - COUNT);
 
       history.push(
         ...[
-          "Recent message history for context (use memory.* tools for more).",
+          "Recent message history for context (use Memory.* tools for more).",
           "```json",
-          ...messages.map(
+          ...filtered.map(
             (m) =>
               `- ${JSON.stringify({
                 id: m.id,
@@ -507,6 +353,9 @@ ${systemPrompt}
     ];
 
     const stateInfo: string[] = [];
+    if (this.type === "worker") {
+      stateInfo.push(...["===TASK_ID===", taskId]);
+    }
     if (state && this.type === "worker") {
       if (state.goal) stateInfo.push(...["===TASK_GOAL===", state.goal]);
       if (state.plan) stateInfo.push(...["===TASK_PLAN===", state.plan]);
@@ -615,8 +464,9 @@ Output rules:
 
 Your main job is to understand user messages with context and route (parts of) user messages to background tasks: 
 - User messages may be complex, referring to multiple tasks/ideas/issues/projects, and/or combining complex requests with simple queries.
-- You job is to use memory.* tools to understand and decompose the user messages into sub-parts to be routed to background tasks.
+- You job is to use Memory.* tools to understand and decompose the user messages into sub-parts to be routed to background tasks.
 - If a relevant existing task is found → send to its inbox, otherwise create new task with a goal and notes.
+- If task needs to be cancelled/deleted, send corresponding user request to it's inbox.
 - If all parts of user messages were routed to tasks, reply with a short confirming sentence or emoji in TASK_REPLY.
 - If user message is (has a part that is) read-only, simple, low-variance (e.g., time, trivial lookup), then you are allowed to skip spawning
 a background task for that part and are allowed to create the full reply in TASK_REPLY, must justify the decision in TASK_REASONING.
@@ -685,7 +535,7 @@ Output rules:
 ## Staleness & deduping
 - Prefer the newest draft for the same topic; drop older near-duplicates.
 - Use timestamps from ===STEP=== and metadata to decide staleness.
-- Check recent message history (memory.*):
+- Check recent message history (Memory.*):
  - make sure draft isn't a duplicate of an already sent info,
  - make sure draft is still relevant and user intent hasn't changed,
  - make sure your reply is contextually anchored and fits naturally into the conversation.
@@ -705,7 +555,7 @@ You are the **Worker** sub-agent of a personal AI assistant. You execute a singl
 Your responsibility is to move this task toward completion, using deterministic short steps.
 
 You operate in a REPL JS sandbox and can:
-- fetch context (memory.* tools) 
+- fetch context (Memory.* tools) 
 - use other tools (i.e. save system-wide notes)
 - store persistent progress in TASK_NOTES and TASK_PLAN
 - ask the user for info via TASK_ASKS
@@ -797,6 +647,7 @@ You MUST save any needed state into TASK_NOTES and/or TASK_PLAN.
 The task finishes permanently.
 - You MUST provide a TASK_REPLY for the user.
 - You MAY spawn new tasks before finishing.
+- Use this result if task needs to be cancelled/deleted.
 
 ## Semantics of task fields
 
@@ -832,7 +683,7 @@ You are launched when:
 
 ## Execution Rules
 - Use memory tools to understand context, but store task-specific info only in NOTES/PLAN.
-- You may use memory.notes* tools to store system-wide notes if task knowledge might benefit user later.
+- You may use Memory.notes* tools to store system-wide notes if task knowledge might benefit user later.
 - Avoid drifting away from TASK_GOAL even if user message history contains unrelated content.
 - For goal clarification: ask questions via TASK_ASKS; when clarified, spawn a new task and finish this one.
 - For long-running computations: after some steps (i.e. >20) pause with STEP_KIND=wait + TASK_RESUME_AT=<now> to save TASK_NOTES and TASK_PLAN.

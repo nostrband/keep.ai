@@ -16,9 +16,9 @@ export const qk = {
   // Task-related queries
   allTasks: (includeFinished: boolean) => [{ scope: "allTasks", includeFinished }] as const,
   task: (taskId: string) => [{ scope: "task", taskId }] as const,
-  
-  // Memory-related queries
-  workingMemory: () => [{ scope: "workingMemory" }] as const,
+  taskState: (taskId: string) => [{ scope: "taskState", taskId }] as const,
+  taskRuns: (taskId: string) => [{ scope: "taskRuns", taskId }] as const,
+  taskRun: (runId: string) => [{ scope: "taskRun", runId }] as const,
   
   // Note-related queries
   allNotes: () => [{ scope: "allNotes" }] as const,
@@ -31,4 +31,8 @@ export const qk = {
   // Nostr peer-related queries
   allNostrPeers: () => [{ scope: "allNostrPeers" }] as const,
   nostrPeer: (peerPubkey: string) => [{ scope: "nostrPeer", peerPubkey }] as const,
+  
+  // Inbox-related queries
+  inboxItems: (options?: { source?: string; target?: string; handled?: boolean; limit?: number; }) => [{ scope: "inboxItems", options }] as const,
+  inboxItem: (id: string) => [{ scope: "inboxItem", id }] as const,
 };
