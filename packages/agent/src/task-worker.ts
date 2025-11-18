@@ -397,7 +397,7 @@ export class TaskWorker {
           if (taskType === "replier") {
             await this.sendToUser(result.reply);
           } else {
-            await this.sendToReplier(result.reply, threadId);
+            await this.sendToReplier(result.reply, task.id, taskRunId);
           }
         }
       } catch (error) {
@@ -551,17 +551,17 @@ ${result.reply || ""}
     );
   }
 
-  private async sendToReplier(reply: string, threadId: string) {
+  private async sendToReplier(reply: string, taskId: string, taskRunId: string) {
     this.debug("Send reply to replier", reply);
     // Send router's reply to replier
     await this.api.inboxStore.saveInbox({
-      id: threadId,
+      id: taskRunId,
       source: "router",
-      source_id: threadId,
+      source_id: taskRunId,
       target: "replier",
       target_id: "",
       timestamp: new Date().toISOString(),
-      content: JSON.stringify({ role: "assistant", content: reply }),
+      content: JSON.stringify({ role: "assistant", content: reply, sourceTaskId: taskId }),
       handler_thread_id: "",
       handler_timestamp: "",
     });

@@ -406,6 +406,20 @@ ${stepResults.join("\n")}
 `.trim();
   }
 
+  private jsPrompt() {
+    return `
+## JS REPL code guidelines 
+- you MUST 'return' the value you need to receive (must be convertible to JSON)
+- no fetch, no console.log/error, no direct network or disk
+- do not wrap your code in '(async () => {...})()' - that's already done for you
+- tools are exposed on globalThis
+- ALWAYS get tool descriptions via docs("<ToolName>") before use
+- all tools are async and must be await-ed
+- to store state across steps, set to globalThis, i.e. globalThis.someState=...; will be available next time
+- variables declared on the stack aren't stored across steps, i.e. const localState=...; will NOT be available next time
+`;
+  }
+
   private routerSystemPrompt() {
     return `
 You are the **Router** sub-agent in a Router→Worker→Replier pipeline of a personal AI assistant. 
@@ -447,13 +461,7 @@ Output rules:
 - If STEP_KIND=done: include TASK_REPLY and must omit STEP_CODE.
 - Always end with ===END=== on its own line.
 
-## JS REPL code guidelines 
-- you MUST 'return' the value you need to receive (must be convertible to JSON)
-- no fetch, no console.log/error, no direct network or disk
-- do not wrap your code in '(async () => {...})()' - that's already done for you
-- tools are exposed on globalThis
-- ALWAYS get tool descriptions via docs("<ToolName>") before use
-- all tools are async and must be await-ed
+${this.jsPrompt()}
 
 ## Time & locale
 - Use the provided Now: timestamp from ===STEP=== as current time.
@@ -517,12 +525,7 @@ Output rules:
 - If STEP_KIND=done: include TASK_REPLY and must omit STEP_CODE.
 - Always end with ===END=== on its own line.
 
-## JS REPL code guidelines 
-- you MUST 'return' the value you need to receive (must be convertible to JSON)
-- no fetch, no console.log/error, no direct network or disk
-- do not wrap your code in '(async () => {...})()' - that's already done for you
-- tools are exposed on globalThis, get descriptions via docs("<ToolName>")
-- all tools are async and must be await-ed
+${this.jsPrompt()}
 
 ## Time & locale
 - Use the provided Now: timestamp from ===STEP=== as current time.
@@ -610,12 +613,7 @@ Output rules:
 - If STEP_KIND=wait: may include TASK_REPLY and must omit STEP_CODE, must include TASK_ASKS or TASK_RESUME_AT.
 - Always end with ===END=== on its own line.
 
-## JS REPL code guidelines 
-- you MUST 'return' the value you need to receive (must be convertible to JSON)
-- no fetch, no console.log/error, no direct network or disk
-- do not wrap your code in '(async () => {...})()' - that's already done for you
-- tools are exposed on globalThis, get descriptions via docs("<ToolName>")
-- all tools are async and must be await-ed
+${this.jsPrompt()}
 
 ## Time & locale
 - Use the provided Now: timestamp from ===STEP=== as current time.

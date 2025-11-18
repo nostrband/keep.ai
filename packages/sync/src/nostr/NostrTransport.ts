@@ -749,6 +749,7 @@ class PeerSend {
   private sub?: SubCloser;
   private debug: ReturnType<typeof debug>;
   private pending: PeerChange[] = [];
+  private schemaVersion: number = 0;
   private nextSendTimer?: ReturnType<typeof setTimeout>;
 
   constructor(parent: NostrTransport, peer: NostrPeer) {
@@ -779,6 +780,7 @@ class PeerSend {
     if (this.nextSendTimer) clearTimeout(this.nextSendTimer);
     this.nextSendTimer = undefined;
     this.pending.length = 0;
+    this.schemaVersion = 0;
   }
 
   private async subscribe() {
@@ -884,6 +886,7 @@ class PeerSend {
     if (changes.type === "eose") return;
 
     // Put to send queue
+    this.schemaVersion = Math.max(this.schemaVersion, changes.schemaVersion || 0);
     this.schedule(changes.data);
   }
 
@@ -918,6 +921,7 @@ class PeerSend {
       if (!batch) {
         batch = {
           type: "changes",
+          schemaVersion: this.schemaVersion,
           data: [c],
         };
       } else {
