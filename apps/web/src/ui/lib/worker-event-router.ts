@@ -9,6 +9,7 @@ interface TabMessagePortLike {
 export class WorkerEventRouter extends EventEmitter<{
   connect(connStr: string, port: TabMessagePortLike): Promise<void>;
   local_key(key: Uint8Array): Promise<void>;
+  reconnect(): Promise<void>;
 }> {
   private started = false;
   private buffer: [MessageEvent, TabMessagePortLike][] = [];
@@ -50,6 +51,8 @@ export class WorkerEventRouter extends EventEmitter<{
       this.emit("connect", data.connectionString, port);
     } else if (type === "local_key") {
       this.emit("local_key", hexToBytes(data.key));
+    } else if (type === "reconnect") {
+      this.emit("reconnect");
     } else if (type === "ping") {
       // Immediately respond with pong
       port.postMessage({ type: "pong" });

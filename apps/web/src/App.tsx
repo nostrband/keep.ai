@@ -56,6 +56,14 @@ function App() {
     );
   }
 
+  if (dbStatus === "reconnecting") {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div>Reconnecting</div>
+      </div>
+    );
+  }
+
   return (
     <BrowserRouter>
       <Routes>

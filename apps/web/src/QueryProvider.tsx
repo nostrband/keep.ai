@@ -21,7 +21,8 @@ type DbStatus =
   | "ready"
   | "error"
   | "disconnected"
-  | "reload";
+  | "reload"
+  | "reconnecting";
 
 interface QueryContextType {
   dbStatus: DbStatus;
@@ -68,16 +69,21 @@ export function QueryProvider({
   const [pingTimeout, setPingTimeout] = useState<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
-    initializeDatabase();
+    let onResumeHandler: (() => void) | undefined;
+    initializeDatabase().then(({ onResume }) => (onResumeHandler = onResume));
+
+    if (onResumeHandler) document.addEventListener("resume", onResumeHandler);
 
     // Cleanup on unmount
     return () => {
-      cleanup();
+      cleanup(onResumeHandler);
     };
   }, []);
 
-  const cleanup = async () => {
+  const cleanup = async (onResume?: () => void) => {
     stopPingInterval();
+
+    if (onResume) document.removeEventListener("resume", onResume);
 
     if (peer) {
       peer.stop();
@@ -141,6 +147,7 @@ export function QueryProvider({
   };
 
   const initializeDatabase = async () => {
+    let onResume: (() => void) | undefined;
     try {
       setDbStatus("initializing");
       setError(null);
@@ -227,6 +234,13 @@ export function QueryProvider({
             } else if (type === "connect_error") {
               setError(data.error);
               console.error("[QueryProvider] Connection error:", data.error);
+            } else if (type === "worker_reconnecting") {
+              setDbStatus("reconnecting");
+              console.error("[QueryProvider] Reconnecting...");
+            } else if (type === "worker_reconnected") {
+              if (wasReady)
+                setDbStatus("ready");
+              console.error("[QueryProvider] Reconnecting...");
             }
           });
         }
@@ -289,6 +303,12 @@ export function QueryProvider({
           });
           console.log("[QueryProvider] Sent existing local key to worker");
         }
+
+        onResume = () => {
+          workerPort!.postMessage({
+            type: "reconnect",
+          });
+        };
       }
 
       console.log("[QueryProvider] Initialized successfully");
@@ -297,6 +317,8 @@ export function QueryProvider({
       setError((err as Error).message);
       console.error("[QueryProvider] Initialization failed:", err);
     }
+
+    return { onResume };
   };
 
   const retryInitialization = async () => {

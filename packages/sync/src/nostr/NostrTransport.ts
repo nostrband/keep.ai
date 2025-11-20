@@ -173,6 +173,13 @@ export class NostrTransport implements Transport {
     }
   }
 
+  async reconnect() {
+    for (const p of this.sends.values())
+      p.reconnect();
+    for (const p of this.recvs.values())
+      p.reconnect();
+  }
+
   async sync(peerId: string, localCursor: Cursor): Promise<void> {
     const recv = this.recvs.get(peerId);
     if (!recv) throw new Error("Peer not found " + peerId);
@@ -236,6 +243,16 @@ class PeerRecv {
         ":P" +
         this.peer.peer_id.substring(0, 4)
     );
+  }
+
+  async reconnect() {
+    // Not started yet
+    if (!this.localCursor || !this.sub) return;
+
+    this.sub.close();
+    this.sub = undefined;
+
+    await this.subscribe();
   }
 
   async sync(localCursor: Cursor): Promise<void> {
@@ -781,6 +798,16 @@ class PeerSend {
     this.nextSendTimer = undefined;
     this.pending.length = 0;
     this.schemaVersion = 0;
+  }
+
+  async reconnect() {
+    // Not connected yet
+    if (!this.sub) return;
+
+    this.sub.close();
+    this.sub = undefined;
+
+    await this.subscribe();
   }
 
   private async subscribe() {

@@ -185,6 +185,13 @@ export class SyncWorker {
             console.error("[Worker] Failed to start with local key:", error);
           }
         });
+
+        // Page was frozen on mobile and now resumed
+        this.workerEvents.on("reconnect", async () => {
+          this.workerEvents.broadcast({ type: "worker_reconnecting" });
+          await (backendTransport as NostrTransport).reconnect();
+          this.workerEvents.broadcast({ type: "worker_reconnected" });
+        });
       }
 
       // Can start now - will deliver buffered messages
