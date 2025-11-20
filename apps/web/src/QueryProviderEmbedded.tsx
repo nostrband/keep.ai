@@ -69,7 +69,14 @@ export function QueryProviderEmbedded({
     let onResumeHandler: (() => void) | undefined;
     initializeDatabase().then(({ onResume }) => (onResumeHandler = onResume));
 
-    if (onResumeHandler) document.addEventListener("resume", onResumeHandler);
+    if (onResumeHandler) {
+      document.addEventListener("visibilitychange", () => {
+        if (!document.hidden) {
+          onResumeHandler!();
+        }
+      });
+      document.addEventListener("resume", onResumeHandler);
+    }
 
     // Cleanup on unmount
     return () => {
@@ -190,7 +197,10 @@ export function QueryProviderEmbedded({
           // Start NostrTransport
           await transport.start(peer.getConfig());
 
-          dbg("NostrTransport started with existing key, pubkey", getPublicKey(keyBytes));
+          dbg(
+            "NostrTransport started with existing key, pubkey",
+            getPublicKey(keyBytes)
+          );
         }
 
         // Resume after freeze might need to reconnect to relays
@@ -303,9 +313,7 @@ export function QueryProviderEmbedded({
 export function useQueryProvider() {
   const context = useContext(QueryContext);
   if (context === undefined) {
-    throw new Error(
-      "useQueryProvider must be used within a QueryProvider"
-    );
+    throw new Error("useQueryProvider must be used within a QueryProvider");
   }
   return context;
 }
