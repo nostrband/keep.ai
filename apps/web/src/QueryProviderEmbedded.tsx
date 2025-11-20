@@ -195,7 +195,8 @@ export function QueryProviderEmbedded({
 
         // Resume after freeze might need to reconnect to relays
         onResume = () => {
-          if (isServerless) (transport as NostrTransport).reconnect();
+          alert("resumed");
+          (transport as NostrTransport).reconnect();
         };
       }
 

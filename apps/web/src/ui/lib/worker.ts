@@ -1,6 +1,5 @@
 import { MessagePortLike, WorkerTransport } from "@app/browser";
 import { WorkerEventRouter } from "./worker-event-router";
-import { DB_FILE } from "@app/proto";
 import { KeepDb, NostrPeerStore } from "@app/db";
 import { ServerlessNostrSigner } from "./signer";
 import {
@@ -13,6 +12,7 @@ import {
 import { getPublicKey } from "nostr-tools";
 import { bytesToHex } from "nostr-tools/utils";
 import { createDB } from "../../db";
+import { DB_FILE } from "@app/web/const";
 
 const isServerless = import.meta.env.VITE_FLAVOR === "serverless";
 
