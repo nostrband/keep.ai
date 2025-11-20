@@ -23,7 +23,7 @@ export class MspParser {
       }
     }
 
-    const reasoning = getSection(text, "TASK_REASONING")?.trim();
+    const reasoning = getSection(text, "STEP_REASONING")?.trim();
 
     switch (kind) {
       case "done": {

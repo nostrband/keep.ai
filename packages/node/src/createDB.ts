@@ -42,6 +42,49 @@ class Sqlite3DBWrapper implements DBInterface {
     });
   }
 
+  async execManyArgs(sql: string, args?: any[][]): Promise<any[]> {
+    if (!args || args.length === 0) {
+      return [];
+    }
+
+    return new Promise((resolve, reject) => {
+      const stmt = this.db.prepare(sql, (err) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+
+        const results: any[] = [];
+        let completed = 0;
+        const total = args.length;
+
+        for (let i = 0; i < args.length; i++) {
+          const argSet = args[i];
+          stmt.run(argSet || [], function(runErr) {
+            if (runErr) {
+              stmt.finalize();
+              reject(runErr);
+              return;
+            }
+
+            results[i] = { lastID: this.lastID, changes: this.changes };
+            completed++;
+
+            if (completed === total) {
+              stmt.finalize((finalizeErr) => {
+                if (finalizeErr) {
+                  reject(finalizeErr);
+                } else {
+                  resolve(results);
+                }
+              });
+            }
+          });
+        }
+      });
+    });
+  }
+
   async tx<T>(fn: (tx: DBInterface) => Promise<T>): Promise<T> {
     return new Promise<T>(async (resolve, reject) => {
       try {

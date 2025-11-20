@@ -2,8 +2,26 @@
 
 @layer base {
   :root {
+    --background: 0 0% 100%; /* White background */
+    --foreground: 0 0% 9%; /* Dark text */
+    --card: 0 0% 100%; /* White card background */
+    --card-foreground: 0 0% 9%; /* Dark card text */
+    --popover: 0 0% 100%; /* White popover background */
+    --popover-foreground: 0 0% 9%; /* Dark popover text */
+    --primary: 42 67% 55%; /* Primary color - same as accent */
+    --primary-foreground: 0 0% 100%; /* White text on primary */
+    --secondary: 0 0% 96%; /* Light gray secondary */
+    --secondary-foreground: 0 0% 9%; /* Dark text on secondary */
+    --muted: 0 0% 96%; /* Light gray muted */
+    --muted-foreground: 0 0% 45%; /* Medium gray muted text */
     --accent: 42 67% 55%; /* #D6A642 converted to HSL */
     --accent-foreground: 0 0% 100%; /* White text on accent background */
+    --destructive: 0 84% 60%; /* Red color for error states - #E53E3E in HSL */
+    --destructive-foreground: 0 0% 100%; /* White text on destructive background */
+    --border: 0 0% 89%; /* Light gray border */
+    --input: 0 0% 89%; /* Light gray input border */
+    --ring: 42 67% 55%; /* Focus ring color - same as primary */
+    --radius: 0.5rem; /* 8px border radius */
   }
   
   * {

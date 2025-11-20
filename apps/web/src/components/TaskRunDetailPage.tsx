@@ -2,14 +2,16 @@ import React from "react";
 import { useParams, Link } from "react-router-dom";
 import { useTask, useTaskRun } from "../hooks/dbTaskReads";
 import SharedHeader from "./SharedHeader";
-import {
-  Badge,
-} from "../ui";
+import { Badge } from "../ui";
 import { Response } from "../ui/components/ai-elements/response";
 
 const getStatusBadge = (run: any) => {
   if (run.state === "done") {
-    return <Badge variant="default" className="bg-green-100 text-green-800">Done</Badge>;
+    return (
+      <Badge variant="default" className="bg-green-100 text-green-800">
+        Done
+      </Badge>
+    );
   } else if (run.state === "error") {
     return <Badge variant="destructive">Error</Badge>;
   } else if (run.state === "wait") {
@@ -32,7 +34,16 @@ export default function TaskRunDetailPage() {
     <div className="min-h-screen bg-gray-50">
       <SharedHeader
         title="Task Run"
-        subtitle={`${task ? (task.title || (task.type === 'router' ? 'Router' : task.type === 'replier' ? 'Replier' : `Task ${task.id.slice(0, 8)}`)) : 'Loading...'} - Run ${runId.slice(0, 8)}`}
+        subtitle={`${
+          task
+            ? task.title ||
+              (task.type === "router"
+                ? "Router"
+                : task.type === "replier"
+                ? "Replier"
+                : `Task ${task.id.slice(0, 8)}`)
+            : "Loading..."
+        } - Run ${runId.slice(0, 8)}`}
       />
 
       {/* Main content */}
@@ -55,9 +66,16 @@ export default function TaskRunDetailPage() {
                     to={`/tasks/${task.id}`}
                     className="text-lg font-semibold text-blue-600 hover:text-blue-800 underline"
                   >
-                    {task.title || (task.type === 'router' ? 'Router' : task.type === 'replier' ? 'Replier' : `Task ${task.id.slice(0, 8)}`)}
+                    {task.title ||
+                      (task.type === "router"
+                        ? "Router"
+                        : task.type === "replier"
+                        ? "Replier"
+                        : `Task ${task.id.slice(0, 8)}`)}
                   </Link>
-                  <p className="text-sm text-gray-600 mt-1">Task ID: {task.id}</p>
+                  <p className="text-sm text-gray-600 mt-1">
+                    Task ID: {task.id}
+                  </p>
                 </div>
               </div>
             </div>
@@ -76,25 +94,37 @@ export default function TaskRunDetailPage() {
               <div className="space-y-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
-                    <h3 className="text-sm font-medium text-gray-700 mb-2">Run ID</h3>
-                    <p className="text-gray-900 font-mono text-sm">{taskRun.id}</p>
+                    <h3 className="text-sm font-medium text-gray-700 mb-2">
+                      Run ID
+                    </h3>
+                    <p className="text-gray-900 font-mono text-sm">
+                      {taskRun.id}
+                    </p>
                   </div>
 
                   <div>
-                    <h3 className="text-sm font-medium text-gray-700 mb-2">Type</h3>
-                    <p className="text-gray-900">{taskRun.type || 'N/A'}</p>
+                    <h3 className="text-sm font-medium text-gray-700 mb-2">
+                      Type
+                    </h3>
+                    <p className="text-gray-900">{taskRun.type || "N/A"}</p>
                   </div>
 
                   <div>
-                    <h3 className="text-sm font-medium text-gray-700 mb-2">Start Time</h3>
+                    <h3 className="text-sm font-medium text-gray-700 mb-2">
+                      Start Time
+                    </h3>
                     <p className="text-gray-900">
-                      {taskRun.start_timestamp ? new Date(taskRun.start_timestamp).toLocaleString() : 'N/A'}
+                      {taskRun.start_timestamp
+                        ? new Date(taskRun.start_timestamp).toLocaleString()
+                        : "N/A"}
                     </p>
                   </div>
 
                   {taskRun.end_timestamp && (
                     <div>
-                      <h3 className="text-sm font-medium text-gray-700 mb-2">End Time</h3>
+                      <h3 className="text-sm font-medium text-gray-700 mb-2">
+                        End Time
+                      </h3>
                       <p className="text-gray-900">
                         {new Date(taskRun.end_timestamp).toLocaleString()}
                       </p>
@@ -102,61 +132,86 @@ export default function TaskRunDetailPage() {
                   )}
 
                   <div>
-                    <h3 className="text-sm font-medium text-gray-700 mb-2">Reason</h3>
-                    <p className="text-gray-900">{taskRun.reason || 'N/A'}</p>
+                    <h3 className="text-sm font-medium text-gray-700 mb-2">
+                      Reason
+                    </h3>
+                    <p className="text-gray-900">{taskRun.reason || "N/A"}</p>
                   </div>
 
                   {taskRun.model && (
                     <div>
-                      <h3 className="text-sm font-medium text-gray-700 mb-2">Model</h3>
+                      <h3 className="text-sm font-medium text-gray-700 mb-2">
+                        Model
+                      </h3>
                       <p className="text-gray-900">{taskRun.model}</p>
                     </div>
                   )}
 
                   {taskRun.steps > 0 && (
                     <div>
-                      <h3 className="text-sm font-medium text-gray-700 mb-2">Steps</h3>
+                      <h3 className="text-sm font-medium text-gray-700 mb-2">
+                        Steps
+                      </h3>
                       <p className="text-gray-900">{taskRun.steps}</p>
                     </div>
                   )}
 
                   {taskRun.run_sec > 0 && (
                     <div>
-                      <h3 className="text-sm font-medium text-gray-700 mb-2">Runtime</h3>
+                      <h3 className="text-sm font-medium text-gray-700 mb-2">
+                        Runtime
+                      </h3>
                       <p className="text-gray-900">{taskRun.run_sec} seconds</p>
                     </div>
                   )}
                 </div>
 
                 {/* Token Usage */}
-                {(taskRun.input_tokens > 0 || taskRun.output_tokens > 0 || taskRun.cached_tokens > 0) && (
+                {(taskRun.input_tokens > 0 ||
+                  taskRun.output_tokens > 0 ||
+                  taskRun.cached_tokens > 0) && (
                   <div>
-                    <h3 className="text-sm font-medium text-gray-700 mb-3">Token Usage</h3>
+                    <h3 className="text-sm font-medium text-gray-700 mb-3">
+                      Token Usage
+                    </h3>
                     <div className="grid grid-cols-3 gap-4 text-sm">
                       <div className="text-center p-3 bg-gray-50 rounded">
-                        <div className="font-medium text-gray-900">{taskRun.input_tokens}</div>
-                        <div className="text-gray-600">Input</div>
+                        <div className="font-medium text-gray-900">
+                          {taskRun.input_tokens}
+                        </div>
+                        <div className="text-gray-600">Input tokens</div>
                       </div>
                       <div className="text-center p-3 bg-gray-50 rounded">
-                        <div className="font-medium text-gray-900">{taskRun.output_tokens}</div>
-                        <div className="text-gray-600">Output</div>
+                        <div className="font-medium text-gray-900">
+                          {taskRun.cached_tokens}
+                        </div>
+                        <div className="text-gray-600">Cached input tokens</div>
                       </div>
                       <div className="text-center p-3 bg-gray-50 rounded">
-                        <div className="font-medium text-gray-900">{taskRun.cached_tokens}</div>
-                        <div className="text-gray-600">Cached</div>
+                        <div className="font-medium text-gray-900">
+                          {taskRun.output_tokens}
+                        </div>
+                        <div className="text-gray-600">Output tokens</div>
                       </div>
                     </div>
                   </div>
                 )}
 
                 {/* Input State (what the task started with) */}
-                {(taskRun.input_goal || taskRun.input_notes || taskRun.input_plan || taskRun.input_asks) && (
+                {(taskRun.input_goal ||
+                  taskRun.input_notes ||
+                  taskRun.input_plan ||
+                  taskRun.input_asks) && (
                   <div>
-                    <h3 className="text-sm font-medium text-gray-700 mb-3">Input State</h3>
+                    <h3 className="text-sm font-medium text-gray-700 mb-3">
+                      Input State
+                    </h3>
                     <div className="space-y-4">
                       {taskRun.input_goal && (
                         <div>
-                          <h4 className="text-xs font-medium text-gray-600 mb-2">Goal</h4>
+                          <h4 className="text-xs font-medium text-gray-600 mb-2">
+                            Goal
+                          </h4>
                           <div className="prose prose-sm max-w-none bg-gray-50 p-3 rounded">
                             <Response>{taskRun.input_goal}</Response>
                           </div>
@@ -164,7 +219,9 @@ export default function TaskRunDetailPage() {
                       )}
                       {taskRun.input_notes && (
                         <div>
-                          <h4 className="text-xs font-medium text-gray-600 mb-2">Notes</h4>
+                          <h4 className="text-xs font-medium text-gray-600 mb-2">
+                            Notes
+                          </h4>
                           <div className="prose prose-sm max-w-none bg-gray-50 p-3 rounded">
                             <Response>{taskRun.input_notes}</Response>
                           </div>
@@ -172,7 +229,9 @@ export default function TaskRunDetailPage() {
                       )}
                       {taskRun.input_plan && (
                         <div>
-                          <h4 className="text-xs font-medium text-gray-600 mb-2">Plan</h4>
+                          <h4 className="text-xs font-medium text-gray-600 mb-2">
+                            Plan
+                          </h4>
                           <div className="prose prose-sm max-w-none bg-gray-50 p-3 rounded">
                             <Response>{taskRun.input_plan}</Response>
                           </div>
@@ -180,7 +239,9 @@ export default function TaskRunDetailPage() {
                       )}
                       {taskRun.input_asks && (
                         <div>
-                          <h4 className="text-xs font-medium text-gray-600 mb-2">Asks</h4>
+                          <h4 className="text-xs font-medium text-gray-600 mb-2">
+                            Asks
+                          </h4>
                           <div className="prose prose-sm max-w-none bg-gray-50 p-3 rounded">
                             <Response>{taskRun.input_asks}</Response>
                           </div>
@@ -190,14 +251,33 @@ export default function TaskRunDetailPage() {
                   </div>
                 )}
 
-                {/* Output State (what the task produced) */}
-                {(taskRun.output_goal || taskRun.output_notes || taskRun.output_plan || taskRun.output_asks) && (
+                {/* Inbox Content */}
+                {taskRun.inbox && (
                   <div>
-                    <h3 className="text-sm font-medium text-gray-700 mb-3">Output State</h3>
+                    <h3 className="text-sm font-medium text-gray-700 mb-2">
+                      Inbox
+                    </h3>
+                    <div className="prose prose-sm max-w-none bg-gray-50 p-3 rounded">
+                      <Response>{taskRun.inbox}</Response>
+                    </div>
+                  </div>
+                )}
+
+                {/* Output State (what the task produced) */}
+                {(taskRun.output_goal ||
+                  taskRun.output_notes ||
+                  taskRun.output_plan ||
+                  taskRun.output_asks) && (
+                  <div>
+                    <h3 className="text-sm font-medium text-gray-700 mb-3">
+                      Output State
+                    </h3>
                     <div className="space-y-4">
                       {taskRun.output_goal && (
                         <div>
-                          <h4 className="text-xs font-medium text-gray-600 mb-2">Goal</h4>
+                          <h4 className="text-xs font-medium text-gray-600 mb-2">
+                            Goal
+                          </h4>
                           <div className="prose prose-sm max-w-none">
                             <Response>{taskRun.output_goal}</Response>
                           </div>
@@ -205,7 +285,9 @@ export default function TaskRunDetailPage() {
                       )}
                       {taskRun.output_notes && (
                         <div>
-                          <h4 className="text-xs font-medium text-gray-600 mb-2">Notes</h4>
+                          <h4 className="text-xs font-medium text-gray-600 mb-2">
+                            Notes
+                          </h4>
                           <div className="prose prose-sm max-w-none">
                             <Response>{taskRun.output_notes}</Response>
                           </div>
@@ -213,7 +295,9 @@ export default function TaskRunDetailPage() {
                       )}
                       {taskRun.output_plan && (
                         <div>
-                          <h4 className="text-xs font-medium text-gray-600 mb-2">Plan</h4>
+                          <h4 className="text-xs font-medium text-gray-600 mb-2">
+                            Plan
+                          </h4>
                           <div className="prose prose-sm max-w-none">
                             <Response>{taskRun.output_plan}</Response>
                           </div>
@@ -221,7 +305,9 @@ export default function TaskRunDetailPage() {
                       )}
                       {taskRun.output_asks && (
                         <div>
-                          <h4 className="text-xs font-medium text-gray-600 mb-2">Asks</h4>
+                          <h4 className="text-xs font-medium text-gray-600 mb-2">
+                            Asks
+                          </h4>
                           <div className="prose prose-sm max-w-none">
                             <Response>{taskRun.output_asks}</Response>
                           </div>
@@ -234,38 +320,38 @@ export default function TaskRunDetailPage() {
                 {/* Reply and Error */}
                 {taskRun.reply && (
                   <div>
-                    <h3 className="text-sm font-medium text-gray-700 mb-2">Reply</h3>
-                    <p className="text-gray-900 whitespace-pre-wrap bg-gray-50 p-3 rounded">{taskRun.reply}</p>
+                    <h3 className="text-sm font-medium text-gray-700 mb-2">
+                      Reply
+                    </h3>
+                    <p className="text-gray-900 whitespace-pre-wrap bg-gray-50 p-3 rounded">
+                      {taskRun.reply}
+                    </p>
                   </div>
                 )}
 
                 {taskRun.error && (
                   <div>
-                    <h3 className="text-sm font-medium text-red-700 mb-2">Error</h3>
-                    <p className="text-red-900 whitespace-pre-wrap bg-red-50 p-3 rounded border border-red-200">{taskRun.error}</p>
+                    <h3 className="text-sm font-medium text-red-700 mb-2">
+                      Error
+                    </h3>
+                    <p className="text-red-900 whitespace-pre-wrap bg-red-50 p-3 rounded border border-red-200">
+                      {taskRun.error}
+                    </p>
                   </div>
                 )}
 
                 {/* Link to Thread */}
                 {taskRun.thread_id && (
                   <div>
-                    <h3 className="text-sm font-medium text-gray-700 mb-2">Related Thread</h3>
+                    <h3 className="text-sm font-medium text-gray-700 mb-2">
+                      Related Thread
+                    </h3>
                     <Link
                       to={`/threads/${taskRun.thread_id}`}
                       className="text-blue-600 hover:text-blue-800 underline"
                     >
                       View Thread: {taskRun.thread_id.slice(0, 8)}...
                     </Link>
-                  </div>
-                )}
-
-                {/* Inbox Content */}
-                {taskRun.inbox && (
-                  <div>
-                    <h3 className="text-sm font-medium text-gray-700 mb-2">Inbox</h3>
-                    <div className="prose prose-sm max-w-none bg-gray-50 p-3 rounded">
-                      <Response>{taskRun.inbox}</Response>
-                    </div>
                   </div>
                 )}
               </div>

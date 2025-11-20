@@ -16,7 +16,7 @@ export interface EvalGlobal {
 }
 
 export type EvalResult =
-  | { ok: true; result: unknown }
+  | { ok: true; result: unknown, state?: unknown }
   | { ok: false; error: string };
 
 export interface SandboxOptions {
@@ -26,6 +26,7 @@ export interface SandboxOptions {
 }
 
 export interface EvalOptions {
+  state?: unknown;
   filename?: string;
   timeoutMs?: number;
   signal?: AbortSignal;
@@ -148,15 +149,23 @@ export class Sandbox {
     const wrappedSource = `(async () => { ${code}\n })()`; // \n in case code ends with // comment
 
     try {
+      // Inject state for this eval step
+      if (options.state) {
+        this.injectInto(this.#ctx, { state: options.state }, this.#ctx.global);
+      }
+
       // console.log("code", wrappedSource);
       const evaluation = this.#ctx.evalCode(wrappedSource, filename, {
         type: "global",
       });
       try {
         const valueHandle = this.#ctx.unwrapResult(evaluation);
-        const result = await this.#resolveHandle(valueHandle, deadline);
-        // console.log("result", result);
-        return { ok: true, result };
+        const result = (await this.#resolveHandle(valueHandle, deadline)) as {
+          result: any,
+          state?: any
+        };
+        console.log("result", result);
+        return { ok: true, result: result.result, state: result.state };
       } catch (error) {
         return { ok: false, error: this.#formatError(error) };
       } finally {

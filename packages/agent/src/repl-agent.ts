@@ -20,12 +20,20 @@ import debug from "debug";
 import { ReplEnv } from "./repl-env";
 import { MspParser } from "./msp-parser";
 import { getMessageText } from "./utils";
+import { LanguageModelV2Usage } from "@ai-sdk/provider";
 
 // Hard limit
 const MAX_STEPS = 100;
 
 export class ReplAgent {
   public readonly history: AssistantUIMessage[] = [];
+  public readonly usage: LanguageModelV2Usage = {
+    inputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+    cachedInputTokens: 0,
+    reasoningTokens: 0,
+  };
   private model: LanguageModel;
   private env: ReplEnv;
   private sandbox: Sandbox;
@@ -68,6 +76,7 @@ export class ReplAgent {
     // Step state
     let stepReason: StepReason = reason || "start";
     let stepResult: EvalResult | undefined;
+    let jsState: any | undefined;
 
     // Loop over steps
     for (let step = 0; step < MAX_STEPS; step++) {
@@ -101,8 +110,12 @@ export class ReplAgent {
           stepResult = await this.sandbox.eval(output.code, {
             // web search might take long time
             timeoutMs: 10000,
+            state: jsState,
           });
           this.debug("step", step, "result", stepResult);
+
+          // Update state
+          if (stepResult.ok && stepResult.state) jsState = stepResult.state;
         }
       } catch (e: any) {
         this.debug("Step error", e);
@@ -181,14 +194,27 @@ export class ReplAgent {
       },
     });
 
+    this.updateUsage(await result.usage);
+
     // Reply text
     const text = getMessageText(newMessage);
-    this.debug("LLM response text", text);
+    // this.debug("LLM response text", text);
 
     // Parse reply text into output
     const output = this.parser.parse(input.step + 1, text);
     this.debug("LLM response output", output);
 
     return output;
+  }
+
+  private updateUsage(usage: LanguageModelV2Usage) {
+    this.usage.cachedInputTokens =
+      this.usage.cachedInputTokens! + (usage.cachedInputTokens || 0);
+    this.usage.inputTokens = this.usage.inputTokens! + (usage.inputTokens || 0);
+    this.usage.outputTokens =
+      this.usage.outputTokens! + (usage.outputTokens || 0);
+    this.usage.reasoningTokens =
+      this.usage.reasoningTokens! + (usage.reasoningTokens || 0);
+    this.usage.totalTokens = this.usage.totalTokens! + (usage.totalTokens || 0);
   }
 }

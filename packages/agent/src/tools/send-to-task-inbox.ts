@@ -14,6 +14,7 @@ export function makeSendToTaskInboxTool(
         throw new Error("Input must be { id, message }");
       const task = await taskStore.getTask(opts.id);
       if (!task) throw new Error("Task not found");
+      if (task.type !== "worker") throw new Error("Can only send to worker tasks");
 
       const context = getContext();
       if (!context) throw new Error("No eval context");
@@ -25,13 +26,15 @@ export function makeSendToTaskInboxTool(
         id,
         source: context.type,
         source_id: context.taskId,
-        target: "worker",
+        target: task.type,
         target_id: opts.id,
         timestamp: new Date().toISOString(),
         content: JSON.stringify({
-          id,
           role: "assistant",
           content: opts.message,
+          timestamp: new Date().toISOString(),
+          sourceTaskType: context.type,
+          sourceTaskId: context.taskId,
         }),
         handler_thread_id: "",
         handler_timestamp: "",

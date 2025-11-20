@@ -7,6 +7,7 @@ import React from "react";
 
 interface ChatInterfaceProps {
   chatId?: string;
+  promptHeight?: number;
 }
 
 type ReadChatMutation = UseMutationResult<void, Error, { chatId: string }, unknown>;
@@ -81,7 +82,7 @@ const ScrollToBottomDetector = React.memo(function ScrollToBottomDetector({
   return null;
 });
 
-export default function ChatInterface({ chatId: propChatId }: ChatInterfaceProps) {
+export default function ChatInterface({ chatId: propChatId, promptHeight }: ChatInterfaceProps) {
   const chatId = propChatId || "main";
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -99,6 +100,18 @@ export default function ChatInterface({ chatId: propChatId }: ChatInterfaceProps
       messagesEndRef.current?.scrollIntoView({ behavior: messages.length < 50 ? "smooth" : "auto" });
     }
   }, [messages]);
+
+  // Scroll to bottom when prompt height changes significantly (input expands)
+  useEffect(() => {
+    if (promptHeight && messages.length > 0) {
+      // Small delay to ensure layout has updated
+      const timeoutId = setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      }, 50);
+      
+      return () => clearTimeout(timeoutId);
+    }
+  }, [promptHeight, messages.length]);
 
   if (isLoading) {
     return (

@@ -9,7 +9,7 @@ let sqlite: SQLite3 | null = null;
 
 // Wrapper class to adapt cr-sqlite DB to our DBInterface
 class CRSqliteDBWrapper implements DBInterface {
-  constructor(private db: DB) {}
+  constructor(private db: DB, private isTx: boolean) {}
 
   async exec(sql: string, args?: any[]): Promise<any> {
     return this.db.exec(sql, args);
@@ -19,12 +19,32 @@ class CRSqliteDBWrapper implements DBInterface {
     return this.db.execO(sql, args) as Promise<T[] | null>;
   }
 
+  async execManyArgs(sql: string, args?: any[][]): Promise<any[]> {
+    if (!args || args.length === 0) {
+      return [];
+    }
+
+    const stmt = await this.db.prepare(sql);
+    const results: any[] = [];
+    
+    const tx = this.isTx ? this.db : null;
+    try {
+      for (const argSet of args) {
+        await stmt.run(tx, ...(argSet || []));
+      }
+    } finally {
+      stmt.finalize(this.db);
+    }
+    
+    return results;
+  }
+
   async tx<T>(fn: (tx: DBInterface) => Promise<T>): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       this.db
         .tx(async (tx: any) => {
           try {
-            const wrappedTx = new CRSqliteDBWrapper(tx);
+            const wrappedTx = new CRSqliteDBWrapper(tx, true);
             const result = await fn(wrappedTx);
             resolve(result);
           } catch (error) {
@@ -70,7 +90,7 @@ export async function createDBBrowser(
     db.exec("PRAGMA busy_timeout=10000;")
 
     // Wrap the DB instance
-    const wrappedDB = new CRSqliteDBWrapper(db);
+    const wrappedDB = new CRSqliteDBWrapper(db, false);
 
     debugBrowser("Browser database created and initialized successfully");
     return wrappedDB;

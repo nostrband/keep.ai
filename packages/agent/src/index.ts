@@ -16,14 +16,11 @@ export { setEnv, getEnv, type Env } from "./env";
 // Model configuration
 export { getOpenRouter, getModelName } from "./model";
 
-// Instructions and modes
-export { getInstructions, type AGENT_MODE } from "./instructions";
-
 // Utilities
 export { getWeekDay, createPlannerTaskPrompt, getMessageText } from "./utils";
 
 // Interfaces
-export { type Memory } from "./interfaces";
+// export { type Memory } from "./interfaces";
 
 export { ReplAgent } from "./repl-agent";
 

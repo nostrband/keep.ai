@@ -8,8 +8,8 @@ import {
   KeepDbApi,
   MAX_STATUS_TTL,
   Task,
+  TaskState,
 } from "@app/db";
-import { AGENT_STATUS } from "./instructions";
 import { AgentTask, StepOutput, TaskType } from "./repl-agent-types";
 import { bytesToHex } from "@noble/ciphers/utils";
 import { randomBytes } from "@noble/ciphers/crypto";
@@ -225,7 +225,13 @@ export class TaskWorker {
       }
 
       // Get task state
-      let state = await this.api.taskStore.getState(task.id);
+      const state: TaskState = (await this.api.taskStore.getState(task.id)) || {
+        id: task.id,
+        goal: "",
+        plan: "",
+        asks: "",
+        notes: "",
+      };
 
       // New thread for each attempt
       const threadId = generateId();
@@ -252,12 +258,10 @@ export class TaskWorker {
       const agentTask: AgentTask = {
         id: task.id,
         type: taskType,
-        state: {},
+        state: {
+          ...state,
+        },
       };
-      if (state?.goal) agentTask.state!.goal = state.goal;
-      if (state?.notes) agentTask.state!.notes = state.notes;
-      if (state?.plan) agentTask.state!.plan = state.plan;
-      if (state?.asks) agentTask.state!.asks = state.asks;
 
       // Run reason
       let reason: "start" | "input" | "timer" = "start";
@@ -289,11 +293,24 @@ export class TaskWorker {
       const agent = new ReplAgent(model, env, sandbox, agentTask);
 
       try {
+        // Placeholder, FIXME add title?
+        await this.ensureThread(threadId, taskType);
+
+        // Helper 
+        const savedIds = new Set<string>();
+        const saveNewMessages = async () => {
+          const newMessages = agent.history.filter(m => !savedIds.has(m.id));
+          this.debug("Save new messages", newMessages);
+          await this.saveHistory(newMessages, threadId);
+          newMessages.forEach(m => savedIds.add(m.id));
+        };
+
         // Use task.task as input message to the agent
         const result = await agent.loop(reason, {
           // Pass the input text to agent
           inbox,
           onStep: async (step) => {
+            await saveNewMessages();
             return { proceed: step < this.stepLimit };
           },
         });
@@ -301,23 +318,24 @@ export class TaskWorker {
           `Loop steps ${result?.steps} result ${JSON.stringify(result)}`
         );
 
+        // Save task messages
+        await saveNewMessages();
+
+        // Sanity check
         if (!result) throw new Error("Bad result");
         if (result.kind === "code") throw new Error("Step limit exceeded");
 
-        // Save task messages
-        this.debug("Save task messages", agent.history);
-        await this.ensureThread(threadId, taskType);
-        await this.saveHistory(agent.history, threadId);
-
         // Save wait state
         if (result.kind === "wait" && result.patch) {
-          state = {
-            id: task.id,
-            goal: result.patch.goal || state?.goal || "",
-            notes: result.patch.notes || state?.notes || "",
-            plan: result.patch.plan || state?.plan || "",
-            asks: result.patch.asks || state?.asks || "",
-          };
+          // Goal is no longer editable
+          // if (result.patch.goal !== undefined)
+          //   state.goal = result.patch.goal;
+          if (result.patch.plan !== undefined)
+            state.plan = result.patch.plan;
+          if (result.patch.notes !== undefined)
+            state.notes = result.patch.notes;
+          if (result.patch.asks !== undefined)
+            state.asks = result.patch.asks;
           await this.api.taskStore.saveState(state);
         }
 
@@ -337,15 +355,16 @@ export class TaskWorker {
           end_timestamp: runEndTime.toISOString(),
           steps: result.steps,
           state: result.kind,
-          output_asks: state?.asks || "",
-          output_goal: state?.goal || "",
-          output_plan: state?.plan || "",
-          output_notes: state?.notes || "",
+          output_asks: state.asks,
+          output_goal: state.goal,
+          output_plan: state.plan,
+          output_notes: state.notes,
           reply: taskReply,
-          // FIXME set
-          input_tokens: 0,
-          cached_tokens: 0,
-          output_tokens: 0,
+          input_tokens: agent.usage.inputTokens || 0,
+          cached_tokens: agent.usage.cachedInputTokens || 0,
+          output_tokens:
+            (agent.usage.outputTokens || 0) +
+            (agent.usage.reasoningTokens || 0),
         });
 
         // Update task in wait status,
@@ -358,9 +377,13 @@ export class TaskWorker {
 
         if (isWait) {
           // Need new timestamp?
+          const isPersistentTask =
+            taskType === "router" || taskType === "replier";
           const timestamp =
             result.kind === "wait" && result.resumeAt
               ? Math.floor(new Date(result.resumeAt).getTime() / 1000)
+              : isPersistentTask
+              ? Math.floor(Date.now() / 1000) // set to current time
               : task.timestamp;
           const status =
             result.kind === "wait" && result.resumeAt ? "wait" : "asks";
@@ -404,7 +427,27 @@ export class TaskWorker {
           if (taskType === "replier") {
             await this.sendToUser(result.reply);
           } else {
-            await this.sendToReplier(result.reply, task.id, taskRunId);
+            await this.sendToReplier({
+              taskType: taskType,
+              taskId: taskType === "worker" ? task.id : "",
+              taskRunId,
+              content: result.reply,
+              reasoning: result.reasoning || "",
+            });
+          }
+        }
+
+        // We ran an iteraction and still have asks in state?
+        // Send to replier
+        if (result.kind === "wait" && taskType === "worker") {
+          if (state.asks) {
+            await this.sendToReplier({
+              taskType,
+              taskId: task.id,
+              taskRunId,
+              content: state.asks,
+              reasoning: result.reasoning || "",
+            });
           }
         }
       } catch (error) {
@@ -438,14 +481,16 @@ export class TaskWorker {
 
   private async startStatusUpdater(type: TaskType) {
     // Set agent status in db
-    let status: AGENT_STATUS = "task";
+    let status = "";
     switch (type) {
       case "replier":
+        status = "Typing...";
+        break;
       case "router":
-        status = "user";
+        status = "Thinking...";
         break;
       default:
-        status = "task";
+        status = "Working...";
         break;
     }
     const update = async () => {
@@ -558,24 +603,29 @@ ${result.reply || ""}
     );
   }
 
-  private async sendToReplier(
-    reply: string,
-    taskId: string,
-    taskRunId: string
-  ) {
-    this.debug("Send reply to replier", reply);
+  private async sendToReplier(opts: {
+    taskType: "worker" | "router";
+    taskId: string;
+    taskRunId: string;
+    content: string;
+    reasoning: string;
+  }) {
+    this.debug("Send reply to replier", opts);
     // Send router's reply to replier
     await this.api.inboxStore.saveInbox({
-      id: taskRunId,
-      source: "router",
-      source_id: taskRunId,
+      id: opts.taskRunId,
+      source: opts.taskType,
+      source_id: opts.taskRunId,
       target: "replier",
       target_id: "",
       timestamp: new Date().toISOString(),
       content: JSON.stringify({
         role: "assistant",
-        content: reply,
-        sourceTaskId: taskId,
+        content: opts.content,
+        timestamp: new Date().toISOString(),
+        reasoning: opts.reasoning,
+        sourceTaskId: opts.taskId,
+        sourceTaskType: opts.taskType,
       }),
       handler_thread_id: "",
       handler_timestamp: "",

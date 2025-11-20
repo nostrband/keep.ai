@@ -356,6 +356,7 @@ export class Peer extends EventEmitter<{
 
     try {
       // FIXME split into batches?
+      const start = Date.now();
       await this.db.tx(async (tx: DBInterface) => {
         for (const change of deserializeChanges(changes)) {
           await tx.exec(
@@ -374,7 +375,7 @@ export class Peer extends EventEmitter<{
           );
         }
       });
-      this.debug(`Successfully applied changes ${changes.length}`);
+      this.debug(`Successfully applied changes ${changes.length} in ${Date.now() - start} ms`);
     } catch (error) {
       this.debug("Error applying changes to database:", error);
       throw error;

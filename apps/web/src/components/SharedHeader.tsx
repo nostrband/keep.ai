@@ -47,7 +47,7 @@ export default function SharedHeader({ title, subtitle }: SharedHeaderProps) {
             <div>
               <h1 className="text-lg font-bold text-gray-900">{title}</h1>
               {title === "Assistant" && agentStatus && (
-                <p className="text-xs text-gray-500">Status: {agentStatus}</p>
+                <p className="text-xs text-gray-500">{agentStatus}</p>
               )}
               {subtitle && (
                 <p className="text-sm text-gray-600">{subtitle}</p>

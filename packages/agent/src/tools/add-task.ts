@@ -11,19 +11,11 @@ export function makeAddTaskTool(taskStore: TaskStore) {
       startAt?: string;
     }) => {
       if (!opts.title) throw new Error("Required 'title'");
-      const id = generateId();
       const timestamp = Math.floor(
-        (opts.startAt ? new Date(opts.startAt).getTime() : Date.now()) /
-          1000
+        (opts.startAt ? new Date(opts.startAt).getTime() : Date.now()) / 1000
       );
-      await taskStore.addTask(
-        id,
-        timestamp,
-        "",
-        "worker",
-        "",
-        opts.title
-      );
+      const id = generateId();
+      await taskStore.addTask(id, timestamp, "", "worker", "", opts.title);
       await taskStore.saveState({
         id,
         goal: opts.goal || "",
@@ -31,13 +23,12 @@ export function makeAddTaskTool(taskStore: TaskStore) {
         asks: "",
         plan: "",
       });
+
       return id;
     },
-    description: "Create a background task",
+    description: "You MUST check for existing tasks before creating new one! Creates a background task. You don't have to call sendToTaskInbox after creating the task.",
     inputSchema: z.object({
-      title: z
-        .string()
-        .describe("Task title for task management and audit"),
+      title: z.string().describe("Task title for task management and audit"),
       goal: z
         .string()
         .optional()

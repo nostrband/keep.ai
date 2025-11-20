@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useRef, useEffect } from "react";
 import { useParams, Navigate } from "react-router-dom";
 import ChatInterface from "./ChatInterface";
 import SharedHeader from "./SharedHeader";
@@ -27,6 +27,8 @@ type PromptInputMessage = {
 export default function ChatPage() {
   const { id } = useParams<{ id: string }>();
   const [input, setInput] = useState("");
+  const [promptHeight, setPromptHeight] = useState(0);
+  const promptContainerRef = useRef<HTMLDivElement>(null);
   const addMessage = useAddMessage();
   
   // If no ID is provided or ID is "new", generate a new chat ID
@@ -51,19 +53,43 @@ export default function ChatPage() {
 
     setInput("");
   }, [id, addMessage]);
+
+  // Track prompt input height changes
+  useEffect(() => {
+    const container = promptContainerRef.current;
+    if (!container) return;
+
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setPromptHeight(entry.contentRect.height);
+      }
+    });
+
+    resizeObserver.observe(container);
+    
+    // Set initial height
+    setPromptHeight(container.getBoundingClientRect().height);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, []);
   
   return (
     <div className="min-h-screen bg-gray-50">
       <SharedHeader title="Assistant" />
       
       {/* Main chat area - flows behind header and footer with padding */}
-      <div className="pt-6 pb-36">
-        <ChatInterface chatId={id} />
+      <div
+        className="pt-6 transition-[padding-bottom] duration-200 ease-out"
+        style={{ paddingBottom: Math.max(144, promptHeight + 32) }} // extra margin
+      >
+        <ChatInterface chatId={id} promptHeight={promptHeight} />
       </div>
       
       {/* Fixed prompt input at viewport bottom */}
       <div className="fixed bottom-0 left-0 right-0 z-10 bg-gray-50 border-t border-gray-200">
-        <div className="max-w-4xl mx-auto px-6 py-4">
+        <div ref={promptContainerRef} className="max-w-4xl mx-auto px-6 py-4">
           <PromptInput
             onSubmit={handleSubmit}
             globalDrop

@@ -19,9 +19,9 @@ export function makeWebFetchTool() {
         live: z
           .boolean()
           .optional()
-          .default(false)
+          .default(true)
           .describe(
-            "If true, ensures the content is 100% up to date and not cached"
+            "If false, allows cached not up-to-date content"
           ),
         maxCharacters: z
           .number()

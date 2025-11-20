@@ -11,12 +11,18 @@ export function makeListTasksTool(taskStore: TaskStore) {
           ? Math.floor(new Date(opts.until).getTime() / 1000)
           : undefined
       );
-      return tasks.map((task) => ({
-        id: task.id,
-        title: task.title,
-        state: task.state,
-        error: task.error,
-      }));
+      const states = await taskStore.getStates(tasks.map((t) => t.id));
+      return tasks.map((task) => {
+        const state = states.find((s) => s.id === task.id);
+        return {
+          id: task.id,
+          title: task.title,
+          state: task.state,
+          goal: state?.goal || "",
+          asks: state?.asks || "",
+          error: task.error,
+        };
+      });
     },
     description: "List background tasks",
     inputSchema: z
@@ -41,6 +47,12 @@ export function makeListTasksTool(taskStore: TaskStore) {
         id: z.string(),
         title: z.string(),
         state: z.string(),
+        goal: z.string().describe("Task goal"),
+        asks: z
+          .string()
+          .describe(
+            "Questions that task asked to the user, if user replied - forward to task's inbox"
+          ),
         error: z.string(),
         runTime: z.string().describe("Date time when task is scheduled to run"),
       })

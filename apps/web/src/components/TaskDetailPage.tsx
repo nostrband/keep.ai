@@ -1,9 +1,11 @@
-import React from "react";
+import React, { useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useTask, useTaskState, useTaskRuns } from "../hooks/dbTaskReads";
+import { useUpdateTask } from "../hooks/dbWrites";
 import SharedHeader from "./SharedHeader";
 import {
   Badge,
+  Button,
 } from "../ui";
 import { Response } from "../ui/components/ai-elements/response";
 
@@ -26,6 +28,48 @@ export default function TaskDetailPage() {
   const { data: task, isLoading } = useTask(id!);
   const { data: taskState, isLoading: isLoadingState } = useTaskState(id!);
   const { data: taskRuns = [], isLoading: isLoadingRuns } = useTaskRuns(id!);
+  const [warning, setWarning] = useState<string>("");
+  const [successMessage, setSuccessMessage] = useState<string>("");
+  
+  const updateTaskMutation = useUpdateTask();
+
+  const handleRunNow = async () => {
+    if (!task) return;
+    
+    // Check if the latest run was created less than 5 minutes ago
+    if (taskRuns.length > 0) {
+      const latestRun = taskRuns[0]; // taskRuns are ordered by start_timestamp DESC
+      const latestRunTime = new Date(latestRun.start_timestamp).getTime();
+      const fiveMinutesAgo = Date.now() - (5 * 60 * 1000);
+      
+      if (latestRunTime > fiveMinutesAgo) {
+        setWarning("Can't restart too often");
+        setSuccessMessage("");
+        setTimeout(() => setWarning(""), 3000); // Clear warning after 3 seconds
+        return;
+      }
+    }
+    
+    // Clear any previous messages
+    setWarning("");
+    setSuccessMessage("");
+    
+    // Update task timestamp to now (in seconds)
+    const nowTimestamp = Math.floor(Date.now() / 1000);
+    updateTaskMutation.mutate({
+      taskId: task.id,
+      timestamp: nowTimestamp,
+    }, {
+      onSuccess: () => {
+        setSuccessMessage("Task will run soon");
+        setTimeout(() => setSuccessMessage(""), 3000); // Clear success message after 3 seconds
+      },
+      onError: () => {
+        setWarning("Failed to restart task");
+        setTimeout(() => setWarning(""), 3000);
+      }
+    });
+  };
 
   if (!id) {
     return <div>Task ID not found</div>;
@@ -57,6 +101,27 @@ export default function TaskDetailPage() {
                     {task.title || (task.type === 'router' ? 'Router' : task.type === 'replier' ? 'Replier' : `Task ${task.id.slice(0, 8)}`)}
                   </h2>
                   {getStatusBadge(task)}
+                </div>
+                <div className="flex flex-col items-end gap-2">
+                  <Button
+                    onClick={handleRunNow}
+                    disabled={updateTaskMutation.isPending}
+                    size="sm"
+                    variant="outline"
+                    className="cursor-pointer"
+                  >
+                    {updateTaskMutation.isPending ? "Running..." : "Run now"}
+                  </Button>
+                  {warning && (
+                    <div className="text-sm text-red-600 bg-red-50 px-2 py-1 rounded border border-red-200">
+                      {warning}
+                    </div>
+                  )}
+                  {successMessage && (
+                    <div className="text-sm text-green-600 bg-green-50 px-2 py-1 rounded border border-green-200">
+                      {successMessage}
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -168,7 +233,7 @@ export default function TaskDetailPage() {
                           <div className="flex items-center gap-2 mb-1">
                             <span className="font-medium text-gray-900">Run {run.id.slice(0, 8)}</span>
                             <Badge variant={run.state === 'done' ? 'default' : run.error ? 'destructive' : 'secondary'}>
-                              {run.state || 'pending'}
+                              {run.state || run.error || 'pending'}
                             </Badge>
                           </div>
                           <div className="flex items-center gap-4 text-xs text-gray-500">
@@ -177,6 +242,10 @@ export default function TaskDetailPage() {
                               <span>Ended: {new Date(run.end_timestamp).toLocaleString()}</span>
                             )}
                             {run.reason && <span>Reason: {run.reason}</span>}
+                            {run.steps > 0 && <span>Steps: {run.steps}</span>}
+                            {(run.input_tokens > 0 || run.output_tokens > 0) && (
+                              <span>Tokens: {(run.input_tokens || 0) + (run.output_tokens || 0)}</span>
+                            )}
                           </div>
                         </div>
                       </div>

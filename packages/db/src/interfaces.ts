@@ -2,6 +2,7 @@
 export interface DBInterface {
   exec(sql: string, args?: any[]): Promise<any>;
   execO<T = any>(sql: string, args?: any[]): Promise<T[] | null>;
+  execManyArgs(sql: string, args?: any[][]): Promise<any[]>;
   tx<T>(fn: (tx: DBInterface) => Promise<T>): Promise<T>;
   close(): Promise<void>;
 }

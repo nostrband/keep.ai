@@ -64,6 +64,7 @@ async function runSandboxCommand(type: string): Promise<void> {
 
     debugSandbox("Sandbox initialized, tools: ", env.tools);
 
+    let state: any | undefined
     for await (const line of rl) {
       const source = normalizeSource(line);
       if (source === undefined) {
@@ -71,9 +72,10 @@ async function runSandboxCommand(type: string): Promise<void> {
       }
 
       try {
-        const evaluation = await sandbox.eval(source, { timeoutMs: 5000 });
+        const evaluation = await sandbox.eval(source, { timeoutMs: 5000, state });
         if (evaluation.ok) {
           console.log(JSON.stringify(evaluation.result, null, 2));
+          if (evaluation.state) state = evaluation.state;
         } else {
           encounteredError = true;
           console.error(`Error: ${evaluation.error}`);

@@ -81,6 +81,38 @@ export function useReadChat() {
   });
 }
 
+export function useUpdateTask() {
+  const { api } = useCRSqliteQuery();
+
+  return useMutation({
+    mutationFn: async (input: {
+      taskId: string;
+      timestamp: number;
+    }) => {
+      if (!api) throw new Error("Task store not available");
+
+      // Get the current task first
+      const task = await api.taskStore.getTask(input.taskId);
+      
+      // Update the task with new timestamp
+      await api.taskStore.updateTask({
+        ...task,
+        timestamp: input.timestamp,
+      });
+
+      return task;
+    },
+    onSuccess: (_result, { taskId }) => {
+      // Invalidate task-related queries to get fresh data
+      queryClient.invalidateQueries({ queryKey: qk.task(taskId) });
+      queryClient.invalidateQueries({ queryKey: qk.allTasks(false) });
+      queryClient.invalidateQueries({ queryKey: qk.allTasks(true) });
+
+      notifyTablesChanged(["tasks"], true, api!);
+    },
+  });
+}
+
 export function useDeletePeer() {
   const { api } = useCRSqliteQuery();
 

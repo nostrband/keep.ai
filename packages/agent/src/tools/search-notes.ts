@@ -32,7 +32,7 @@ You can combine multiple search criteria - all must match for a note to be inclu
             "Regular expression pattern to search in title and content (optional, case-insensitive), will use new RegExp(regexp, 'i') in JS to match"
           ),
       }),
-      z.string().min(1).describe("Search keyword string (shorthand for { keywords: [string] })")
+      z.string().min(1).describe("Search keywords, space-separated")
     ]),
     outputSchema: z.array(z.object({
       id: z.string().describe("Unique note identifier"),
@@ -49,7 +49,7 @@ You can combine multiple search criteria - all must match for a note to be inclu
       let regexp: string | null | undefined;
 
       if (typeof context === 'string') {
-        keywords = [context];
+        keywords = context.split(/\s+/).filter(Boolean);
         tags = undefined;
         regexp = undefined;
       } else {

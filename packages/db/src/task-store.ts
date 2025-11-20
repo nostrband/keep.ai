@@ -388,6 +388,32 @@ export class TaskStore {
     };
   }
 
+  // Get task states by IDs
+  async getStates(ids: string[]): Promise<TaskState[]> {
+    if (ids.length === 0) {
+      return [];
+    }
+
+    // Create placeholders for the IN clause (?, ?, ?, ...)
+    const placeholders = ids.map(() => '?').join(', ');
+    
+    const sql = `SELECT id, goal, notes, plan, asks
+                 FROM task_states
+                 WHERE id IN (${placeholders})`;
+
+    const results = await this.db.db.execO<Record<string, unknown>>(sql, ids);
+
+    if (!results) return [];
+
+    return results.map((row) => ({
+      id: row.id as string,
+      goal: row.goal as string,
+      notes: row.notes as string,
+      plan: row.plan as string,
+      asks: row.asks as string,
+    }));
+  }
+
   // Create a new task run
   async createTaskRun(runStart: TaskRunStart): Promise<void> {
     await this.db.db.exec(
