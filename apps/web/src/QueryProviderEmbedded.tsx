@@ -67,16 +67,16 @@ export function QueryProviderEmbedded({
 
   useEffect(() => {
     let onResumeHandler: (() => void) | undefined;
-    initializeDatabase().then(({ onResume }) => (onResumeHandler = onResume));
 
-    if (onResumeHandler) {
-      document.addEventListener("visibilitychange", () => {
-        if (!document.hidden) {
-          onResumeHandler!();
-        }
-      });
-      document.addEventListener("resume", onResumeHandler);
-    }
+    initializeDatabase().then(({ onResume }) => {
+      // Store for cleanup
+      onResumeHandler = onResume;
+
+      if (onResumeHandler) {
+        document.addEventListener("visibilitychange", onResumeHandler);
+        document.addEventListener("resume", onResumeHandler);
+      }
+    });
 
     // Cleanup on unmount
     return () => {
@@ -85,7 +85,10 @@ export function QueryProviderEmbedded({
   }, []);
 
   const cleanup = async (onResume?: () => void) => {
-    if (onResume) document.removeEventListener("resume", onResume);
+    if (onResume) {
+      document.removeEventListener("visibilitychange", onResume);
+      document.removeEventListener("resume", onResume);
+    }
 
     if (peer) {
       peer.stop();
@@ -205,8 +208,11 @@ export function QueryProviderEmbedded({
 
         // Resume after freeze might need to reconnect to relays
         onResume = () => {
-          alert("resumed");
-          (transport as NostrTransport).reconnect();
+          // alert("resumed");
+          if (!document.hidden) {
+            alert("resumed");;
+            (transport as NostrTransport).reconnect();
+          }
         };
       }
 
