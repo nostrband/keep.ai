@@ -208,9 +208,7 @@ export function QueryProviderEmbedded({
 
         // Resume after freeze might need to reconnect to relays
         onResume = () => {
-          // alert("resumed");
           if (!document.hidden) {
-            alert("resumed");;
             (transport as NostrTransport).reconnect();
           }
         };
