@@ -1,10 +1,10 @@
 // Database task read hooks using TanStack Query
 import { useQuery } from "@tanstack/react-query";
 import { qk } from "./queryKeys";
-import { useCRSqliteQuery } from "../QueryProvider";
+import { useDbQuery } from "./dbQuery";
 
 export function useTasks(includeFinished: boolean = true) {
-  const { api } = useCRSqliteQuery();
+  const { api } = useDbQuery();
   return useQuery({
     queryKey: qk.allTasks(includeFinished),
     queryFn: async () => {
@@ -18,7 +18,7 @@ export function useTasks(includeFinished: boolean = true) {
 }
 
 export function useTask(taskId: string) {
-  const { api } = useCRSqliteQuery();
+  const { api } = useDbQuery();
   return useQuery({
     queryKey: qk.task(taskId),
     queryFn: async () => {
@@ -36,7 +36,7 @@ export function useTask(taskId: string) {
 }
 
 export function useTaskState(taskId: string) {
-  const { api } = useCRSqliteQuery();
+  const { api } = useDbQuery();
   return useQuery({
     queryKey: qk.taskState(taskId),
     queryFn: async () => {
@@ -54,7 +54,7 @@ export function useTaskState(taskId: string) {
 }
 
 export function useTaskRuns(taskId: string) {
-  const { api } = useCRSqliteQuery();
+  const { api } = useDbQuery();
   return useQuery({
     queryKey: qk.taskRuns(taskId),
     queryFn: async () => {
@@ -72,7 +72,7 @@ export function useTaskRuns(taskId: string) {
 }
 
 export function useTaskRun(runId: string) {
-  const { api } = useCRSqliteQuery();
+  const { api } = useDbQuery();
   return useQuery({
     queryKey: qk.taskRun(runId),
     queryFn: async () => {

@@ -1,6 +1,4 @@
-import React from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { useCRSqliteQuery } from "./QueryProvider";
 import HomePage from "./components/HomePage";
 import ChatPage from "./components/ChatPage";
 import ThreadsPage from "./components/ThreadsPage";
@@ -12,9 +10,10 @@ import NotesPage from "./components/NotesPage";
 import NoteDetailPage from "./components/NoteDetailPage";
 import DevicesPage from "./components/DevicesPage";
 import { ConnectDeviceDialog } from "./components/ConnectDeviceDialog";
+import { useDbQuery } from "./hooks/dbQuery";
 
 function App() {
-  const { dbStatus, error } = useCRSqliteQuery();
+  const { dbStatus, error } = useDbQuery();
 
   if (dbStatus === "initializing") {
     return (
@@ -48,21 +47,21 @@ function App() {
     );
   }
 
-  if (dbStatus === "reload") {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div>Please reload the page</div>
-      </div>
-    );
-  }
+  // if (dbStatus === "reload") {
+  //   return (
+  //     <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+  //       <div>Please reload the page</div>
+  //     </div>
+  //   );
+  // }
 
-  if (dbStatus === "reconnecting") {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div>Reconnecting</div>
-      </div>
-    );
-  }
+  // if (dbStatus === "reconnecting") {
+  //   return (
+  //     <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+  //       <div>Reconnecting</div>
+  //     </div>
+  //   );
+  // }
 
   return (
     <BrowserRouter>

@@ -10,7 +10,6 @@ import {
   Transport,
   TransportClientHttp,
 } from "@app/sync";
-import { API_ENDPOINT } from "../../const";
 import { getPublicKey } from "nostr-tools";
 import { bytesToHex } from "nostr-tools/utils";
 import { createDB } from "../../db";
@@ -18,8 +17,11 @@ import { createDB } from "../../db";
 const isServerless = import.meta.env.VITE_FLAVOR === "serverless";
 
 export class SyncWorker {
+  private readonly backendUrl?: string;
+  private readonly embeddedWorker: boolean;
+
   // Talk to the tab that created the worker
-  private tabTransport = new WorkerTransport();
+  private tabTransport?: WorkerTransport;
 
   // Buffer+forward to event handlers below
   private workerEvents = new WorkerEventRouter();
@@ -27,13 +29,19 @@ export class SyncWorker {
   // Worker db status
   private status: "initializing" | "sync" | "ready" = "initializing";
 
-  constructor() {
+  constructor(backendUrl?: string, embeddedWorker?: boolean) {
     console.log("[Worker] Initializing...");
+    this.backendUrl = backendUrl;
+    this.embeddedWorker = !!embeddedWorker;
+    if (!isServerless && !backendUrl) throw new Error("Backend url required");
+
+    if (!this.embeddedWorker)
+      this.tabTransport = new WorkerTransport()
   }
 
   addPort(port: MessagePortLike) {
     // Pass to tab transport
-    this.tabTransport.addMessagePort(port);
+    this.tabTransport?.addMessagePort(port);
 
     // Pass to router too for our additional
     // tab-worker protocol
@@ -69,11 +77,15 @@ export class SyncWorker {
           signer: signer,
         });
       } else {
-        backendTransport = new TransportClientHttp(API_ENDPOINT);
+        backendTransport = new TransportClientHttp(this.backendUrl!);
       }
 
-      // Create cr-sqlite peer with 2 transports
-      const peer = new Peer(db, [this.tabTransport, backendTransport]);
+      // Transport list
+      const transports = [backendTransport];
+      if (this.tabTransport) transports.push(this.tabTransport);
+
+      // Create cr-sqlite peer with transports
+      const peer = new Peer(db, transports);
 
       // Peer event handlers
 
@@ -107,7 +119,8 @@ export class SyncWorker {
       await peer.start();
 
       // Start transports after peer has configuration for them
-      await this.tabTransport.start(peer.getConfig());
+      if (this.tabTransport)
+        await this.tabTransport.start(peer.getConfig());
 
       // Start http transport immediately, serverless transport will
       // be started later below

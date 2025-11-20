@@ -1,8 +1,8 @@
 // Database thread read hooks using TanStack Query
 import { useQuery } from "@tanstack/react-query";
 import { qk } from "./queryKeys";
-import { useCRSqliteQuery } from "../QueryProvider";
 import { StorageThreadType } from "@app/db";
+import { useDbQuery } from "./dbQuery";
 
 interface Thread {
   id: string;
@@ -13,7 +13,7 @@ interface Thread {
 }
 
 export function useThreadMessages(threadId: string) {
-  const { api } = useCRSqliteQuery();
+  const { api } = useDbQuery();
   return useQuery({
     queryKey: qk.threadMessages(threadId),
     queryFn: async () => {
@@ -28,7 +28,7 @@ export function useThreadMessages(threadId: string) {
 }
 
 export function useAllThreads() {
-  const { api } = useCRSqliteQuery();
+  const { api } = useDbQuery();
   return useQuery({
     queryKey: qk.allThreads(),
     queryFn: async () => {
@@ -50,7 +50,7 @@ export function useAllThreads() {
 }
 
 export function useThread(threadId: string) {
-  const { api } = useCRSqliteQuery();
+  const { api } = useDbQuery();
   return useQuery({
     queryKey: qk.thread(threadId),
     queryFn: async () => {

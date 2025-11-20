@@ -2,10 +2,10 @@
 import { useMutation } from "@tanstack/react-query";
 import { notifyTablesChanged, queryClient } from "../queryClient";
 import { qk } from "./queryKeys";
-import { useCRSqliteQuery } from "../QueryProvider";
+import { useDbQuery } from "./dbQuery";
 
 export function useAddMessage() {
-  const { api } = useCRSqliteQuery();
+  const { api } = useDbQuery();
 
   return useMutation({
     mutationFn: async (input: {
@@ -61,7 +61,7 @@ export function useAddMessage() {
 }
 
 export function useReadChat() {
-  const { api } = useCRSqliteQuery();
+  const { api } = useDbQuery();
 
   return useMutation({
     mutationFn: async (input: {
@@ -82,7 +82,7 @@ export function useReadChat() {
 }
 
 export function useUpdateTask() {
-  const { api } = useCRSqliteQuery();
+  const { api } = useDbQuery();
 
   return useMutation({
     mutationFn: async (input: {
@@ -114,7 +114,7 @@ export function useUpdateTask() {
 }
 
 export function useDeletePeer() {
-  const { api } = useCRSqliteQuery();
+  const { api } = useDbQuery();
 
   return useMutation({
     mutationFn: async (peerPubkey: string) => {

@@ -384,11 +384,11 @@ export function QueryProvider({
   );
 }
 
-export function useCRSqliteQuery() {
+export function useQueryProvider() {
   const context = useContext(QueryContext);
   if (context === undefined) {
     throw new Error(
-      "useCRSqliteQuery must be used within a CRSqliteQueryProvider"
+      "useQueryProvider must be used within a QueryProvider"
     );
   }
   return context;

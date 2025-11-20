@@ -2,25 +2,32 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App.tsx";
 import "./index.css";
-import { QueryProvider } from "./QueryProvider.tsx";
-import { notifyTablesChanged, queryClient, setOnLocalChanges } from "./queryClient.ts";
+// import { QueryProvider } from "./QueryProvider.tsx";
+import {
+  notifyTablesChanged,
+  queryClient,
+  setOnLocalChanges,
+} from "./queryClient.ts";
 import debug from "debug";
-import sharedWorkerUrl from "./shared-worker.ts?sharedworker&url";
-import dedicatedWorkerUrl from "./worker.ts?sharedworker&url";
+import { QueryProviderEmbedded } from "./QueryProviderEmbedded.tsx";
+import { API_ENDPOINT } from "./const.ts";
+// import sharedWorkerUrl from "./shared-worker.ts?sharedworker&url";
+// import dedicatedWorkerUrl from "./worker.ts?sharedworker&url";
 
 // FIXME debug
 debug.enable("*");
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <QueryProvider
+    <QueryProviderEmbedded
+      backendUrl={API_ENDPOINT}
       // sharedWorkerUrl={sharedWorkerUrl}
-      dedicatedWorkerUrl={dedicatedWorkerUrl}
+      // dedicatedWorkerUrl={dedicatedWorkerUrl}
       queryClient={queryClient}
       setOnLocalChanges={setOnLocalChanges}
       onRemoteChanges={(tables, api) => notifyTablesChanged(tables, false, api)}
     >
       <App />
-    </QueryProvider>
+    </QueryProviderEmbedded>
   </React.StrictMode>
 );

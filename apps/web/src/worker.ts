@@ -3,6 +3,7 @@
 import { MessagePortLike } from "@app/browser";
 import debug from "debug";
 import { SyncWorker } from "./ui/lib/worker";
+import { API_ENDPOINT } from "./const";
 
 debug.enable("*");
 
@@ -21,7 +22,7 @@ class GlobalMessagePort implements MessagePortLike {
 }
 
 async function main() {
-  const worker = new SyncWorker();
+  const worker = new SyncWorker(API_ENDPOINT);
 
   // Create global message port
   const messagePort = new GlobalMessagePort();

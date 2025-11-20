@@ -1,10 +1,10 @@
 // Database chat read hooks using TanStack Query
 import { useQuery } from "@tanstack/react-query";
 import { qk } from "./queryKeys";
-import { useCRSqliteQuery } from "../QueryProvider";
+import { useDbQuery } from "./dbQuery";
 
 export function useChatMessages(chatId: string) {
-  const { api } = useCRSqliteQuery();
+  const { api } = useDbQuery();
   return useQuery({
     queryKey: qk.chatMessages(chatId),
     queryFn: async () => {
@@ -20,7 +20,7 @@ export function useChatMessages(chatId: string) {
 }
 
 export function useAllChats() {
-  const { api } = useCRSqliteQuery();
+  const { api } = useDbQuery();
   return useQuery({
     queryKey: qk.allChats(),
     queryFn: async () => {
@@ -34,7 +34,7 @@ export function useAllChats() {
 }
 
 export function useChat(chatId: string) {
-  const { api } = useCRSqliteQuery();
+  const { api } = useDbQuery();
   return useQuery({
     queryKey: qk.chat(chatId),
     queryFn: async () => {

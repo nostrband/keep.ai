@@ -101,6 +101,7 @@ export class NostrTransport implements Transport {
   }
 
   get debug() {
+    if (!this.#debug) throw new Error("Not started yet");
     return this.#debug;
   }
 
@@ -124,6 +125,7 @@ export class NostrTransport implements Transport {
     this.#localPeerId = config.localPeerId;
     this.callbacks = config;
     this.#debug = debug("sync:Nostr:" + config.localPeerId.substring(0, 4));
+    this.debug("Starting...");
 
     this.updatePeers();
   }
@@ -134,6 +136,7 @@ export class NostrTransport implements Transport {
 
     // Peers connected to our device/db
     const peers = allPeers.filter((p) => p.local_id === this.localPeerId);
+    this.debug("Peers", peers.length);
 
     // Find removed peers, match by pubkey - we might connect
     // multiple times to the same device, thus have same peer_id but different
@@ -174,6 +177,7 @@ export class NostrTransport implements Transport {
   }
 
   async reconnect() {
+    this.debug("Reconnecting peers", this.peers.length);
     for (const p of this.sends.values())
       p.reconnect();
     for (const p of this.recvs.values())
@@ -191,13 +195,6 @@ export class NostrTransport implements Transport {
     if (!send) throw new Error("Peer not found " + peerId);
     return send.send(changes);
   }
-
-  // async finish() {
-  //   await Promise.all([
-  //     ...[...this.sends.values()].map((s) => s.finish()),
-  //     ...[...this.recvs.values()].map((r) => r.finish()),
-  //   ]);
-  // }
 
   async stop() {
     for (const r of this.recvs.values()) await r.stop();

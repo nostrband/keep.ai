@@ -1,11 +1,10 @@
 // Database note read hooks using TanStack Query
 import { useQuery } from "@tanstack/react-query";
 import { qk } from "./queryKeys";
-import { useCRSqliteQuery } from "../QueryProvider";
-import type { Note, NoteListItem } from "@app/db";
+import { useDbQuery } from "./dbQuery";
 
 export function useNotes() {
-  const { api } = useCRSqliteQuery();
+  const { api } = useDbQuery();
   return useQuery({
     queryKey: qk.allNotes(),
     queryFn: async () => {
@@ -18,7 +17,7 @@ export function useNotes() {
 }
 
 export function useNote(noteId: string) {
-  const { api } = useCRSqliteQuery();
+  const { api } = useDbQuery();
   return useQuery({
     queryKey: qk.note(noteId),
     queryFn: async () => {
@@ -35,7 +34,7 @@ export function useSearchNotes(query?: {
   tags?: string[];
   regexp?: string;
 }) {
-  const { api } = useCRSqliteQuery();
+  const { api } = useDbQuery();
   return useQuery({
     queryKey: qk.searchNotes(query),
     queryFn: async () => {

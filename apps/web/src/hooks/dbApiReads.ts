@@ -1,10 +1,10 @@
 // Database API read hooks using TanStack Query
 import { useQuery } from "@tanstack/react-query";
 import { qk } from "./queryKeys";
-import { useCRSqliteQuery } from "../QueryProvider";
+import { useDbQuery } from "./dbQuery";
 
 export function useAgentStatus() {
-  const { api } = useCRSqliteQuery();
+  const { api } = useDbQuery();
   return useQuery({
     queryKey: qk.agentStatus(),
     queryFn: async () => {

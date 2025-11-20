@@ -1,8 +1,8 @@
 // Database inbox read hooks using TanStack Query
 import { useQuery } from "@tanstack/react-query";
 import { qk } from "./queryKeys";
-import { useCRSqliteQuery } from "../QueryProvider";
-import type { InboxItem, InboxItemSource, InboxItemTarget } from "@app/db";
+import type { InboxItemSource, InboxItemTarget } from "@app/db";
+import { useDbQuery } from "./dbQuery";
 
 export function useInboxItems(options?: {
   source?: InboxItemSource;
@@ -11,7 +11,7 @@ export function useInboxItems(options?: {
   limit?: number;
   offset?: number;
 }) {
-  const { api } = useCRSqliteQuery();
+  const { api } = useDbQuery();
   return useQuery({
     queryKey: qk.inboxItems(options),
     queryFn: async () => {
@@ -25,7 +25,7 @@ export function useInboxItems(options?: {
 }
 
 export function useInboxItem(id: string) {
-  const { api } = useCRSqliteQuery();
+  const { api } = useDbQuery();
   return useQuery({
     queryKey: qk.inboxItem(id),
     queryFn: async () => {
@@ -44,7 +44,7 @@ export function useInboxItem(id: string) {
 
 // Hook to get inbox item for a specific task run
 export function useTaskRunInboxItem(taskRun: { inbox?: string } | null) {
-  const { api } = useCRSqliteQuery();
+  const { api } = useDbQuery();
   const inboxId = taskRun?.inbox;
   
   return useQuery({

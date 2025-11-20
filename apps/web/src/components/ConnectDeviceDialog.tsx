@@ -1,12 +1,12 @@
 import React, { useState } from "react";
-import { useCRSqliteQuery } from "../QueryProvider";
+import { useDbQuery } from "../hooks/dbQuery";
 
 interface ConnectDeviceDialogProps {
   onClose?: () => void;
 }
 
 export function ConnectDeviceDialog({ onClose }: ConnectDeviceDialogProps) {
-  const { connectDevice, dbStatus, error } = useCRSqliteQuery();
+  const { connectDevice, dbStatus, error } = useDbQuery();
   const [connectionString, setConnectionString] = useState("");
   const [isConnecting, setIsConnecting] = useState(false);
 

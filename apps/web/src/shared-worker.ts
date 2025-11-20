@@ -1,10 +1,11 @@
 /// <reference lib="webworker" />
+import { API_ENDPOINT } from "./const";
 import { SyncWorker } from "./ui/lib/worker";
 
 declare const self: SharedWorkerGlobalScope;
 
 const initializeWorker = async () => {
-  const worker = new SyncWorker();
+  const worker = new SyncWorker(API_ENDPOINT);
 
   // Set up connection handler immediately (no awaits above it)
   self.addEventListener("connect", (event: MessageEvent) => {

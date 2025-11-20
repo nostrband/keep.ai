@@ -1,10 +1,10 @@
 // Database nostr peer read hooks using TanStack Query
 import { useQuery } from "@tanstack/react-query";
 import { qk } from "./queryKeys";
-import { useCRSqliteQuery } from "../QueryProvider";
+import { useDbQuery } from "./dbQuery";
 
 export function useNostrPeers() {
-  const { api } = useCRSqliteQuery();
+  const { api } = useDbQuery();
   return useQuery({
     queryKey: qk.allNostrPeers(),
     queryFn: async () => {
@@ -17,7 +17,7 @@ export function useNostrPeers() {
 }
 
 export function useNostrPeer(peerPubkey: string) {
-  const { api } = useCRSqliteQuery();
+  const { api } = useDbQuery();
   return useQuery({
     queryKey: qk.nostrPeer(peerPubkey),
     queryFn: async () => {
