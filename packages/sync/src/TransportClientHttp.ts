@@ -78,7 +78,9 @@ export class TransportClientHttp implements Transport {
       return;
     }
     if (peerId !== this.remotePeerId) {
-      debugTransport(`Cannot sync: unknown peer '${peerId} expected '${this.remotePeerId}''`);
+      debugTransport(
+        `Cannot sync: unknown peer '${peerId} expected '${this.remotePeerId}''`
+      );
       return;
     }
 
@@ -114,7 +116,9 @@ export class TransportClientHttp implements Transport {
       return;
     }
     if (peerId !== this.remotePeerId) {
-      debugTransport(`Cannot sync: unknown peer '${peerId} expected '${this.remotePeerId}''`);
+      debugTransport(
+        `Cannot sync: unknown peer '${peerId} expected '${this.remotePeerId}''`
+      );
       return;
     }
 
@@ -173,20 +177,30 @@ export class TransportClientHttp implements Transport {
 
       debugTransport("Connecting to SSE stream...");
       // Now use GET with peerId as query parameter
-      this.eventSource = new EventSource(`${this.endpoint}/stream?peerId=${encodeURIComponent(this.localPeerId)}`);
+      this.eventSource = new EventSource(
+        `${this.endpoint}/stream?peerId=${encodeURIComponent(this.localPeerId)}`
+      );
 
       this.eventSource.onopen = async () => {
         debugTransport("SSE connection opened");
         // No need to send separate connect message - server handles it automatically
       };
 
-      this.eventSource.onmessage = async (event) => {
-        try {
-          const message: TransportMessage = JSON.parse(event.data);
-          await this.handleSSEMessage(message);
-        } catch (error) {
-          debugTransport("Error parsing SSE message:", error);
-        }
+      let queue = Promise.resolve();
+      this.eventSource.onmessage = (event) => {
+        // Ensure handling is single-threaded
+        queue = queue
+          .then(async () => {
+            try {
+              const message: TransportMessage = JSON.parse(event.data);
+              await this.handleSSEMessage(message);
+            } catch (error) {
+              debugTransport("Error parsing SSE message:", error);
+              this.handleConnectionError();
+              throw error;
+            }
+          })
+          .catch(); // stop the queue processing on error
       };
 
       this.eventSource.onerror = (error) => {
@@ -242,7 +256,9 @@ export class TransportClientHttp implements Transport {
           break;
 
         case "error":
-          debugTransport(`Received error from peer: ${message.peerId} '${message.error}'`);
+          debugTransport(
+            `Received error from peer: ${message.peerId} '${message.error}'`
+          );
           // Just log the ping - no action needed, it keeps the connection alive
           break;
 

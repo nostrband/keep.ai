@@ -114,7 +114,7 @@ export class TransportServerFastify implements Transport {
           return;
         }
 
-        // Reply with out own connect ASAP
+        // Reply with our own connect ASAP
         const message: TransportMessage = {
           type: "connect",
           peerId: this.localPeerId!,
@@ -187,6 +187,7 @@ export class TransportServerFastify implements Transport {
           await this.callbacks.onSync(this, msg.peerId, cursor);
           reply.send({ success: true });
         } catch (error) {
+          console.error("/sync error", error);
           reply.status(500).send({
             type: "error",
             error: error instanceof Error ? error.message : "Unknown error",
@@ -237,6 +238,7 @@ export class TransportServerFastify implements Transport {
           await this.callbacks.onReceive(this, msg.peerId, msg.data);
           reply.send({ success: true });
         } catch (error) {
+          console.error("/data error", error);
           reply.status(500).send({
             type: "error",
             error: error instanceof Error ? error.message : "Unknown error",

@@ -12,8 +12,6 @@
  *  - forward received changes to peers according to their cursors
  *  - when local changes detected - send to all peers
  *  - disconnect - no more updates received
- * Nostr is not a transport medium, it's a virtual peer with
- * relay url as peer id.
  */
 
 import { DBInterface } from "@app/db";
@@ -45,7 +43,11 @@ export class Peer extends EventEmitter<{
   connect: (peerId: string, transport: Transport) => void;
   sync: (peerId: string, transport: Transport) => void;
   eose: (peerId: string, transport: Transport) => void;
-  outdated: (schemaVersion: number, peerId: string, transport: Transport) => void;
+  outdated: (
+    schemaVersion: number,
+    peerId: string,
+    transport: Transport
+  ) => void;
 }> {
   #db: DBInterface | (() => DBInterface);
   #id: string = "";
@@ -54,6 +56,7 @@ export class Peer extends EventEmitter<{
   private transports: Transport[];
   private cursor = new Cursor();
   private peers = new Map<string, PeerInfo>();
+  private queue: Promise<void> = Promise.resolve();
   #debug?: ReturnType<typeof debug>;
 
   constructor(db: DBInterface | (() => DBInterface), transports: Transport[]) {
@@ -102,10 +105,10 @@ export class Peer extends EventEmitter<{
     if (!this.id) throw new Error("Config empty until start()");
     return {
       localPeerId: this.id,
-      onConnect: this.onConnect.bind(this),
-      onSync: this.onSync.bind(this),
-      onReceive: this.onReceive.bind(this),
-      onDisconnect: this.onDisconnect.bind(this),
+      onConnect: this.queued(this.onConnect.bind(this)),
+      onSync: this.queued(this.onSync.bind(this)),
+      onReceive: this.queued(this.onReceive.bind(this)),
+      onDisconnect: this.queued(this.onDisconnect.bind(this)),
     };
   }
 
@@ -148,8 +151,15 @@ export class Peer extends EventEmitter<{
     // bcs sync might send "EOSE" immediately
     this.emit("connect", peerId, transport);
 
-    // Start sync with peer
-    await transport.sync(peerId, this.cursor);
+    // Start sync with peer, make sure this call can't
+    // synchronously re-enter into Peer's callbacks
+    queueMicrotask(async () => {
+      try {
+        await transport.sync(peerId, this.cursor);
+      } catch (e) {
+        this.debug("Sync error with peer", peerId, "cursor", this.cursor, e);
+      }
+    });
   }
 
   private async onSync(
@@ -157,6 +167,7 @@ export class Peer extends EventEmitter<{
     peerId: string,
     peerCursor: Cursor
   ): Promise<void> {
+    this.debug("onSync", peerId, peerCursor);
     const peer = this.peers.get(peerId);
     if (!peer) {
       console.error("onSync for unknown peer", peerId);
@@ -235,7 +246,11 @@ export class Peer extends EventEmitter<{
     }
   }
 
-  private async onReceiveEOSE(peerId: string, msg: PeerMessage, transport: Transport): Promise<void> {
+  private async onReceiveEOSE(
+    peerId: string,
+    msg: PeerMessage,
+    transport: Transport
+  ): Promise<void> {
     this.debug(`Got EOSE message peer '${peerId}'`);
     this.emit("eose", peerId, transport);
   }
@@ -375,7 +390,11 @@ export class Peer extends EventEmitter<{
           );
         }
       });
-      this.debug(`Successfully applied changes ${changes.length} in ${Date.now() - start} ms`);
+      this.debug(
+        `Successfully applied changes ${changes.length} in ${
+          Date.now() - start
+        } ms`
+      );
     } catch (error) {
       this.debug("Error applying changes to database:", error);
       throw error;
@@ -472,17 +491,31 @@ export class Peer extends EventEmitter<{
     );
   }
 
-  private async sendChanges(peer: PeerInfo, changes: PeerChange[]) {
-    await peer.transport.send(peer.id, {
+  private sendToPeer(peer: PeerInfo, msg: PeerMessage) {
+    // Making sure transport.send can't synchronously
+    // call Peer's callbacks
+    queueMicrotask(async () => {
+      try {
+        await peer.transport.send(peer.id, msg);
+      } catch (e) {
+        this.debug("Send error with peer", peer.id, "msg", msg, e);
+      }
+    });
+  }
+
+  private sendChanges(peer: PeerInfo, changes: PeerChange[]) {
+    this.sendToPeer(peer, {
       type: "changes",
       data: changes,
       schemaVersion: this.schemaVersion,
     });
-    this.debug(`Sent to peer '${peer.id}' changes ${changes.length}`);
+    this.debug(`Sending to peer '${peer.id}' changes ${changes.length}`);
   }
 
   private async broadcastChanges(changes: PeerChange[], exceptPeerId?: string) {
+    this.debug("Broadcasting to peers", this.peers.size);
     for (const p of this.peers.values()) {
+      this.debug("Broadcasting to peer", p.id, p.active);
       if (p.id === exceptPeerId || !p.active) continue;
 
       const newChanges = changes.filter((c) => {
@@ -490,7 +523,7 @@ export class Peer extends EventEmitter<{
         return c.db_version > peerChangeDbVersion;
       });
 
-      await this.sendChanges(p, newChanges);
+      this.sendChanges(p, newChanges);
     }
   }
 
@@ -536,7 +569,7 @@ export class Peer extends EventEmitter<{
         this.debug(`Sync to peer '${peer.id}' changes ${changes.length}`);
 
         // Send to peer
-        await this.sendChanges(peer, changes);
+        this.sendChanges(peer, changes);
 
         // Assume peer knows these changes now
         this.updatePeerCursor(peer.id, changes);
@@ -545,16 +578,55 @@ export class Peer extends EventEmitter<{
       }
 
       // Send EOSE
-      await peer.transport.send(peer.id, {
+      this.sendToPeer(peer, {
         type: "eose",
         data: [],
       });
       this.debug(`Sent to peer '${peer.id}' EOSE`);
-
     } catch (error) {
       this.debug("Error sending changes to", peer, error);
       throw error;
     }
+  }
+
+  // The magic by chatgpt, just a typesafe way to do this:
+  // this.queue = this.queue.then(callback(args)).catch(logIt);
+  // so that queued callbacks are always executed in a single-thread
+  // and we avoid racy clients that might call our callbacks concurrently.
+  private queued<T extends (...args: any[]) => any>(
+    fn: T
+  ): (...args: Parameters<T>) => Promise<Awaited<ReturnType<T>>> {
+    return (...args: Parameters<T>): Promise<Awaited<ReturnType<T>>> => {
+      // This promise is what the *caller* of the wrapped function awaits
+      let resolveResult: (value: Awaited<ReturnType<T>>) => void;
+      let rejectResult: (reason?: unknown) => void;
+
+      const resultPromise = new Promise<Awaited<ReturnType<T>>>(
+        (resolve, reject) => {
+          resolveResult = resolve;
+          rejectResult = reject;
+        }
+      );
+
+      // Chain onto the instance queue so calls are strictly serialized
+      this.queue = this.queue
+        .then(async () => {
+          try {
+            const value = await fn(...args);
+            resolveResult!(value as Awaited<ReturnType<T>>);
+          } catch (err) {
+            rejectResult!(err);
+            throw err; // propagate to .catch below so we can keep the queue healthy
+          }
+        })
+        .catch((err) => {
+          // Prevent the queue from staying in a rejected state.
+          // You can swap this for your own logging.
+          console.error("Error in queued callback:", err);
+        });
+
+      return resultPromise;
+    };
   }
 }
 
