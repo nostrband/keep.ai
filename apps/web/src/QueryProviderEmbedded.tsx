@@ -317,7 +317,7 @@ export function QueryProviderEmbedded({
 export function useQueryProvider() {
   const context = useContext(QueryContext);
   if (context === undefined) {
-    throw new Error("useQueryProvider must be used within a QueryProvider");
+    throw new Error("useQueryProvider must be used within a QueryProviderEmbedded");
   }
   return context;
 }

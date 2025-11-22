@@ -360,6 +360,7 @@ export class Peer extends EventEmitter<{
     if (changes.length === 0) return;
 
     // Validate all changes before applying any
+    const start = Date.now();
     for (let i = 0; i < changes.length; i++) {
       try {
         this.validateChange(changes[i]);
@@ -369,14 +370,24 @@ export class Peer extends EventEmitter<{
       }
     }
 
+    // helper
+    function chunk<T>(array: T[], size: number) {
+      const result = [];
+      for (let i = 0; i < array.length; i += size) {
+        result.push(array.slice(i, i + size));
+      }
+      return result;
+    }
+
     try {
-      // FIXME split into batches?
-      const start = Date.now();
-      await this.db.tx(async (tx: DBInterface) => {
-        for (const change of deserializeChanges(changes)) {
-          await tx.exec(
+      // Larger batch doesn't improve timing on desktop
+      const batches = chunk(deserializeChanges(changes), 2000);
+      for (const batch of batches) {
+        const start = Date.now();
+        await this.db.tx(async (tx: DBInterface) => {
+          await tx.execManyArgs(
             `INSERT INTO crsql_changes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [
+            batch.map((change) => [
               change.table,
               change.pk,
               change.cid,
@@ -386,10 +397,30 @@ export class Peer extends EventEmitter<{
               change.site_id,
               change.cl,
               change.seq,
-            ]
+            ])
           );
-        }
-      });
+
+          // for (const change of batch) {
+          //   await tx.exec(
+          //     `INSERT INTO crsql_changes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          //     [
+          //       change.table,
+          //       change.pk,
+          //       change.cid,
+          //       change.val,
+          //       change.col_version,
+          //       change.db_version,
+          //       change.site_id,
+          //       change.cl,
+          //       change.seq,
+          //     ]
+          //   );
+          // }
+        });
+        this.debug(
+          `Applied batch of size ${batch.length} in ${Date.now() - start} ms`
+        );
+      }
       this.debug(
         `Successfully applied changes ${changes.length} in ${
           Date.now() - start
@@ -408,6 +439,7 @@ export class Peer extends EventEmitter<{
 
   private async initialize(): Promise<void> {
     try {
+      const start = Date.now();
       const cursorData = await this.db.execO<{
         site_id: Uint8Array;
         db_version: number;
@@ -426,7 +458,7 @@ export class Peer extends EventEmitter<{
       this.#debug = debug("sync:Peer:L" + this.id.substring(0, 4));
 
       this.debug(
-        `Initialized cursor to ${JSON.stringify(serializeCursor(this.cursor))}`
+        `Initialized cursor to ${JSON.stringify(serializeCursor(this.cursor))} in ${Date.now() - start} ms`
       );
 
       this.debug(`Initialized our peer id to ${this.id}`);
@@ -534,6 +566,12 @@ export class Peer extends EventEmitter<{
           serializeCursor(peer.cursor)
         )}`
       );
+      const start = Date.now();
+      const count = await this.db.execO<{ count: number }>(
+        "SELECT COUNT(*) as count FROM crsql_changes"
+      );
+      this.debug("Total change count", count);
+
       // for each site_id:db_version of peer cursor,
       // fetch known changes since then,
       // plus all changes from third-parties not known to peer,
@@ -558,11 +596,19 @@ export class Peer extends EventEmitter<{
       const bindString = new Array(excludePeerIds.length).fill("?").join(",");
       const dbChanges = await this.db.execO<Change>(
         `SELECT * FROM crsql_changes WHERE site_id NOT IN (${bindString})`,
-        [peer.id, ...peer.cursor.peers.keys()].map((site_id) =>
-          hexToBytes(site_id)
-        )
+        excludePeerIds
       );
       if (dbChanges) changes.push(...serializeChanges(dbChanges));
+
+      this.debug(
+        "Collected changes for peer",
+        peer.id,
+        "changes",
+        changes.length,
+        "in",
+        Date.now() - start,
+        "ms"
+      );
 
       // Convert to peer changes
       if (changes.length > 0) {
@@ -641,9 +687,8 @@ export function isCursorOlder(a: Cursor, b: Cursor) {
   for (const [id, bv] of b.peers.entries()) {
     const av = a.peers.get(id);
     // a has no info on this id?
-    if (av === undefined) return true;
-    // a has older version than b?
-    if (av < bv) return true;
+    // or a has older version than b?
+    if (av === undefined || av < bv) return true;
   }
   // a covers all b's peers, and a's versions are not less
   return false;

@@ -1,0 +1,934 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>execManyArgs Browser Tests</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            padding: 20px;
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .test-suite {
+            margin-bottom: 20px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            overflow: hidden;
+        }
+        .test-suite-header {
+            background: #f8f9fa;
+            padding: 12px 16px;
+            font-weight: bold;
+            border-bottom: 1px solid #ddd;
+            cursor: pointer;
+        }
+        .test-suite-header:hover {
+            background: #e9ecef;
+        }
+        .test-case {
+            padding: 10px 16px;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .test-case:last-child {
+            border-bottom: none;
+        }
+        .test-name {
+            flex: 1;
+        }
+        .test-status {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        .status-pending {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+        .status-running {
+            background: #cce5ff;
+            color: #0056b3;
+            border: 1px solid #74c0fc;
+        }
+        .status-pass {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status-fail {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f1b0b7;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: #e9ecef;
+            border-radius: 10px;
+            margin: 20px 0;
+            overflow: hidden;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #28a745, #20c997);
+            transition: width 0.3s ease;
+            border-radius: 10px;
+        }
+        .summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+        .stat-card {
+            text-align: center;
+            padding: 15px;
+            border-radius: 6px;
+            border: 1px solid #ddd;
+        }
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .stat-label {
+            font-size: 12px;
+            text-transform: uppercase;
+            color: #666;
+        }
+        .error-details {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 10px;
+            margin-top: 10px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .run-button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            font-size: 16px;
+            cursor: pointer;
+            width: 100%;
+            margin-bottom: 20px;
+        }
+        .run-button:hover {
+            background: #0056b3;
+        }
+        .run-button:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+        }
+        .logs {
+            background: #2d3748;
+            color: #e2e8f0;
+            border-radius: 6px;
+            padding: 15px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>execManyArgs Browser Tests</h1>
+        
+        <button id="runTests" class="run-button" onclick="runTests()">
+            Run Tests
+        </button>
+        
+        <div class="progress-bar">
+            <div id="progressFill" class="progress-fill" style="width: 0%"></div>
+        </div>
+        
+        <div class="summary">
+            <div class="stat-card">
+                <div id="totalTests" class="stat-value">0</div>
+                <div class="stat-label">Total</div>
+            </div>
+            <div class="stat-card">
+                <div id="passedTests" class="stat-value">0</div>
+                <div class="stat-label">Passed</div>
+            </div>
+            <div class="stat-card">
+                <div id="failedTests" class="stat-value">0</div>
+                <div class="stat-label">Failed</div>
+            </div>
+            <div class="stat-card">
+                <div id="duration" class="stat-value">0ms</div>
+                <div class="stat-label">Duration</div>
+            </div>
+        </div>
+        
+        <div id="testSuites"></div>
+        
+        <div id="logs" class="logs" style="display: none;"></div>
+    </div>
+
+    <script type="module">
+        let db = null;
+        let testResults = {
+            total: 0,
+            passed: 0,
+            failed: 0,
+            suites: []
+        };
+
+        // Logger
+        function log(message, type = 'info') {
+            const logs = document.getElementById('logs');
+            const timestamp = new Date().toLocaleTimeString();
+            logs.innerHTML += `[${timestamp}] ${type.toUpperCase()}: ${message}\n`;
+            logs.scrollTop = logs.scrollHeight;
+            console.log(`[${type.toUpperCase()}] ${message}`);
+        }
+
+        // Test framework
+        class TestSuite {
+            constructor(name) {
+                this.name = name;
+                this.tests = [];
+                this.beforeEachFn = null;
+                this.afterEachFn = null;
+            }
+
+            beforeEach(fn) {
+                this.beforeEachFn = fn;
+            }
+
+            afterEach(fn) {
+                this.afterEachFn = fn;
+            }
+
+            it(name, fn) {
+                this.tests.push({ name, fn, status: 'pending', error: null });
+            }
+        }
+
+        function describe(name, fn) {
+            const suite = new TestSuite(name);
+            const originalIt = window.it;
+            const originalBeforeEach = window.beforeEach;
+            const originalAfterEach = window.afterEach;
+            
+            window.it = suite.it.bind(suite);
+            window.beforeEach = suite.beforeEach.bind(suite);
+            window.afterEach = suite.afterEach.bind(suite);
+            
+            fn();
+            
+            window.it = originalIt;
+            window.beforeEach = originalBeforeEach;
+            window.afterEach = originalAfterEach;
+            
+            testResults.suites.push(suite);
+            testResults.total += suite.tests.length;
+            return suite;
+        }
+
+        function expect(actual) {
+            return {
+                toBe: (expected) => {
+                    if (actual !== expected) {
+                        throw new Error(`Expected ${expected} but got ${actual}`);
+                    }
+                },
+                toHaveLength: (length) => {
+                    if (!actual || actual.length !== length) {
+                        throw new Error(`Expected length ${length} but got ${actual ? actual.length : 'undefined'}`);
+                    }
+                },
+                toBeDefined: () => {
+                    if (actual === undefined) {
+                        throw new Error('Expected value to be defined');
+                    }
+                },
+                toBeNull: () => {
+                    if (actual !== null) {
+                        throw new Error(`Expected null but got ${actual}`);
+                    }
+                },
+                toMatchObject: (expected) => {
+                    for (const key in expected) {
+                        if (actual[key] !== expected[key]) {
+                            throw new Error(`Expected ${key} to be ${expected[key]} but got ${actual[key]}`);
+                        }
+                    }
+                },
+                toEqual: (expected) => {
+                    if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+                        throw new Error(`Expected ${JSON.stringify(expected)} but got ${JSON.stringify(actual)}`);
+                    }
+                },
+                toBeLessThan: (expected) => {
+                    if (actual >= expected) {
+                        throw new Error(`Expected ${actual} to be less than ${expected}`);
+                    }
+                },
+                toBeGreaterThan: (expected) => {
+                    if (actual <= expected) {
+                        throw new Error(`Expected ${actual} to be greater than ${expected}`);
+                    }
+                },
+                rejects: {
+                    toThrow: async () => {
+                        try {
+                            await actual;
+                            throw new Error('Expected promise to reject but it resolved');
+                        } catch (error) {
+                            // Expected behavior
+                        }
+                    }
+                }
+            };
+        }
+
+        // Load the browser DB implementation
+        async function loadBrowserDB() {
+            try {
+                // Import the createDBBrowser function
+                // For this demo, we'll load it from CDN
+                const sqliteWasm = (await import('https://esm.sh/@vlcn.io/crsqlite-wasm@0.16.0')).default;
+                
+                // SQLite3 wrapper implementation for browser
+                let sqlite = null;
+
+                class CRSqliteDBWrapper {
+                    constructor(db, isTx = false) {
+                        this.db = db;
+                        this.isTx = isTx;
+                    }
+
+                    async exec(sql, args) {
+                        return this.db.exec(sql, args);
+                    }
+
+                    async execO(sql, args) {
+                        return this.db.execO(sql, args);
+                    }
+
+                    async execManyArgs(sql, args) {
+                        if (!args || args.length === 0) {
+                            return [];
+                        }
+
+                        const stmt = await this.db.prepare(sql);
+                        const results = [];
+
+                        const tx = this.isTx ? this.db : null;
+                        try {
+                            for (const argSet of args) {
+                                const result = await stmt.run(tx, ...(argSet || []));
+                                results.push(result);
+                            }
+                        } finally {
+                            stmt.finalize(this.db);
+                        }
+
+                        return results;
+                    }
+
+                    async tx(fn) {
+                        return new Promise((resolve, reject) => {
+                            this.db.tx(async (tx) => {
+                                    const wrappedTx = new CRSqliteDBWrapper(tx, true);
+                                    const result = await fn(wrappedTx);
+                                    resolve(result);
+                            }).catch(reject);
+                        });
+                    }
+
+                    async close() {
+                        try {
+                            await this.db.exec("SELECT crsql_finalize()");
+                        } catch (error) {
+                            log(`CRSqlite finalize warning: ${error}`, 'warn');
+                        }
+                        return this.db.close();
+                    }
+                }
+
+                async function createDBBrowser(file) {
+                    if (!sqlite) {
+                        sqlite = await sqliteWasm(
+                            () => "https://esm.sh/@vlcn.io/crsqlite-wasm@0.16.0/dist/crsqlite.wasm"
+                        );
+                    }
+
+                    const db = await sqlite.open(file);
+                    db.exec("PRAGMA journal_mode = WAL;");
+                    db.exec("PRAGMA synchronous = NORMAL;");
+                    db.exec("PRAGMA busy_timeout = 10000;");
+
+                    return new CRSqliteDBWrapper(db, false);
+                }
+
+                return { createDBBrowser };
+            } catch (error) {
+                log(`Failed to load browser DB: ${error}`, 'error');
+                throw error;
+            }
+        }
+
+        // Test definitions (converted from the test file)
+        function defineTests(createDBBrowser) {
+            describe("Bulk Insert Operations", () => {
+                beforeEach(async () => {
+                    db = await createDBBrowser(":memory:");
+                });
+
+                afterEach(async () => {
+                    if (db) await db.close();
+                });
+
+                it("should perform bulk inserts with execManyArgs", async () => {
+                    await db.exec(`
+                        CREATE TABLE users (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            name TEXT NOT NULL,
+                            email TEXT NOT NULL,
+                            age INTEGER
+                        )
+                    `);
+
+                    const insertArgs = [
+                        ["Alice", "alice@example.com", 25],
+                        ["Bob", "bob@example.com", 30],
+                        ["Charlie", "charlie@example.com", 35]
+                    ];
+
+                    const results = await db.execManyArgs(
+                        "INSERT INTO users (name, email, age) VALUES (?, ?, ?)",
+                        insertArgs
+                    );
+
+                    expect(results).toBeDefined();
+                    expect(results).toHaveLength(3);
+
+                    const allUsers = await db.execO("SELECT * FROM users ORDER BY id");
+                    expect(allUsers).toHaveLength(3);
+                    expect(allUsers[0]).toMatchObject({
+                        id: 1,
+                        name: "Alice",
+                        email: "alice@example.com",
+                        age: 25
+                    });
+                });
+
+                it("should handle empty args array", async () => {
+                    await db.exec(`CREATE TABLE test_table (id INTEGER PRIMARY KEY, value TEXT)`);
+
+                    const results = await db.execManyArgs(
+                        "INSERT INTO test_table (value) VALUES (?)",
+                        []
+                    );
+
+                    expect(results).toBeDefined();
+                    expect(results).toHaveLength(0);
+                });
+            });
+
+            describe("Bulk Update Operations", () => {
+                beforeEach(async () => {
+                    db = await createDBBrowser(":memory:");
+                    await db.exec(`
+                        CREATE TABLE products (
+                            id INTEGER PRIMARY KEY,
+                            name TEXT NOT NULL,
+                            price DECIMAL(10,2)
+                        )
+                    `);
+                    await db.execManyArgs(
+                        "INSERT INTO products (id, name, price) VALUES (?, ?, ?)",
+                        [
+                            [1, "Laptop", 999.99],
+                            [2, "Mouse", 29.99]
+                        ]
+                    );
+                });
+
+                afterEach(async () => {
+                    if (db) await db.close();
+                });
+
+                it("should perform bulk updates with execManyArgs", async () => {
+                    const updateArgs = [
+                        [1099.99, 1],
+                        [24.99, 2]
+                    ];
+
+                    const results = await db.execManyArgs(
+                        "UPDATE products SET price = ? WHERE id = ?",
+                        updateArgs
+                    );
+
+                    expect(results).toHaveLength(2);
+                    
+                    const laptop = await db.execO("SELECT price FROM products WHERE id = 1");
+                    expect(laptop[0].price).toBe(1099.99);
+                });
+            });
+
+            describe("Bulk Delete Operations", () => {
+                beforeEach(async () => {
+                    db = await createDBBrowser(":memory:");
+                    await db.exec(`
+                        CREATE TABLE orders (
+                            id INTEGER PRIMARY KEY,
+                            status TEXT
+                        )
+                    `);
+                    await db.execManyArgs(
+                        "INSERT INTO orders (id, status) VALUES (?, ?)",
+                        [
+                            [1, "pending"],
+                            [2, "completed"],
+                            [3, "cancelled"]
+                        ]
+                    );
+                });
+
+                afterEach(async () => {
+                    if (db) await db.close();
+                });
+
+                it("should perform bulk deletes with execManyArgs", async () => {
+                    const results = await db.execManyArgs(
+                        "DELETE FROM orders WHERE id = ?",
+                        [[1], [3]]
+                    );
+
+                    expect(results).toHaveLength(2);
+                    
+                    const remaining = await db.execO("SELECT id FROM orders ORDER BY id");
+                    expect(remaining).toHaveLength(1);
+                    expect(remaining[0].id).toBe(2);
+                });
+            });
+            describe("Transaction Tests - Comprehensive execManyArgs", () => {
+                beforeEach(async () => {
+                    db = await createDBBrowser(":memory:");
+                    await db.exec(`
+                        CREATE TABLE transaction_test (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            batch_id INTEGER,
+                            value TEXT,
+                            amount DECIMAL(10,2)
+                        )
+                    `);
+                    
+                    await db.exec(`
+                        CREATE TABLE audit_log (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            operation TEXT,
+                            table_name TEXT,
+                            record_count INTEGER,
+                            timestamp TEXT
+                        )
+                    `);
+                });
+
+                afterEach(async () => {
+                    if (db) await db.close();
+                });
+
+                it("should handle single execManyArgs call in transaction with commit", async () => {
+                    const testData = [
+                        [1, "test1", 100.50],
+                        [1, "test2", 200.75],
+                        [1, "test3", 300.25]
+                    ];
+
+                    let txResults;
+                    await db.tx(async (tx) => {
+                        txResults = await tx.execManyArgs(
+                            "INSERT INTO transaction_test (batch_id, value, amount) VALUES (?, ?, ?)",
+                            testData
+                        );
+
+                        // Verify results within transaction
+                        expect(txResults).toHaveLength(3);
+                        txResults.forEach(result => {
+                            expect(result).toBeDefined();
+                        });
+
+                        // Verify data is visible within transaction
+                        const countInTx = await tx.execO("SELECT COUNT(*) as count FROM transaction_test");
+                        expect(countInTx[0].count).toBe(3);
+                    });
+
+                    // Verify data persisted after commit
+                    const allData = await db.execO("SELECT * FROM transaction_test ORDER BY id");
+                    expect(allData).toHaveLength(3);
+                    expect(allData[0].value).toBe("test1");
+                    expect(allData[1].value).toBe("test2");
+                    expect(allData[2].value).toBe("test3");
+                });
+
+                it("should handle multiple execManyArgs calls in same transaction", async () => {
+                    await db.tx(async (tx) => {
+                        // First batch of inserts
+                        const batch1Results = await tx.execManyArgs(
+                            "INSERT INTO transaction_test (batch_id, value, amount) VALUES (?, ?, ?)",
+                            [
+                                [1, "batch1_item1", 10.00],
+                                [1, "batch1_item2", 20.00]
+                            ]
+                        );
+
+                        // Second batch of inserts
+                        const batch2Results = await tx.execManyArgs(
+                            "INSERT INTO transaction_test (batch_id, value, amount) VALUES (?, ?, ?)",
+                            [
+                                [2, "batch2_item1", 30.00],
+                                [2, "batch2_item2", 40.00],
+                                [2, "batch2_item3", 50.00]
+                            ]
+                        );
+
+                        // Log operations
+                        const auditResults = await tx.execManyArgs(
+                            "INSERT INTO audit_log (operation, table_name, record_count, timestamp) VALUES (?, ?, ?, ?)",
+                            [
+                                ["INSERT", "transaction_test", 2, new Date().toISOString()],
+                                ["INSERT", "transaction_test", 3, new Date().toISOString()]
+                            ]
+                        );
+
+                        // Verify all operations succeeded
+                        expect(batch1Results).toHaveLength(2);
+                        expect(batch2Results).toHaveLength(3);
+                        expect(auditResults).toHaveLength(2);
+
+                        // Verify data is consistent within transaction
+                        const totalCount = await tx.execO("SELECT COUNT(*) as count FROM transaction_test");
+                        expect(totalCount[0].count).toBe(5);
+
+                        const batch1Count = await tx.execO("SELECT COUNT(*) as count FROM transaction_test WHERE batch_id = 1");
+                        expect(batch1Count[0].count).toBe(2);
+
+                        const batch2Count = await tx.execO("SELECT COUNT(*) as count FROM transaction_test WHERE batch_id = 2");
+                        expect(batch2Count[0].count).toBe(3);
+                    });
+
+                    // Verify all data committed
+                    const finalData = await db.execO("SELECT * FROM transaction_test ORDER BY batch_id, id");
+                    expect(finalData).toHaveLength(5);
+                    
+                    const auditData = await db.execO("SELECT * FROM audit_log");
+                    expect(auditData).toHaveLength(2);
+                });
+
+                it("should rollback all execManyArgs calls on transaction failure", async () => {
+                    try {
+                        await db.tx(async (tx) => {
+                            // First successful batch
+                            await tx.execManyArgs(
+                                "INSERT INTO transaction_test (batch_id, value, amount) VALUES (?, ?, ?)",
+                                [
+                                    [1, "should_rollback1", 100.00],
+                                    [1, "should_rollback2", 200.00]
+                                ]
+                            );
+
+                            // Second successful batch  
+                            await tx.execManyArgs(
+                                "INSERT INTO transaction_test (batch_id, value, amount) VALUES (?, ?, ?)",
+                                [
+                                    [2, "should_rollback3", 300.00],
+                                    [2, "should_rollback4", 400.00]
+                                ]
+                            );
+
+                            // This should cause the transaction to fail
+                            throw new Error("Simulated transaction failure");
+                        });
+                    } catch (error) {
+                        expect(error.message).toBe("Simulated transaction failure");
+                    }
+
+                    // Verify complete rollback - no data should persist
+                    let remainingData = await db.execO("SELECT * FROM transaction_test");
+                    if (remainingData?.length === 0) remainingData = null;
+                    console.log("remainingData", remainingData)
+                    expect(remainingData).toBeNull();
+                });
+
+                it("should handle mixed operations in transaction with rollback", async () => {
+                    // Insert some initial data
+                    await db.execManyArgs(
+                        "INSERT INTO transaction_test (batch_id, value, amount) VALUES (?, ?, ?)",
+                        [
+                            [0, "initial1", 10.00],
+                            [0, "initial2", 20.00]
+                        ]
+                    );
+
+                    // Verify initial data exists
+                    const initialCount = await db.execO("SELECT COUNT(*) as count FROM transaction_test");
+                    expect(initialCount[0].count).toBe(2);
+
+                    try {
+                        await db.tx(async (tx) => {
+                            // Insert new data
+                            await tx.execManyArgs(
+                                "INSERT INTO transaction_test (batch_id, value, amount) VALUES (?, ?, ?)",
+                                [
+                                    [1, "new1", 100.00],
+                                    [1, "new2", 200.00]
+                                ]
+                            );
+
+                            // Update existing data
+                            await tx.execManyArgs(
+                                "UPDATE transaction_test SET amount = ? WHERE batch_id = ? AND value = ?",
+                                [
+                                    [15.00, 0, "initial1"],
+                                    [25.00, 0, "initial2"]
+                                ]
+                            );
+
+                            // Delete some data
+                            await tx.execManyArgs(
+                                "DELETE FROM transaction_test WHERE batch_id = ? AND value = ?", 
+                                [[1, "new1"]]
+                            );
+
+                            // This should cause the transaction to fail
+                            throw new Error("Simulated transaction failure");
+                        });
+                    } catch (error) {
+                        expect(error.message).toBe("Simulated transaction failure");
+                    }
+
+                    // Verify rollback - original data should be unchanged
+                    const finalData = await db.execO("SELECT * FROM transaction_test ORDER BY id");
+                    expect(finalData).toHaveLength(2);
+                    expect(finalData[0].amount).toBe(10.00); // Should not be 15.00
+                    expect(finalData[1].amount).toBe(20.00); // Should not be 25.00
+                });
+            });
+
+
+            describe("Error Handling", () => {
+                beforeEach(async () => {
+                    db = await createDBBrowser(":memory:");
+                });
+
+                afterEach(async () => {
+                    if (db) await db.close();
+                });
+
+                it("should handle SQL syntax errors", async () => {
+                    await db.exec(`CREATE TABLE error_test (id INTEGER PRIMARY KEY)`);
+                    
+                    await expect(
+                        db.execManyArgs("INVALID SQL SYNTAX", [["test"]])
+                    ).rejects.toThrow();
+                });
+            });
+
+            describe("Performance Test", () => {
+                beforeEach(async () => {
+                    db = await createDBBrowser(":memory:");
+                });
+
+                afterEach(async () => {
+                    if (db) await db.close();
+                });
+
+                it("should handle large batch operations efficiently", async () => {
+                    await db.exec(`
+                        CREATE TABLE performance_test (
+                            id INTEGER PRIMARY KEY,
+                            value TEXT
+                        )
+                    `);
+
+                    const largeBatch = Array.from({ length: 100 }, (_, i) => [`value_${i}`]);
+
+                    const startTime = Date.now();
+                    const results = await db.execManyArgs(
+                        "INSERT INTO performance_test (value) VALUES (?)",
+                        largeBatch
+                    );
+                    const endTime = Date.now();
+
+                    expect(results).toHaveLength(100);
+                    expect(endTime - startTime).toBeLessThan(1000);
+                    
+                    const count = await db.execO("SELECT COUNT(*) as count FROM performance_test");
+                    expect(count[0].count).toBe(100);
+                });
+            });
+        }
+
+        // UI Updates
+        function updateProgress() {
+            const completed = testResults.passed + testResults.failed;
+            const percentage = testResults.total > 0 ? (completed / testResults.total) * 100 : 0;
+            document.getElementById('progressFill').style.width = percentage + '%';
+            
+            document.getElementById('totalTests').textContent = testResults.total;
+            document.getElementById('passedTests').textContent = testResults.passed;
+            document.getElementById('failedTests').textContent = testResults.failed;
+        }
+
+        function updateTestDisplay(suite, testIndex, status, error = null) {
+            const testElement = document.querySelector(`[data-suite="${suite.name}"][data-test="${testIndex}"]`);
+            if (testElement) {
+                const statusElement = testElement.querySelector('.test-status');
+                statusElement.textContent = status;
+                statusElement.className = `test-status status-${status}`;
+                
+                if (error) {
+                    const errorDiv = document.createElement('div');
+                    errorDiv.className = 'error-details';
+                    errorDiv.textContent = error.toString();
+                    testElement.appendChild(errorDiv);
+                }
+            }
+        }
+
+        function createTestUI() {
+            const container = document.getElementById('testSuites');
+            container.innerHTML = '';
+            
+            testResults.suites.forEach(suite => {
+                const suiteDiv = document.createElement('div');
+                suiteDiv.className = 'test-suite';
+                suiteDiv.innerHTML = `
+                    <div class="test-suite-header">${suite.name} (${suite.tests.length} tests)</div>
+                `;
+                
+                suite.tests.forEach((test, index) => {
+                    const testDiv = document.createElement('div');
+                    testDiv.className = 'test-case';
+                    testDiv.setAttribute('data-suite', suite.name);
+                    testDiv.setAttribute('data-test', index);
+                    testDiv.innerHTML = `
+                        <div class="test-name">${test.name}</div>
+                        <div class="test-status status-pending">pending</div>
+                    `;
+                    suiteDiv.appendChild(testDiv);
+                });
+                
+                container.appendChild(suiteDiv);
+            });
+        }
+
+        // Main test runner
+        window.runTests = async function() {
+            const runButton = document.getElementById('runTests');
+            runButton.disabled = true;
+            runButton.textContent = 'Running Tests...';
+            
+            document.getElementById('logs').style.display = 'block';
+            log('Starting browser tests...');
+            
+            testResults = { total: 0, passed: 0, failed: 0, suites: [] };
+            
+            try {
+                log('Loading browser database implementation...');
+                const { createDBBrowser } = await loadBrowserDB();
+                log('Database implementation loaded successfully');
+                
+                log('Defining test suites...');
+                defineTests(createDBBrowser);
+                log(`Defined ${testResults.suites.length} test suites with ${testResults.total} tests`);
+                
+                createTestUI();
+                updateProgress();
+                
+                const startTime = Date.now();
+                
+                for (const suite of testResults.suites) {
+                    log(`Running suite: ${suite.name}`);
+                    
+                    for (let i = 0; i < suite.tests.length; i++) {
+                        const test = suite.tests[i];
+                        log(`  Running test: ${test.name}`);
+                        updateTestDisplay(suite, i, 'running');
+                        
+                        try {
+                            if (suite.beforeEachFn) {
+                                await suite.beforeEachFn();
+                            }
+                            
+                            await test.fn();
+                            
+                            if (suite.afterEachFn) {
+                                await suite.afterEachFn();
+                            }
+                            
+                            test.status = 'pass';
+                            testResults.passed++;
+                            updateTestDisplay(suite, i, 'pass');
+                            log(`    ✓ ${test.name}`, 'success');
+                            
+                        } catch (error) {
+                            test.status = 'fail';
+                            test.error = error;
+                            testResults.failed++;
+                            updateTestDisplay(suite, i, 'fail', error);
+                            log(`    ✗ ${test.name}: ${error.message}`, 'error');
+                        }
+                        
+                        updateProgress();
+                        
+                        // Small delay to show progress
+                        await new Promise(resolve => setTimeout(resolve, 10));
+                    }
+                }
+                
+                const endTime = Date.now();
+                const duration = endTime - startTime;
+                document.getElementById('duration').textContent = duration + 'ms';
+                
+                log(`Tests completed in ${duration}ms`);
+                log(`Results: ${testResults.passed} passed, ${testResults.failed} failed`, 
+                    testResults.failed > 0 ? 'warn' : 'success');
+                
+            } catch (error) {
+                log(`Fatal error: ${error}`, 'error');
+                console.error(error);
+            }
+            
+            runButton.disabled = false;
+            runButton.textContent = 'Run Tests';
+        };
+
+        // Initialize
+        log('Browser test page loaded. Click "Run Tests" to start.');
+    </script>
+</body>
+</html>

@@ -26,16 +26,17 @@ class CRSqliteDBWrapper implements DBInterface {
 
     const stmt = await this.db.prepare(sql);
     const results: any[] = [];
-    
+
     const tx = this.isTx ? this.db : null;
     try {
       for (const argSet of args) {
-        await stmt.run(tx, ...(argSet || []));
+        const result = await stmt.run(tx, ...(argSet || []));
+        results.push(result);
       }
     } finally {
       stmt.finalize(this.db);
     }
-    
+
     return results;
   }
 
@@ -43,14 +44,11 @@ class CRSqliteDBWrapper implements DBInterface {
     return new Promise<T>((resolve, reject) => {
       this.db
         .tx(async (tx: any) => {
-          try {
-            const wrappedTx = new CRSqliteDBWrapper(tx, true);
-            const result = await fn(wrappedTx);
-            resolve(result);
-          } catch (error) {
-            reject(error);
-          }
+          const wrappedTx = new CRSqliteDBWrapper(tx, true);
+          const result = await fn(wrappedTx);
+          resolve(result);
         })
+        // tx will rollback and forward the error here
         .catch(reject);
     });
   }
@@ -85,9 +83,19 @@ export async function createDBBrowser(
     // Open database
     const db = await sqlite.open(file);
 
-    db.exec("PRAGMA journal_mode = WAL");
-    db.exec("PRAGMA synchronous = NORMAL");
-    db.exec("PRAGMA busy_timeout=10000;")
+    await db.exec("PRAGMA journal_mode = WAL;");
+    await db.exec("PRAGMA synchronous = NORMAL;");
+    await db.exec("PRAGMA busy_timeout = 10000;");
+    // No effect
+    // await db.exec("PRAGMA page_size = 8192;");
+    // const ps = await db.execA("PRAGMA page_size");
+    // debugBrowser("DB page_size", ps);
+
+    // 4k causes 'malformed db' on reload
+    await db.exec("PRAGMA cache_size = 2048;"); // pages
+    // Made 2k change batches work better
+    await db.exec("PRAGMA temp_store = MEMORY;");
+    await db.exec("PRAGMA cache_spill = OFF;");
 
     // Wrap the DB instance
     const wrappedDB = new CRSqliteDBWrapper(db, false);

@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@app/node": "file:../node",
+    "@app/browser": "file:../browser",
     "@app/db": "file:../db",
     "@app/sync": "file:../sync"
   },
