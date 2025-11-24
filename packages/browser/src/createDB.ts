@@ -96,6 +96,12 @@ export async function createDBBrowser(
     // Made 2k change batches work better
     await db.exec("PRAGMA temp_store = MEMORY;");
     await db.exec("PRAGMA cache_spill = OFF;");
+    // No effect, but won't hurt
+    await db.exec("PRAGMA locking_mode = exclusive");
+
+    // db.onUpdate((type, db, tbl, row) =>
+    //   console.log("DB CHANGE", type, db, tbl, row)
+    // );
 
     // Wrap the DB instance
     const wrappedDB = new CRSqliteDBWrapper(db, false);

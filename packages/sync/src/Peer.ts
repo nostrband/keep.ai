@@ -188,7 +188,11 @@ export class Peer extends EventEmitter<{
     this.emit("sync", peerId, transport);
 
     // send changes since cursor
-    await this.syncPeer(peer);
+    // NOTE: this is a slow method and if we await it,
+    // we'll block all peer access (bcs onSync/onReceive are serialized),
+    // so we don't await - there are no races in having
+    // this method interleave with other callbacks
+    this.syncPeer(peer);
   }
 
   private async onReceiveChanges(
@@ -439,27 +443,15 @@ export class Peer extends EventEmitter<{
 
   private async initialize(): Promise<void> {
     try {
-      const start = Date.now();
-      const cursorData = await this.db.execO<{
-        site_id: Uint8Array;
-        db_version: number;
-      }>(
-        "SELECT site_id, MAX(db_version) as db_version FROM crsql_changes GROUP BY site_id"
-      );
-      if (cursorData) {
-        for (const c of cursorData)
-          this.cursor.peers.set(bytesToHex(c.site_id), c.db_version);
-      }
-
+      // Get peer ID first so we can initialize debug logger
       const siteId = await this.db.execO<{ site_id: Uint8Array }>(
         "SELECT crsql_site_id() as site_id;"
       );
       this.#id = bytesToHex(siteId?.[0]?.site_id || new Uint8Array());
       this.#debug = debug("sync:Peer:L" + this.id.substring(0, 4));
 
-      this.debug(
-        `Initialized cursor to ${JSON.stringify(serializeCursor(this.cursor))} in ${Date.now() - start} ms`
-      );
+      // Initialize cursor using the optimized method
+      this.cursor = await this.getCurrentCursor();
 
       this.debug(`Initialized our peer id to ${this.id}`);
 
@@ -470,6 +462,92 @@ export class Peer extends EventEmitter<{
       this.debug(`Initialized our schema version to ${this.schemaVersion}`);
     } catch (error) {
       console.error("Error initializing last db version:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Alternative method to get current cursor using __crsql_clock tables
+   * instead of the slow GROUP BY on crsql_changes table.
+   *
+   * It's a replacement of slow naive:
+   * SELECT site_id, MAX(db_version) as db_version FROM crsql_changes GROUP BY site_id
+   *
+   * Had to look at https://github.com/vlcn-io/cr-sqlite/blob/main/core/rs/core/src/changes_vtab_read.rs
+   * and crsqlite internal tables to figure this out.
+   */
+  private async getCurrentCursor(): Promise<Cursor> {
+    try {
+      const start = Date.now();
+      const cursor = new Cursor();
+
+      // Step 1: Find all tables whose names end with __crsql_clock
+      const clockTables = await this.db.execO<{ name: string }>(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%__crsql_clock'"
+      );
+
+      if (!clockTables || clockTables.length === 0) {
+        this.debug("No __crsql_clock tables found");
+        return cursor;
+      }
+
+      this.debug(`Found ${clockTables.length} __crsql_clock tables`);
+
+      // Step 2 & 3: For each clock table, get site_id_int and MAX(db_version), build map A
+      const siteIdIntToMaxDbVersion = new Map<number, number>();
+
+      for (const table of clockTables) {
+        const tableName = table.name;
+        const clockData = await this.db.execO<{
+          site_id: number;
+          db_version: number;
+        }>(
+          `SELECT site_id, MAX(db_version) as db_version FROM "${tableName}" GROUP BY site_id`
+        );
+
+        if (clockData) {
+          for (const row of clockData) {
+            const existing = siteIdIntToMaxDbVersion.get(row.site_id) || 0;
+            siteIdIntToMaxDbVersion.set(
+              row.site_id,
+              Math.max(existing, row.db_version)
+            );
+          }
+        }
+      }
+
+      this.debug(
+        `Built site_id_int map with ${siteIdIntToMaxDbVersion.size} entries`
+      );
+
+      // Step 4: Get ordinal -> site_id mapping from crsql_site_id table
+      const ordinalToSiteId = await this.db.execO<{
+        ordinal: number;
+        site_id: Uint8Array;
+      }>("SELECT ordinal, site_id FROM crsql_site_id");
+
+      // Step 5: Convert map A to final map using ordinal mapping
+      if (ordinalToSiteId) {
+        for (const row of ordinalToSiteId) {
+          const maxDbVersion = siteIdIntToMaxDbVersion.get(row.ordinal);
+          if (maxDbVersion !== undefined) {
+            const siteIdHex = bytesToHex(row.site_id);
+            cursor.peers.set(siteIdHex, maxDbVersion);
+          }
+        }
+      }
+
+      if (!cursor.peers.size) cursor.peers.set(this.id, 0);
+
+      this.debug(
+        `getCurrentCursor completed in ${
+          Date.now() - start
+        } ms, cursor: ${JSON.stringify(serializeCursor(cursor))}`
+      );
+
+      return cursor;
+    } catch (error) {
+      this.debug("Error in getCurrentCursor:", error);
       throw error;
     }
   }
@@ -559,6 +637,11 @@ export class Peer extends EventEmitter<{
     }
   }
 
+  // NOTE: this method might interleave with execution of
+  // other callbacks, so it should be careful to avoid races
+  // when modifying state members, the only case right now
+  // is updatePeerCursor which is safe to call in any
+  // order and thus seems race-free.
   private async syncPeer(peer: PeerInfo): Promise<void> {
     try {
       this.debug(
@@ -567,10 +650,6 @@ export class Peer extends EventEmitter<{
         )}`
       );
       const start = Date.now();
-      const count = await this.db.execO<{ count: number }>(
-        "SELECT COUNT(*) as count FROM crsql_changes"
-      );
-      this.debug("Total change count", count);
 
       // for each site_id:db_version of peer cursor,
       // fetch known changes since then,
@@ -580,13 +659,12 @@ export class Peer extends EventEmitter<{
       const changes: PeerChange[] = [];
 
       // Collect changes since known peer cursor
+      let sql = "SELECT * FROM crsql_changes WHERE 0";
+      const args = [];
       for (const [site_id, db_version] of peer.cursor.peers.entries()) {
-        const dbChanges = await this.db.execO<Change>(
-          "SELECT * FROM crsql_changes WHERE db_version > ? AND site_id = ?",
-          [db_version, hexToBytes(site_id)]
-        );
-
-        if (dbChanges) changes.push(...serializeChanges(dbChanges));
+        sql += " OR (site_id = ? AND db_version > ?)";
+        args.push(site_id);
+        args.push(db_version);
       }
 
       // Collect changes from third-parties that peer didn't know about
@@ -594,10 +672,11 @@ export class Peer extends EventEmitter<{
         (site_id) => hexToBytes(site_id)
       );
       const bindString = new Array(excludePeerIds.length).fill("?").join(",");
-      const dbChanges = await this.db.execO<Change>(
-        `SELECT * FROM crsql_changes WHERE site_id NOT IN (${bindString})`,
-        excludePeerIds
-      );
+      sql += ` OR site_id NOT IN (${bindString})`;
+      args.push(...excludePeerIds);
+
+      const dbChanges = await this.db.execO<Change>(sql, args);
+
       if (dbChanges) changes.push(...serializeChanges(dbChanges));
 
       this.debug(

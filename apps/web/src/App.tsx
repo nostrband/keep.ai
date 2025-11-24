@@ -9,6 +9,7 @@ import TaskRunDetailPage from "./components/TaskRunDetailPage";
 import NotesPage from "./components/NotesPage";
 import NoteDetailPage from "./components/NoteDetailPage";
 import DevicesPage from "./components/DevicesPage";
+import ConsolePage from "./components/ConsolePage";
 import { ConnectDeviceDialog } from "./components/ConnectDeviceDialog";
 import { useDbQuery } from "./hooks/dbQuery";
 
@@ -77,6 +78,7 @@ function App() {
         <Route path="/notes" element={<NotesPage />} />
         <Route path="/notes/:id" element={<NoteDetailPage />} />
         <Route path="/devices" element={<DevicesPage />} />
+        <Route path="/console" element={<ConsolePage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>

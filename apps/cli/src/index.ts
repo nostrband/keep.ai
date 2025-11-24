@@ -5,6 +5,7 @@ import { registerChatCommand } from './commands/chat';
 import { registerWorkerCommand } from './commands/worker';
 import { registerInitCommand } from './commands/init';
 import { registerSandboxCommand } from './commands/sandbox';
+import { registerVacuumCommand } from './commands/vacuum';
 import { KEEPAI_DIR } from './const';
 import { Env, setEnv } from '@app/agent';
 import * as path from 'path';
@@ -66,6 +67,7 @@ registerChatCommand(program);
 registerWorkerCommand(program);
 registerSandboxCommand(program);
 registerAgentCommand(program);
+registerVacuumCommand(program);
 
 // Parse command line arguments
 program.parse(process.argv);
