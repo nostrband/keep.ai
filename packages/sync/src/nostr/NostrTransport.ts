@@ -115,8 +115,8 @@ export class NostrTransport implements Transport {
     return this.callbacks!.onSync(this, peerId, peerCursor);
   }
 
-  onReceive(peerId: string, msg: PeerMessage) {
-    return this.callbacks!.onReceive(this, peerId, msg);
+  onReceive(peerId: string, msg: PeerMessage, cb?: (cursor: Cursor) => void) {
+    return this.callbacks!.onReceive(this, peerId, msg, cb);
   }
 
   async start(
@@ -178,10 +178,8 @@ export class NostrTransport implements Transport {
 
   async reconnect() {
     this.debug("Reconnecting peers", this.peers.length);
-    for (const p of this.sends.values())
-      p.reconnect();
-    for (const p of this.recvs.values())
-      p.reconnect();
+    for (const p of this.sends.values()) p.reconnect();
+    for (const p of this.recvs.values()) p.reconnect();
   }
 
   async sync(peerId: string, localCursor: Cursor): Promise<void> {
@@ -271,8 +269,10 @@ class PeerRecv {
     if (needResync) {
       if (this.recvCursor)
         this.debug("Need resync from peer", this.peer.peer_pubkey, {
-          local: this.localCursor,
-          stored: this.recvCursor.recv_cursor,
+          local: JSON.stringify([...this.localCursor.peers.entries()]),
+          stored: JSON.stringify([
+            ...this.recvCursor.recv_cursor.peers.entries(),
+          ]),
           published: havePublishedCursor,
         });
       // No cursor or stream interrupted?
@@ -325,7 +325,7 @@ class PeerRecv {
       // Ensure sort order
       events.sort((a, b) => b.created_at - a.created_at);
 
-      // Find the next expected event
+      // Find the next expected event index
       const lastIndex = events.findIndex((e) => {
         return e.id === this.recvCursor!.recv_changes_event_id;
       });
@@ -354,6 +354,9 @@ class PeerRecv {
 
       // Do not go crazy, >10k events should result in re-sync
     } while (buffer.length < MAX_RECV_BUFFER_SIZE);
+
+    // Return everything if we don't have 'last-known' changes event
+    if (!this.recvCursor!.recv_changes_event_id) return buffer;
 
     this.debug(
       "Failed to find next change event for peer",
@@ -553,10 +556,19 @@ class PeerRecv {
 
     try {
       // Notify the Peer
-      await this.parent.onReceive(this.peer.peer_id, msg.msg);
+      const newCursor = await new Promise<Cursor>((ok) =>
+        this.parent.onReceive(this.peer.peer_id, msg.msg, ok)
+      );
+
+      // NOTE: this doesn't work, bcs some of site_id:db_version pairs
+      // from msg might have been discarded by our db, in which
+      // case that site_id might disappear entirely from db,
+      // but we'd keep tracking it in recv_cursor, causing resync on
+      // every restart due to 'old' local cursor (db missing discarded site_id)
+      // updateCursor(this.recvCursor.recv_cursor, msg.msg.data);
 
       // Update cursor and last event id
-      updateCursor(this.recvCursor.recv_cursor, msg.msg.data);
+      this.recvCursor.recv_cursor = newCursor;
       this.recvCursor.recv_changes_event_id = msg.event_id;
       this.recvCursor.recv_changes_timestamp = msg.created_at;
 
@@ -706,7 +718,8 @@ class PeerRecv {
       this.peer.peer_pubkey,
       "stream",
       c.recv_cursor_id,
-      c.recv_cursor
+      c.recv_cursor,
+      c.recv_changes_event_id
     );
 
     try {
@@ -910,7 +923,10 @@ class PeerSend {
     if (changes.type === "eose") return;
 
     // Put to send queue
-    this.schemaVersion = Math.max(this.schemaVersion, changes.schemaVersion || 0);
+    this.schemaVersion = Math.max(
+      this.schemaVersion,
+      changes.schemaVersion || 0
+    );
     this.schedule(changes.data);
   }
 
@@ -921,7 +937,7 @@ class PeerSend {
       this.nextSendTimer = setTimeout(async () => {
         await this.publishPending();
 
-        // Reset after sending 
+        // Reset after sending
         this.nextSendTimer = undefined;
       }, 100);
     }
@@ -933,10 +949,15 @@ class PeerSend {
     let batch: PeerMessage | undefined;
     let size = 0;
     for (const c of this.pending) {
-      const nextSize = c.cid.length + c.pk.length + c.site_id.length + c.table.length + (c.val?.length || 0);
+      const nextSize =
+        c.cid.length +
+        c.pk.length +
+        c.site_id.length +
+        c.table.length +
+        (c.val?.length || 0);
       // console.log("val", typeof c.val, c.val?.length, nextSize);
 
-      if (batch && (size + nextSize) >= MAX_BATCH_BYTES) {
+      if (batch && size + nextSize >= MAX_BATCH_BYTES) {
         batches.push(batch);
         batch = undefined;
         size = 0;
@@ -994,7 +1015,7 @@ class PeerSend {
         this.nextSendTimer = setTimeout(async () => {
           await this.publishPending();
 
-          // Reset after sending 
+          // Reset after sending
           this.nextSendTimer = undefined;
         }, 10000);
         break;

@@ -198,15 +198,13 @@ export class Peer extends EventEmitter<{
   private async onReceiveChanges(
     peerId: string,
     msg: PeerMessage,
-    transport: Transport
+    transport: Transport,
+    cb?: (cursor: Cursor) => void
   ): Promise<void> {
     // Apply everything peer sent us
     this.debug(
       `Received from peer '${peerId}' changes ${msg.data.length} schema ${msg.schemaVersion}`
     );
-
-    // Assume peer knows everything they sent us
-    this.updatePeerCursor(peerId, msg.data);
 
     // Peer schema newer?
     if ((msg.schemaVersion || 0) > this.schemaVersion) {
@@ -218,12 +216,12 @@ export class Peer extends EventEmitter<{
     }
 
     // Stuff we haven't yet seen
-    const newChanges = msg.data.filter((c) => {
-      const lastDbVersion = this.cursor.peers.get(c.site_id) || 0;
-      // "Or equal" bcs one tx with save db version might be split
-      // into several change records
-      return c.db_version >= lastDbVersion;
-    });
+    const newChanges = filterChanges(msg.data, this.cursor);
+
+    // Assume peer knows everything they sent us,
+    // only update with newChanges as some might have been overwritten
+    // already
+    this.updatePeerCursor(peerId, newChanges);
 
     this.debug(
       `Applying from peer '${peerId}' new changes ${newChanges.length} out of ${
@@ -236,7 +234,15 @@ export class Peer extends EventEmitter<{
       await this.applyChanges(newChanges);
 
       // We ourselves now know these new changes
-      updateCursor(this.cursor, newChanges);
+      this.cursor = await this.getCurrentCursor();
+      // NOTE: Updating cursor without checking from db
+      // doesn't work: we don't know if some of incoming changes
+      // are discarded due to newer changes in db from other peers,
+      // that would cause our cursor to include non-existent peer id,
+      // which will be broadcasted and will cause
+      // hard-to-predict issues everywhere.
+      // updateCursor(this.cursor, newChanges);
+
       this.debug(
         "Updated our cursor on remote changes",
         JSON.stringify(serializeCursor(this.cursor))
@@ -248,21 +254,26 @@ export class Peer extends EventEmitter<{
       // Forward to other peers
       await this.broadcastChanges(newChanges, peerId);
     }
+
+    if (cb) cb(this.cursor);
   }
 
   private async onReceiveEOSE(
     peerId: string,
     msg: PeerMessage,
-    transport: Transport
+    transport: Transport,
+    cb?: (cursor: Cursor) => void
   ): Promise<void> {
     this.debug(`Got EOSE message peer '${peerId}'`);
     this.emit("eose", peerId, transport);
+    if (cb) cb(this.cursor);
   }
 
   private async onReceive(
     transport: Transport,
     peerId: string,
-    msg: PeerMessage
+    msg: PeerMessage,
+    cb?: (cursor: Cursor) => void
   ): Promise<void> {
     const peer = this.peers.get(peerId);
     if (!peer) {
@@ -275,9 +286,9 @@ export class Peer extends EventEmitter<{
     }
     switch (msg.type) {
       case "changes":
-        return await this.onReceiveChanges(peerId, msg, transport);
+        return await this.onReceiveChanges(peerId, msg, transport, cb);
       case "eose":
-        return await this.onReceiveEOSE(peerId, msg, transport);
+        return await this.onReceiveEOSE(peerId, msg, transport, cb);
       default:
         this.debug(`Got unknown message peer '${peerId}' type '${msg.type}'`);
     }
@@ -628,11 +639,7 @@ export class Peer extends EventEmitter<{
       this.debug("Broadcasting to peer", p.id, p.active);
       if (p.id === exceptPeerId || !p.active) continue;
 
-      const newChanges = changes.filter((c) => {
-        const peerChangeDbVersion = p.cursor.peers.get(c.site_id) || 0;
-        return c.db_version > peerChangeDbVersion;
-      });
-
+      const newChanges = filterChanges(changes, p.cursor);
       this.sendChanges(p, newChanges);
     }
   }
@@ -762,12 +769,24 @@ export function updateCursor(cursor: Cursor, changes: PeerChange[]) {
   }
 }
 
+export function filterChanges(changes: PeerChange[], cursor: Cursor) {
+  return changes.filter((c) => {
+    const lastDbVersion = cursor.peers.get(c.site_id) || 0;
+    // "Or equal" bcs one tx with same db version might be split
+    // into several change records
+    return c.db_version >= lastDbVersion;
+  });
+}
+
 export function isCursorOlder(a: Cursor, b: Cursor) {
   for (const [id, bv] of b.peers.entries()) {
     const av = a.peers.get(id);
     // a has no info on this id?
     // or a has older version than b?
-    if (av === undefined || av < bv) return true;
+    if (av === undefined || av < bv) {
+      console.log("older cursor", id, av, bv);
+      return true;
+    }
   }
   // a covers all b's peers, and a's versions are not less
   return false;

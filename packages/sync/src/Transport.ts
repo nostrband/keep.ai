@@ -10,7 +10,7 @@ import { Cursor, PeerMessage } from "./messages";
 // NOTE: Peer needs these callbacks to be serialized (called one by one, awaiting each call),
 // to save every Transports from reimplementing serialization, that logic was built into the Peer.
 // So transports are free to (seemingly) call the callbacks concurrently,
-// but should know that internally those will be serialized, with unobvious 
+// but should know that internally those will be serialized, with unobvious
 // potential latency spikes from transport's POV.
 export interface TransportCallbacks {
   // When remote peer connects, this will be called so Peer can sync,
@@ -18,10 +18,21 @@ export interface TransportCallbacks {
   onConnect: (transport: Transport, peerId: string) => Promise<void>;
   // Received sync, so Peer could start tracking it and sending changes,
   // if cb throws transport should reconnect after pause
-  onSync: (transport: Transport, peerId: string, peerCursor: Cursor) => Promise<void>;
+  onSync: (
+    transport: Transport,
+    peerId: string,
+    peerCursor: Cursor
+  ) => Promise<void>;
   // Received msg from remote peer (change or eose),
-  // if cb throws transport should reconnect after pause
-  onReceive: (transport: Transport, peerId: string, msg: PeerMessage) => Promise<void>;
+  // if cb throws transport should reconnect after pause,
+  // supply 'cb' if transport does internal cursor tracking to get the
+  // updated local cursor after changes
+  onReceive: (
+    transport: Transport,
+    peerId: string,
+    msg: PeerMessage,
+    cb?: (cursor: Cursor) => void
+  ) => Promise<void>;
   // When remote peer is permanently disconnected, Peer should stop tracking it and
   // sending to it, cb shouldn't throw
   onDisconnect: (transport: Transport, peerId: string) => Promise<void>;
