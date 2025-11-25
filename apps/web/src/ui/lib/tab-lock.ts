@@ -22,7 +22,7 @@ function openLockDb(): Promise<IDBDatabase> {
   });
 }
 
-async function tryBecomeActiveTab(): Promise<boolean> {
+export async function tryBecomeActiveTab(): Promise<boolean> {
   const db = await openLockDb();
   return new Promise((resolve, reject) => {
     const tx = db.transaction('locks', 'readwrite');

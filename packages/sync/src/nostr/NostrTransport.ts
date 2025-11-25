@@ -402,7 +402,7 @@ class PeerRecv {
     // Wait until they're all processed
     await this.processBuffer();
 
-    // Send EOSE after we're handled all stored events
+    // Send EOSE after we've handled all stored events
     await this.parent.onReceive(this.peer.peer_id, {
       type: "eose",
       data: [],

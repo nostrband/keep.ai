@@ -17,7 +17,8 @@ export interface TransportCallbacks {
   // if cb throws transport should reconnect after pause
   onConnect: (transport: Transport, peerId: string) => Promise<void>;
   // Received sync, so Peer could start tracking it and sending changes,
-  // if cb throws transport should reconnect after pause
+  // if cb throws transport should reconnect after pause,
+  // awaiting onSync doesn't guarantee that peer has sent all the data
   onSync: (
     transport: Transport,
     peerId: string,

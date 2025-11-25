@@ -32,6 +32,14 @@ function App() {
     );
   }
 
+  if (dbStatus === "locked") {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div>Another tab with Keep.AI is active.</div>
+      </div>
+    );
+  }
+
   if (dbStatus === "error") {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">

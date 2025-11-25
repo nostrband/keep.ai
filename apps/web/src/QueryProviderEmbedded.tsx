@@ -20,11 +20,12 @@ import debug from "debug";
 import { ServerlessNostrSigner } from "./ui/lib/signer";
 import { bytesToHex, hexToBytes } from "nostr-tools/utils";
 import { getPublicKey } from "nostr-tools";
+import { tryBecomeActiveTab } from "./ui/lib/tab-lock";
 
 // Serverless mode (nostr-sync with main device)
 const isServerless = (import.meta as any).env?.VITE_FLAVOR === "serverless";
 
-type DbStatus = "initializing" | "syncing" | "ready" | "error" | "disconnected";
+type DbStatus = "initializing" | "syncing" | "ready" | "error" | "disconnected" | "locked";
 
 interface QueryContextType {
   dbStatus: DbStatus;
@@ -107,6 +108,13 @@ export function QueryProviderEmbedded({
     try {
       setDbStatus("initializing");
       setError(null);
+
+      const activeTab = await tryBecomeActiveTab();
+      if (!activeTab) {
+        dbg("Another tab is active");
+        setDbStatus("locked");
+        return { onResume };
+      }
 
       // Create database using provided factory
       const db = await createDB(DB_FILE);
