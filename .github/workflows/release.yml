@@ -42,15 +42,15 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Build web SPA
-        run: npm exec turbo run build:electron -- --filter=...@app/web
+      - name: Build web SPA & deps
+        run: npm exec turbo run build:electron -- --filter=@app/web
 
-      - name: Build all apps
+      - name: Build electron app
         run: npm run build
         working-directory: apps/electron
 
       - name: Build distributables with electron-builder
-        run: npx electron-builder ${{ matrix.build_target }}
+        run: mkdir release/@app && npx electron-builder ${{ matrix.build_target }}
         working-directory: apps/electron
 
       - name: Upload artifacts
