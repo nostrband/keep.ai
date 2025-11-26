@@ -3,11 +3,19 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "main": "dist/server.cjs",
+  "exports": {
+    ".": {
+      "require": "./dist/server.cjs",
+      "import": "./dist/server.js",
+      "types": "./dist/server.d.ts"
+    }
+  },
   "scripts": {
-    "build": "tsup src/server.ts --format cjs --out-dir dist",
+    "build": "tsup src/server.ts src/start.ts --format esm,cjs --out-dir dist",
     "postbuild": "mkdir -p public; cp -r ../web/dist/frontend/* ./public",
-    "dev": "tsx src/server.ts",
-    "start": "node dist/server.cjs",
+    "dev": "tsx src/start.ts",
+    "start": "node dist/start.cjs",
     "type-check": "tsc --noEmit"
   },
   "dependencies": {

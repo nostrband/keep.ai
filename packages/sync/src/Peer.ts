@@ -25,7 +25,7 @@ import {
   deserializeChanges,
 } from "./messages";
 import debug from "debug";
-import { EventEmitter } from "tseep/lib/ee-safe";
+import { EventEmitter } from "tseep/lib/ee-safe.js";
 import { bytesToHex, hexToBytes } from "nostr-tools/utils";
 import { Transport } from "./Transport";
 
@@ -670,12 +670,12 @@ export class Peer extends EventEmitter<{
       const args = [];
       for (const [site_id, db_version] of peer.cursor.peers.entries()) {
         sql += " OR (site_id = ? AND db_version > ?)";
-        args.push(site_id);
+        args.push(hexToBytes(site_id));
         args.push(db_version);
       }
 
       // Collect changes from third-parties that peer didn't know about
-      const excludePeerIds = [peer.id, ...peer.cursor.peers.keys()].map(
+      const excludePeerIds = [...new Set([peer.id, ...peer.cursor.peers.keys()])].map(
         (site_id) => hexToBytes(site_id)
       );
       const bindString = new Array(excludePeerIds.length).fill("?").join(",");

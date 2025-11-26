@@ -2,12 +2,13 @@ import fastify from "fastify";
 import {
   TransportServerFastify,
   createDBNode,
+  ensureEnv,
   getCurrentUser,
   getDBPath,
   getUserPath,
 } from "@app/node";
 import { DBInterface, KeepDb, KeepDbApi, NostrPeerStore } from "@app/db";
-import { setEnv, TaskWorker, type Env } from "@app/agent";
+import { setEnv, getEnv, TaskWorker, type Env } from "@app/agent";
 import debug from "debug";
 import path from "path";
 import os from "os";
@@ -39,14 +40,6 @@ if (fs.existsSync(envPath)) {
   dotenv.config({ path: envPath });
 }
 
-// Create Env object from environment variables
-const env: Env = {
-  OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
-  OPENROUTER_BASE_URL: process.env.OPENROUTER_BASE_URL,
-  AGENT_MODEL: process.env.AGENT_MODEL,
-  EXA_API_KEY: process.env.EXA_API_KEY,
-};
-
 // Parse NOSTR_RELAYS environment variable
 const getNostrRelays = (): string[] => {
   const relaysEnv = process.env.NOSTR_RELAYS;
@@ -61,12 +54,15 @@ const getNostrRelays = (): string[] => {
 };
 
 // Set environment in agent package
-setEnv(env);
+setEnv({
+  OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
+  OPENROUTER_BASE_URL: process.env.OPENROUTER_BASE_URL,
+  AGENT_MODEL: process.env.AGENT_MODEL,
+  EXA_API_KEY: process.env.EXA_API_KEY,
+});
 
 // For CommonJS compatibility
 const __dirname = process.cwd();
-
-const app = fastify({ logger: true });
 
 async function createReplWorker(keepDB: KeepDb) {
   const worker = new TaskWorker({
@@ -166,130 +162,241 @@ class KeyStore implements NostrSigner {
   }
 }
 
-const start = async () => {
-  try {
-    const pubkey = await getCurrentUser();
-    const userPath = getUserPath(pubkey);
-    const dbPath = getDBPath(pubkey);
+interface ServerConfig {
+  serveStaticFiles?: boolean;
+  staticFilesRoot?: string;
+  port?: number;
+  host?: string;
+}
 
-    debugServer("Config directory:", configDir);
-    debugServer("Database path:", dbPath);
-    debugServer("Environment file:", envPath);
+export async function createServer(config: ServerConfig = {}) {
+  const app = fastify({ logger: true });
 
-    // Init db
-    const dbInstance = await createDBNode(dbPath);
-    const keepDB = new KeepDb(dbInstance);
-    await keepDB.start();
+  await ensureEnv();
+  
+  const pubkey = await getCurrentUser();
+  const userPath = getUserPath(pubkey);
+  const dbPath = getDBPath(pubkey);
 
-    // For sync over nostr
-    const peerStore = new NostrPeerStore(keepDB);
-    const keyStore = new KeyStore(path.join(userPath, "keys.db"));
-    await keyStore.start();
+  debugServer("Config directory:", configDir);
+  debugServer("Database path:", dbPath);
+  debugServer("Environment file:", envPath);
 
-    // Talks to peers over http server
-    const http = new TransportServerFastify();
-    const nostr = new NostrTransport({
-      store: peerStore,
-      signer: keyStore,
-    });
+  // Init db
+  const dbInstance = await createDBNode(dbPath);
+  const keepDB = new KeepDb(dbInstance);
+  await keepDB.start();
 
-    const peer = new Peer(dbInstance, [http, nostr]);
-    await peer.start();
-    await http.start(peer.getConfig());
-    await nostr.start(peer.getConfig());
+  // For sync over nostr
+  const peerStore = new NostrPeerStore(keepDB);
+  const keyStore = new KeyStore(path.join(userPath, "keys.db"));
+  await keyStore.start();
 
-    // Performs background operations
-    const worker = await createReplWorker(keepDB);
+  // Talks to peers over http server
+  const http = new TransportServerFastify();
+  const nostr = new NostrTransport({
+    store: peerStore,
+    signer: keyStore,
+  });
 
-    // Notify nostr transport if peer set changes
-    peer.on("change", (tables) => {
-      if (tables.includes("nostr_peers")) nostr.updatePeers();
-      if (tables.includes("tasks") || tables.includes("inbox"))
-        worker.checkWork();
-    });
+  const peer = new Peer(dbInstance, [http, nostr]);
+  await peer.start();
+  await http.start(peer.getConfig());
+  await nostr.start(peer.getConfig());
 
-    // Start checking timestamped tasks
-    worker.start();
+  // Performs background operations
+  const worker = await createReplWorker(keepDB);
 
-    // Check regularly for changes
-    // FIXME call it on every mutation endpoint
-    const check = async () => {
-      await peer.checkLocalChanges();
-      setTimeout(check, 1000);
-    };
-    check();
+  // Notify nostr transport if peer set changes
+  peer.on("change", (tables) => {
+    if (tables.includes("nostr_peers")) nostr.updatePeers();
+    if (tables.includes("tasks") || tables.includes("inbox"))
+      worker.checkWork();
+  });
 
-    // Register worker routes under /api/worker prefix
-    await app.register(
-      async function (fastify) {
-        // @ts-ignore
-        await http.registerRoutes(fastify);
-      },
-      { prefix: "/api/worker" }
-    );
+  // Start checking timestamped tasks
+  worker.start();
 
-    // Add /api/connect endpoint
-    app.post("/api/connect", async (request, reply) => {
-      try {
-        // Get relays from environment
-        const relays = getNostrRelays();
+  // Check regularly for changes
+  // FIXME call it on every mutation endpoint
+  const check = async () => {
+    await peer.checkLocalChanges();
+    setTimeout(check, 1000);
+  };
+  check();
 
-        // Create NostrConnector instance
-        const connector = new NostrConnector();
+  // Register worker routes under /api/worker prefix
+  await app.register(
+    async function (fastify) {
+      // @ts-ignore
+      await http.registerRoutes(fastify);
+    },
+    { prefix: "/api/worker" }
+  );
 
-        // Generate connection string
-        const connectionInfo = await connector.generateConnectionString(relays);
+  app.get("/api/check_config", async (request, reply) => {
+    const currentEnv = getEnv();
+    const ok = !!currentEnv.OPENROUTER_API_KEY?.trim();
+    reply.send({ ok });
+  });
 
-        // Device info placeholder
-        const deviceInfo = "test info";
-
-        // Launch listen() asynchronously - don't wait for it to complete
-        (async () => {
-          try {
-            const result = await connector.listen(
-              connectionInfo,
-              peer.id,
-              deviceInfo
-            );
-            console.log("NostrConnector listen completed:", {
-              peer_pubkey: result.peer_pubkey,
-              peer_id: result.peer_id,
-              peer_device_info: result.peer_device_info,
-              relays: result.relays,
-            });
-
-            // Write to key store
-            await keyStore.addKey(result.key);
-
-            // Write the peer info
-            await peerStore.addPeer({
-              peer_pubkey: result.peer_pubkey,
-              peer_id: result.peer_id,
-              device_info: result.peer_device_info,
-              local_pubkey: getPublicKey(result.key),
-              relays: relays.join(","),
-              local_id: peer.id,
-              timestamp: "",
-            });
-          } catch (error) {
-            console.error("NostrConnector listen failed:", error);
-          }
-        })();
-
-        // Return connection string to client
-        reply.send({ str: connectionInfo.str });
-      } catch (error) {
-        console.error("Error in /api/connect:", error);
-        reply.status(500).send({
-          error: "Failed to create connection string",
-          message: error instanceof Error ? error.message : "Unknown error",
-        });
+  app.post("/api/set_config", async (request, reply) => {
+    try {
+      const body = request.body as { openrouterApiKey?: string };
+      
+      if (!body.openrouterApiKey?.trim()) {
+        reply.status(400).send({ error: "OpenRouter API key is required" });
+        return;
       }
-    });
 
+      // Test the API key first
+      try {
+        const testResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${body.openrouterApiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: 'openai/gpt-oss-120b',
+            messages: [
+              {
+                role: 'user',
+                content: 'ping',
+              },
+            ],
+          }),
+        });
+
+        if (!testResponse.ok) {
+          const errorData = await testResponse.text();
+          reply.status(400).send({
+            error: "Invalid OpenRouter API key",
+            details: errorData
+          });
+          return;
+        }
+      } catch (testError) {
+        reply.status(400).send({
+          error: "Failed to validate OpenRouter API key",
+          details: testError instanceof Error ? testError.message : 'Unknown error'
+        });
+        return;
+      }
+
+      // Update the current env object
+      const newEnv = getEnv();
+      newEnv.OPENROUTER_API_KEY = body.openrouterApiKey;
+      setEnv(newEnv);
+
+      // Handle .env file: find OPENROUTER_API_KEY line and replace it, or append if not found
+      let envContent = '';
+      let foundApiKey = false;
+      
+      if (fs.existsSync(envPath)) {
+        envContent = fs.readFileSync(envPath, 'utf8');
+        const lines = envContent.split('\n');
+        
+        for (let i = 0; i < lines.length; i++) {
+          if (lines[i].startsWith('OPENROUTER_API_KEY=')) {
+            lines[i] = `OPENROUTER_API_KEY=${body.openrouterApiKey}`;
+            foundApiKey = true;
+          }
+        }
+        
+        envContent = lines.join('\n');
+      }
+      
+      // If OPENROUTER_API_KEY wasn't found, append it
+      if (!foundApiKey) {
+        if (envContent && !envContent.endsWith('\n')) {
+          envContent += '\n';
+        }
+        envContent += `OPENROUTER_API_KEY=${body.openrouterApiKey}\n`;
+      }
+
+      // Write updated .env file
+      fs.writeFileSync(envPath, envContent, 'utf8');
+
+      // Also update the global env used by this server instance
+      process.env.OPENROUTER_API_KEY = body.openrouterApiKey;
+
+      reply.send({ ok: true });
+    } catch (error) {
+      console.error("Error in /api/set_config:", error);
+      reply.status(500).send({
+        error: "Failed to save configuration",
+        message: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
+  // Add /api/connect endpoint
+  app.post("/api/connect", async (request, reply) => {
+    try {
+      // Get relays from environment
+      const relays = getNostrRelays();
+
+      // Create NostrConnector instance
+      const connector = new NostrConnector();
+
+      // Generate connection string
+      const connectionInfo = await connector.generateConnectionString(relays);
+
+      // Device info placeholder
+      const deviceInfo = "test info";
+
+      // Launch listen() asynchronously - don't wait for it to complete
+      (async () => {
+        try {
+          const result = await connector.listen(
+            connectionInfo,
+            peer.id,
+            deviceInfo
+          );
+          console.log("NostrConnector listen completed:", {
+            peer_pubkey: result.peer_pubkey,
+            peer_id: result.peer_id,
+            peer_device_info: result.peer_device_info,
+            relays: result.relays,
+          });
+
+          // Write to key store
+          await keyStore.addKey(result.key);
+
+          // Write the peer info
+          await peerStore.addPeer({
+            peer_pubkey: result.peer_pubkey,
+            peer_id: result.peer_id,
+            device_info: result.peer_device_info,
+            local_pubkey: getPublicKey(result.key),
+            relays: relays.join(","),
+            local_id: peer.id,
+            timestamp: "",
+          });
+        } catch (error) {
+          console.error("NostrConnector listen failed:", error);
+        }
+      })();
+
+      // Return connection string to client
+      reply.send({ str: connectionInfo.str });
+    } catch (error) {
+      console.error("Error in /api/connect:", error);
+      reply.status(500).send({
+        error: "Failed to create connection string",
+        message: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
+  // Conditionally serve static files and SPA fallback
+  if (config.serveStaticFiles) {
+    const staticRoot = config.staticFilesRoot || path.join(__dirname, "public");
+    
     // Serve static files from public directory
     await app.register(require("@fastify/static"), {
-      root: path.join(__dirname, "public"),
+      root: staticRoot,
       prefix: "/",
     });
 
@@ -305,22 +412,27 @@ const start = async () => {
       // @ts-ignore
       reply.sendFile("index.html");
     });
-
-    // await app.ready();
-    await app.listen({
-      port: Number(process.env.PORT || 3000),
-      host: "0.0.0.0",
-    });
-    console.log("listening");
-    debugServer("Server listening on port", process.env.PORT || 3000);
-    debugServer("API available at /api/worker/*");
-    debugServer("SPA served from /");
-  } catch (err) {
-    console.error("error", err);
-    app.log.error(err);
-    process.exit(1);
-  } finally {
   }
-};
 
-start();
+  return {
+    app,
+    async listen(options: { port?: number; host?: string } = {}) {
+      const port = options.port || config.port || Number(process.env.PORT || 3000);
+      const host = options.host || config.host || "0.0.0.0";
+      
+      await app.listen({ port, host });
+      console.log("listening");
+      debugServer("Server listening on port", port);
+      debugServer("API available at /api/worker/*");
+      if (config.serveStaticFiles) {
+        debugServer("SPA served from /");
+      }
+      return { port, host };
+    },
+    async close() {
+      await app.close();
+      await keyStore.stop();
+    }
+  };
+}
+

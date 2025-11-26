@@ -17,7 +17,6 @@ export class MessageNotifications {
     try {
       while (true) {
         const newMessages = await api.getNewAssistantMessages();
-        console.log("newAssistantMessages", newMessages);
 
         // If no new messages, exit the loop
         if (newMessages.length === 0) {

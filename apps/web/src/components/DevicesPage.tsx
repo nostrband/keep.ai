@@ -6,6 +6,7 @@ import { useNostrPeers } from "../hooks/dbNostrPeerReads";
 import { useDeletePeer } from "../hooks/dbWrites";
 import SharedHeader from "./SharedHeader";
 import { Button, Badge } from "../ui";
+import { API_ENDPOINT } from "../const";
 
 interface QRModalProps {
   isOpen: boolean;
@@ -123,7 +124,7 @@ export default function DevicesPage() {
   const handleConnectDevice = async () => {
     setIsConnecting(true);
     try {
-      const response = await fetch("/api/connect", {
+      const response = await fetch(API_ENDPOINT + "/connect", {
         method: "POST",
         body: "{}"
       });

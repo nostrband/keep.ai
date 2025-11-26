@@ -1,0 +1,30 @@
+appId: com.keepai.assistant
+productName: Keep.AI
+directories:
+  output: release
+  buildResources: build
+
+# What goes into the app bundle
+files:
+  - dist/**           # bundled main/preload
+  - public/**         # your SPA, already bundled
+
+# Make sure Electron knows the correct main file
+extraMetadata:
+  main: dist/main.js
+
+asar: true
+
+win:
+  target:
+    - nsis           # installer
+    - portable       # single-file exe if you want
+
+mac:
+  target:
+    - dmg
+
+linux:
+  target:
+    - AppImage       # nice single-file app for Linux
+    - deb

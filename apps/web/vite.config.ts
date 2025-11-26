@@ -4,9 +4,10 @@ import path from "node:path";
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
-  const flavor = mode; // "frontend" or "serverless"
+  const flavor = mode; // "frontend", "serverless", or "electron"
   const isFrontend = mode === "frontend";
   const isServerless = mode === "serverless";
+  const isElectron = mode === "electron";
 
   return {
     plugins: [react()],
@@ -47,6 +48,17 @@ export default defineConfig(({ mode }) => {
     build: {
       outDir: `dist/${flavor}`, // <- separate directories
       sourcemap: true,
+      // Use relative paths only for electron builds
+      ...(isElectron && {
+        rollupOptions: {
+          output: {
+            assetFileNames: 'assets/[name]-[hash].[ext]',
+            chunkFileNames: 'assets/[name]-[hash].js',
+            entryFileNames: 'assets/[name]-[hash].js',
+          }
+        }
+      }),
     },
+    base: isElectron ? './' : '/', // Use relative base only for electron builds
   };
 });

@@ -22,7 +22,7 @@ class GlobalMessagePort implements MessagePortLike {
 }
 
 async function main() {
-  const worker = new SyncWorker(API_ENDPOINT);
+  const worker = new SyncWorker(API_ENDPOINT + "/worker");
 
   // Create global message port
   const messagePort = new GlobalMessagePort();

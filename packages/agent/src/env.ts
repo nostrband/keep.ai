@@ -10,10 +10,14 @@ let env: Env = {};
 export function setEnv(newEnv: Env) {
   env = {
     ...newEnv,
-    ...env
-  }
+    ...env,
+  };
 }
 
 export function getEnv(): Env {
   return env;
+}
+
+export function isValidEnv() {
+  return !!env.OPENROUTER_API_KEY?.trim();
 }

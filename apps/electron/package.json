@@ -1,0 +1,38 @@
+{
+  "name": "@app/electron",
+  "version": "0.1.0",
+  "description": "Keep.AI Electron Desktop Application",
+  "private": true,
+  "type": "module",
+  "main": "dist/main.js",
+  "scripts": {
+    "dev": "concurrently \"npm run build:watch\" \"npm run start\"",
+    "build": "npm run build:deps && npm run build:app && npm run copy:frontend",
+    "build:deps": "cd ../server && npm run build && cd ../web && npm run build:electron",
+    "build:app": "npm run type-check && npm run build:main",
+    "type-check": "tsc --noEmit",
+    "build:main": "esbuild src/main.ts --bundle --platform=node --format=esm --external:electron --outdir=dist && esbuild src/preload.ts --bundle --platform=node --format=cjs --external:electron --outdir=dist",
+    "build:watch": "esbuild src/main.ts --bundle --platform=node --format=esm --external:electron --outdir=dist --watch",
+    "copy:frontend": "mkdir -p public && cp -r ../web/dist/electron/* ./public/",
+    "start": "electron .",
+    "start:dev": "electron . --dev",
+    "clean": "rm -rf dist public",
+    "dist": "npm run build && electron-builder"
+  },
+  "dependencies": {
+    "@app/server": "file:../server"
+  },
+  "devDependencies": {
+    "@types/node": "^20.4.0",
+    "concurrently": "^8.2.2",
+    "electron": "39.2.3",
+    "electron-builder": "^26.0.12",
+    "esbuild": "^0.18.20",
+    "typescript": "^5.2.0"
+  },
+  "homepage": "https://github.com/nostrband/keep.ai",
+  "author": {
+    "name": "Artur Briugeman",
+    "email": "artur@nostr.band"
+  }
+}

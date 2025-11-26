@@ -23,7 +23,7 @@ debug.enable("*");
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <QueryProviderEmbedded
-      backendUrl={API_ENDPOINT}
+      backendUrl={API_ENDPOINT + "/worker"}
       // sharedWorkerUrl={sharedWorkerUrl}
       // dedicatedWorkerUrl={dedicatedWorkerUrl}
       queryClient={queryClient}

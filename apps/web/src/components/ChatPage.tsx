@@ -1,5 +1,4 @@
 import React, { useState, useCallback, useRef, useEffect } from "react";
-import { useParams, Navigate } from "react-router-dom";
 import ChatInterface from "./ChatInterface";
 import SharedHeader from "./SharedHeader";
 import { useAddMessage } from "../hooks/dbWrites";
@@ -25,17 +24,11 @@ type PromptInputMessage = {
 };
 
 export default function ChatPage() {
-  const { id } = useParams<{ id: string }>();
+  const id = "main"; // Static chat ID
   const [input, setInput] = useState("");
   const [promptHeight, setPromptHeight] = useState(0);
   const promptContainerRef = useRef<HTMLDivElement>(null);
   const addMessage = useAddMessage();
-  
-  // If no ID is provided or ID is "new", generate a new chat ID
-  if (!id || id === "new") {
-    const newId = `chat_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    return <Navigate to={`/chat/${newId}`} replace />;
-  }
 
   const handleSubmit = useCallback((message: PromptInputMessage) => {
     const hasText = Boolean(message.text);
@@ -52,7 +45,7 @@ export default function ChatPage() {
     });
 
     setInput("");
-  }, [id, addMessage]);
+  }, [addMessage]);
 
   // Track prompt input height changes
   useEffect(() => {

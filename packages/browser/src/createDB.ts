@@ -86,7 +86,7 @@ export async function createDBBrowser(
     await db.exec("PRAGMA journal_mode = WAL;");
     await db.exec("PRAGMA synchronous = NORMAL;");
     await db.exec("PRAGMA busy_timeout = 10000;");
-    // No effect
+    // No effect, always 4k
     // await db.exec("PRAGMA page_size = 8192;");
     // const ps = await db.execA("PRAGMA page_size");
     // debugBrowser("DB page_size", ps);

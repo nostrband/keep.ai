@@ -1,5 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import HomePage from "./components/HomePage";
+import { BrowserRouter, HashRouter, Routes, Route, Navigate } from "react-router-dom";
 import ChatPage from "./components/ChatPage";
 import ThreadsPage from "./components/ThreadsPage";
 import ThreadDetailPage from "./components/ThreadDetailPage";
@@ -11,10 +10,40 @@ import NoteDetailPage from "./components/NoteDetailPage";
 import DevicesPage from "./components/DevicesPage";
 import ConsolePage from "./components/ConsolePage";
 import { ConnectDeviceDialog } from "./components/ConnectDeviceDialog";
+import { ConfigDialog } from "./components/ConfigDialog";
 import { useDbQuery } from "./hooks/dbQuery";
+import { useConfig } from "./hooks/useConfig";
+
+// Access build-time constants
+declare const __SERVERLESS__: boolean;
 
 function App() {
   const { dbStatus, error } = useDbQuery();
+  const isServerless = __SERVERLESS__;
+  const { isConfigValid, isLoading: configLoading, error: configError, recheckConfig } = useConfig();
+
+  // For non-serverless mode, check configuration first
+  if (!isServerless) {
+    if (configLoading) {
+      return (
+        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+          <div>Checking configuration...</div>
+        </div>
+      );
+    }
+
+    if (configError) {
+      return (
+        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+          <div>Configuration error: {configError}</div>
+        </div>
+      );
+    }
+
+    if (isConfigValid === false) {
+      return <ConfigDialog onConfigured={recheckConfig} />;
+    }
+  }
 
   if (dbStatus === "initializing") {
     return (
@@ -72,12 +101,14 @@ function App() {
   //   );
   // }
 
+  // Use HashRouter in Electron to avoid file:// protocol issues with routing
+  const isElectron = (window as any).env?.API_ENDPOINT?.includes('localhost:');
+  const Router = isElectron ? HashRouter : BrowserRouter;
+
   return (
-    <BrowserRouter>
+    <Router>
       <Routes>
-        <Route path="/" element={<HomePage />} />
-        <Route path="/chat" element={<Navigate to="/chat/new" replace />} />
-        <Route path="/chat/:id" element={<ChatPage />} />
+        <Route path="/" element={<ChatPage />} />
         <Route path="/threads" element={<ThreadsPage />} />
         <Route path="/threads/:id" element={<ThreadDetailPage />} />
         <Route path="/tasks" element={<TasksPage />} />
@@ -89,7 +120,7 @@ function App() {
         <Route path="/console" element={<ConsolePage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
-    </BrowserRouter>
+    </Router>
   );
 }
 

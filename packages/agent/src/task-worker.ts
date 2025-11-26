@@ -14,6 +14,7 @@ import { AgentTask, StepOutput, TaskType } from "./repl-agent-types";
 import { bytesToHex } from "@noble/ciphers/utils";
 import { randomBytes } from "@noble/ciphers/crypto";
 import { ReplEnv } from "./repl-env";
+import { isValidEnv } from "./env";
 
 export interface TaskWorkerConfig {
   api: KeepDbApi;
@@ -51,6 +52,11 @@ export class TaskWorker {
   }
 
   public async checkWork(): Promise<void> {
+    if (!isValidEnv()) {
+      this.debug("No api keys or invalid env config");
+      return;
+    }
+
     this.debug(
       "checkWork, running",
       this.isRunning,

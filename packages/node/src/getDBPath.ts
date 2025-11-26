@@ -1,6 +1,17 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { generateSecretKey, getPublicKey } from 'nostr-tools';
+import { bytesToHex } from 'nostr-tools/utils';
+
+interface User {
+  key: string;
+  pubkey: string;
+}
+
+interface UsersFile {
+  users: User[];
+}
 
 /**
  * Gets the Keep.ai directory path
@@ -81,3 +92,70 @@ export async function getCurrentUserDBPath(homePath?: string): Promise<string> {
   const pubkey = await getCurrentUser(homePath);
   return getDBPath(pubkey, homePath);
 }
+
+/**
+ * Ensures the Keep.ai environment is properly initialized
+ * Creates directories, generates user keys, and sets up configuration if needed
+ * @param homePath - Optional home path, defaults to os.homedir()
+ * @returns Promise that resolves when environment is ready
+ */
+export async function ensureEnv(homePath?: string): Promise<void> {
+  const keepAiDir = getKeepaiDir(homePath);
+  const currentUserFile = path.join(keepAiDir, 'current_user.txt');
+  
+  // Ensure ~/.keep.ai directory exists
+  if (!fs.existsSync(keepAiDir)) {
+    fs.mkdirSync(keepAiDir, { recursive: true });
+  }
+  
+  // Check if current_user.txt exists
+  if (!fs.existsSync(currentUserFile)) {
+    // Generate secret key and derive public key
+    const secretKey = generateSecretKey();
+    const publicKey = getPublicKey(secretKey);
+    
+    // Convert keys to hex format
+    const secretKeyHex = bytesToHex(secretKey);
+    const publicKeyHex = publicKey; // getPublicKey already returns hex string
+    
+    // Write public key to current_user.txt
+    fs.writeFileSync(currentUserFile, publicKeyHex, 'utf8');
+    
+    // Create user directory
+    const userDir = path.join(keepAiDir, publicKeyHex);
+    if (!fs.existsSync(userDir)) {
+      fs.mkdirSync(userDir, { recursive: true });
+    }
+    
+    // Handle users.json file
+    const usersFile = path.join(keepAiDir, 'users.json');
+    let usersData: UsersFile = { users: [] };
+    
+    // Read existing users.json if it exists
+    if (fs.existsSync(usersFile)) {
+      try {
+        const existingData = fs.readFileSync(usersFile, 'utf8');
+        usersData = JSON.parse(existingData);
+      } catch (error) {
+        // If parsing fails, start with empty users array
+        usersData = { users: [] };
+      }
+    }
+    
+    // Check if user already exists (unlikely but safe to check)
+    const existingUser = usersData.users.find(user => user.pubkey === publicKeyHex);
+    if (!existingUser) {
+      // Add new user to the list
+      const newUser: User = {
+        key: secretKeyHex,
+        pubkey: publicKeyHex
+      };
+      
+      usersData.users.push(newUser);
+      
+      // Write updated users.json
+      fs.writeFileSync(usersFile, JSON.stringify(usersData, null, 2), 'utf8');
+    }
+  }
+}
+
