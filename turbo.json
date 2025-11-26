@@ -5,6 +5,14 @@
       "dependsOn": ["^build"],
       "outputs": ["dist/**", "public/**", "build/**"]
     },
+    "build:serverless": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**", "public/**", "build/**"]
+    },
+    "build:electron": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**", "public/**", "build/**"]
+    },
     "dev": {
       "cache": false,
       "persistent": true

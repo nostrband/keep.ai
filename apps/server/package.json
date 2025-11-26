@@ -13,7 +13,8 @@
   },
   "scripts": {
     "build": "tsup src/server.ts src/start.ts --format esm,cjs --out-dir dist",
-    "postbuild": "mkdir -p public; cp -r ../web/dist/frontend/* ./public",
+    "build:copy": "mkdir -p public; cp -r ../web/dist/frontend/* ./public",
+    "build:all": "npm run build && npm run build:copy",
     "dev": "tsx src/start.ts",
     "start": "node dist/start.cjs",
     "type-check": "tsc --noEmit"

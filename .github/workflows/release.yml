@@ -42,8 +42,12 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Build web SPA
+        run: npm exec turbo run build:electron -- --filter=...@app/web
+
       - name: Build all apps
         run: npm run build
+        working-directory: apps/electron
 
       - name: Build distributables with electron-builder
         run: npx electron-builder ${{ matrix.build_target }}
