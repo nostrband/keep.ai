@@ -8,7 +8,7 @@
   "scripts": {
     "dev": "concurrently \"npm run build:watch\" \"npm run start\"",
     "build": "npm run build:deps && npm run build:app && npm run copy:frontend",
-    "build:deps": "cd ../server && npm run build && cd ../web && npm run build:electron",
+    "build:deps": "cd ../web && npm run build:all && cd ../server && npm run build",
     "build:app": "npm run type-check && npm run build:main",
     "type-check": "tsc --noEmit",
     "build:main": "esbuild src/main.ts --bundle --platform=node --format=esm --external:electron --outdir=dist && esbuild src/preload.ts --bundle --platform=node --format=cjs --external:electron --outdir=dist",
