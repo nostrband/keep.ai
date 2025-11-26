@@ -22,9 +22,9 @@ jobs:
           - os: macos-latest
             build_target: -m    # mac
 
-    defaults:
-      run:
-        working-directory: apps/electron   # <--- important for your structure
+    # defaults:
+    #   run:
+    #     working-directory: apps/electron   # <--- important for your structure
 
     steps:
       - name: Checkout
@@ -33,27 +33,23 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: 'npm'
           cache-dependency-path: |
             package-lock.json
-            apps/electron/package-lock.json
 
-      - name: Install dependencies (root)
-        run: npm install
-        working-directory: .
-
-      # If apps/electron has its own package.json (it does), ensure local deps are installed too
-      - name: Install dependencies (electron app)
+      - name: Install dependencies
         run: npm install
 
-      - name: Build app (web + server + electron main)
+      - name: Build all apps
         run: npm run build
 
       - name: Build distributables with electron-builder
         run: npx electron-builder ${{ matrix.build_target }}
+        working-directory: apps/electron
 
       - name: Upload artifacts
+        working-directory: apps/electron
         uses: actions/upload-artifact@v4
         with:
           name: desktop-${{ matrix.os }}

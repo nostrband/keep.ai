@@ -8,7 +8,7 @@
     "dev:frontend": "vite --mode frontend",
     "dev:serverless": "vite --mode serverless",
     "dev:electron": "vite --mode electron",
-    "build": "npm run build:serverless",
+    "build": "npm run build:all",
     "build:frontend": "vite build --mode frontend",
     "build:serverless": "vite build --mode serverless",
     "build:electron": "vite build --mode electron",
