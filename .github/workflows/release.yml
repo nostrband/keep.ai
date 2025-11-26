@@ -51,7 +51,7 @@ jobs:
 
       - name: Build node
         run: npm run build
-        working-directory: apps/node
+        working-directory: packages/node
 
       - name: Build electron app
         run: npm run build
