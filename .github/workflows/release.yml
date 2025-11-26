@@ -45,6 +45,10 @@ jobs:
       - name: Build web SPA & deps
         run: npm exec turbo run build:electron -- --filter=@app/web
 
+      - name: Build server
+        run: npm run build
+        working-directory: apps/server
+
       - name: Build electron app
         run: npm run build
         working-directory: apps/electron
