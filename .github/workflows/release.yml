@@ -58,7 +58,7 @@ jobs:
         working-directory: apps/electron
 
       - name: Build distributables with electron-builder
-        run: mkdir release/@app && npx electron-builder ${{ matrix.build_target }}
+        run: mkdir -p release/@app && npx electron-builder ${{ matrix.build_target }}
         working-directory: apps/electron
 
       - name: Upload artifacts
