@@ -10,10 +10,6 @@ directories:
   output: apps/electron/release
   buildResources: apps/electron/build
 
-# Don't publish release on github
-# FIXME consider allowing it to publish to github releases when it all starts working
-publish: "never"
-
 # What goes into the app bundle
 files:
   - package.json
