@@ -16,6 +16,9 @@ files:
   - node_modules/**
   - apps/electron/dist/**           # bundled main/preload
   - apps/electron/public/**         # your SPA, already bundled
+  - "!node_modules/sqlite3/**"
+  - "!node_modules/bindings/**"
+  - "!node_modules/@nostrband/crsqlite/**"
 
 extraResources:
   - from: node_modules/sqlite3
@@ -34,9 +37,9 @@ extraMetadata:
 asar: true
 
 # binaries better outside the asar
-asarUnpack:
-  - node_modules/sqlite3/**    
-  - node_modules/@nostrband/crsqlite/**
+#asarUnpack:
+#  - node_modules/sqlite3/**    
+#  - node_modules/@nostrband/crsqlite/**
 
 win:
   target:
