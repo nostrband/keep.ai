@@ -1,16 +1,38 @@
-import { app, BrowserWindow, Menu, ipcMain } from 'electron';
-import path from 'path';
-// import { fileURLToPath } from 'url';
-import { createServer } from '@app/server';
+// redirect 'debug' output to a file
+import fs from 'node:fs';
+import os from 'node:os';
+import util from 'node:util';
+import createDebug from 'debug';
 
-// ES module equivalent of __dirname
-// const __filename = fileURLToPath(import.meta.url);
-// const __dirname = path.dirname(__filename);
+const keepaiDir = path.join(os.homedir(), '.keep.ai')
+const logPath = path.join(keepaiDir, 'debug.log');
+const logStream = fs.createWriteStream(logPath, { flags: 'a' });
+
+// Save original log target (usually console.error or console.log)
+const originalLog = createDebug.log || console.log;
+
+// Override for ALL debug instances (app + dependencies)
+createDebug.log = (...args) => {
+  const line = util.format(...args);
+
+  // Optional: keep printing to console in dev
+  originalLog(line);
+
+  // Always write to file
+  logStream.write(line + '\n');
+};
+
+// Now import the rest
+import { app, BrowserWindow, Menu, ipcMain, Tray, nativeImage } from 'electron';
+import path from 'path';
+import { createServer } from '@app/server';
 
 // Keep a global reference of the window object
 let mainWindow: any = null;
 let server: any = null;
 let serverPort: number = 0;
+let tray: Tray | null = null;
+let isQuiting = false;
 
 function createWindow(): void {
   // Create the browser window
@@ -34,9 +56,23 @@ function createWindow(): void {
     mainWindow.webContents.openDevTools();
   }
 
+  // Instead of closing, just hide to tray
+  mainWindow.on('close', (event: any) => {
+    if (!isQuiting) {
+      event.preventDefault();
+      mainWindow?.hide();
+    }
+  });
+
   // Handle window closed
   mainWindow.on('closed', () => {
     mainWindow = null;
+  });
+
+  // Optional: minimize to tray instead
+  mainWindow.on('minimize', (event: any) => {
+    event.preventDefault();
+    mainWindow?.hide();
   });
 }
 
@@ -69,6 +105,62 @@ function setupIpcHandlers(): void {
   });
 }
 
+function createTray(): void {
+  // Try to find an icon, fallback to a basic one if not found
+  const iconPath = path.join(__dirname, '../assets/icon.png');
+  let trayIcon;
+  
+  try {
+    trayIcon = nativeImage.createFromPath(iconPath);
+    // If icon is empty, create a simple fallback
+    if (trayIcon.isEmpty()) {
+      trayIcon = nativeImage.createFromNamedImage('NSApplicationIcon');
+    }
+  } catch (error) {
+    // Fallback to system icon if app icon not found
+    trayIcon = nativeImage.createFromNamedImage('NSApplicationIcon');
+  }
+
+  tray = new Tray(trayIcon);
+  tray.setToolTip('Keep.AI - Your Private AI Assistant');
+
+  const contextMenu = Menu.buildFromTemplate([
+    {
+      label: 'Open Keep.AI',
+      click: () => {
+        if (!mainWindow) {
+          createWindow();
+        }
+        mainWindow?.show();
+        mainWindow?.focus();
+      },
+    },
+    { type: 'separator' },
+    {
+      label: 'Quit',
+      click: () => {
+        isQuiting = true;
+        app.quit();
+      },
+    },
+  ]);
+
+  tray.setContextMenu(contextMenu);
+
+  // Single-click on tray restores window
+  tray.on('click', () => {
+    if (!mainWindow) {
+      createWindow();
+    }
+    if (mainWindow?.isVisible()) {
+      mainWindow.hide();
+    } else {
+      mainWindow?.show();
+      mainWindow?.focus();
+    }
+  });
+}
+
 // This method will be called when Electron has finished initialization
 app.whenReady().then(async () => {
   try {
@@ -90,6 +182,12 @@ app.whenReady().then(async () => {
     
     setupIpcHandlers();
     createWindow();
+    createTray();
+    
+    // Hide dock icon on macOS to make it a pure tray app
+    if (process.platform === 'darwin' && app.dock) {
+      app.dock.hide();
+    }
   } catch (error) {
     console.error('Failed to start server:', error);
     app.quit();
@@ -141,36 +239,36 @@ app.whenReady().then(async () => {
   });
 });
 
-// Quit when all windows are closed
-app.on('window-all-closed', async () => {
-  // Close the server when quitting
-  if (server) {
+// With tray functionality, we don't quit when all windows are closed
+app.on('window-all-closed', () => {
+  // Keep the app running in the tray - don't quit
+  // The server will continue running in the background
+  console.log('All windows closed, app continues running in tray');
+});
+
+// Handle app quit - only when explicitly quitting (e.g., from tray menu)
+app.on('before-quit', async (event: any) => {
+  if (server && !isQuiting) {
+    event.preventDefault();
+    isQuiting = true;
     try {
+      console.log('Closing server before quit...');
       await server.close();
-      server = undefined;
+      server = null;
+      console.log('Server closed, quitting app...');
+      app.quit();
     } catch (error) {
       console.error('Error closing server:', error);
+      app.quit();
     }
-  }
-  
-  // On macOS, keep the app running even when all windows are closed
-  if (process.platform !== 'darwin') {
-    app.quit();
   }
 });
 
-// Handle app quit
-app.on('before-quit', async (event: any) => {
-  if (server) {
-    event.preventDefault();
-    try {
-      await server.close();
-      server = null;
-      app.quit();
-    } catch (error) {
-      console.error('Error closing server:', error);
-      app.quit();
-    }
+// Handle tray cleanup on quit
+app.on('will-quit', () => {
+  if (tray) {
+    tray.destroy();
+    tray = null;
   }
 });
 
