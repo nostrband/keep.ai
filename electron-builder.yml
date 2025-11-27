@@ -28,7 +28,21 @@ extraResources:
   - from: node_modules/file-uri-to-path
     to: node_modules/file-uri-to-path
   - from: node_modules/@nostrband/crsqlite
-    to: node_modules/@nostrband/crsqlite    
+    to: node_modules/@nostrband/crsqlite
+  - from: node_modules/quickjs-emscripten
+    to: node_modules/quickjs-emscripten
+  - from: node_modules/quickjs-emscripten-core
+    to: node_modules/quickjs-emscripten-core
+  - from: node_modules/@jitl/quickjs-ffi-types
+    to: node_modules/@jitl/quickjs-ffi-types
+  - from: node_modules/@jitl/quickjs-wasmfile-debug-asyncify
+    to: node_modules/@jitl/quickjs-wasmfile-debug-asyncify
+  - from: node_modules/@jitl/quickjs-wasmfile-release-asyncify
+    to: node_modules/@jitl/quickjs-wasmfile-release-asyncify
+  - from: node_modules/@jitl/quickjs-wasmfile-debug-sync
+    to: node_modules/@jitl/quickjs-wasmfile-debug-sync
+  - from: node_modules/@jitl/quickjs-wasmfile-release-sync
+    to: node_modules/@jitl/quickjs-wasmfile-release-sync
 
 # Make sure Electron knows the correct main file
 extraMetadata:

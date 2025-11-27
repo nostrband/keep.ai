@@ -9,6 +9,13 @@ const common = {
     'electron',
     'sqlite3',
     "@nostrband/crsqlite",
+    'quickjs-emscripten',
+    'quickjs-emscripten-core',
+    '@jitl/quickjs-ffi-types',
+    '@jitl/quickjs-wasmfile-debug-asyncify',
+    '@jitl/quickjs-wasmfile-release-asyncify',
+    '@jitl/quickjs-wasmfile-debug-sync',
+    '@jitl/quickjs-wasmfile-release-sync',
   ]
 };
 
