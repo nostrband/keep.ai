@@ -1,0 +1,53 @@
+# Due to our monorepo and sub-package deps config
+# we have to build the electron app (apps/electron)
+# from root, we also have to put binary deps of that app
+# to root's 'dependencies' in package.json to make it all work
+
+appId: com.keepai.assistant
+productName: Keep.AI
+directories:
+  app: .
+  output: apps/electron/release
+  buildResources: apps/electron/build
+
+# What goes into the app bundle
+files:
+  - package.json
+  - node_modules/**
+  - apps/electron/dist/**           # bundled main/preload
+  - apps/electron/public/**         # your SPA, already bundled
+
+extraResources:
+  - from: node_modules/sqlite3
+    to: node_modules/sqlite3
+  - from: node_modules/bindings
+    to: node_modules/bindings
+  - from: node_modules/file-uri-to-path
+    to: node_modules/file-uri-to-path
+  - from: node_modules/@nostrband/crsqlite
+    to: node_modules/@nostrband/crsqlite    
+
+# Make sure Electron knows the correct main file
+extraMetadata:
+  main: apps/electron/dist/main.cjs
+
+asar: true
+
+# binaries better outside the asar
+asarUnpack:
+  - node_modules/sqlite3/**    
+  - node_modules/@nostrband/crsqlite/**
+
+win:
+  target:
+    - nsis           # installer
+    - portable       # single-file exe if you want
+
+mac:
+  target:
+    - dmg
+
+linux:
+  target:
+    - AppImage       # nice single-file app for Linux
+    - deb

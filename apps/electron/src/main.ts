@@ -1,11 +1,11 @@
 import { app, BrowserWindow, Menu, ipcMain } from 'electron';
 import path from 'path';
-import { fileURLToPath } from 'url';
+// import { fileURLToPath } from 'url';
 import { createServer } from '@app/server';
 
 // ES module equivalent of __dirname
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// const __filename = fileURLToPath(import.meta.url);
+// const __dirname = path.dirname(__filename);
 
 // Keep a global reference of the window object
 let mainWindow: any = null;
@@ -20,7 +20,7 @@ function createWindow(): void {
     webPreferences: {
       nodeIntegration: false, // Security best practice
       contextIsolation: true, // Security best practice
-      preload: path.join(__dirname, 'preload.js'), // Use a preload script
+      preload: path.join(__dirname, 'preload.cjs'), // Use a preload script
     },
     icon: path.join(__dirname, '../assets/icon.png'), // Optional: Add an app icon
     title: 'Keep.AI',

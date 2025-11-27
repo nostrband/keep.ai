@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "Privacy-focused AI assistant app with peer-to-peer sync",
+  "main": "apps/electron/dist/main.cjs",
   "workspaces": [
     "apps/*",
     "packages/*"
@@ -24,7 +25,19 @@
     "npm": ">=10.9.0"
   },
   "dependencies": {
-    "debug": "^4.4.3"
+    "debug": "^4.4.3",
+    "@app/server": "file:./apps/server",
+    "@fastify/cors": "^11.1.0",
+    "@nostrband/crsqlite": "^0.16.3",
+    "fastify": "^5.6.1",
+    "sqlite3": "^5.1.7",
+    "bindings": "^1.5.0",
+    "file-uri-to-path": "^1.0.0"
   },
-  "packageManager": "npm@11.4.2"
+  "packageManager": "npm@11.4.2",
+  "homepage": "https://github.com/nostrband/keep.ai",
+  "author": {
+    "name": "Artur Briugeman",
+    "email": "artur@nostr.band"
+  }
 }

@@ -8,7 +8,7 @@ import {
   getUserPath,
 } from "@app/node";
 import { DBInterface, KeepDb, KeepDbApi, NostrPeerStore } from "@app/db";
-import { setEnv, getEnv, TaskWorker, type Env } from "@app/agent";
+import { setEnv, getEnv, TaskWorker } from "@app/agent";
 import debug from "debug";
 import path from "path";
 import os from "os";

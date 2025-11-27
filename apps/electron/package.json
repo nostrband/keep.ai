@@ -4,19 +4,17 @@
   "description": "Keep.AI Electron Desktop Application",
   "private": true,
   "type": "module",
-  "main": "dist/main.js",
+  "main": "dist/main.cjs",
   "scripts": {
-    "dev": "concurrently \"npm run build:watch\" \"npm run start\"",
     "build": "npm run build:app && npm run copy:frontend",
     "build:app": "npm run type-check && npm run build:main",
     "type-check": "tsc --noEmit",
-    "build:main": "esbuild src/main.ts --bundle --platform=node --format=esm --external:electron --outdir=dist && esbuild src/preload.ts --bundle --platform=node --format=cjs --external:electron --outdir=dist",
-    "build:watch": "esbuild src/main.ts --bundle --platform=node --format=esm --external:electron --outdir=dist --watch",
+    "build:main": "node esbuild.main.mjs",
     "copy:frontend": "mkdir -p public && cp -r ../web/dist/electron/* ./public/",
     "start": "electron .",
     "start:dev": "electron . --dev",
     "clean": "rm -rf dist public",
-    "dist": "npm run build && electron-builder"
+    "dist": "npm run build && mkdir -p release/@app && cd ../../ && electron-builder"
   },
   "dependencies": {
     "@app/server": "file:../server",
