@@ -1,5 +1,7 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
+import { Html5QrcodeScanner, Html5Qrcode } from "html5-qrcode";
 import { useDbQuery } from "../hooks/dbQuery";
+import { isMobileDevice, hasCameraAccess } from "../lib/mobile-utils";
 
 interface ConnectDeviceDialogProps {
   onClose?: () => void;
@@ -9,6 +11,11 @@ export function ConnectDeviceDialog({ onClose }: ConnectDeviceDialogProps) {
   const { connectDevice, dbStatus, error } = useDbQuery();
   const [connectionString, setConnectionString] = useState("");
   const [isConnecting, setIsConnecting] = useState(false);
+  const [isScanning, setIsScanning] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+  const [hasCamera, setHasCamera] = useState(false);
+  const scannerRef = useRef<Html5QrcodeScanner | null>(null);
+  const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
 
   const handleConnect = async () => {
     if (!connectionString.trim()) {
@@ -30,11 +37,111 @@ export function ConnectDeviceDialog({ onClose }: ConnectDeviceDialogProps) {
     }
   };
 
+  useEffect(() => {
+    const checkMobileAndCamera = async () => {
+      const mobile = isMobileDevice();
+      setIsMobile(mobile);
+      
+      if (mobile) {
+        const camera = await hasCameraAccess();
+        setHasCamera(camera);
+      }
+    };
+    
+    checkMobileAndCamera();
+
+    // Cleanup scanner on unmount
+    return () => {
+      if (scannerRef.current) {
+        scannerRef.current.clear();
+      }
+      if (html5QrCodeRef.current) {
+        html5QrCodeRef.current.stop().catch(console.error);
+      }
+    };
+  }, []);
+
+  const startQrScanner = () => {
+    setIsScanning(true);
+  };
+
+  useEffect(() => {
+    if (isScanning) {
+      // Wait for the component to re-render with the qr-reader element
+      const initializeScanner = async () => {
+        try {
+          const html5QrCode = new Html5Qrcode("qr-reader");
+          html5QrCodeRef.current = html5QrCode;
+
+          await html5QrCode.start(
+            { facingMode: "environment" }, // Use back camera
+            {
+              fps: 10,
+              qrbox: { width: 250, height: 250 }
+            },
+            (decodedText) => {
+              // QR code successfully scanned
+              setConnectionString(decodedText);
+              stopQrScanner();
+            },
+            (errorMessage) => {
+              // Handle scan error (optional)
+              console.log("QR scan error:", errorMessage);
+            }
+          );
+        } catch (err) {
+          console.error("Failed to start QR scanner:", err);
+          setIsScanning(false);
+        }
+      };
+
+      // Small delay to ensure DOM element is available
+      const timeoutId = setTimeout(initializeScanner, 100);
+      return () => clearTimeout(timeoutId);
+    }
+  }, [isScanning]);
+
+  const stopQrScanner = () => {
+    if (html5QrCodeRef.current) {
+      html5QrCodeRef.current.stop()
+        .then(() => {
+          html5QrCodeRef.current = null;
+          setIsScanning(false);
+        })
+        .catch(console.error);
+    }
+  };
+
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !isConnecting) {
       handleConnect();
     }
   };
+
+  if (isScanning) {
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+          <h2 className="text-xl font-semibold mb-4">Scan QR Code</h2>
+          
+          <p className="text-gray-600 mb-4">
+            Point your camera at the QR code from your main device.
+          </p>
+
+          <div id="qr-reader" className="w-full mb-4"></div>
+
+          <div className="flex justify-end space-x-3">
+            <button
+              onClick={stopQrScanner}
+              className="px-4 py-2 text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
@@ -68,7 +175,28 @@ export function ConnectDeviceDialog({ onClose }: ConnectDeviceDialogProps) {
           </div>
         )}
 
-        <div className="flex justify-end space-x-3">
+        <div className="flex flex-col items-center space-y-3 mb-4">
+          {isMobile && hasCamera && (
+            <button
+              onClick={startQrScanner}
+              disabled={isConnecting}
+              className="w-full px-4 py-2 text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
+            >
+              <span>📷</span>
+              <span>Scan QR Code</span>
+            </button>
+          )}
+          <button
+            onClick={handleConnect}
+            disabled={!connectionString.trim() || isConnecting}
+            className="w-full px-4 py-2 text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
+          >
+            <span>🔗</span>
+            <span>{isConnecting ? "Connecting..." : "Connect"}</span>
+          </button>
+        </div>
+
+        <div className="flex justify-end">
           {onClose && (
             <button
               onClick={onClose}
@@ -78,13 +206,6 @@ export function ConnectDeviceDialog({ onClose }: ConnectDeviceDialogProps) {
               Cancel
             </button>
           )}
-          <button
-            onClick={handleConnect}
-            disabled={!connectionString.trim() || isConnecting}
-            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {isConnecting ? "Connecting..." : "Connect"}
-          </button>
         </div>
 
         {dbStatus === "initializing" && (

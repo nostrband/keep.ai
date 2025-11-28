@@ -23,12 +23,10 @@ import { useConfig } from "./hooks/useConfig";
 
 // Access build-time constants
 declare const __SERVERLESS__: boolean;
-declare const __FRONTEND__: boolean;
 
 function App() {
   const { dbStatus, error } = useDbQuery();
   const isServerless = __SERVERLESS__;
-  const isFrontend = __FRONTEND__;
   const {
     isConfigValid,
     isLoading: configLoading,
@@ -132,7 +130,7 @@ function App() {
         <Route path="/notes/:id" element={<NoteDetailPage />} />
         <Route path="/devices" element={<DevicesPage />} />
         <Route path="/console" element={<ConsolePage />} />
-        {isFrontend && <Route path="/settings" element={<SettingsPage />} />}
+        {!isServerless && <Route path="/settings" element={<SettingsPage />} />}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Router>

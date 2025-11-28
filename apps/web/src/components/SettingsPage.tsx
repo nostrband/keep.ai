@@ -215,7 +215,6 @@ export default function SettingsPage() {
     );
   }
 
-  console.log("formData.AGENT_MODEL", formData.AGENT_MODEL);
   return (
     <div className="min-h-screen bg-gray-50">
       <SharedHeader title="Settings" />
