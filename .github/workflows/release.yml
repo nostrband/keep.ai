@@ -60,7 +60,7 @@ jobs:
         run: |
           mkdir -p apps/electron/release/@app
           npx electron-builder ${{ matrix.build_target }} --publish=never
-          npx rimraf "apps/electron/release/*-unpacked"
+          npx rimraf --glob "apps/electron/release/*-unpacked"
 
       # still keep artifacts for CI/debugging if you like
       - name: Upload artifacts
