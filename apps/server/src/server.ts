@@ -14,7 +14,7 @@ import {
   NostrPeerStore,
   MemoryStore,
 } from "@app/db";
-import { setEnv, getEnv, TaskWorker } from "@app/agent";
+import { setEnv, getEnv, TaskWorker, Env, DEFAULT_AGENT_MODEL } from "@app/agent";
 import debug from "debug";
 import path from "path";
 import os from "os";
@@ -387,11 +387,16 @@ export async function createServer(config: ServerConfig = {}) {
     reply.send({ ok });
   });
 
+  app.get("/api/get_config", async (request, reply) => {
+    const currentEnv = getEnv();
+    reply.send({ env: currentEnv });
+  });
+
   app.post("/api/set_config", async (request, reply) => {
     try {
-      const body = request.body as { openrouterApiKey?: string };
+      const body = request.body as Env;
 
-      if (!body.openrouterApiKey?.trim()) {
+      if (!body.OPENROUTER_API_KEY?.trim()) {
         reply.status(400).send({ error: "OpenRouter API key is required" });
         return;
       }
@@ -403,11 +408,11 @@ export async function createServer(config: ServerConfig = {}) {
           {
             method: "POST",
             headers: {
-              Authorization: `Bearer ${body.openrouterApiKey}`,
+              Authorization: `Bearer ${body.OPENROUTER_API_KEY}`,
               "Content-Type": "application/json",
             },
             body: JSON.stringify({
-              model: "openai/gpt-oss-120b",
+              model: body.AGENT_MODEL || DEFAULT_AGENT_MODEL,
               messages: [
                 {
                   role: "user",
@@ -435,42 +440,52 @@ export async function createServer(config: ServerConfig = {}) {
         return;
       }
 
-      // Update the current env object
+      // Copy the current env
       const newEnv = getEnv();
-      newEnv.OPENROUTER_API_KEY = body.openrouterApiKey;
-      setEnv(newEnv);
 
-      // Handle .env file: find OPENROUTER_API_KEY line and replace it, or append if not found
+      // Get current .env file
       let envContent = "";
-      let foundApiKey = false;
-
       if (fs.existsSync(envPath)) {
         envContent = fs.readFileSync(envPath, "utf8");
-        const lines = envContent.split("\n");
+      }
 
+      // Helper
+      const updateVar = (name: "OPENROUTER_API_KEY" | "AGENT_MODEL") => {
+        if (body[name] === undefined) return;
+
+        // Set in ram
+        newEnv[name] = body[name];
+
+        // Find & replace/append the .env row
+        const row = `${name}=${newEnv[name]}`;
+        let found = false;
+        const lines = envContent.split("\n");
         for (let i = 0; i < lines.length; i++) {
-          if (lines[i].startsWith("OPENROUTER_API_KEY=")) {
-            lines[i] = `OPENROUTER_API_KEY=${body.openrouterApiKey}`;
-            foundApiKey = true;
+          if (lines[i].startsWith(name + "=")) {
+            lines[i] = row;
+            found = true;
           }
         }
 
-        envContent = lines.join("\n");
-      }
+        // Append?
+        if (!found) lines.push(row);
 
-      // If OPENROUTER_API_KEY wasn't found, append it
-      if (!foundApiKey) {
-        if (envContent && !envContent.endsWith("\n")) {
-          envContent += "\n";
-        }
-        envContent += `OPENROUTER_API_KEY=${body.openrouterApiKey}\n`;
-      }
+        // Format the content
+        envContent = lines.join("\n");
+
+        // Also update the global env used by this server instance
+        process.env[name] = newEnv[name];
+      };
+
+      // Update each var
+      updateVar("OPENROUTER_API_KEY");
+      updateVar("AGENT_MODEL");
+
+      // Set globally
+      setEnv(newEnv);
 
       // Write updated .env file
       fs.writeFileSync(envPath, envContent, "utf8");
-
-      // Also update the global env used by this server instance
-      process.env.OPENROUTER_API_KEY = body.openrouterApiKey;
 
       reply.send({ ok: true });
     } catch (error) {

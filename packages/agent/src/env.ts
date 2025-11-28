@@ -15,7 +15,9 @@ export function setEnv(newEnv: Env) {
 }
 
 export function getEnv(): Env {
-  return env;
+  return {
+    ...env,
+  };
 }
 
 export function isValidEnv() {

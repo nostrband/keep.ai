@@ -1,4 +1,10 @@
-import { BrowserRouter, HashRouter, Routes, Route, Navigate } from "react-router-dom";
+import {
+  BrowserRouter,
+  HashRouter,
+  Routes,
+  Route,
+  Navigate,
+} from "react-router-dom";
 import ChatPage from "./components/ChatPage";
 import ThreadsPage from "./components/ThreadsPage";
 import ThreadDetailPage from "./components/ThreadDetailPage";
@@ -9,6 +15,7 @@ import NotesPage from "./components/NotesPage";
 import NoteDetailPage from "./components/NoteDetailPage";
 import DevicesPage from "./components/DevicesPage";
 import ConsolePage from "./components/ConsolePage";
+import SettingsPage from "./components/SettingsPage";
 import { ConnectDeviceDialog } from "./components/ConnectDeviceDialog";
 import { ConfigDialog } from "./components/ConfigDialog";
 import { useDbQuery } from "./hooks/dbQuery";
@@ -16,11 +23,18 @@ import { useConfig } from "./hooks/useConfig";
 
 // Access build-time constants
 declare const __SERVERLESS__: boolean;
+declare const __FRONTEND__: boolean;
 
 function App() {
   const { dbStatus, error } = useDbQuery();
   const isServerless = __SERVERLESS__;
-  const { isConfigValid, isLoading: configLoading, error: configError, recheckConfig } = useConfig();
+  const isFrontend = __FRONTEND__;
+  const {
+    isConfigValid,
+    isLoading: configLoading,
+    error: configError,
+    recheckConfig,
+  } = useConfig();
 
   // For non-serverless mode, check configuration first
   if (!isServerless) {
@@ -102,7 +116,7 @@ function App() {
   // }
 
   // Use HashRouter in Electron to avoid file:// protocol issues with routing
-  const isElectron = (window as any).env?.API_ENDPOINT?.includes('localhost:');
+  const isElectron = (window as any).env?.API_ENDPOINT?.includes("localhost:");
   const Router = isElectron ? HashRouter : BrowserRouter;
 
   return (
@@ -118,6 +132,7 @@ function App() {
         <Route path="/notes/:id" element={<NoteDetailPage />} />
         <Route path="/devices" element={<DevicesPage />} />
         <Route path="/console" element={<ConsolePage />} />
+        {isFrontend && <Route path="/settings" element={<SettingsPage />} />}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Router>

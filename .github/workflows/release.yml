@@ -8,6 +8,9 @@ on:
       - 'main'
   workflow_dispatch: {}
 
+permissions:
+  contents: write  # needed to create/update GitHub Releases
+
 jobs:
   build:
     name: Build for ${{ matrix.os }}
@@ -21,10 +24,6 @@ jobs:
             build_target: -w    # windows
           - os: macos-latest
             build_target: -m    # mac
-
-    # defaults:
-    #   run:
-    #     working-directory: apps/electron   # <--- important for your structure
 
     steps:
       - name: Checkout
@@ -58,10 +57,28 @@ jobs:
         working-directory: apps/electron
 
       - name: Build distributables with electron-builder
-        run: mkdir -p apps/electron/release/@app && npx electron-builder ${{ matrix.build_target }} --publish=never
+        run: |
+          mkdir -p apps/electron/release/@app
+          npx electron-builder ${{ matrix.build_target }} --publish=never
+          rm -Rf apps/electron/release/*-unpacked/
 
+      # still keep artifacts for CI/debugging if you like
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: desktop-${{ matrix.os }}
           path: apps/electron/release/**
+
+      - name: Create / update GitHub Release
+        uses: softprops/action-gh-release@v2
+#        if: startsWith(github.ref, 'refs/tags/') # build for main too for now
+        with:
+          # attach what we just built for this OS
+          files: |
+            apps/electron/release/*.AppImage
+            apps/electron/release/*Setup*.exe
+            apps/electron/release/*.dmg
+          draft: false
+          prerelease: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

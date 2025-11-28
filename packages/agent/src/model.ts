@@ -6,6 +6,8 @@ import { getEnv } from "./env";
 
 let openRouter: OpenRouterProvider | undefined;
 
+export const DEFAULT_AGENT_MODEL = "anthropic/claude-sonnet-4";
+
 export function getOpenRouter() {
   if (!openRouter)
     openRouter = createOpenRouter({
@@ -16,5 +18,5 @@ export function getOpenRouter() {
 }
 
 export function getModelName() {
-  return getEnv().AGENT_MODEL || "openai/gpt-oss-120b";
+  return getEnv().AGENT_MODEL || DEFAULT_AGENT_MODEL;
 }

@@ -3,7 +3,7 @@
 # from root, we also have to put binary deps of that app
 # to root's 'dependencies' in package.json to make it all work
 
-appId: com.keepai.assistant
+appId: ai.getkeep.app
 productName: Keep.AI
 directories:
   app: .
@@ -57,8 +57,8 @@ asar: true
 
 win:
   target:
-    - nsis           # installer
     - portable       # single-file exe if you want
+#    - nsis           # installer
 
 mac:
   target:
@@ -67,4 +67,4 @@ mac:
 linux:
   target:
     - AppImage       # nice single-file app for Linux
-    - deb
+#    - deb

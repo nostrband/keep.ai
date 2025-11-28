@@ -61,7 +61,7 @@ export function ConfigDialog({ onConfigured }: ConfigDialogProps) {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          openrouterApiKey: apiKey,
+          OPENROUTER_API_KEY: apiKey,
         }),
       });
 

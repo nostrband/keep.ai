@@ -14,7 +14,7 @@ export {
 export { setEnv, getEnv, type Env } from "./env";
 
 // Model configuration
-export { getOpenRouter, getModelName } from "./model";
+export { getOpenRouter, getModelName, DEFAULT_AGENT_MODEL } from "./model";
 
 // Utilities
 export { getWeekDay, createPlannerTaskPrompt, getMessageText } from "./utils";
