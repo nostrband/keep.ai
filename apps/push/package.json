@@ -1,0 +1,37 @@
+{
+  "name": "@app/push",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/server.cjs",
+  "exports": {
+    ".": {
+      "require": "./dist/server.cjs",
+      "import": "./dist/server.js",
+      "types": "./dist/server.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsup src/server.ts src/start.ts --format esm,cjs --out-dir dist",
+    "dev": "tsx src/start.ts",
+    "start": "node dist/start.cjs",
+    "type-check": "tsc --noEmit",
+    "test-events": "tsx src/test.ts"
+  },
+  "dependencies": {
+    "@app/db": "file:../../packages/db",
+    "@app/node": "file:../../packages/node",
+    "@app/sync": "file:../../packages/sync",
+    "debug": "^4.3.4",
+    "dotenv": "^16.0.0",
+    "nostr-tools": "^2.7.2",
+    "web-push": "^3.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^20.4.0",
+    "@types/web-push": "^3.6.3",
+    "tsup": "^7.2.0",
+    "tsx": "^3.12.0",
+    "typescript": "^5.2.0"
+  }
+}

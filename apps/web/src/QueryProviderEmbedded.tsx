@@ -21,11 +21,20 @@ import { ServerlessNostrSigner } from "./ui/lib/signer";
 import { bytesToHex, hexToBytes } from "nostr-tools/utils";
 import { getPublicKey } from "nostr-tools";
 import { tryBecomeActiveTab } from "./ui/lib/tab-lock";
+import { PushNotificationManager } from "./lib/PushNotificationManager";
 
 // Serverless mode (nostr-sync with main device)
 const isServerless = (import.meta as any).env?.VITE_FLAVOR === "serverless";
+// Electron (desktop)
+const isElectron = (import.meta as any).env?.VITE_FLAVOR === "electron";
 
-type DbStatus = "initializing" | "syncing" | "ready" | "error" | "disconnected" | "locked";
+type DbStatus =
+  | "initializing"
+  | "syncing"
+  | "ready"
+  | "error"
+  | "disconnected"
+  | "locked";
 
 interface QueryContextType {
   dbStatus: DbStatus;
@@ -109,11 +118,13 @@ export function QueryProviderEmbedded({
       setDbStatus("initializing");
       setError(null);
 
-      const activeTab = await tryBecomeActiveTab();
-      if (!activeTab) {
-        dbg("Another tab is active");
-        setDbStatus("locked");
-        return { onResume };
+      if (!isElectron) {
+        const activeTab = await tryBecomeActiveTab();
+        if (!activeTab) {
+          dbg("Another tab is active");
+          setDbStatus("locked");
+          return { onResume };
+        }
       }
 
       // Create database using provided factory
@@ -191,6 +202,19 @@ export function QueryProviderEmbedded({
 
       setPeer(peer);
       setTransport(transport);
+
+      // Setup push notifications after successful peer initialization (serverless mode only)
+      if (isServerless && signer && api) {
+        try {
+          const pushManager = new PushNotificationManager(signer);
+          const peers = await api.nostrPeerStore.listPeers();
+          await pushManager.setupPushNotifications(peers);
+          dbg('Push notifications setup completed');
+        } catch (error) {
+          dbg('Push notifications setup failed:', error);
+          // Don't fail the whole initialization if push setup fails
+        }
+      }
 
       // Start logic
       if (!isServerless) {
@@ -293,6 +317,17 @@ export function QueryProviderEmbedded({
       localStorage.setItem("local_key", bytesToHex(result.key));
 
       dbg("Device connected and key saved");
+      
+      // Setup push notifications after device connection
+      try {
+        const pushManager = new PushNotificationManager(signer);
+        const peers = await api.nostrPeerStore.listPeers();
+        await pushManager.setupPushNotifications(peers);
+        dbg('Push notifications setup completed after device connection');
+      } catch (error) {
+        dbg('Push notifications setup failed after device connection:', error);
+        // Don't fail the connection if push setup fails
+      }
     } catch (err) {
       dbg("Device connect error", err);
       setError((err as Error).message);
@@ -325,7 +360,9 @@ export function QueryProviderEmbedded({
 export function useQueryProvider() {
   const context = useContext(QueryContext);
   if (context === undefined) {
-    throw new Error("useQueryProvider must be used within a QueryProviderEmbedded");
+    throw new Error(
+      "useQueryProvider must be used within a QueryProviderEmbedded"
+    );
   }
   return context;
 }

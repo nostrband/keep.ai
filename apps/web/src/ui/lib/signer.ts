@@ -1,4 +1,4 @@
-import { Event, finalizeEvent, UnsignedEvent } from "nostr-tools";
+import { Event, finalizeEvent, getPublicKey, UnsignedEvent } from "nostr-tools";
 import { nip44_v3, NostrSigner } from "@app/sync";
 
 // Simple NostrSigner implementation for serverless shared worker
@@ -7,6 +7,16 @@ export class ServerlessNostrSigner implements NostrSigner {
 
   setKey(key: Uint8Array) {
     this.key = key;
+  }
+
+  pubkey() {
+    if (!this.key) throw new Error("No pubkey");
+    return getPublicKey(this.key);
+  }
+
+  privkey() {
+    if (!this.key) throw new Error("No private key");
+    return this.key;
   }
 
   async signEvent(event: UnsignedEvent): Promise<Event> {
