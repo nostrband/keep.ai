@@ -76,7 +76,7 @@ jobs:
           # attach what we just built for this OS
           files: |
             apps/electron/release/*.AppImage
-            apps/electron/release/*Setup*.exe
+            apps/electron/release/*.exe
             apps/electron/release/*.dmg
           draft: false
           prerelease: true
