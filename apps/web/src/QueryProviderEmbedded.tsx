@@ -17,10 +17,10 @@ import {
 import { createDB } from "./db";
 import { DB_FILE } from "./const";
 import debug from "debug";
-import { ServerlessNostrSigner } from "./ui/lib/signer";
+import { ServerlessNostrSigner } from "./lib/signer";
 import { bytesToHex, hexToBytes } from "nostr-tools/utils";
 import { getPublicKey } from "nostr-tools";
-import { tryBecomeActiveTab } from "./ui/lib/tab-lock";
+import { tryBecomeActiveTab } from "./lib/tab-lock";
 import { PushNotificationManager } from "./lib/PushNotificationManager";
 
 // Serverless mode (nostr-sync with main device)
@@ -203,19 +203,6 @@ export function QueryProviderEmbedded({
       setPeer(peer);
       setTransport(transport);
 
-      // Setup push notifications after successful peer initialization (serverless mode only)
-      if (isServerless && signer && api) {
-        try {
-          const pushManager = new PushNotificationManager(signer);
-          const peers = await api.nostrPeerStore.listPeers();
-          await pushManager.setupPushNotifications(peers);
-          dbg('Push notifications setup completed');
-        } catch (error) {
-          dbg('Push notifications setup failed:', error);
-          // Don't fail the whole initialization if push setup fails
-        }
-      }
-
       // Start logic
       if (!isServerless) {
         await transport.start(peer.getConfig());
@@ -236,6 +223,10 @@ export function QueryProviderEmbedded({
             "NostrTransport started with existing key, pubkey",
             getPublicKey(keyBytes)
           );
+
+          // Can setup push notifications now, don't await to avoid blocking
+          // on it
+          setupPush(signer, api);
         }
 
         // Resume after freeze might need to reconnect to relays
@@ -317,22 +308,29 @@ export function QueryProviderEmbedded({
       localStorage.setItem("local_key", bytesToHex(result.key));
 
       dbg("Device connected and key saved");
-      
-      // Setup push notifications after device connection
-      try {
-        const pushManager = new PushNotificationManager(signer);
-        const peers = await api.nostrPeerStore.listPeers();
-        await pushManager.setupPushNotifications(peers);
-        dbg('Push notifications setup completed after device connection');
-      } catch (error) {
-        dbg('Push notifications setup failed after device connection:', error);
-        // Don't fail the connection if push setup fails
-      }
+
+      // Setup push notifications after device connection,
+      // don't await for it, might take long due to sw init delays
+      setupPush(signer, api);
     } catch (err) {
       dbg("Device connect error", err);
       setError((err as Error).message);
       setDbStatus("disconnected");
       throw err;
+    }
+  };
+
+  const setupPush = async (signer: ServerlessNostrSigner, api: KeepDbApi) => {
+    // Setup push notifications after successful peer initialization (serverless mode only)
+    if (isServerless) {
+      try {
+        const pushManager = new PushNotificationManager(signer);
+        const peers = await api.nostrPeerStore.listPeers();
+        await pushManager.setupPushNotifications(peers);
+        dbg("Push notifications setup completed");
+      } catch (error) {
+        dbg("Push notifications setup failed:", error);
+      }
     }
   };
 

@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 import { API_ENDPOINT } from "./const";
-import { SyncWorker } from "./ui/lib/worker";
+import { SyncWorker } from "./lib/worker";
 
 declare const self: SharedWorkerGlobalScope;
 

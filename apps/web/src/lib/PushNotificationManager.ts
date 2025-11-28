@@ -1,5 +1,5 @@
 import { UnsignedEvent, Event as NostrEvent, finalizeEvent, SimplePool } from 'nostr-tools';
-import { ServerlessNostrSigner } from '../ui/lib/signer';
+import { ServerlessNostrSigner } from './signer';
 import { NostrPeer } from '@app/db';
 import { publish } from '@app/sync';
 import debug from 'debug';

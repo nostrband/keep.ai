@@ -7,12 +7,12 @@ declare const self: ServiceWorkerGlobalScope;
 
 // PWA cache configuration
 const CACHE_NAME = 'keep-ai-v1';
-const urlsToCache = [
-  '/',
-  '/index.html',
-  '/src/main.tsx',
-  '/src/index.css',
-  '/manifest.json'
+const urlsToCache: string[] = [
+  // '/',
+  // '/index.html',
+  // '/src/main.tsx',
+  // '/src/index.css',
+  // '/manifest.json'
 ];
 
 // Installation event - cache resources
@@ -72,8 +72,7 @@ self.addEventListener('fetch', (event: FetchEvent) => {
   );
 });
 
-// Push notification event
-self.addEventListener('push', async (event: PushEvent) => {
+const handlePush = async (event: PushEvent) => {
   console.log('[SW] Push notification received:', event);
   
   if (!event.data) {
@@ -136,7 +135,10 @@ self.addEventListener('push', async (event: PushEvent) => {
   } catch (error) {
     console.error('[SW] Error handling push notification:', error);
   }
-});
+};
+
+// Push notification event
+self.addEventListener('push', (event) => event.waitUntil(handlePush(event)) );
 
 // Notification click event
 self.addEventListener('notificationclick', (event: NotificationEvent) => {

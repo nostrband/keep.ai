@@ -10,7 +10,7 @@ export class ServerlessNostrSigner implements NostrSigner {
   }
 
   pubkey() {
-    if (!this.key) throw new Error("No pubkey");
+    if (!this.key) throw new Error("No key yet");
     return getPublicKey(this.key);
   }
 

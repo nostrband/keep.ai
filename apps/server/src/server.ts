@@ -7,7 +7,13 @@ import {
   getDBPath,
   getUserPath,
 } from "@app/node";
-import { DBInterface, KeepDb, KeepDbApi, NostrPeerStore } from "@app/db";
+import {
+  DBInterface,
+  KeepDb,
+  KeepDbApi,
+  NostrPeerStore,
+  MemoryStore,
+} from "@app/db";
 import { setEnv, getEnv, TaskWorker } from "@app/agent";
 import debug from "debug";
 import path from "path";
@@ -20,8 +26,15 @@ import {
   Peer,
   NostrConnector,
   nip44_v3,
+  publish,
 } from "@app/sync";
-import { UnsignedEvent, Event, getPublicKey, finalizeEvent } from "nostr-tools";
+import {
+  UnsignedEvent,
+  Event,
+  getPublicKey,
+  finalizeEvent,
+  SimplePool,
+} from "nostr-tools";
 import { bytesToHex, hexToBytes } from "nostr-tools/utils";
 
 const debugServer = debug("server:server");
@@ -39,6 +52,10 @@ if (!fs.existsSync(configDir)) {
 if (fs.existsSync(envPath)) {
   dotenv.config({ path: envPath });
 }
+
+// Our hosted push server
+const DEFAULT_PUSH_SERVER_PUBKEY =
+  "e46b5c98fe12661a765ded00ca05866ea0b58bd175454aed703fba2589f6c666";
 
 // Parse NOSTR_RELAYS environment variable
 const getNostrRelays = (): string[] => {
@@ -162,6 +179,116 @@ class KeyStore implements NostrSigner {
   }
 }
 
+// Push notification handler
+async function handlePushNotifications(
+  pool: SimplePool,
+  memoryStore: MemoryStore,
+  peerStore: NostrPeerStore,
+  keyStore: KeyStore,
+  peer: Peer,
+  lastMessageTime: number
+): Promise<number> {
+  try {
+    // Get NOSTR_RELAYS and PUSH_SERVER_PUBKEY from environment
+    const relays = getNostrRelays();
+    const pushServerPubkey =
+      process.env.PUSH_SERVER_PUBKEY || DEFAULT_PUSH_SERVER_PUBKEY;
+
+    if (!pushServerPubkey) {
+      console.warn(
+        "PUSH_SERVER_PUBKEY not configured, skipping push notifications"
+      );
+      return lastMessageTime;
+    }
+
+    // Get messages from threadId='main' with createdAt > lastMessageTime
+    const newMessages = await memoryStore.getMessages({
+      threadId: "main",
+      since: new Date(lastMessageTime).toISOString(),
+    });
+
+    // Only notify about assistant messages
+    const messages = newMessages.filter((m) => m.role === "assistant");
+
+    if (messages.length === 0) {
+      return lastMessageTime;
+    }
+
+    console.log(`Found ${messages.length} new messages to push`);
+
+    // Get all peers where local_id === peer.id
+    const allPeers = await peerStore.listPeers();
+    const relevantPeers = allPeers.filter((p) => p.local_id === peer.id);
+
+    if (relevantPeers.length === 0) {
+      console.log("No relevant peers found for push notifications");
+      return Date.now();
+    }
+
+    // For each message and each peer, send push notification
+    for (const message of messages) {
+      for (const peerRecord of relevantPeers) {
+        try {
+          const senderPubkey = peerRecord.local_pubkey; // sender_pubkey
+          const receiverPubkey = peerRecord.peer_pubkey; // receiver_pubkey
+
+          // Create 24683 event (the actual message payload)
+          const messagePayload: UnsignedEvent = {
+            kind: 24683,
+            created_at: Math.floor(Date.now() / 1000),
+            tags: [],
+            content: await keyStore.encrypt({
+              plaintext: JSON.stringify(message),
+              senderPubkey: senderPubkey,
+              receiverPubkey: receiverPubkey,
+            }),
+            pubkey: senderPubkey,
+          };
+
+          // Sign the 24683 event
+          const signedMessagePayload = await keyStore.signEvent(messagePayload);
+
+          // Create 24682 event (the push notification trigger)
+          const pushEvent: UnsignedEvent = {
+            kind: 24682,
+            created_at: Math.floor(Date.now() / 1000),
+            tags: [["p", pushServerPubkey]],
+            content: await keyStore.encrypt({
+              plaintext: JSON.stringify({
+                receiver_pubkey: receiverPubkey,
+                payload: JSON.stringify(signedMessagePayload),
+              }),
+              senderPubkey: senderPubkey,
+              receiverPubkey: pushServerPubkey,
+            }),
+            pubkey: senderPubkey,
+          };
+
+          // Sign the 24682 event
+          const signedPushEvent = await keyStore.signEvent(pushEvent);
+
+          // Publish to relays
+          await publish(signedPushEvent, pool, relays);
+
+          console.log(
+            `Push notification sent for message ${message.id} to peer ${receiverPubkey}`
+          );
+        } catch (error) {
+          console.error(
+            `Failed to send push notification for peer ${peerRecord.peer_pubkey}:`,
+            error
+          );
+        }
+      }
+    }
+
+    return Date.now();
+  } catch (error) {
+    console.error("Error handling push notifications:", error);
+    return lastMessageTime;
+  }
+}
+
 interface ServerConfig {
   serveStaticFiles?: boolean;
   staticFilesRoot?: string;
@@ -170,10 +297,12 @@ interface ServerConfig {
 }
 
 export async function createServer(config: ServerConfig = {}) {
+  // Track last message time for push notifications
+  let lastMessageTime = Date.now();
   const app = fastify({ logger: true });
 
   await ensureEnv();
-  
+
   const pubkey = await getCurrentUser();
   const userPath = getUserPath(pubkey);
   const dbPath = getDBPath(pubkey);
@@ -187,8 +316,10 @@ export async function createServer(config: ServerConfig = {}) {
   const keepDB = new KeepDb(dbInstance);
   await keepDB.start();
 
-  // For sync over nostr
+  // For sync over nostr & web push
+  const pool = new SimplePool();
   const peerStore = new NostrPeerStore(keepDB);
+  const memoryStore = new MemoryStore(keepDB);
   const keyStore = new KeyStore(path.join(userPath, "keys.db"));
   await keyStore.start();
 
@@ -208,10 +339,26 @@ export async function createServer(config: ServerConfig = {}) {
   const worker = await createReplWorker(keepDB);
 
   // Notify nostr transport if peer set changes
-  peer.on("change", (tables) => {
+  peer.on("change", async (tables) => {
     if (tables.includes("nostr_peers")) nostr.updatePeers();
     if (tables.includes("tasks") || tables.includes("inbox"))
       worker.checkWork();
+
+    // Handle push notifications when messages table changes
+    if (tables.includes("messages")) {
+      try {
+        lastMessageTime = await handlePushNotifications(
+          pool,
+          memoryStore,
+          peerStore,
+          keyStore,
+          peer,
+          lastMessageTime
+        );
+      } catch (error) {
+        console.error("Error in push notification handler:", error);
+      }
+    }
   });
 
   // Start checking timestamped tasks
@@ -243,7 +390,7 @@ export async function createServer(config: ServerConfig = {}) {
   app.post("/api/set_config", async (request, reply) => {
     try {
       const body = request.body as { openrouterApiKey?: string };
-      
+
       if (!body.openrouterApiKey?.trim()) {
         reply.status(400).send({ error: "OpenRouter API key is required" });
         return;
@@ -251,35 +398,39 @@ export async function createServer(config: ServerConfig = {}) {
 
       // Test the API key first
       try {
-        const testResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${body.openrouterApiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            model: 'openai/gpt-oss-120b',
-            messages: [
-              {
-                role: 'user',
-                content: 'ping',
-              },
-            ],
-          }),
-        });
+        const testResponse = await fetch(
+          "https://openrouter.ai/api/v1/chat/completions",
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${body.openrouterApiKey}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              model: "openai/gpt-oss-120b",
+              messages: [
+                {
+                  role: "user",
+                  content: "ping",
+                },
+              ],
+            }),
+          }
+        );
 
         if (!testResponse.ok) {
           const errorData = await testResponse.text();
           reply.status(400).send({
             error: "Invalid OpenRouter API key",
-            details: errorData
+            details: errorData,
           });
           return;
         }
       } catch (testError) {
         reply.status(400).send({
           error: "Failed to validate OpenRouter API key",
-          details: testError instanceof Error ? testError.message : 'Unknown error'
+          details:
+            testError instanceof Error ? testError.message : "Unknown error",
         });
         return;
       }
@@ -290,33 +441,33 @@ export async function createServer(config: ServerConfig = {}) {
       setEnv(newEnv);
 
       // Handle .env file: find OPENROUTER_API_KEY line and replace it, or append if not found
-      let envContent = '';
+      let envContent = "";
       let foundApiKey = false;
-      
+
       if (fs.existsSync(envPath)) {
-        envContent = fs.readFileSync(envPath, 'utf8');
-        const lines = envContent.split('\n');
-        
+        envContent = fs.readFileSync(envPath, "utf8");
+        const lines = envContent.split("\n");
+
         for (let i = 0; i < lines.length; i++) {
-          if (lines[i].startsWith('OPENROUTER_API_KEY=')) {
+          if (lines[i].startsWith("OPENROUTER_API_KEY=")) {
             lines[i] = `OPENROUTER_API_KEY=${body.openrouterApiKey}`;
             foundApiKey = true;
           }
         }
-        
-        envContent = lines.join('\n');
+
+        envContent = lines.join("\n");
       }
-      
+
       // If OPENROUTER_API_KEY wasn't found, append it
       if (!foundApiKey) {
-        if (envContent && !envContent.endsWith('\n')) {
-          envContent += '\n';
+        if (envContent && !envContent.endsWith("\n")) {
+          envContent += "\n";
         }
         envContent += `OPENROUTER_API_KEY=${body.openrouterApiKey}\n`;
       }
 
       // Write updated .env file
-      fs.writeFileSync(envPath, envContent, 'utf8');
+      fs.writeFileSync(envPath, envContent, "utf8");
 
       // Also update the global env used by this server instance
       process.env.OPENROUTER_API_KEY = body.openrouterApiKey;
@@ -393,7 +544,7 @@ export async function createServer(config: ServerConfig = {}) {
   // Conditionally serve static files and SPA fallback
   if (config.serveStaticFiles) {
     const staticRoot = config.staticFilesRoot || path.join(__dirname, "public");
-    
+
     // Serve static files from public directory
     await app.register(require("@fastify/static"), {
       root: staticRoot,
@@ -417,9 +568,10 @@ export async function createServer(config: ServerConfig = {}) {
   return {
     app,
     async listen(options: { port?: number; host?: string } = {}) {
-      const port = options.port || config.port || Number(process.env.PORT || 3000);
+      const port =
+        options.port || config.port || Number(process.env.PORT || 3000);
       const host = options.host || config.host || "0.0.0.0";
-      
+
       await app.listen({ port, host });
       console.log("listening");
       debugServer("Server listening on port", port);
@@ -432,7 +584,6 @@ export async function createServer(config: ServerConfig = {}) {
     async close() {
       await app.close();
       await keyStore.stop();
-    }
+    },
   };
 }
-

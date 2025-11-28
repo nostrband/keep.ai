@@ -11,8 +11,8 @@ import {
 } from "@app/sync";
 import { getPublicKey } from "nostr-tools";
 import { bytesToHex } from "nostr-tools/utils";
-import { createDB } from "../../db";
-import { DB_FILE } from "../../const";
+import { createDB } from "../db";
+import { DB_FILE } from "../const";
 
 const isServerless = import.meta.env.VITE_FLAVOR === "serverless";
 

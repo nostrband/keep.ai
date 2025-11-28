@@ -1,5 +1,5 @@
 import { AssistantUIMessage } from "@app/proto";
-import { notificationSound } from "../ui/lib/notification-sound";
+import { notificationSound } from "./notification-sound";
 import { KeepDbApi } from "@app/db";
 import { notifyTablesChanged } from "../queryClient";
 

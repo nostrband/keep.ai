@@ -48,17 +48,32 @@ export default defineConfig(({ mode }) => {
     build: {
       outDir: `dist/${flavor}`, // <- separate directories
       sourcemap: true,
+      // Service worker stuff
+      ...(isServerless && {
+        rollupOptions: {
+          input: {
+            main: path.resolve(__dirname, "index.html"),
+            sw: path.resolve(__dirname, "src/service-worker.ts"),
+          },
+          output: {
+            entryFileNames: (chunk) => {
+              if (chunk.name === "sw") return "service-worker.js"; // at root
+              return "assets/[name]-[hash].js";
+            },
+          },
+        },
+      }),
       // Use relative paths only for electron builds
       ...(isElectron && {
         rollupOptions: {
           output: {
-            assetFileNames: 'assets/[name]-[hash].[ext]',
-            chunkFileNames: 'assets/[name]-[hash].js',
-            entryFileNames: 'assets/[name]-[hash].js',
-          }
-        }
+            assetFileNames: "assets/[name]-[hash].[ext]",
+            chunkFileNames: "assets/[name]-[hash].js",
+            entryFileNames: "assets/[name]-[hash].js",
+          },
+        },
       }),
     },
-    base: isElectron ? './' : '/', // Use relative base only for electron builds
+    base: isElectron ? "./" : "/", // Use relative base only for electron builds
   };
 });

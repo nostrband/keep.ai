@@ -2,7 +2,7 @@
 
 import { MessagePortLike } from "@app/browser";
 import debug from "debug";
-import { SyncWorker } from "./ui/lib/worker";
+import { SyncWorker } from "./lib/worker";
 import { API_ENDPOINT } from "./const";
 
 debug.enable("*");

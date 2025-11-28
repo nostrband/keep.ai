@@ -53,7 +53,7 @@ if (isServerless && "serviceWorker" in navigator) {
   window.addEventListener("load", async () => {
     try {
       const registration = await navigator.serviceWorker.register(
-        "/src/service-worker.ts",
+        '/service-worker.js',
         {
           type: "module",
         }
