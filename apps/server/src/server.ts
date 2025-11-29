@@ -592,6 +592,32 @@ export async function createServer(config: ServerConfig = {}) {
     }
   });
 
+  // Add /api/id endpoint to return site_id as hex
+  app.get("/api/id", async (request, reply) => {
+    try {
+      const result = await dbInstance.execO<{ site_id: Buffer }>(
+        "SELECT crsql_site_id() as site_id"
+      );
+      
+      if (!result || result.length === 0) {
+        reply.status(500).send({ error: "Failed to get site_id" });
+        return;
+      }
+
+      // Convert binary site_id to hex
+      const siteIdBuffer = result[0].site_id;
+      const siteIdHex = bytesToHex(new Uint8Array(siteIdBuffer));
+      
+      reply.send({ site_id: siteIdHex });
+    } catch (error) {
+      debugServer("Error in /api/id:", error);
+      reply.status(500).send({
+        error: "Failed to get site_id",
+        message: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
   // Conditionally serve static files and SPA fallback
   if (config.serveStaticFiles) {
     const staticRoot = config.staticFilesRoot || path.join(__dirname, "public");
