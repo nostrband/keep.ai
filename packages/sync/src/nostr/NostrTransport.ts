@@ -77,7 +77,7 @@ interface ChangesPayload {
 export class NostrTransport implements Transport {
   public readonly store: NostrPeerStore;
   public readonly signer: NostrSigner;
-  public readonly pool: SimplePool = new SimplePool();
+  public readonly pool: SimplePool;
   public readonly expiryPeriod: number;
   #localPeerId?: string;
   private callbacks?: TransportCallbacks;
@@ -85,18 +85,28 @@ export class NostrTransport implements Transport {
   private sends = new Map<string, PeerSend>();
   private recvs = new Map<string, PeerRecv>();
   #debug?: ReturnType<typeof debug>;
+  private isExternalPool: boolean;
 
   constructor({
     store,
     signer,
+    pool,
     expiryPeriod = 7 * 24 * 3600,
   }: {
     store: NostrPeerStore;
     signer: NostrSigner;
+    pool?: SimplePool;
     expiryPeriod?: number;
   }) {
     this.store = store;
     this.signer = signer;
+    this.pool =
+      pool ||
+      new SimplePool({
+        enablePing: true,
+        enableReconnect: true,
+      });
+    this.isExternalPool = !!pool;
     this.expiryPeriod = expiryPeriod;
   }
 
@@ -197,7 +207,10 @@ export class NostrTransport implements Transport {
   async stop() {
     for (const r of this.recvs.values()) await r.stop();
     for (const s of this.sends.values()) await s.stop();
-    this.pool.destroy();
+    // Only destroy the pool if it's not external
+    if (!this.isExternalPool) {
+      this.pool.destroy();
+    }
   }
 }
 
@@ -225,6 +238,7 @@ class PeerRecv {
   private buffer = new Map<string, RecvMessage>();
   private processBufferPromise?: Promise<void>;
   private debug: ReturnType<typeof debug>;
+  private reconnectTimeout?: ReturnType<typeof setTimeout>;
   private resyncTimer?: ReturnType<typeof setTimeout>;
 
   constructor(parent: NostrTransport, peer: NostrPeer) {
@@ -244,8 +258,16 @@ class PeerRecv {
     // Not started yet
     if (!this.localCursor || !this.sub) return;
 
-    this.sub.close();
+    // Clear scheduled reconnect
+    if (this.reconnectTimeout) clearTimeout(this.reconnectTimeout);
+    this.reconnectTimeout = undefined;
+
+    // Clear current sub
+    const sub = this.sub;
     this.sub = undefined;
+
+    // Close old sub
+    sub.close();
 
     await this.subscribe();
   }
@@ -411,7 +433,17 @@ class PeerRecv {
     // Subscribe for future events
     if (this.recvCursor.recv_changes_timestamp)
       filter.since = this.recvCursor.recv_changes_timestamp;
-    this.sub = this.parent.pool.subscribeMany(this.relays, filter, {
+    const sub = this.parent.pool.subscribeMany(this.relays, filter, {
+      onclose: async (reasons) => {
+        this.debug("Relays closed sub", filter, reasons);
+
+        // Still current sub & not scheduled a reconnect?
+        if (this.sub === sub && !this.reconnectTimeout)
+          this.reconnectTimeout = setTimeout(() => {
+            this.reconnectTimeout = undefined;
+            this.reconnect();
+          }, 5000);
+      },
       onevent: async (e) => {
         await this.handleChangesEvent(e);
 
@@ -419,6 +451,9 @@ class PeerRecv {
         if (!this.processBufferPromise) this.processBuffer();
       },
     });
+
+    // Make it current
+    this.sub = sub;
   }
 
   private async processBuffer() {
@@ -777,6 +812,8 @@ class PeerSend {
   private debug: ReturnType<typeof debug>;
   private pending: PeerChange[] = [];
   private schemaVersion: number = 0;
+  private lastCursorCreatedAt = 0;
+  private reconnectTimeout?: ReturnType<typeof setTimeout>;
   private nextSendTimer?: ReturnType<typeof setTimeout>;
 
   constructor(parent: NostrTransport, peer: NostrPeer) {
@@ -808,41 +845,67 @@ class PeerSend {
     this.nextSendTimer = undefined;
     this.pending.length = 0;
     this.schemaVersion = 0;
+    this.lastCursorCreatedAt = 0;
   }
 
   async reconnect() {
     // Not connected yet
     if (!this.sub) return;
 
-    this.sub.close();
+    // Make sure scheduled reconnect is cancelled
+    if (this.reconnectTimeout) clearTimeout(this.reconnectTimeout);
+    this.reconnectTimeout = undefined;
+
+    // Clear current sub
+    const sub = this.sub;
     this.sub = undefined;
 
-    await this.subscribe();
+    // Close old sub
+    sub.close();
+
+    await this.subscribe(true); // reconnect
   }
 
-  private async subscribe() {
+  private async subscribe(reconnect = false) {
     const filter: Filter = {
       kinds: [KIND_CURSOR],
       authors: [this.peer.peer_pubkey],
     };
 
     // Subscribe for cursor events
-    let last_created_at = 0;
-    this.sub = this.parent.pool.subscribeMany(this.relays, filter, {
+    const sub = this.parent.pool.subscribeMany(this.relays, filter, {
+      onclose: async (reasons) => {
+        this.debug("Relays closed sub", filter, reasons);
+
+        // Still current sub & not scheduled a reconnect?
+        if (this.sub === sub && !this.reconnectTimeout)
+          this.reconnectTimeout = setTimeout(() => {
+            this.reconnectTimeout = undefined;
+            this.reconnect();
+          }, 5000);
+      },
       onevent: async (e) => {
+        this.debug("New cursor event by", this.peer.peer_pubkey, e);
         // ignore old events
-        if (e.created_at < last_created_at) return;
+        if (e.created_at < this.lastCursorCreatedAt) return;
 
         const { valid, restart } = await this.handleCursorEvent(e);
-        if (valid) last_created_at = e.created_at;
+        this.debug("New cursor event by", this.peer.peer_pubkey, {
+          valid,
+          restart,
+        });
+        if (valid) this.lastCursorCreatedAt = e.created_at;
 
         if (restart)
           this.parent.onSync(this.peer.peer_id, this.sendCursor!.send_cursor);
       },
     });
 
-    // Have stored cursor? Launch immediately
-    if (this.sendCursor)
+    // Make this sub current
+    this.sub = sub;
+
+    // Have stored cursor on first start? Launch immediately
+    if (this.sendCursor && !reconnect)
       this.parent.onSync(this.peer.peer_id, this.sendCursor.send_cursor);
   }
 

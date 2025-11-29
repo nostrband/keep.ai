@@ -227,7 +227,7 @@ LIMIT 10;`,
     <div className="min-h-screen bg-gray-50">
       <SharedHeader
         title="Console"
-        subtitle="Execute SELECT queries on the database. Press Ctrl+Enter to execute."
+        subtitle="Execute SELECT queries on the database."
       />
 
       <div className="max-w-7xl mx-auto px-6 py-6">
@@ -252,7 +252,7 @@ LIMIT 10;`,
                   variant="outline"
                   size="sm"
                   onClick={() => insertCommonQuery(item.query)}
-                  className="text-xs"
+                  className="text-xs cursor-pointer"
                 >
                   {item.name}
                 </Button>
@@ -263,7 +263,8 @@ LIMIT 10;`,
           <Button
             onClick={executeQuery}
             disabled={isExecuting || !sqlQuery.trim()}
-            className="w-full sm:w-auto"
+            variant="outline"
+            className="w-full sm:w-auto cursor-pointer"
           >
             {isExecuting ? "Executing..." : "Execute Query (Ctrl+Enter)"}
           </Button>

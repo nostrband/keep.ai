@@ -19,7 +19,7 @@ import { DB_FILE } from "./const";
 import debug from "debug";
 import { ServerlessNostrSigner } from "./lib/signer";
 import { bytesToHex, hexToBytes } from "nostr-tools/utils";
-import { getPublicKey } from "nostr-tools";
+import { getPublicKey, SimplePool } from "nostr-tools";
 import { tryBecomeActiveTab } from "./lib/tab-lock";
 import { PushNotificationManager } from "./lib/PushNotificationManager";
 
@@ -59,6 +59,10 @@ interface QueryProviderProps {
 }
 
 const dbg = debug("QueryProviderEmbedded");
+const pool = new SimplePool({
+  enablePing: true,
+  enableReconnect: true
+});
 
 export function QueryProviderEmbedded({
   children,
@@ -155,6 +159,7 @@ export function QueryProviderEmbedded({
         transport = new NostrTransport({
           store: api.nostrPeerStore,
           signer,
+          pool
         });
       }
 
@@ -324,7 +329,7 @@ export function QueryProviderEmbedded({
     // Setup push notifications after successful peer initialization (serverless mode only)
     if (isServerless) {
       try {
-        const pushManager = new PushNotificationManager(signer);
+        const pushManager = new PushNotificationManager(signer, pool);
         const peers = await api.nostrPeerStore.listPeers();
         await pushManager.setupPushNotifications(peers);
         dbg("Push notifications setup completed");

@@ -12,8 +12,9 @@ export class PushNotificationManager {
   private pushRelays: string[];
   private pool: SimplePool;
 
-  constructor(signer: ServerlessNostrSigner) {
+  constructor(signer: ServerlessNostrSigner, pool: SimplePool) {
     this.signer = signer;
+    this.pool = pool;
     
     // Get environment variables
     this.pushServerPubkey = (import.meta as any).env?.VITE_PUSH_SERVER_PUBKEY || '';
@@ -26,9 +27,6 @@ export class PushNotificationManager {
     if (this.pushRelays.length === 0) {
       throw new Error('VITE_PUSH_RELAYS environment variable is required');
     }
-
-    // Initialize SimplePool for publishing
-    this.pool = new SimplePool();
   }
 
   async setupPushNotifications(peers: NostrPeer[]): Promise<void> {

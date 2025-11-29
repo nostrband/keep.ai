@@ -104,6 +104,7 @@ function QRModal({
 }
 
 export default function DevicesPage() {
+  const isServerless = import.meta.env.VITE_FLAVOR === "serverless";
   const { data: peers = [], isLoading } = useNostrPeers();
   const deletePeerMutation = useDeletePeer();
   const [isConnecting, setIsConnecting] = useState(false);
@@ -211,15 +212,17 @@ export default function DevicesPage() {
       <div className="pt-6 pb-6">
         <div className="max-w-4xl mx-auto px-6">
           {/* Connect device button */}
-          <div className="mb-6 text-center">
-            <Button
-              onClick={handleConnectDevice}
-              disabled={isConnecting}
-              className="bg-blue-600 hover:bg-blue-700 text-white"
-            >
-              {isConnecting ? "Connecting..." : "Connect Device"}
-            </Button>
-          </div>
+          {!isServerless && (
+            <div className="mb-6 text-center">
+              <Button
+                onClick={handleConnectDevice}
+                disabled={isConnecting}
+                className="bg-blue-600 hover:bg-blue-700 text-white"
+              >
+                {isConnecting ? "Connecting..." : "Connect Device"}
+              </Button>
+            </div>
+          )}
 
           {/* Peer list */}
           {isLoading ? (

@@ -45,7 +45,10 @@ interface PushEventContent {
 }
 
 export class PushServer {
-  private pool: SimplePool = new SimplePool();
+  private pool: SimplePool = new SimplePool({
+    enablePing: true,
+    enableReconnect: true
+  });
   private db!: PushDatabase;
   private serverPrivkey: Uint8Array;
   private serverPubkey: string;

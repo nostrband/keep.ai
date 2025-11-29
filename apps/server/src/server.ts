@@ -317,7 +317,10 @@ export async function createServer(config: ServerConfig = {}) {
   await keepDB.start();
 
   // For sync over nostr & web push
-  const pool = new SimplePool();
+  const pool = new SimplePool({
+    enablePing: true,
+    enableReconnect: true
+  });
   const peerStore = new NostrPeerStore(keepDB);
   const memoryStore = new MemoryStore(keepDB);
   const keyStore = new KeyStore(path.join(userPath, "keys.db"));
@@ -328,6 +331,7 @@ export async function createServer(config: ServerConfig = {}) {
   const nostr = new NostrTransport({
     store: peerStore,
     signer: keyStore,
+    pool
   });
 
   const peer = new Peer(dbInstance, [http, nostr]);
