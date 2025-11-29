@@ -116,10 +116,10 @@ export default function DevicesPage() {
   const [expectedPeerPubkey, setExpectedPeerPubkey] = useState<string | null>(null);
   const [isAwaitingPeer, setIsAwaitingPeer] = useState(false);
 
-  // Filter to show only remote peers (where peer_id === localSiteId)
+  // Filter to show only remote peers (where peer_id !== localSiteId)
   const peers = useMemo(() => {
     if (!localSiteId) return [];
-    return allPeers.filter(peer => peer.peer_id === localSiteId);
+    return allPeers.filter(peer => peer.peer_id !== localSiteId);
   }, [allPeers, localSiteId]);
 
   const handleCloseQrModal = useCallback(() => {
