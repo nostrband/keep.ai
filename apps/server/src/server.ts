@@ -195,7 +195,7 @@ async function handlePushNotifications(
       process.env.PUSH_SERVER_PUBKEY || DEFAULT_PUSH_SERVER_PUBKEY;
 
     if (!pushServerPubkey) {
-      console.warn(
+      debugServer(
         "PUSH_SERVER_PUBKEY not configured, skipping push notifications"
       );
       return lastMessageTime;
@@ -214,14 +214,14 @@ async function handlePushNotifications(
       return lastMessageTime;
     }
 
-    console.log(`Found ${messages.length} new messages to push`);
+    debugServer(`Found ${messages.length} new messages to push`);
 
     // Get all peers where local_id === peer.id
     const allPeers = await peerStore.listPeers();
     const relevantPeers = allPeers.filter((p) => p.local_id === peer.id);
 
     if (relevantPeers.length === 0) {
-      console.log("No relevant peers found for push notifications");
+      debugServer("No relevant peers found for push notifications");
       return Date.now();
     }
 
@@ -270,11 +270,11 @@ async function handlePushNotifications(
           // Publish to relays
           await publish(signedPushEvent, pool, relays);
 
-          console.log(
+          debugServer(
             `Push notification sent for message ${message.id} to peer ${receiverPubkey}`
           );
         } catch (error) {
-          console.error(
+          debugServer(
             `Failed to send push notification for peer ${peerRecord.peer_pubkey}:`,
             error
           );
@@ -284,7 +284,7 @@ async function handlePushNotifications(
 
     return Date.now();
   } catch (error) {
-    console.error("Error handling push notifications:", error);
+    debugServer("Error handling push notifications:", error);
     return lastMessageTime;
   }
 }
@@ -360,7 +360,7 @@ export async function createServer(config: ServerConfig = {}) {
           lastMessageTime
         );
       } catch (error) {
-        console.error("Error in push notification handler:", error);
+        debugServer("Error in push notification handler:", error);
       }
     }
   });
@@ -493,7 +493,7 @@ export async function createServer(config: ServerConfig = {}) {
 
       reply.send({ ok: true });
     } catch (error) {
-      console.error("Error in /api/set_config:", error);
+      debugServer("Error in /api/set_config:", error);
       reply.status(500).send({
         error: "Failed to save configuration",
         message: error instanceof Error ? error.message : "Unknown error",
@@ -513,8 +513,37 @@ export async function createServer(config: ServerConfig = {}) {
       // Generate connection string
       const connectionInfo = await connector.generateConnectionString(relays);
 
-      // Device info placeholder
-      const deviceInfo = "test info";
+      // Get OS information using Node.js
+      const getOSInfo = (): string => {
+        const platform = os.platform();
+        const release = os.release();
+        const arch = os.arch();
+        
+        let osName: string;
+        switch (platform) {
+          case 'win32':
+            osName = 'Windows';
+            break;
+          case 'darwin':
+            osName = 'macOS';
+            break;
+          case 'linux':
+            osName = 'Linux';
+            break;
+          case 'freebsd':
+            osName = 'FreeBSD';
+            break;
+          case 'openbsd':
+            osName = 'OpenBSD';
+            break;
+          default:
+            osName = platform;
+        }
+        
+        return `${osName} ${release} (${arch})`;
+      };
+      
+      const deviceInfo = getOSInfo();
 
       // Launch listen() asynchronously - don't wait for it to complete
       (async () => {
@@ -524,7 +553,7 @@ export async function createServer(config: ServerConfig = {}) {
             peer.id,
             deviceInfo
           );
-          console.log("NostrConnector listen completed:", {
+          debugServer("NostrConnector listen completed:", {
             peer_pubkey: result.peer_pubkey,
             peer_id: result.peer_id,
             peer_device_info: result.peer_device_info,
@@ -544,15 +573,18 @@ export async function createServer(config: ServerConfig = {}) {
             local_id: peer.id,
             timestamp: "",
           });
+
+          // Make sure peer is noticed
+          await peer.checkLocalChanges();
         } catch (error) {
-          console.error("NostrConnector listen failed:", error);
+          debugServer("NostrConnector listen failed:", error);
         }
       })();
 
       // Return connection string to client
       reply.send({ str: connectionInfo.str });
     } catch (error) {
-      console.error("Error in /api/connect:", error);
+      debugServer("Error in /api/connect:", error);
       reply.status(500).send({
         error: "Failed to create connection string",
         message: error instanceof Error ? error.message : "Unknown error",
@@ -592,7 +624,6 @@ export async function createServer(config: ServerConfig = {}) {
       const host = options.host || config.host || "0.0.0.0";
 
       await app.listen({ port, host });
-      console.log("listening");
       debugServer("Server listening on port", port);
       debugServer("API available at /api/worker/*");
       if (config.serveStaticFiles) {

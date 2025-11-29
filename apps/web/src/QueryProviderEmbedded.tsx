@@ -18,6 +18,7 @@ import { createDB } from "./db";
 import { DB_FILE } from "./const";
 import debug from "debug";
 import { ServerlessNostrSigner } from "./lib/signer";
+import { getDeviceInfo } from "./lib/browser-info";
 import { bytesToHex, hexToBytes } from "nostr-tools/utils";
 import { getPublicKey, SimplePool } from "nostr-tools";
 import { tryBecomeActiveTab } from "./lib/tab-lock";
@@ -283,7 +284,7 @@ export function QueryProviderEmbedded({
       const result = await connector.connect(
         connectionString,
         peer!.id,
-        "Serverless Device"
+        getDeviceInfo()
       );
 
       dbg("Connected successfully:", {

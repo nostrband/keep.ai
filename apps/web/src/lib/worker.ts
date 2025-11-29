@@ -2,6 +2,7 @@ import { MessagePortLike, WorkerTransport } from "@app/browser";
 import { WorkerEventRouter } from "./worker-event-router";
 import { KeepDb, NostrPeerStore } from "@app/db";
 import { ServerlessNostrSigner } from "./signer";
+import { getDeviceInfo } from "./browser-info";
 import {
   NostrConnector,
   NostrTransport,
@@ -137,7 +138,7 @@ export class SyncWorker {
             const result = await connector.connect(
               connStr,
               peer!.id,
-              "Serverless Device"
+              getDeviceInfo()
             );
 
             console.log("[Worker] Connected successfully:", {

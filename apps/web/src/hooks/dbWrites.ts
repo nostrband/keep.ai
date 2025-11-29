@@ -117,10 +117,15 @@ export function useDeletePeer() {
   const { api } = useDbQuery();
 
   return useMutation({
-    mutationFn: async (peerPubkey: string) => {
+    mutationFn: async (peerPubkey: string | string[]) => {
       if (!api) throw new Error("Nostr peer store not available");
 
-      await api.nostrPeerStore.deletePeer(peerPubkey);
+      const pubkeys = Array.isArray(peerPubkey) ? peerPubkey : [peerPubkey];
+      
+      // Delete all specified peers
+      for (const pubkey of pubkeys) {
+        await api.nostrPeerStore.deletePeer(pubkey);
+      }
     },
     onSuccess: () => {
       // Invalidate to get fresh data from DB

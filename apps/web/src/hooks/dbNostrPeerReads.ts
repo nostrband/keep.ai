@@ -3,6 +3,21 @@ import { useQuery } from "@tanstack/react-query";
 import { qk } from "./queryKeys";
 import { useDbQuery } from "./dbQuery";
 
+export function useLocalSiteId() {
+  const { api } = useDbQuery();
+  return useQuery({
+    queryKey: ["localSiteId"],
+    queryFn: async () => {
+      if (!api) return null;
+      const result = await api.db.db.execO<{ site_id: string }>(
+        "SELECT crsql_site_id() as site_id"
+      );
+      return result?.[0]?.site_id || null;
+    },
+    enabled: !!api,
+  });
+}
+
 export function useNostrPeers() {
   const { api } = useDbQuery();
   return useQuery({

@@ -1,8 +1,8 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useState, useMemo } from "react";
 import QRCode from "qrcode";
 import { Loader2 } from "lucide-react";
 import { parseConnectionString } from "@app/sync";
-import { useNostrPeers } from "../hooks/dbNostrPeerReads";
+import { useNostrPeers, useLocalSiteId } from "../hooks/dbNostrPeerReads";
 import { useDeletePeer } from "../hooks/dbWrites";
 import SharedHeader from "./SharedHeader";
 import { Button, Badge } from "../ui";
@@ -105,7 +105,8 @@ function QRModal({
 
 export default function DevicesPage() {
   const isServerless = import.meta.env.VITE_FLAVOR === "serverless";
-  const { data: peers = [], isLoading } = useNostrPeers();
+  const { data: allPeers = [], isLoading } = useNostrPeers();
+  const { data: localSiteId } = useLocalSiteId();
   const deletePeerMutation = useDeletePeer();
   const [isConnecting, setIsConnecting] = useState(false);
   const [qrModalOpen, setQrModalOpen] = useState(false);
@@ -114,6 +115,12 @@ export default function DevicesPage() {
   const [peerToDelete, setPeerToDelete] = useState<{ pubkey: string; deviceInfo: string } | null>(null);
   const [expectedPeerPubkey, setExpectedPeerPubkey] = useState<string | null>(null);
   const [isAwaitingPeer, setIsAwaitingPeer] = useState(false);
+
+  // Filter to show only remote peers (where peer_id === localSiteId)
+  const peers = useMemo(() => {
+    if (!localSiteId) return [];
+    return allPeers.filter(peer => peer.peer_id === localSiteId);
+  }, [allPeers, localSiteId]);
 
   const handleCloseQrModal = useCallback(() => {
     setQrModalOpen(false);
@@ -173,10 +180,22 @@ export default function DevicesPage() {
   };
 
   const handleConfirmDelete = async () => {
-    if (!peerToDelete) return;
+    if (!peerToDelete || !allPeers) return;
 
     try {
-      await deletePeerMutation.mutateAsync(peerToDelete.pubkey);
+      // Find the matching local peer (where local_pubkey === deleted_peer.peer_pubkey)
+      const remotePeerPubkey = peerToDelete.pubkey;
+      const matchingLocalPeer = allPeers.find(peer =>
+        peer.local_pubkey === remotePeerPubkey
+      );
+
+      // Delete both the remote peer and its matching local peer
+      const peersToDelete = [remotePeerPubkey];
+      if (matchingLocalPeer) {
+        peersToDelete.push(matchingLocalPeer.peer_pubkey);
+      }
+
+      await deletePeerMutation.mutateAsync(peersToDelete);
       setConfirmDeleteOpen(false);
       setPeerToDelete(null);
     } catch (error) {
@@ -195,7 +214,7 @@ export default function DevicesPage() {
       return;
     }
 
-    const hasMatchingPeer = peers.some(
+    const hasMatchingPeer = allPeers.some(
       (peer) => peer.local_pubkey === expectedPeerPubkey
     );
 
