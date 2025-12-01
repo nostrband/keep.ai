@@ -105,6 +105,10 @@ export class InboxStore {
     const args: (string | number)[] = [];
     const conditions: string[] = [];
 
+    // 'expired' items that should be consumed now
+    conditions.push("timestamp <= ?");
+    args.push(new Date().toISOString());
+
     if (options?.source) {
       conditions.push("source = ?");
       args.push(options.source);
@@ -127,7 +131,8 @@ export class InboxStore {
       sql += " WHERE " + conditions.join(" AND ");
     }
 
-    sql += " ORDER BY timestamp DESC";
+    // Older to newer ones
+    sql += " ORDER BY timestamp ASC";
 
     if (options?.limit) {
       sql += " LIMIT ?";
@@ -148,6 +153,17 @@ export class InboxStore {
 
   async deleteInboxItem(id: string): Promise<boolean> {
     await this.db.db.exec("DELETE FROM inbox WHERE id = ?", [id]);
+
+    // Note: cr-sqlite exec doesn't return changes count like better-sqlite3
+    // We'll assume the operation succeeded if no error was thrown
+    return true;
+  }
+
+  async postponeItem(id: string, datetime: string): Promise<boolean> {
+    await this.db.db.exec(
+      `UPDATE inbox SET timestamp = ? WHERE id = ?`,
+      [datetime, id]
+    );
 
     // Note: cr-sqlite exec doesn't return changes count like better-sqlite3
     // We'll assume the operation succeeded if no error was thrown

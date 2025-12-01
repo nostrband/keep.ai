@@ -669,7 +669,7 @@ export class Peer extends EventEmitter<{
       let sql = "SELECT * FROM crsql_changes WHERE 0";
       const args = [];
       for (const [site_id, db_version] of peer.cursor.peers.entries()) {
-        sql += " OR (site_id = ? AND db_version > ?)";
+        sql += " OR (site_id = ? AND db_version >= ?)";
         args.push(hexToBytes(site_id));
         args.push(db_version);
       }

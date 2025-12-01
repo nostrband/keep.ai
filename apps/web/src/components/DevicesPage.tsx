@@ -288,7 +288,7 @@ export default function DevicesPage() {
                               </span>
                             </div>
                             <div>
-                              <span className="font-medium">Public Key:</span>{" "}
+                              <span className="font-medium">Peer pubkey:</span>{" "}
                               <span className="font-mono">
                                 {formatPubkey(peer.peer_pubkey)}
                               </span>
@@ -297,6 +297,12 @@ export default function DevicesPage() {
                               <span className="font-medium">Local ID:</span>{" "}
                               <span className="font-mono">
                                 {formatPubkey(peer.local_id)}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="font-medium">Local pubkey:</span>{" "}
+                              <span className="font-mono">
+                                {formatPubkey(peer.local_pubkey)}
                               </span>
                             </div>
                             {peer.relays && (

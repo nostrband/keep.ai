@@ -46,6 +46,7 @@ export interface EvalContext {
   step: number;
   type: TaskType;
   taskId: string;
+  data?: any;
 }
 
 export class Sandbox {

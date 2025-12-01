@@ -1,5 +1,11 @@
-import { generateId } from "ai";
-import { getModelName, getOpenRouter, initSandbox, ReplAgent } from "./index";
+import { generateId, StepResult } from "ai";
+import {
+  getModelName,
+  getOpenRouter,
+  initSandbox,
+  ReplAgent,
+  Sandbox,
+} from "./index";
 import { AssistantUIMessage } from "@app/proto";
 import debug from "debug";
 import {
@@ -10,11 +16,17 @@ import {
   Task,
   TaskState,
 } from "@app/db";
-import { AgentTask, StepOutput, TaskType } from "./repl-agent-types";
+import {
+  AgentTask,
+  StepOutput,
+  StepReason,
+  TaskType,
+} from "./repl-agent-types";
 import { bytesToHex } from "@noble/ciphers/utils";
 import { randomBytes } from "@noble/ciphers/crypto";
 import { ReplEnv } from "./repl-env";
 import { isValidEnv } from "./env";
+import { Cron } from "croner";
 
 export interface TaskWorkerConfig {
   api: KeepDbApi;
@@ -184,6 +196,21 @@ export class TaskWorker {
     return !!task;
   }
 
+  /**
+   * Task states per type:
+   * - router/replier (isPersistentTask):
+   *  - if no task with state not in ('finished', 'error) - created
+   *  - can't return asks/wait
+   *  - when done state set to 'asks' and timestamp made current
+   * - worker single-shot:
+   *  - started when timestamp < now or if 'wait'/'asks' state and inbox is not empty
+   *  - if returns 'wait' => is asks not empty state = 'asks' else state = 'wait'
+   *  - timestamp set to resumeAt if returns 'wait'
+   * - worker recurring:
+   *  - started by same logic as single-shot
+   *  - same handling of 'wait' return status
+   *  - if returns 'done' then task state set to '' (new task) and timestamp set to cron next run
+   */
   private async processTask(task: Task): Promise<void> {
     this.debug("Process task", task);
 
@@ -194,71 +221,42 @@ export class TaskWorker {
         return;
       }
 
-      // Type check
+      // Type check to cast to TaskType safely
       if (
         task.type !== "worker" &&
         task.type !== "router" &&
         task.type !== "replier"
       ) {
         this.debug("Unsupported task type", task.type);
-        await this.api.taskStore.finishTask(
-          task.id,
-          task.thread_id,
-          "Wrong type",
-          "Unsupported task type"
-        );
-        return;
+        return this.finishTask(task, "Wrong type", "Unsupported task type");
       }
       const taskType: TaskType = task.type;
 
-      // Fill inbox
-      const inboxItems = (
-        await this.api.inboxStore.listInboxItems({
-          target: taskType,
-          handled: false,
-        })
-      ).filter((i) => !i.target_id || i.target_id === task.id);
-
-      const inbox = inboxItems.map((i) => i.content);
+      const { inboxItems, inbox } = await this.getInboxItems(taskType, task.id);
       if (taskType !== "worker" && !inbox.length) {
-        await this.api.taskStore.finishTask(
-          task.id,
-          task.thread_id,
-          "Empty inbox",
-          "Empty inbox"
-        );
-        return;
+        this.debug("Empty task inbox", task.type, task.id);
+        return this.finishTask(task, "Empty inbox", "Empty inbox");
       }
 
-      // Get task state
-      const state: TaskState = (await this.api.taskStore.getState(task.id)) || {
-        id: task.id,
-        goal: "",
-        plan: "",
-        asks: "",
-        notes: "",
-      };
-
-      // New thread for each attempt
-      const threadId = generateId();
+      // =============================
+      // Valid task, can start working
 
       // Set agent status in db
       statusUpdaterInterval = await this.startStatusUpdater(taskType);
 
-      // Sandbox
-      const sandbox = await initSandbox();
+      // New thread for each attempt
+      task.thread_id = generateId();
+      // Placeholder, FIXME add title?
+      await this.ensureThread(task.thread_id, taskType);
 
-      // Init context
-      sandbox.context = {
-        step: 0,
-        taskId: task.id,
-        type: taskType,
-        taskThreadId: threadId,
-      };
+      // Get task state
+      const state = await this.getTaskState(task);
+
+      // Sandbox
+      const sandbox = await this.createSandbox(taskType, task);
 
       // Env
-      const env = new ReplEnv(this.api, taskType, () => sandbox.context!);
-      sandbox.setGlobal(await env.createGlobal());
+      const env = await this.createEnv(taskType, task, sandbox);
 
       // Agent task
       const agentTask: AgentTask = {
@@ -277,38 +275,26 @@ export class TaskWorker {
       const modelName = getModelName();
 
       // Start the run
-      const taskRunId = generateId();
-      const runStartTime = new Date();
-      await this.api.taskStore.createTaskRun({
-        id: taskRunId,
-        task_id: task.id,
-        thread_id: threadId,
-        start_timestamp: runStartTime.toISOString(),
-        type: taskType,
-        model: modelName,
+      const { taskRunId, runStartTime } = await this.createTaskRun(
+        agentTask,
+        task.thread_id,
+        modelName,
         reason,
-        inbox: JSON.stringify(inbox),
-        input_asks: agentTask.state?.asks || "",
-        input_goal: agentTask.state?.goal || "",
-        input_plan: agentTask.state?.plan || "",
-        input_notes: agentTask.state?.notes || "",
-      });
+        inbox
+      );
 
       // Init agent
       const model = getOpenRouter()(modelName);
       const agent = new ReplAgent(model, env, sandbox, agentTask);
 
       try {
-        // Placeholder, FIXME add title?
-        await this.ensureThread(threadId, taskType);
-
-        // Helper 
+        // Helper
         const savedIds = new Set<string>();
         const saveNewMessages = async () => {
-          const newMessages = agent.history.filter(m => !savedIds.has(m.id));
+          const newMessages = agent.history.filter((m) => !savedIds.has(m.id));
           this.debug("Save new messages", newMessages);
-          await this.saveHistory(newMessages, threadId);
-          newMessages.forEach(m => savedIds.add(m.id));
+          await this.saveHistory(newMessages, task.thread_id);
+          newMessages.forEach((m) => savedIds.add(m.id));
         };
 
         // Use task.task as input message to the agent
@@ -336,50 +322,47 @@ export class TaskWorker {
           // Goal is no longer editable
           // if (result.patch.goal !== undefined)
           //   state.goal = result.patch.goal;
-          if (result.patch.plan !== undefined)
-            state.plan = result.patch.plan;
+          if (result.patch.plan !== undefined) state.plan = result.patch.plan;
           if (result.patch.notes !== undefined)
             state.notes = result.patch.notes;
-          if (result.patch.asks !== undefined)
-            state.asks = result.patch.asks;
+          if (result.patch.asks !== undefined) state.asks = result.patch.asks;
           await this.api.taskStore.saveState(state);
         }
 
         // Mark inbox items as finished
         const now = new Date().toISOString();
         for (const item of inboxItems)
-          await this.api.inboxStore.handleInboxItem(item.id, now, threadId);
+          await this.api.inboxStore.handleInboxItem(
+            item.id,
+            now,
+            task.thread_id
+          );
+
+        // Reply for replier & task run info
+        const taskReply = this.formatTaskReply(result);
 
         // Prepare run end
-        const runEndTime = new Date();
-        const taskReply = this.formatTaskReply(result);
-        await this.api.taskStore.finishTaskRun({
-          id: taskRunId,
-          run_sec: Math.floor(
-            (runEndTime.getTime() - runStartTime.getTime()) / 1000
-          ),
-          end_timestamp: runEndTime.toISOString(),
-          steps: result.steps,
-          state: result.kind,
-          output_asks: state.asks,
-          output_goal: state.goal,
-          output_plan: state.plan,
-          output_notes: state.notes,
-          reply: taskReply,
-          input_tokens: agent.usage.inputTokens || 0,
-          cached_tokens: agent.usage.cachedInputTokens || 0,
-          output_tokens:
-            (agent.usage.outputTokens || 0) +
-            (agent.usage.reasoningTokens || 0),
-        });
+        await this.finishTaskRun(
+          taskRunId,
+          runStartTime,
+          result,
+          state,
+          taskReply,
+          agent
+        );
+
+        // Recurring task cancelled?
+        const cancelled = !!sandbox.context?.data?.cancelled;
 
         // Update task in wait status,
         // Router and Replier always end up in 'wait/asks' status
         // to reuse the same task for every run
         const isWait =
-          result.kind === "wait" ||
-          taskType === "replier" ||
-          taskType === "router";
+          !cancelled &&
+          (result.kind === "wait" ||
+            task.cron ||
+            taskType === "replier" ||
+            taskType === "router");
 
         if (isWait) {
           // Need new timestamp?
@@ -390,14 +373,20 @@ export class TaskWorker {
               ? Math.floor(new Date(result.resumeAt).getTime() / 1000)
               : isPersistentTask
               ? Math.floor(Date.now() / 1000) // set to current time
+              : task.cron
+              ? Math.floor(new Cron(task.cron).nextRun()!.getTime() / 1000)
               : task.timestamp;
           const status =
-            result.kind === "wait" && result.resumeAt ? "wait" : "asks";
+            result.kind === "wait" && result.resumeAt
+              ? "wait"
+              : task.cron
+              ? "" // Necessary to get on TODO list next time
+              : "asks";
 
           this.debug(
-            `Updating ${task.type || ""} task ${
-              task.id
-            } timestamp ${timestamp} (resumeAt '${
+            `Updating ${task.type || ""} task ${task.id} cron '${
+              task.cron
+            }' timestamp ${timestamp} (resumeAt '${
               result.kind === "wait" ? result.resumeAt : ""
             }') asks '${result.patch?.asks || ""}' status '${status}'`
           );
@@ -411,51 +400,27 @@ export class TaskWorker {
             thread_id: task.thread_id,
           });
 
-          this.debug(`Task wait:`, {
+          this.debug(`Task '${status}':`, {
             id: task.id,
             timestamp,
-            threadId,
+            threadId: task.thread_id,
             status,
             asks: state?.asks,
+            cron: task.cron,
           });
         } else {
           // Single-shot task finished
-          await this.api.taskStore.finishTask(task.id, threadId, taskReply, "");
+          await this.finishTask(task, taskReply, cancelled ? "Cancelled" : "");
 
           this.debug(`Task done:`, {
             reply: taskReply,
-            threadId,
+            threadId: task.thread_id,
+            cancelled
           });
         }
 
-        // Send reply after all done
-        if (result.reply) {
-          if (taskType === "replier") {
-            await this.sendToUser(result.reply);
-          } else {
-            await this.sendToReplier({
-              taskType: taskType,
-              taskId: taskType === "worker" ? task.id : "",
-              taskRunId,
-              content: result.reply,
-              reasoning: result.reasoning || "",
-            });
-          }
-        }
-
-        // We ran an iteraction and still have asks in state?
-        // Send to replier
-        if (result.kind === "wait" && taskType === "worker") {
-          if (state.asks) {
-            await this.sendToReplier({
-              taskType,
-              taskId: task.id,
-              taskRunId,
-              content: state.asks,
-              reasoning: result.reasoning || "",
-            });
-          }
-        }
+        // Send reply/asks to recipient (replier inbox or user)
+        await this.handleReply(taskType, task, state, result, taskRunId);
       } catch (error) {
         this.debug("Task processing error:", error);
 
@@ -471,7 +436,7 @@ export class TaskWorker {
         );
 
         // Schedule retry for this task
-        await this.retry(task, errorMessage, threadId);
+        await this.retry(task, errorMessage, task.thread_id);
 
         throw error; // Re-throw to be caught by caller
       }
@@ -483,6 +448,182 @@ export class TaskWorker {
       this.debug(`Clear agent status`);
       await this.api.setAgentStatus("");
     }
+  }
+
+  private async handleReply(
+    taskType: TaskType,
+    task: Task,
+    state: TaskState,
+    result: StepOutput,
+    taskRunId: string
+  ) {
+    if (result.kind === "code") throw new Error("Can't handle 'code' reply");
+    // Send reply after all done
+    if (result.reply) {
+      if (taskType === "replier") {
+        await this.sendToUser(result.reply);
+      } else {
+        await this.sendToReplier({
+          taskType,
+          taskRunId,
+          taskId: task.id,
+          content: result.reply,
+          reasoning: result.reasoning || "",
+        });
+      }
+    }
+
+    // We ran an iteraction and still have asks in state?
+    // Send to replier
+    if (result.kind === "wait" && taskType === "worker") {
+      if (state.asks) {
+        await this.sendToReplier({
+          taskType,
+          taskRunId,
+          taskId: task.id,
+          content: state.asks,
+          reasoning: result.reasoning || "",
+        });
+      }
+    }
+  }
+
+  private async createTaskRun(
+    agentTask: AgentTask,
+    threadId: string,
+    modelName: string,
+    reason: StepReason,
+    inbox: string[]
+  ) {
+    const taskRunId = generateId();
+    const runStartTime = new Date();
+    await this.api.taskStore.createTaskRun({
+      id: taskRunId,
+      task_id: agentTask.id,
+      thread_id: threadId,
+      start_timestamp: runStartTime.toISOString(),
+      type: agentTask.type,
+      model: modelName,
+      reason,
+      inbox: JSON.stringify(inbox),
+      input_asks: agentTask.state?.asks || "",
+      input_goal: agentTask.state?.goal || "",
+      input_plan: agentTask.state?.plan || "",
+      input_notes: agentTask.state?.notes || "",
+    });
+    return {
+      taskRunId,
+      runStartTime,
+    };
+  }
+
+  private async finishTaskRun(
+    taskRunId: string,
+    runStartTime: Date,
+    result: StepOutput,
+    state: TaskState,
+    taskReply: string,
+    agent: ReplAgent
+  ) {
+    const runEndTime = new Date();
+    await this.api.taskStore.finishTaskRun({
+      id: taskRunId,
+      run_sec: Math.floor(
+        (runEndTime.getTime() - runStartTime.getTime()) / 1000
+      ),
+      end_timestamp: runEndTime.toISOString(),
+      steps: result.steps,
+      state: result.kind,
+      output_asks: state.asks,
+      output_goal: state.goal,
+      output_plan: state.plan,
+      output_notes: state.notes,
+      reply: taskReply,
+      input_tokens: agent.usage.inputTokens || 0,
+      cached_tokens: agent.usage.cachedInputTokens || 0,
+      output_tokens:
+        (agent.usage.outputTokens || 0) + (agent.usage.reasoningTokens || 0),
+    });
+  }
+
+  private async createEnv(taskType: TaskType, task: Task, sandbox: Sandbox) {
+    const env = new ReplEnv(
+      this.api,
+      taskType,
+      task.cron,
+      () => sandbox.context!
+    );
+    sandbox.setGlobal(await env.createGlobal());
+
+    return env;
+  }
+
+  private async createSandbox(taskType: TaskType, task: Task) {
+    // Sandbox
+    const sandbox = await initSandbox();
+
+    // Init context
+    sandbox.context = {
+      step: 0,
+      taskId: task.id,
+      type: taskType,
+      taskThreadId: task.thread_id,
+    };
+
+    return sandbox;
+  }
+
+  private async getTaskState(task: Task): Promise<TaskState> {
+    return (
+      (await this.api.taskStore.getState(task.id)) || {
+        id: task.id,
+        goal: "",
+        plan: "",
+        asks: "",
+        notes: "",
+      }
+    );
+  }
+
+  private async getInboxItems(
+    taskType: TaskType,
+    taskId: string
+  ): Promise<{
+    inboxItems: InboxItem[];
+    inbox: string[];
+  }> {
+    const inboxItems = (
+      await this.api.inboxStore.listInboxItems({
+        target: taskType,
+        handled: false,
+      })
+    ).filter((i) => !i.target_id || i.target_id === taskId);
+
+    // @ts-ignore
+    const inbox: string[] = inboxItems
+      .map((i) => {
+        try {
+          const message = JSON.parse(i.content);
+          return JSON.stringify({
+            ...message,
+            id: i.id,
+          });
+        } catch {}
+      })
+      .filter(Boolean);
+
+    return {
+      inboxItems,
+      inbox,
+    };
+  }
+
+  private async finishTask(
+    task: Task,
+    reply: string,
+    error: string = ""
+  ): Promise<void> {
+    await this.api.taskStore.finishTask(task.id, task.thread_id, reply, error);
   }
 
   private async startStatusUpdater(type: TaskType) {

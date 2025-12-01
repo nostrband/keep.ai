@@ -14,6 +14,9 @@ import {
   makeGetTaskTool,
   makeListTasksTool,
   makeSendToTaskInboxTool,
+  makeAddTaskRecurringTool,
+  makeCancelThisRecurringTaskTool,
+  makePostponeInboxItemTool,
 } from "./tools";
 import { z, ZodFirstPartyTypeKind as K } from "zod";
 import { EvalContext, EvalGlobal } from "./sandbox/sandbox";
@@ -23,13 +26,22 @@ import debug from "debug";
 export class ReplEnv {
   private api: KeepDbApi;
   private type: TaskType;
+  private cron: string;
   private getContext: () => EvalContext;
   #tools = new Map<string, string>();
   private debug = debug("ReplEnv");
 
-  constructor(api: KeepDbApi, type: TaskType, getContext: () => EvalContext) {
+  constructor(
+    api: KeepDbApi,
+    type: TaskType,
+    cron: string,
+    getContext: () => EvalContext
+  ) {
     this.api = api;
     this.type = type;
+    this.cron = cron;
+    if (type !== "worker" && cron)
+      throw new Error("Only worker tasks can be recurring");
     this.getContext = getContext;
   }
 
@@ -78,7 +90,9 @@ export class ReplEnv {
 
         // Execute the tool with validated input
         try {
-          return await tool.execute(validatedInput);
+          const result = await tool.execute(validatedInput);
+          this.debug("Tool called", { name, input, context: this.getContext(), result });
+          return result;
         } catch (e) {
           const message = `Failed at ${ns}.${name}: ${e}.\nUsage: ${desc}`;
           throw new Error(message);
@@ -178,6 +192,12 @@ export class ReplEnv {
     // Router or Worker
     if (this.type !== "replier") {
       addTool(global, "Tasks", "add", makeAddTaskTool(this.api.taskStore));
+      addTool(
+        global,
+        "Tasks",
+        "addRecurring",
+        makeAddTaskRecurringTool(this.api.taskStore)
+      );
       addTool(global, "Tasks", "get", makeGetTaskTool(this.api.taskStore));
       addTool(global, "Tasks", "list", makeListTasksTool(this.api.taskStore));
       addTool(
@@ -190,17 +210,36 @@ export class ReplEnv {
           this.getContext
         )
       );
+
+      // Only add cancel tool for recurring tasks
+      if (this.cron) {
+        addTool(
+          global,
+          "Tasks",
+          "cancelThisRecurringTask",
+          makeCancelThisRecurringTaskTool(this.api.taskStore, this.getContext)
+        );
+      }
     }
+
+    // Inbox management tools for replier
+    if (this.type === "replier") {
+      addTool(
+        global,
+        "inbox",
+        "postponeInboxItem",
+        makePostponeInboxItemTool(this.api.inboxStore, this.getContext)
+      );
+    }
+
     return global;
   }
 
-  async buildSystem(
-  ): Promise<string> {
+  async buildSystem(): Promise<string> {
     let systemPrompt = "";
     switch (this.type) {
       case "router": {
         systemPrompt = this.routerSystemPrompt();
-        console.log("ROUTER SYSTEM PROMPT: ", systemPrompt);
         break;
       }
       case "worker": {
@@ -212,6 +251,7 @@ export class ReplEnv {
         break;
       }
     }
+    this.debug("system prompt: ", systemPrompt);
 
     return `
 ${systemPrompt}
@@ -249,7 +289,7 @@ ${systemPrompt}
         case "replier":
           job.push(
             ...[
-              "Background tasks have submitted reply drafts. Produce at most ONE user-facing message, or suppress all if inappropriate. ",
+              "Background tasks have submitted reply drafts. Produce at most ONE user-facing message: ",
               "- Check recent conversation and preferences to ensure natural conversation flow.",
               "- Deduplicate near-identical drafts. Merge compatible info.",
               "- If all drafts should be suppressed, leave TASK_REPLY empty.",
@@ -301,7 +341,7 @@ ${systemPrompt}
     const history: string[] = [];
     if (
       // FIXME looks useless
-      false && 
+      false &&
       input.step === 0 &&
       (this.type === "router" || this.type === "replier")
     ) {
@@ -371,6 +411,7 @@ ${systemPrompt}
       `Reason: ${input.reason}`,
       `Now: ${input.now} (Local: ${new Date(input.now).toString()})`,
     ];
+    if (this.cron) stepInfo.push(`Cron: '${this.cron}'`);
 
     const stateInfo: string[] = [];
     if (input.step === 0) {
@@ -658,17 +699,31 @@ ${this.toolsPrompt()}
 - Prefer the newest draft for the same topic; drop older near-duplicates. Exceptions: user explicitly re-asked, source task's purpose/reasoning is to re-send the same info, etc.
 - If all drafts were suppressed, include TASK_REPLY but keep it's content empty.
 
+## Rescheduling
+- If draft arrives at an inappropriate time (late at night, low-priority stuff during high-priority talk, etc), it can be rescheduled
+- use 'postponeInboxItem' tool with inbox item id and new timestamp to schedule the draft for consideration at a later time
+
 ## Restrictions
 - NEVER CHANGE OR JUDGE THE SUBSTANCE of the drafts, don't make decisions, don't answer user queries, don't rewrite/suppress based on what you think should be replied, your jobs are ONLY: simplification, anchoring, deduping.
 - Assistant messages in history have all gone through a complex Router->Worker?->Replier pipeline, don't treat those past interactions as example/empowerment - your capabilities are limited and you have specific job defined above, stick with it.
+
+## Content policy
+- Postpone non-urgent drafts at night (local time)
+
 `;
   }
 
   private workerSystemPrompt() {
     return `
 You are the **Worker** sub-agent in a Router→Worker→Replier pipeline of a personal AI assistant. You are working on a single, clearly defined task created by the Router (on behalf of user). Your responsibility is to move this task toward the goal.
-
-You will be given a task info and the history of the current attempt at processing the task. You have two options:
+${
+  this.cron
+    ? `
+This task is recurring, you are working on the current iteration of the task, after you finish processing this task, next iteration will be scheduled according to the 'cron' instructions.
+`
+    : "\n"
+}
+You will be given a task info (goal, notes, plan, etc) for the current attempt at processing the task. At each step of the conversation, you have two options:
 - generate code for JS sandbox to access tools/scripting - adds a step in this attempt
 - end the current attempt with a reply, question or pause.
 
@@ -710,6 +765,13 @@ You will be given a task info and the history of the current attempt at processi
 ===END===
 - Follow ===TASK_REPLY=== with ===END===
 - No more steps will happen after STEP_KIND=done
+${
+  this.cron
+    ? `- Next iteration will be scheduled according to the 'cron'.
+- If you need to cancel/remove the task, call 'cancelThisRecurringTask' tool before returning 'done'.
+`
+    : ""
+}
 
 #### STEP_KIND=wait
 - Choose STEP_KIND=wait if:
@@ -734,7 +796,7 @@ You will be given a task info and the history of the current attempt at processi
 - On STEP_KIND=wait you can also print ===TASK_PLAN=== and/or ===TASK_NOTES===
 - Treat plan & notes like a task report you'd be asked to produce if you had to hand-over the task to someone else. Info should be up-to-date, should provide all important current context, should help execute the next steps of the task more efficiently.
 - The plan should be used for complex tasks, prefer markdown checkbox list as plan format.
-- For recurring tasks, plan should be per-iteration, with final point being something like 'schedule the next iteration of this task'.
+- For recurring tasks, plan should be per-iteration - the host system will handle rescheduling.
 - Notes should include: important context uncovered during last iteration, good code/tool-use paths, new info generated in the current thread.
 - If you don't print TASK_PLAN/TASK_NOTES at STEP_KIND=wait, those will stay as they were given to you at the start of this thread.
 
@@ -748,6 +810,11 @@ ${this.toolsPrompt()}
 
 ## Other tasks
 - You cannot change your task goal, but you can create other tasks. 
+${
+  this.cron
+    ? "- You can't change 'cron' instructions for this task - create another task for that.\n"
+    : "- You can't make this task recurring - create another task for that.\n"
+}
 - User might request creation of a new task, or provides useful info outside of this task's goal which might make sense to handle in another task.
 - In all those cases where a separate task seems appropriate, you MUST FIRST CHECK if relevant task exists.
 - Use Tasks.* tools to get existing tasks, might be relevant by title/topic/goal or 'asks' property.
@@ -757,7 +824,6 @@ ${this.toolsPrompt()}
 
 ## Task examples
 - Single-shot reminder: check if it's time to remind, if so return TASK_REPLY=<reminder text> and STEP_KIND=done, otherwise return TASK_RESUME_AT and STEP_KIND=wait to schedule the run at proper time
-- Recurring tasks (reminders): check if it's time to execute/remind, if so return TASK_REPLY=<reminder text>, return TASK_RESUME_AT and STEP_KIND=wait to schedule the next run at proper time
 - Need user clarification: return STEP_KIND=wait and TASK_ASKS=<list of questions>, you will be launched again with user's replies in TASK_INBOX
 - Need user clarification with deadline: return STEP_KIND=wait and TASK_ASKS=<list of questions> and TASK_RESUME_AT=<deadline>, you will be launched again with user's message in TASK_INBOX or when deadline occurs
 - Need to figure out user's goal: send some TASK_ASKS, when clarified use tools to create new task with proper goal and end this task with STEP_KIND=done

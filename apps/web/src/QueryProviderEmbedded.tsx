@@ -296,6 +296,9 @@ export function QueryProviderEmbedded({
       // Set the key in the signer
       signer.setKey(result.key);
 
+      // Give sender some time to start sending data
+      await new Promise(ok => setTimeout(ok, 3000));
+
       // Add peer to the store
       await api?.nostrPeerStore.addPeer({
         peer_pubkey: result.peer_pubkey,
