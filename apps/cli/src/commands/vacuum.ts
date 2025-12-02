@@ -91,13 +91,17 @@ async function runVacuumCommand(options: { input?: string; output?: string }): P
       const userTables = filterUserTables(allTables);
       console.log(`📋 Found ${userTables.length} user tables to copy: ${userTables.map(t => t.name).join(', ')}`);
       
+      // Check if crsql_change_history exists and add it to tables to recreate (but not copy data from)
+      const historyTable = allTables.find(t => t.name === 'crsql_change_history');
+      const tablesToRecreate = historyTable ? [...userTables, historyTable] : userTables;
+      
       // Get table schemas and indexes
       console.log('📐 Extracting table schemas and indexes...');
-      const indexes = await getAllIndexes(oldDB, userTables.map(t => t.name));
+      const indexes = await getAllIndexes(oldDB, tablesToRecreate.map(t => t.name));
       
       // Recreate tables in new database
       console.log('🏗️  Creating tables in output database...');
-      await recreateTables(newDB, userTables);
+      await recreateTables(newDB, tablesToRecreate);
       
       // Create indexes in new database
       console.log('🔗 Creating indexes in output database...');
@@ -182,7 +186,8 @@ async function getAllTables(db: DBInterface): Promise<TableInfo[]> {
 function filterUserTables(tables: TableInfo[]): TableInfo[] {
   return tables.filter(table => {
     const name = table.name;
-    // Filter out CRSQLite internal tables
+    // Filter out CRSQLite internal tables including crsql_change_history
+    // (we'll copy it specially later from crsql_changes to avoid copying old site_ids)
     return !name.startsWith('crsql_') && !name.includes('__crsql_');
   });
 }
@@ -259,9 +264,64 @@ async function enableCRSQLiteTracking(db: DBInterface, trackedTables: string[]):
 
 async function copyAllTableData(oldDB: DBInterface, newDB: DBInterface, tableNames: string[]): Promise<void> {
   for (const tableName of tableNames) {
+    // Drop nostr_peers and nostr_peer_cursors!
+    // Otherwise we'll try to sync from them and will re-import all existing changes and
+    // grow the site_id set again.
+    // Also skip history - we have separate process for that below.
+    if (tableName.startsWith('nostr_peer') || tableName === "crsql_change_history") continue;
     console.log(`  📋 Copying data for table: ${tableName}`);
     await copyTableData(oldDB, newDB, tableName);
   }
+  
+  // After copying all regular tables, copy from crsql_changes to crsql_change_history
+  // This ensures only the current site_id is preserved in the history
+  console.log('  📋 Copying crsql_changes to crsql_change_history...');
+  await copyChangesToHistory(oldDB, newDB);
+}
+
+async function copyChangesToHistory(oldDB: DBInterface, newDB: DBInterface): Promise<void> {
+  // Check if crsql_change_history table exists in old database (to know if we should copy)
+  const historyTableExists = await oldDB.execO<{ count: number }>(
+    "SELECT COUNT(*) as count FROM sqlite_master WHERE type='table' AND name='crsql_change_history'"
+  );
+  
+  if (!historyTableExists || historyTableExists[0].count === 0) {
+    console.log('    ℹ️  crsql_change_history table does not exist in source database, skipping');
+    return;
+  }
+  
+  // Count total records in NEW database's crsql_changes to copy
+  const countResult = await newDB.execO<{ total: number }>(
+    'SELECT COUNT(*) as total FROM crsql_changes'
+  );
+  
+  const totalRecords = countResult && countResult.length > 0 ? countResult[0].total : 0;
+  
+  if (totalRecords === 0) {
+    console.log('    ℹ️  No records in new database crsql_changes to copy to history');
+    return;
+  }
+  
+  console.log(`    📊 Found ${totalRecords} records in new database crsql_changes to copy to history`);
+  
+  // Copy in batches of 5000 using INSERT...SELECT (same as database.ts)
+  const batchSize = 5000;
+  const totalBatches = Math.ceil(totalRecords / batchSize);
+  
+  for (let batch = 0; batch < totalBatches; batch++) {
+    const offset = batch * batchSize;
+    
+    await newDB.exec(
+      `INSERT INTO crsql_change_history (\`table\`, pk, cid, val, col_version, db_version, site_id, cl, seq)
+       SELECT \`table\`, pk, cid, val, col_version, db_version, site_id, cl, seq
+       FROM crsql_changes LIMIT ? OFFSET ?`,
+      [batchSize, offset]
+    );
+    
+    console.log(`    📋 Copied batch ${batch + 1}/${totalBatches} to crsql_change_history`);
+  }
+  
+  console.log(`    ✅ Successfully copied ${totalRecords} records from new crsql_changes to crsql_change_history`);
 }
 
 async function copyTableData(oldDB: DBInterface, newDB: DBInterface, tableName: string): Promise<void> {

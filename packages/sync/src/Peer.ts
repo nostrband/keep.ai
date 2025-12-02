@@ -198,8 +198,7 @@ export class Peer extends EventEmitter<{
   private async onReceiveChanges(
     peerId: string,
     msg: PeerMessage,
-    transport: Transport,
-    cb?: (cursor: Cursor) => void
+    transport: Transport
   ): Promise<void> {
     // Apply everything peer sent us
     this.debug(
@@ -230,23 +229,18 @@ export class Peer extends EventEmitter<{
     );
 
     if (newChanges.length) {
-      // Apply to local db
+      // Apply to local db (this now includes writing to crsql_change_history atomically)
       await this.applyChanges(newChanges);
 
       // We ourselves now know these new changes
-      this.cursor = await this.getCurrentCursor();
-      // NOTE: Updating cursor without checking from db
-      // doesn't work: we don't know if some of incoming changes
-      // are discarded due to newer changes in db from other peers,
-      // that would cause our cursor to include non-existent peer id,
-      // which will be broadcasted and will cause
-      // hard-to-predict issues everywhere.
-      // updateCursor(this.cursor, newChanges);
-
+      updateCursor(this.cursor, newChanges);
       this.debug(
         "Updated our cursor on remote changes",
         JSON.stringify(serializeCursor(this.cursor))
       );
+
+      // Write cursor to all_peers table
+      await this.writeCursor();
 
       // Notify clients
       this.emitChanges(newChanges);
@@ -254,26 +248,21 @@ export class Peer extends EventEmitter<{
       // Forward to other peers
       await this.broadcastChanges(newChanges, peerId);
     }
-
-    if (cb) cb(this.cursor);
   }
 
   private async onReceiveEOSE(
     peerId: string,
     msg: PeerMessage,
-    transport: Transport,
-    cb?: (cursor: Cursor) => void
+    transport: Transport
   ): Promise<void> {
     this.debug(`Got EOSE message peer '${peerId}'`);
     this.emit("eose", peerId, transport);
-    if (cb) cb(this.cursor);
   }
 
   private async onReceive(
     transport: Transport,
     peerId: string,
-    msg: PeerMessage,
-    cb?: (cursor: Cursor) => void
+    msg: PeerMessage
   ): Promise<void> {
     const peer = this.peers.get(peerId);
     if (!peer) {
@@ -286,9 +275,9 @@ export class Peer extends EventEmitter<{
     }
     switch (msg.type) {
       case "changes":
-        return await this.onReceiveChanges(peerId, msg, transport, cb);
+        return await this.onReceiveChanges(peerId, msg, transport);
       case "eose":
-        return await this.onReceiveEOSE(peerId, msg, transport, cb);
+        return await this.onReceiveEOSE(peerId, msg, transport);
       default:
         this.debug(`Got unknown message peer '${peerId}' type '${msg.type}'`);
     }
@@ -395,11 +384,17 @@ export class Peer extends EventEmitter<{
     }
 
     try {
-      // Larger batch doesn't improve timing on desktop
+      // Larger batch doesn't improve timing on desktop browser
       const batches = chunk(deserializeChanges(changes), 2000);
-      for (const batch of batches) {
+      const changeBatches = chunk(changes, 2000);
+
+      for (let i = 0; i < batches.length; i++) {
+        const batch = batches[i];
+        const changeBatch = changeBatches[i];
         const start = Date.now();
+
         await this.db.tx(async (tx: DBInterface) => {
+          // Apply changes to crsql_changes
           await tx.execManyArgs(
             `INSERT INTO crsql_changes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             batch.map((change) => [
@@ -415,23 +410,10 @@ export class Peer extends EventEmitter<{
             ])
           );
 
-          // for (const change of batch) {
-          //   await tx.exec(
-          //     `INSERT INTO crsql_changes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          //     [
-          //       change.table,
-          //       change.pk,
-          //       change.cid,
-          //       change.val,
-          //       change.col_version,
-          //       change.db_version,
-          //       change.site_id,
-          //       change.cl,
-          //       change.seq,
-          //     ]
-          //   );
-          // }
+          // Atomically write to crsql_change_history in the same transaction
+          await this.writeChangesToHistory(changeBatch, tx);
         });
+
         this.debug(
           `Applied batch of size ${batch.length} in ${Date.now() - start} ms`
         );
@@ -460,12 +442,13 @@ export class Peer extends EventEmitter<{
       );
       this.#id = bytesToHex(siteId?.[0]?.site_id || new Uint8Array());
       this.#debug = debug("sync:Peer:L" + this.id.substring(0, 4));
-
-      // Initialize cursor using the optimized method
-      this.cursor = await this.getCurrentCursor();
-
       this.debug(`Initialized our peer id to ${this.id}`);
 
+      // Initialize our own cursor
+      this.cursor = await this.readCursor();
+      this.debug(`Initialized our cursor to ${JSON.stringify(this.cursor)}`);
+
+      // Db version
       const schemaVersion = await this.db.execO<{ user_version: number }>(
         "PRAGMA user_version;"
       );
@@ -478,87 +461,140 @@ export class Peer extends EventEmitter<{
   }
 
   /**
-   * Alternative method to get current cursor using __crsql_clock tables
-   * instead of the slow GROUP BY on crsql_changes table.
-   *
-   * It's a replacement of slow naive:
-   * SELECT site_id, MAX(db_version) as db_version FROM crsql_changes GROUP BY site_id
-   *
-   * Had to look at https://github.com/vlcn-io/cr-sqlite/blob/main/core/rs/core/src/changes_vtab_read.rs
-   * and crsqlite internal tables to figure this out.
+   * Get current cursor using our optimized all_peers table.
+   * This is much faster than the original slow query on crsql_changes virtual table.
    */
-  private async getCurrentCursor(): Promise<Cursor> {
+  private async readCursor(): Promise<Cursor> {
     try {
       const start = Date.now();
       const cursor = new Cursor();
 
-      // Step 1: Find all tables whose names end with __crsql_clock
-      const clockTables = await this.db.execO<{ name: string }>(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%__crsql_clock'"
-      );
-
-      if (!clockTables || clockTables.length === 0) {
-        this.debug("No __crsql_clock tables found");
-        return cursor;
-      }
-
-      this.debug(`Found ${clockTables.length} __crsql_clock tables`);
-
-      // Step 2 & 3: For each clock table, get site_id_int and MAX(db_version), build map A
-      const siteIdIntToMaxDbVersion = new Map<number, number>();
-
-      for (const table of clockTables) {
-        const tableName = table.name;
-        const clockData = await this.db.execO<{
-          site_id: number;
-          db_version: number;
-        }>(
-          `SELECT site_id, MAX(db_version) as db_version FROM "${tableName}" GROUP BY site_id`
-        );
-
-        if (clockData) {
-          for (const row of clockData) {
-            const existing = siteIdIntToMaxDbVersion.get(row.site_id) || 0;
-            siteIdIntToMaxDbVersion.set(
-              row.site_id,
-              Math.max(existing, row.db_version)
-            );
-          }
-        }
-      }
-
-      this.debug(
-        `Built site_id_int map with ${siteIdIntToMaxDbVersion.size} entries`
-      );
-
-      // Step 4: Get ordinal -> site_id mapping from crsql_site_id table
-      const ordinalToSiteId = await this.db.execO<{
-        ordinal: number;
+      // Use our all_peers table for fast cursor lookup
+      const cursorData = await this.db.execO<{
         site_id: Uint8Array;
-      }>("SELECT ordinal, site_id FROM crsql_site_id");
+        db_version: number;
+      }>("SELECT site_id, db_version FROM all_peers");
 
-      // Step 5: Convert map A to final map using ordinal mapping
-      if (ordinalToSiteId) {
-        for (const row of ordinalToSiteId) {
-          const maxDbVersion = siteIdIntToMaxDbVersion.get(row.ordinal);
-          if (maxDbVersion !== undefined) {
-            const siteIdHex = bytesToHex(row.site_id);
-            cursor.peers.set(siteIdHex, maxDbVersion);
-          }
+      if (cursorData) {
+        for (const row of cursorData) {
+          const siteIdHex = bytesToHex(row.site_id);
+          cursor.peers.set(siteIdHex, row.db_version);
         }
       }
 
+      // Ensure our own peer is in the cursor, even if no changes yet
       if (!cursor.peers.size) cursor.peers.set(this.id, 0);
 
       this.debug(
-        `getCurrentCursor completed in ${
+        `readCursor completed in ${
           Date.now() - start
         } ms, cursor: ${JSON.stringify(serializeCursor(cursor))}`
       );
 
       return cursor;
     } catch (error) {
-      this.debug("Error in getCurrentCursor:", error);
+      this.debug("Error in readCursor:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Write current cursor state to all_peers table.
+   * This ensures the table is always up-to-date with the complete site_id:db_version map.
+   */
+  private async writeCursor(): Promise<void> {
+    try {
+      const start = Date.now();
+
+      // Convert cursor to array of [site_id_bytes, db_version] for execManyArgs
+      const cursorEntries: [Uint8Array, number][] = [];
+      for (const [siteIdHex, dbVersion] of this.cursor.peers.entries()) {
+        cursorEntries.push([hexToBytes(siteIdHex), dbVersion]);
+      }
+
+      if (cursorEntries.length === 0) return;
+
+      await this.db.tx(async (tx) => {
+        // Clear existing entries and insert current cursor state
+        await tx.exec("DELETE FROM all_peers");
+        await tx.execManyArgs(
+          "INSERT INTO all_peers (site_id, db_version) VALUES (?, ?)",
+          cursorEntries
+        );
+      });
+
+      this.debug(
+        `writeCursor completed in ${Date.now() - start} ms, written ${
+          cursorEntries.length
+        } entries`
+      );
+    } catch (error) {
+      this.debug("Error in writeCursor:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Write changes to crsql_change_history table for fast queries.
+   * This maintains a copy of changes for performance optimization.
+   */
+  private async writeChangesToHistory(
+    changes: PeerChange[],
+    tx?: DBInterface
+  ): Promise<void> {
+    if (changes.length === 0) return;
+
+    try {
+      const start = Date.now();
+
+      // Convert changes to the format needed for crsql_change_history
+      const historyEntries: [
+        string,
+        Uint8Array,
+        string,
+        any,
+        number,
+        number,
+        Uint8Array,
+        number,
+        number
+      ][] = [];
+      for (const change of changes) {
+        historyEntries.push([
+          change.table,
+          hexToBytes(change.pk),
+          change.cid,
+          change.val,
+          change.col_version,
+          change.db_version,
+          hexToBytes(change.site_id),
+          change.cl,
+          change.seq,
+        ]);
+      }
+
+      const exec = async (tx: DBInterface) => {
+        // Use provided transaction for atomic writes
+        await tx.execManyArgs(
+          `INSERT INTO crsql_change_history (\`table\`, pk, cid, val, col_version, db_version, site_id, cl, seq) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          historyEntries
+        );
+      };
+
+      if (tx) {
+        await exec(tx);
+      } else {
+        // Create new transaction if none provided
+        await this.db.tx((tx) => exec(tx));
+      }
+
+      this.debug(
+        `writeChangesToHistory completed in ${Date.now() - start} ms, written ${
+          historyEntries.length
+        } entries`
+      );
+    } catch (error) {
+      this.debug("Error in writeChangesToHistory:", error);
       throw error;
     }
   }
@@ -587,11 +623,17 @@ export class Peer extends EventEmitter<{
           JSON.stringify(serializeCursor(this.cursor))
         );
 
-        // Send to everyone
-        await this.broadcastChanges(changes);
+        // Write new changes to history
+        await this.writeChangesToHistory(changes);
 
-        // Notify clients
+        // Write cursor to all_peers table
+        await this.writeCursor();
+
+        // Notify clients before broadcasting
         this.emitChanges(changes);
+
+        // Send to peers
+        await this.broadcastChanges(changes);
       }
     } catch (error) {
       this.debug("Error broadcasting changes:", error);
@@ -665,22 +707,39 @@ export class Peer extends EventEmitter<{
 
       const changes: PeerChange[] = [];
 
+      // Copy the peer's site_id:db_version map
+      const map = new Map(peer.cursor.peers);
+
+      // Add site_ids peer doesn't know about w/ db_version=0
+      for (const site_id of this.cursor.peers.keys()) {
+        if (!map.has(site_id)) map.set(site_id, 0);
+      }
+
       // Collect changes since known peer cursor
-      let sql = "SELECT * FROM crsql_changes WHERE 0";
+      let sql =
+        "SELECT `table`, pk, cid, val, col_version, db_version, site_id, cl, seq FROM crsql_change_history WHERE ";
       const args = [];
-      for (const [site_id, db_version] of peer.cursor.peers.entries()) {
-        sql += " OR (site_id = ? AND db_version >= ?)";
+      for (const [site_id, db_version] of map.entries()) {
+        if (args.length) sql += " OR ";
+        // db_version >= (or EQUALS) to make sure we deliver full changes per tx
+        // FIXME: look into ensuring tx delivery by organizing change batches properly
+        sql += "(site_id = ? AND db_version > ?)";
         args.push(hexToBytes(site_id));
         args.push(db_version);
       }
 
-      // Collect changes from third-parties that peer didn't know about
-      const excludePeerIds = [...new Set([peer.id, ...peer.cursor.peers.keys()])].map(
-        (site_id) => hexToBytes(site_id)
-      );
-      const bindString = new Array(excludePeerIds.length).fill("?").join(",");
-      sql += ` OR site_id NOT IN (${bindString})`;
-      args.push(...excludePeerIds);
+      // // Collect changes from third-parties that peer didn't know about
+      // const otherPeerIds = [...this.cursor.peers.keys()]
+      //   // from our cursor (all site_ids we know) remove ones the peer knows about
+      //   .filter((s) => s !== peer.id && !peer.cursor.peers.has(s))
+      //   .map((site_id) => hexToBytes(site_id));
+      // if (otherPeerIds.length) {
+      //   const bindString = new Array(otherPeerIds.length).fill("?").join(",");
+      //   sql += ` OR site_id IN (${bindString})`;
+      //   args.push(...otherPeerIds);
+      // }
+
+      this.debug("Collecting changes with crsql_change_history", sql, args);
 
       const dbChanges = await this.db.execO<Change>(sql, args);
 

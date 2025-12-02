@@ -26,13 +26,10 @@ export interface TransportCallbacks {
   ) => Promise<void>;
   // Received msg from remote peer (change or eose),
   // if cb throws transport should reconnect after pause,
-  // supply 'cb' if transport does internal cursor tracking to get the
-  // updated local cursor after changes
   onReceive: (
     transport: Transport,
     peerId: string,
-    msg: PeerMessage,
-    cb?: (cursor: Cursor) => void
+    msg: PeerMessage
   ) => Promise<void>;
   // When remote peer is permanently disconnected, Peer should stop tracking it and
   // sending to it, cb shouldn't throw

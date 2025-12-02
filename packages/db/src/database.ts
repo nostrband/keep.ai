@@ -7,6 +7,8 @@ import { migrateV3 } from "./migrations/v3";
 import { migrateV4 } from "./migrations/v4";
 import { migrateV5 } from "./migrations/v5";
 import { migrateV6 } from "./migrations/v6";
+import { migrateV7 } from "./migrations/v7";
+import { migrateV8 } from "./migrations/v8";
 
 const debugDatabase = debug("db:database");
 
@@ -60,6 +62,8 @@ export class KeepDb implements CRSqliteDB {
       [4, migrateV4],
       [5, migrateV5],
       [6, migrateV6],
+      [7, migrateV7],
+      [8, migrateV8],
     ]);
 
     const readVersion = async () => {
@@ -102,6 +106,36 @@ export class KeepDb implements CRSqliteDB {
           throw new Error(
             `Migration v${version} failed: expected version ${version}, got ${newVersion}`
           );
+        }
+
+        // NOTE: we'll remove this after prototyping
+        // is over and we've figured out the final db structure
+        // and collapsed all migrations
+        if (newVersion === 7) {
+          // Import all records from crsql_changes in batches of 5000
+          // First count total records to know how many batches we need
+          const countResult = await db.execO<{ total: number }>(
+            `SELECT COUNT(*) as total FROM crsql_changes`
+          );
+
+          const totalRecords =
+            countResult && countResult.length > 0 ? countResult[0].total : 0;
+
+          if (totalRecords > 0) {
+            const batchSize = 5000;
+            const totalBatches = Math.ceil(totalRecords / batchSize);
+
+            for (let batch = 0; batch < totalBatches; batch++) {
+              const offset = batch * batchSize;
+
+              await db.exec(
+                `INSERT INTO crsql_change_history (\`table\`, pk, cid, val, col_version, db_version, site_id, cl, seq)
+         SELECT \`table\`, pk, cid, val, col_version, db_version, site_id, cl, seq
+         FROM crsql_changes LIMIT ? OFFSET ?`,
+                [batchSize, offset]
+              );
+            }
+          }
         }
 
         debugDatabase(`Migration v${version} applied successfully`);

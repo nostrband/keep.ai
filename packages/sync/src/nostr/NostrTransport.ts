@@ -125,8 +125,8 @@ export class NostrTransport implements Transport {
     return this.callbacks!.onSync(this, peerId, peerCursor);
   }
 
-  onReceive(peerId: string, msg: PeerMessage, cb?: (cursor: Cursor) => void) {
-    return this.callbacks!.onReceive(this, peerId, msg, cb);
+  onReceive(peerId: string, msg: PeerMessage) {
+    return this.callbacks!.onReceive(this, peerId, msg);
   }
 
   async start(
@@ -591,19 +591,12 @@ class PeerRecv {
 
     try {
       // Notify the Peer
-      const newCursor = await new Promise<Cursor>((ok) =>
-        this.parent.onReceive(this.peer.peer_id, msg.msg, ok)
-      );
+      await this.parent.onReceive(this.peer.peer_id, msg.msg);
 
-      // NOTE: this doesn't work, bcs some of site_id:db_version pairs
-      // from msg might have been discarded by our db, in which
-      // case that site_id might disappear entirely from db,
-      // but we'd keep tracking it in recv_cursor, causing resync on
-      // every restart due to 'old' local cursor (db missing discarded site_id)
-      // updateCursor(this.recvCursor.recv_cursor, msg.msg.data);
+      // Update recv cursor w/ new changes
+      updateCursor(this.recvCursor.recv_cursor, msg.msg.data);
 
-      // Update cursor and last event id
-      this.recvCursor.recv_cursor = newCursor;
+      // Update last event id
       this.recvCursor.recv_changes_event_id = msg.event_id;
       this.recvCursor.recv_changes_timestamp = msg.created_at;
 
