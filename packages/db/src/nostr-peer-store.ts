@@ -62,14 +62,26 @@ export class NostrPeerStore {
     await this.db.db.exec(
       `INSERT OR REPLACE INTO nostr_peers (peer_pubkey, peer_id, local_pubkey, local_id, device_info, timestamp, relays)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [p.peer_pubkey, p.peer_id, p.local_pubkey, p.local_id, p.device_info, p.timestamp, p.relays]
+      [
+        p.peer_pubkey,
+        p.peer_id,
+        p.local_pubkey,
+        p.local_id,
+        p.device_info,
+        p.timestamp,
+        p.relays,
+      ]
     );
   }
 
-  async deletePeer(peerPubkey: string): Promise<void> {
-    await this.db.db.exec("DELETE FROM nostr_peers WHERE peer_pubkey = ?", [
-      peerPubkey,
-    ]);
+  async deletePeers(peerPubkeys: string[]): Promise<void> {
+    if (peerPubkeys.length === 0) return;
+
+    const placeholders = peerPubkeys.map(() => "?").join(",");
+    await this.db.db.exec(
+      `DELETE FROM nostr_peers WHERE peer_pubkey IN (${placeholders})`,
+      peerPubkeys
+    );
   }
 
   async setNostrPeerCursorSend(c: NostrPeerCursorSend): Promise<void> {
@@ -89,7 +101,7 @@ export class NostrPeerStore {
         c.send_cursor,
         c.send_cursor_id,
         c.send_changes_event_id,
-        c.send_changes_timestamp
+        c.send_changes_timestamp,
       ]
     );
   }
@@ -111,7 +123,7 @@ export class NostrPeerStore {
         c.recv_cursor,
         c.recv_cursor_id,
         c.recv_changes_event_id,
-        c.recv_changes_timestamp
+        c.recv_changes_timestamp,
       ]
     );
   }

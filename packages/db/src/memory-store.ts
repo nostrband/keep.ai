@@ -1,5 +1,6 @@
 import { AssistantUIMessage } from "@app/proto";
 import { CRSqliteDB } from "./database";
+import { DBInterface } from "./interfaces";
 import debug from "debug";
 
 const debugMemoryStore = debug("db:memory-store");
@@ -28,8 +29,9 @@ export class MemoryStore {
   }
 
   // Thread operations
-  async saveThread(thread: Thread): Promise<void> {
-    await this.db.db.exec(
+  async saveThread(thread: Thread, tx?: DBInterface): Promise<void> {
+    const db = tx || this.db.db;
+    await db.exec(
       `INSERT OR REPLACE INTO threads (id, title, created_at, updated_at, metadata)
         VALUES (?, ?, ?, ?, ?)`,
       [
@@ -42,8 +44,9 @@ export class MemoryStore {
     );
   }
 
-  async getThread(threadId: string): Promise<Thread | null> {
-    const results = await this.db.db.execO<Record<string, unknown>>(
+  async getThread(threadId: string, tx?: DBInterface): Promise<Thread | null> {
+    const db = tx || this.db.db;
+    const results = await db.execO<Record<string, unknown>>(
       `SELECT * FROM threads WHERE id = ?`,
       [threadId]
     );
@@ -79,7 +82,11 @@ export class MemoryStore {
   }
 
   // Message operations
-  async saveMessages(messages: AssistantUIMessage[]): Promise<void> {
+  async saveMessages(
+    messages: AssistantUIMessage[],
+    tx?: DBInterface
+  ): Promise<void> {
+    const db = tx || this.db.db;
     for (const message of messages) {
       if (!message.metadata) throw new Error("Empty message metadata");
       const metadata = message.metadata;
@@ -89,7 +96,7 @@ export class MemoryStore {
         throw new Error("Message metadata must include threadId");
       }
 
-      await this.db.db.exec(
+      await db.exec(
         `INSERT OR REPLACE INTO messages (id, thread_id, role, content, created_at)
           VALUES (?, ?, ?, ?, ?)`,
         [

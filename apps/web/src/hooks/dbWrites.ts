@@ -122,10 +122,8 @@ export function useDeletePeer() {
 
       const pubkeys = Array.isArray(peerPubkey) ? peerPubkey : [peerPubkey];
       
-      // Delete all specified peers
-      for (const pubkey of pubkeys) {
-        await api.nostrPeerStore.deletePeer(pubkey);
-      }
+      // Delete all specified peers using bulk delete
+      await api.nostrPeerStore.deletePeers(pubkeys);
     },
     onSuccess: () => {
       // Invalidate to get fresh data from DB

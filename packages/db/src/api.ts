@@ -35,64 +35,69 @@ export class KeepDbApi {
     content: string;
     role?: "user" | "assistant"; // default = user
   }): Promise<AssistantUIMessage> {
-    const now = new Date();
-    const role = input.role || "user";
-    const chatId = input.threadId; // Reuse threadId as chatId
-    
-    // First ensure the thread exists
-    const existingThread = await this.memoryStore.getThread(input.threadId);
-    if (!existingThread) {
-      const newThread: Thread = {
-        id: input.threadId,
-        title: input.threadId,
-        created_at: now,
-        updated_at: now,
-        metadata: {},
-      };
-      await this.memoryStore.saveThread(newThread);
-    }
+    return await this.db.db.tx(async (tx) => {
+      const now = new Date();
+      const role = input.role || "user";
+      const chatId = input.threadId; // Reuse threadId as chatId
 
-    // Create the message in AssistantUIMessage format
-    const message: AssistantUIMessage = {
-      id: bytesToHex(randomBytes(16)),
-      role,
-      parts: [{ type: "text", text: input.content }],
-      metadata: {
-        threadId: input.threadId,
-        createdAt: now.toISOString(),
-      },
-    };
-
-    // Save the message
-    await this.memoryStore.saveMessages([message]);
-
-    // Ensure Chat object exists with threadId reused as chatId
-    const existingChat = await this.chatStore.getChat(chatId);
-    if (existingChat) {
-      // Update existing chat
-      await this.chatStore.updateChat({ chatId, updatedAt: now });
-    } else {
-      // Create new chat
-      await this.chatStore.createChat({ chatId, message });
-    }
-
-    // Create task for agent to process the user message
-    if (role === "user") {
-      const inboxItem: InboxItem = {
-        id: message.id,
-        source: "user",
-        source_id: message.id,
-        target: "router",
-        target_id: "",
-        timestamp: new Date().toISOString(),
-        content: JSON.stringify(message),
-        handler_thread_id: "",
-        handler_timestamp: ""
+      // First ensure the thread exists
+      const existingThread = await this.memoryStore.getThread(
+        input.threadId,
+        tx
+      );
+      if (!existingThread) {
+        const newThread: Thread = {
+          id: input.threadId,
+          title: input.threadId,
+          created_at: now,
+          updated_at: now,
+          metadata: {},
+        };
+        await this.memoryStore.saveThread(newThread, tx);
       }
-      await this.inboxStore.saveInbox(inboxItem);
-    }
 
-    return message;
+      // Create the message in AssistantUIMessage format
+      const message: AssistantUIMessage = {
+        id: bytesToHex(randomBytes(16)),
+        role,
+        parts: [{ type: "text", text: input.content }],
+        metadata: {
+          threadId: input.threadId,
+          createdAt: now.toISOString(),
+        },
+      };
+
+      // Save the message
+      await this.memoryStore.saveMessages([message], tx);
+
+      // Ensure Chat object exists with threadId reused as chatId
+      const existingChat = await this.chatStore.getChat(chatId, tx);
+      if (existingChat) {
+        // Update existing chat
+        await this.chatStore.updateChat({ chatId, updatedAt: now }, tx);
+      } else {
+        // Create new chat
+        await this.chatStore.createChat({ chatId, message }, tx);
+      }
+
+      // Create task for agent to process the user message
+      if (role === "user") {
+        const inboxItem: InboxItem = {
+          id: message.id,
+          source: "user",
+          source_id: message.id,
+          target: "router",
+          target_id: "",
+          timestamp: new Date().toISOString(),
+          content: JSON.stringify(message),
+          handler_thread_id: "",
+          handler_timestamp: "",
+        };
+        await this.inboxStore.saveInbox(inboxItem, tx);
+      }
+
+      return message;
+    });
   }
 
   async getNewAssistantMessages(): Promise<AssistantUIMessage[]> {
@@ -103,7 +108,7 @@ export class KeepDbApi {
       WHERE (c.read_at IS NULL OR m.created_at > c.read_at) AND m.role = 'assistant'
       ORDER BY m.created_at
     `;
-    
+
     const result = await this.db.db.execO<Record<string, unknown>>(sql);
     if (!result) return [];
 
@@ -135,21 +140,23 @@ export class KeepDbApi {
     const sql = `
       SELECT value, timestamp FROM agent_state WHERE key = 'status'
     `;
-    const result = await this.db.db.execO<{ value: string; timestamp: string }>(sql);
-    
+    const result = await this.db.db.execO<{ value: string; timestamp: string }>(
+      sql
+    );
+
     if (!result || result.length === 0) {
-      return '';
+      return "";
     }
-    
+
     const row = result[0];
     const timestampMs = new Date(row.timestamp).getTime();
     const nowMs = Date.now();
-    
+
     // Check if timestamp is older than MAX_STATUS_TTL (1 minute)
     if (nowMs - timestampMs > MAX_STATUS_TTL) {
-      return '';
+      return "";
     }
-    
+
     return row.value;
   }
 }

@@ -1,5 +1,6 @@
 import { generateId } from "ai";
 import { CRSqliteDB } from "./database";
+import { DBInterface } from "./interfaces";
 import { AssistantUIMessage } from "@app/proto";
 import debug from "debug";
 
@@ -20,10 +21,13 @@ export class ChatStore {
   }
 
   // Save chat info when messages are sent (creates/updates chat entry)
-  async createChat(opts: {
-    chatId: string;
-    message: AssistantUIMessage;
-  }): Promise<void> {
+  async createChat(
+    opts: {
+      chatId: string;
+      message: AssistantUIMessage;
+    },
+    tx?: DBInterface
+  ): Promise<void> {
     const { chatId, message: firstMessage } = opts;
 
     if (!firstMessage) return;
@@ -35,7 +39,8 @@ export class ChatStore {
 
     // Create new chat with first message info
     const now = new Date().toISOString();
-    await this.db.db.exec(
+    const db = tx || this.db.db;
+    await db.exec(
       `INSERT INTO chats (id, first_message_content, first_message_time, created_at, updated_at, read_at)
           VALUES (?, ?, ?, ?, ?, ?)`,
       [chatId, firstMessageContent, now, now, now]
@@ -43,11 +48,15 @@ export class ChatStore {
   }
 
   // Update chat info when new messages are sent
-  async updateChat(opts: { chatId: string; updatedAt: Date }): Promise<void> {
+  async updateChat(
+    opts: { chatId: string; updatedAt: Date },
+    tx?: DBInterface
+  ): Promise<void> {
     const { chatId, updatedAt } = opts;
 
     // Update existing chat
-    await this.db.db.exec(
+    const db = tx || this.db.db;
+    await db.exec(
       `UPDATE chats
           SET updated_at = ?
           WHERE id = ?`,
@@ -74,7 +83,10 @@ export class ChatStore {
   }
 
   // Get a specific chat by ID
-  async getChat(chatId: string): Promise<{
+  async getChat(
+    chatId: string,
+    tx?: DBInterface
+  ): Promise<{
     id: string;
     first_message_content: string | null;
     first_message_time: string | null;
@@ -82,7 +94,8 @@ export class ChatStore {
     updated_at: string;
     read_at: string | null;
   } | null> {
-    const results = await this.db.db.execO<Record<string, unknown>>(
+    const db = tx || this.db.db;
+    const results = await db.execO<Record<string, unknown>>(
       `SELECT id, first_message_content, first_message_time, created_at, updated_at, read_at
        FROM chats
        WHERE id = ?`,
@@ -106,10 +119,10 @@ export class ChatStore {
   async readChat(chatId: string): Promise<void> {
     const now = new Date().toISOString();
 
-    await this.db.db.exec(
-      `UPDATE chats SET read_at = ? WHERE id = ?`,
-      [now, chatId]
-    );
+    await this.db.db.exec(`UPDATE chats SET read_at = ? WHERE id = ?`, [
+      now,
+      chatId,
+    ]);
   }
 
   // Get all chats for sidebar - now reads directly from chats table

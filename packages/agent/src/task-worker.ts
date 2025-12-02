@@ -460,7 +460,7 @@ export class TaskWorker {
     if (result.kind === "code") throw new Error("Can't handle 'code' reply");
     // Send reply after all done
     if (result.reply) {
-      if (taskType === "replier") {
+      if (taskType === "replier" || taskType === "router") {
         await this.sendToUser(result.reply);
       } else {
         await this.sendToReplier({

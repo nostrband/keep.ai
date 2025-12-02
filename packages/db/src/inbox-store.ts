@@ -1,4 +1,5 @@
 import { CRSqliteDB } from "./database";
+import { DBInterface } from "./interfaces";
 
 export type InboxItemSource = "user" | "router" | "worker";
 export type InboxItemTarget = "router" | "worker" | "replier";
@@ -48,8 +49,9 @@ export class InboxStore {
     this.db = db;
   }
 
-  async saveInbox(item: InboxItem): Promise<void> {
-    await this.db.db.exec(
+  async saveInbox(item: InboxItem, tx?: DBInterface): Promise<void> {
+    const db = tx || this.db.db;
+    await db.exec(
       `INSERT OR REPLACE INTO inbox (id, source, source_id, target, target_id, content, timestamp, handler_timestamp, handler_thread_id)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
@@ -160,10 +162,10 @@ export class InboxStore {
   }
 
   async postponeItem(id: string, datetime: string): Promise<boolean> {
-    await this.db.db.exec(
-      `UPDATE inbox SET timestamp = ? WHERE id = ?`,
-      [datetime, id]
-    );
+    await this.db.db.exec(`UPDATE inbox SET timestamp = ? WHERE id = ?`, [
+      datetime,
+      id,
+    ]);
 
     // Note: cr-sqlite exec doesn't return changes count like better-sqlite3
     // We'll assume the operation succeeded if no error was thrown
