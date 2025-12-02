@@ -3,6 +3,8 @@ import { QueryClient } from "@tanstack/react-query";
 import { messageNotifications } from "./lib/MessageNotifications";
 import type { KeepDbApi } from "@app/db";
 
+const isServerless = (import.meta as any).env?.VITE_FLAVOR === "serverless";
+
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -38,7 +40,7 @@ export function notifyTablesChanged(tables: string[], isLocalChange: boolean, ap
     onLocalChangesCallback();
   }
 
-  if (!isLocalChange && globalThis === window) {
+  if (!isServerless && !isLocalChange && globalThis === window) {
     // Check for new messages and show notifications
     messageNotifications.checkNewMessages(api).catch((error) => {
       console.debug("Message notifications failed:", error);
