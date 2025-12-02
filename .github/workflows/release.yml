@@ -41,7 +41,10 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Build web SPA & deps
+      - name: Build deps
+        run: npm exec turbo run build -- --filter=@app/browser --filter=@app/agent
+
+      - name: Build electron SPA 
         run: npm exec turbo run build:electron -- --filter=@app/web
 
       - name: Build server
