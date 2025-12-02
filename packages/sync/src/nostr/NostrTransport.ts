@@ -1007,6 +1007,11 @@ class PeerSend {
   }
 
   private async publishPending() {
+
+    // NOTE: very important! We assume ordered delivery everywhere,
+    // order by db_version asc to make sure we're doing it properly
+    const ordered = this.pending.sort((a, b) => a.db_version - b.db_version);
+
     // Split all changes into messages of ~20kb size
     let batches: PeerMessage[] = [];
     let batch: PeerMessage | undefined;
@@ -1067,7 +1072,8 @@ class PeerSend {
           batches.length
         );
 
-        // Put msg and remaining batches back to pending
+        // Put msg and remaining batches back to pending,
+        // note that the db_version asc ordering is broken after these pushes
         this.pending.push(...msg.data);
         this.pending.push(...batches.map((b) => b.data).flat());
 
