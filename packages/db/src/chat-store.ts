@@ -157,4 +157,80 @@ export class ChatStore {
       read_at: row.read_at as string | null,
     }));
   }
+
+  // Chat Events methods - similar to memory-store getMessages/saveMessages
+  async getChatMessages({
+    chatId,
+    limit = 50,
+    since,
+  }: {
+    chatId: string;
+    limit?: number;
+    since?: string;
+  }): Promise<AssistantUIMessage[]> {
+    let sql = `SELECT * FROM chat_events WHERE chat_id = ? AND type = 'message'`;
+    const args: (string | number)[] = [chatId];
+
+    if (since) {
+      sql += ` AND timestamp > ?`;
+      args.push(since);
+    }
+
+    sql += ` ORDER BY timestamp DESC`;
+
+    if (limit) {
+      sql += ` LIMIT ?`;
+      args.push(limit);
+    }
+
+    const results = await this.db.db.execO<Record<string, unknown>>(sql, args);
+
+    if (!results) return [];
+
+    return results
+      .filter((row) => !!row.content)
+      .map((row) => {
+        // Parse the full UIMessage from content field
+        try {
+          return JSON.parse(row.content as string) as AssistantUIMessage;
+        } catch (e) {
+          debugChatStore("Bad message in chat_events db", row, e);
+          return undefined;
+        }
+      })
+      .filter((m) => !!m)
+      .filter((m) => !!m.role)
+      .sort((a, b) =>
+        // re-sort ASC
+        a.metadata!.createdAt! < b.metadata!.createdAt!
+          ? -1
+          : a.metadata!.createdAt! > b.metadata!.createdAt!
+          ? 1
+          : 0
+      );
+  }
+
+  async saveChatMessages(
+    chatId: string,
+    messages: AssistantUIMessage[],
+    tx?: DBInterface
+  ): Promise<void> {
+    const db = tx || this.db.db;
+    for (const message of messages) {
+      if (!message.metadata) throw new Error("Empty message metadata");
+      const metadata = message.metadata;
+
+      await db.exec(
+        `INSERT OR REPLACE INTO chat_events (id, chat_id, type, timestamp, content)
+          VALUES (?, ?, ?, ?, ?)`,
+        [
+          message.id,
+          chatId,
+          'message',
+          metadata.createdAt || new Date().toISOString(),
+          JSON.stringify(message),
+        ]
+      );
+    }
+  }
 }

@@ -67,8 +67,9 @@ export class KeepDbApi {
         },
       };
 
-      // Save the message
+      // Save the message to both tables
       await this.memoryStore.saveMessages([message], tx);
+      await this.chatStore.saveChatMessages(chatId, [message], tx);
 
       // Ensure Chat object exists with threadId reused as chatId
       const existingChat = await this.chatStore.getChat(chatId, tx);

@@ -781,22 +781,27 @@ ${result.reply || ""}
 
   private async sendToUser(reply: string) {
     this.debug("Save user reply", reply);
-    await this.api.memoryStore.saveMessages([
-      {
-        id: generateId(),
-        role: "assistant",
-        metadata: {
-          createdAt: new Date().toISOString(),
-          // FIXME not good!
-          threadId: "main",
-        },
-        parts: [
-          {
-            type: "text",
-            text: reply,
-          },
-        ],
+    
+    const message = {
+      id: generateId(),
+      role: "assistant" as const,
+      metadata: {
+        createdAt: new Date().toISOString(),
+        // FIXME not good!
+        threadId: "main",
       },
-    ]);
+      parts: [
+        {
+          type: "text" as const,
+          text: reply,
+        },
+      ],
+    };
+
+    // Save to both tables in one transaction
+    await this.api.db.db.tx(async (tx) => {
+      await this.api.memoryStore.saveMessages([message], tx);
+      await this.api.chatStore.saveChatMessages("main", [message], tx);
+    });
   }
 }

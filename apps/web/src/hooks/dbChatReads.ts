@@ -9,12 +9,12 @@ export function useChatMessages(chatId: string) {
     queryKey: qk.chatMessages(chatId),
     queryFn: async () => {
       if (!api) return [];
-      // Since chatId === threadId, we can use the same getMessages method
-      const messages = await api.memoryStore.getMessages({ threadId: chatId });
+      // Use the new getChatMessages method from chatStore to read from chat_events table
+      const messages = await api.chatStore.getChatMessages({ chatId });
       // Return AssistantUIMessage directly without conversion
       return messages;
     },
-    meta: { tables: ["messages"] },
+    meta: { tables: ["chat_events"] },
     enabled: !!api && !!chatId,
   });
 }

@@ -13,6 +13,7 @@ import {
   KeepDbApi,
   NostrPeerStore,
   MemoryStore,
+  ChatStore,
 } from "@app/db";
 import { setEnv, getEnv, TaskWorker, Env, DEFAULT_AGENT_MODEL } from "@app/agent";
 import debug from "debug";
@@ -182,7 +183,7 @@ class KeyStore implements NostrSigner {
 // Push notification handler
 async function handlePushNotifications(
   pool: SimplePool,
-  memoryStore: MemoryStore,
+  chatStore: ChatStore,
   peerStore: NostrPeerStore,
   keyStore: KeyStore,
   peer: Peer,
@@ -202,8 +203,8 @@ async function handlePushNotifications(
     }
 
     // Get messages from threadId='main' with createdAt > lastMessageTime
-    const newMessages = await memoryStore.getMessages({
-      threadId: "main",
+    const newMessages = await chatStore.getChatMessages({
+      chatId: "main",
       since: new Date(lastMessageTime).toISOString(),
     });
 
@@ -322,7 +323,7 @@ export async function createServer(config: ServerConfig = {}) {
     enableReconnect: true
   });
   const peerStore = new NostrPeerStore(keepDB);
-  const memoryStore = new MemoryStore(keepDB);
+  const chatStore = new ChatStore(keepDB);
   const keyStore = new KeyStore(path.join(userPath, "keys.db"));
   await keyStore.start();
 
@@ -353,7 +354,7 @@ export async function createServer(config: ServerConfig = {}) {
       try {
         lastMessageTime = await handlePushNotifications(
           pool,
-          memoryStore,
+          chatStore,
           peerStore,
           keyStore,
           peer,

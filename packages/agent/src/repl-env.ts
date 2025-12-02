@@ -184,7 +184,7 @@ export class ReplEnv {
       global,
       "Memory",
       "listMessages",
-      makeListMessagesTool(this.api.memoryStore)
+      makeListMessagesTool(this.api.chatStore)
     );
 
     // Tasks
@@ -346,6 +346,7 @@ ${systemPrompt}
       (this.type === "router" || this.type === "replier")
     ) {
       const COUNT = 3;
+      // FIXME use chatStore.getChatMessages
       const messages = await this.api.memoryStore.getMessages({
         threadId: "main",
         limit: 10,

@@ -1,16 +1,16 @@
 import { z } from "zod";
-import { MemoryStore } from "@app/db";
+import { ChatStore } from "@app/db";
 
-export function makeListMessagesTool(memoryStore: MemoryStore) {
+export function makeListMessagesTool(chatStore: ChatStore) {
   return {
     execute: async (opts?: { limit: number }) => {
-      return await memoryStore.getMessages({
+      return await chatStore.getChatMessages({
         // default limit
         limit: 3,
         // copy other options
         ...opts,
         // override thread
-        threadId: "main",
+        chatId: "main",
       });
     },
     description:

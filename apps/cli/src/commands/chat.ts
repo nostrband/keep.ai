@@ -49,8 +49,8 @@ async function runChatCommand(): Promise<void> {
     // Get and display 5 latest messages from 'main' chat
     let lastMessageTimestamp: string | undefined;
     try {
-      const messages = await api.memoryStore.getMessages({
-        threadId: 'main',
+      const messages = await api.chatStore.getChatMessages({
+        chatId: 'main',
         limit: 5
       });
       
