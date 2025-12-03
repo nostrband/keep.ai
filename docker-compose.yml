@@ -1,0 +1,19 @@
+# Build and run: docker-compose up --build
+services:
+  keep-ai:
+    image: nostrband/keep.ai:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "${PORT:-8080}:8080"
+    environment:
+      - PORT=${PORT:-8080}
+      - DEBUG=${DEBUG:-}
+    volumes:
+      - keep-ai-data:/root/.keep.ai
+    restart: unless-stopped
+
+volumes:
+  keep-ai-data:
+    driver: local

@@ -290,6 +290,81 @@ async function handlePushNotifications(
   }
 }
 
+// Test OpenRouter API key
+async function testOpenRouterKey(apiKey: string, model: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const testResponse = await fetch(
+      "https://openrouter.ai/api/v1/chat/completions",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: model || DEFAULT_AGENT_MODEL,
+          messages: [
+            {
+              role: "user",
+              content: "ping",
+            },
+          ],
+        }),
+      }
+    );
+
+    if (!testResponse.ok) {
+      const errorData = await testResponse.text();
+      return {
+        success: false,
+        error: `Invalid OpenRouter API key: ${errorData}`,
+      };
+    }
+
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: `Failed to validate OpenRouter API key: ${error instanceof Error ? error.message : 'Unknown error'}`,
+    };
+  }
+}
+
+// Test Exa.ai API key
+async function testExaKey(apiKey: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const testResponse = await fetch(
+      "https://api.exa.ai/contents",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": apiKey,
+        },
+        body: JSON.stringify({
+          ids: ["tesla.com"],
+          text: true,
+        }),
+      }
+    );
+
+    if (!testResponse.ok) {
+      const errorData = await testResponse.text();
+      return {
+        success: false,
+        error: `Invalid Exa.ai API key: ${errorData}`,
+      };
+    }
+
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: `Failed to validate Exa.ai API key: ${error instanceof Error ? error.message : 'Unknown error'}`,
+    };
+  }
+}
+
 interface ServerConfig {
   serveStaticFiles?: boolean;
   staticFilesRoot?: string;
@@ -406,43 +481,28 @@ export async function createServer(config: ServerConfig = {}) {
         return;
       }
 
-      // Test the API key first
-      try {
-        const testResponse = await fetch(
-          "https://openrouter.ai/api/v1/chat/completions",
-          {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${body.OPENROUTER_API_KEY}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              model: body.AGENT_MODEL || DEFAULT_AGENT_MODEL,
-              messages: [
-                {
-                  role: "user",
-                  content: "ping",
-                },
-              ],
-            }),
-          }
-        );
+      // Test the OpenRouter API key first
+      const openRouterTest = await testOpenRouterKey(
+        body.OPENROUTER_API_KEY,
+        body.AGENT_MODEL || DEFAULT_AGENT_MODEL
+      );
 
-        if (!testResponse.ok) {
-          const errorData = await testResponse.text();
+      if (!openRouterTest.success) {
+        reply.status(400).send({
+          error: openRouterTest.error || "Failed to validate OpenRouter API key",
+        });
+        return;
+      }
+
+      // Test Exa.ai API key if provided
+      if (body.EXA_API_KEY && body.EXA_API_KEY.trim()) {
+        const exaTest = await testExaKey(body.EXA_API_KEY);
+        if (!exaTest.success) {
           reply.status(400).send({
-            error: "Invalid OpenRouter API key",
-            details: errorData,
+            error: exaTest.error || "Failed to validate Exa.ai API key",
           });
           return;
         }
-      } catch (testError) {
-        reply.status(400).send({
-          error: "Failed to validate OpenRouter API key",
-          details:
-            testError instanceof Error ? testError.message : "Unknown error",
-        });
-        return;
       }
 
       // Copy the current env
@@ -455,7 +515,7 @@ export async function createServer(config: ServerConfig = {}) {
       }
 
       // Helper
-      const updateVar = (name: "OPENROUTER_API_KEY" | "AGENT_MODEL" | "LANG") => {
+      const updateVar = (name: "OPENROUTER_API_KEY" | "AGENT_MODEL" | "LANG" | "EXA_API_KEY") => {
         if (body[name] === undefined) return;
 
         // Set in ram
@@ -486,6 +546,7 @@ export async function createServer(config: ServerConfig = {}) {
       updateVar("OPENROUTER_API_KEY");
       updateVar("AGENT_MODEL");
       updateVar("LANG");
+      updateVar("EXA_API_KEY");
 
       // Set globally
       setEnv(newEnv);

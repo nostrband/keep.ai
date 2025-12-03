@@ -51,6 +51,7 @@ interface ConfigData {
     OPENROUTER_API_KEY?: string;
     AGENT_MODEL?: string;
     LANG?: string;
+    EXA_API_KEY?: string;
   };
 }
 
@@ -67,6 +68,7 @@ export default function SettingsPage() {
     OPENROUTER_API_KEY: "",
     AGENT_MODEL: "",
     LANG: "en",
+    EXA_API_KEY: "",
   });
 
   // Load current config
@@ -80,12 +82,12 @@ export default function SettingsPage() {
         const data: ConfigData = await response.json();
         setConfig(data);
 
-        // Set form data with current values, mask the API key
-        const apiKey = data.env.OPENROUTER_API_KEY || "";
+        // Set form data with current values
         setFormData({
-          OPENROUTER_API_KEY: apiKey, // ? "••••••••••••••••••••" : "",
+          OPENROUTER_API_KEY: data.env.OPENROUTER_API_KEY || "",
           AGENT_MODEL: data.env.AGENT_MODEL || "anthropic/claude-sonnet-4", //DEFAULT_AGENT_MODEL,
           LANG: data.env.LANG || getBrowserLanguage(),
+          EXA_API_KEY: data.env.EXA_API_KEY || "",
         });
       } catch (err) {
         setError(
@@ -170,12 +172,10 @@ export default function SettingsPage() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          OPENROUTER_API_KEY:
-            formData.OPENROUTER_API_KEY === "••••••••••••••••••••"
-              ? config?.env.OPENROUTER_API_KEY
-              : formData.OPENROUTER_API_KEY,
+          OPENROUTER_API_KEY: formData.OPENROUTER_API_KEY,
           AGENT_MODEL: formData.AGENT_MODEL,
           LANG: formData.LANG,
+          EXA_API_KEY: formData.EXA_API_KEY,
         }),
       });
 
@@ -190,13 +190,13 @@ export default function SettingsPage() {
       if (configResponse.ok) {
         const updatedConfig: ConfigData = await configResponse.json();
         setConfig(updatedConfig);
-        // Update form to show masked API key again
-        const apiKey = updatedConfig.env.OPENROUTER_API_KEY || "";
+        // Update form with saved values
         setFormData({
-          OPENROUTER_API_KEY: apiKey ? "••••••••••••••••••••" : "",
+          OPENROUTER_API_KEY: updatedConfig.env.OPENROUTER_API_KEY || "",
           AGENT_MODEL:
             updatedConfig.env.AGENT_MODEL || "anthropic/claude-sonnet-4",
           LANG: updatedConfig.env.LANG || getBrowserLanguage(),
+          EXA_API_KEY: updatedConfig.env.EXA_API_KEY || "",
         });
       }
     } catch (err) {
@@ -292,6 +292,40 @@ export default function SettingsPage() {
                   className="text-blue-600 hover:text-blue-500"
                 >
                   openrouter.ai
+                </a>
+              </p>
+            </div>
+
+            <div>
+              <label
+                htmlFor="exaApiKey"
+                className="block text-sm font-medium text-gray-700 mb-2"
+              >
+                Exa.ai API Key
+              </label>
+              <input
+                type="password"
+                id="exaApiKey"
+                value={formData.EXA_API_KEY}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    EXA_API_KEY: e.target.value,
+                  }))
+                }
+                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                placeholder="Enter your Exa.ai API key (optional)"
+                disabled={saving}
+              />
+              <p className="text-sm text-gray-500 mt-1">
+                Optional Exa.ai API key for enhanced search capabilities. Get one at{" "}
+                <a
+                  href="https://exa.ai"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-blue-600 hover:text-blue-500"
+                >
+                  exa.ai
                 </a>
               </p>
             </div>

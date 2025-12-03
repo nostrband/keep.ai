@@ -7,10 +7,17 @@
       "outputs": ["dist/**", "public/**", "build/**"]
     },
     "build:serverless": {
+      "cache": false,
       "dependsOn": ["^build"],
       "outputs": ["dist/**", "public/**", "build/**"]
     },
     "build:electron": {
+      "cache": false,
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**", "public/**", "build/**"]
+    },
+    "build:frontend": {
+      "cache": false,
       "dependsOn": ["^build"],
       "outputs": ["dist/**", "public/**", "build/**"]
     },

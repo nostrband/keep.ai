@@ -1,0 +1,41 @@
+# Dependencies
+node_modules
+npm-debug.log*
+
+# Build outputs
+dist
+build
+public
+apps/*/dist
+apps/*/build
+apps/*/public
+packages/*/dist
+packages/*/build
+
+# Cache directories
+.turbo
+.vite
+.cache
+.next
+
+# Development files
+.env*
+.DS_Store
+*.log
+
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Tests
+coverage
+*.test.*
