@@ -10,8 +10,8 @@ let env: Env = {};
 
 export function setEnv(newEnv: Env) {
   env = {
-    ...newEnv,
     ...env,
+    ...newEnv,
   };
 }
 

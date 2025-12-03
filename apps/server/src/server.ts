@@ -12,10 +12,15 @@ import {
   KeepDb,
   KeepDbApi,
   NostrPeerStore,
-  MemoryStore,
   ChatStore,
 } from "@app/db";
-import { setEnv, getEnv, TaskWorker, Env, DEFAULT_AGENT_MODEL } from "@app/agent";
+import {
+  setEnv,
+  getEnv,
+  TaskWorker,
+  Env,
+  DEFAULT_AGENT_MODEL,
+} from "@app/agent";
 import debug from "debug";
 import path from "path";
 import os from "os";
@@ -37,6 +42,7 @@ import {
   SimplePool,
 } from "nostr-tools";
 import { bytesToHex, hexToBytes } from "nostr-tools/utils";
+import { randomBytes } from "crypto";
 
 const debugServer = debug("server:server");
 
@@ -291,7 +297,10 @@ async function handlePushNotifications(
 }
 
 // Test OpenRouter API key
-async function testOpenRouterKey(apiKey: string, model: string): Promise<{ success: boolean; error?: string }> {
+async function testOpenRouterKey(
+  apiKey: string,
+  model: string
+): Promise<{ success: boolean; error?: string }> {
   try {
     const testResponse = await fetch(
       "https://openrouter.ai/api/v1/chat/completions",
@@ -325,28 +334,29 @@ async function testOpenRouterKey(apiKey: string, model: string): Promise<{ succe
   } catch (error) {
     return {
       success: false,
-      error: `Failed to validate OpenRouter API key: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      error: `Failed to validate OpenRouter API key: ${
+        error instanceof Error ? error.message : "Unknown error"
+      }`,
     };
   }
 }
 
 // Test Exa.ai API key
-async function testExaKey(apiKey: string): Promise<{ success: boolean; error?: string }> {
+async function testExaKey(
+  apiKey: string
+): Promise<{ success: boolean; error?: string }> {
   try {
-    const testResponse = await fetch(
-      "https://api.exa.ai/contents",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": apiKey,
-        },
-        body: JSON.stringify({
-          ids: ["tesla.com"],
-          text: true,
-        }),
-      }
-    );
+    const testResponse = await fetch("https://api.exa.ai/contents", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+      },
+      body: JSON.stringify({
+        ids: ["tesla.com"],
+        text: true,
+      }),
+    });
 
     if (!testResponse.ok) {
       const errorData = await testResponse.text();
@@ -360,7 +370,9 @@ async function testExaKey(apiKey: string): Promise<{ success: boolean; error?: s
   } catch (error) {
     return {
       success: false,
-      error: `Failed to validate Exa.ai API key: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      error: `Failed to validate Exa.ai API key: ${
+        error instanceof Error ? error.message : "Unknown error"
+      }`,
     };
   }
 }
@@ -395,10 +407,11 @@ export async function createServer(config: ServerConfig = {}) {
   // For sync over nostr & web push
   const pool = new SimplePool({
     enablePing: true,
-    enableReconnect: true
+    enableReconnect: true,
   });
-  const peerStore = new NostrPeerStore(keepDB);
-  const chatStore = new ChatStore(keepDB);
+  const api = new KeepDbApi(keepDB);
+  const peerStore = api.nostrPeerStore;
+  const chatStore = api.chatStore;
   const keyStore = new KeyStore(path.join(userPath, "keys.db"));
   await keyStore.start();
 
@@ -407,7 +420,7 @@ export async function createServer(config: ServerConfig = {}) {
   const nostr = new NostrTransport({
     store: peerStore,
     signer: keyStore,
-    pool
+    pool,
   });
 
   const peer = new Peer(dbInstance, [http, nostr]);
@@ -476,6 +489,8 @@ export async function createServer(config: ServerConfig = {}) {
     try {
       const body = request.body as Env;
 
+      const wasOk = !!getEnv().OPENROUTER_API_KEY?.trim();
+
       if (!body.OPENROUTER_API_KEY?.trim()) {
         reply.status(400).send({ error: "OpenRouter API key is required" });
         return;
@@ -489,7 +504,8 @@ export async function createServer(config: ServerConfig = {}) {
 
       if (!openRouterTest.success) {
         reply.status(400).send({
-          error: openRouterTest.error || "Failed to validate OpenRouter API key",
+          error:
+            openRouterTest.error || "Failed to validate OpenRouter API key",
         });
         return;
       }
@@ -515,7 +531,9 @@ export async function createServer(config: ServerConfig = {}) {
       }
 
       // Helper
-      const updateVar = (name: "OPENROUTER_API_KEY" | "AGENT_MODEL" | "LANG" | "EXA_API_KEY") => {
+      const updateVar = (
+        name: "OPENROUTER_API_KEY" | "AGENT_MODEL" | "LANG" | "EXA_API_KEY"
+      ) => {
         if (body[name] === undefined) return;
 
         // Set in ram
@@ -550,9 +568,36 @@ export async function createServer(config: ServerConfig = {}) {
 
       // Set globally
       setEnv(newEnv);
+      console.log("newEnv", newEnv);
 
       // Write updated .env file
       fs.writeFileSync(envPath, envContent, "utf8");
+
+      // First good config?
+      if (!wasOk) {
+        const messages = await api.chatStore.getChatMessages({
+          chatId: "main",
+        });
+        // First launch?
+        if (!messages.length) {
+          const id = bytesToHex(randomBytes(16));
+          await api.inboxStore.saveInbox({
+            id,
+            source: "worker",
+            source_id: "",
+            target: "replier",
+            target_id: "",
+            timestamp: "",
+            handler_thread_id: "",
+            handler_timestamp: "",
+            content: JSON.stringify({
+              id,
+              role: "system",
+              content: `This is user onboarding synthetic instruction-draft for replier: please greet the user, tell them 'who you are' in their preferred language and ask how you could be helpful. We rely on your, Replier's, common sense to prepare the first ever message that user will see from us.`,
+            }),
+          });
+        }
+      }
 
       reply.send({ ok: true });
     } catch (error) {
@@ -581,31 +626,31 @@ export async function createServer(config: ServerConfig = {}) {
         const platform = os.platform();
         const release = os.release();
         const arch = os.arch();
-        
+
         let osName: string;
         switch (platform) {
-          case 'win32':
-            osName = 'Windows';
+          case "win32":
+            osName = "Windows";
             break;
-          case 'darwin':
-            osName = 'macOS';
+          case "darwin":
+            osName = "macOS";
             break;
-          case 'linux':
-            osName = 'Linux';
+          case "linux":
+            osName = "Linux";
             break;
-          case 'freebsd':
-            osName = 'FreeBSD';
+          case "freebsd":
+            osName = "FreeBSD";
             break;
-          case 'openbsd':
-            osName = 'OpenBSD';
+          case "openbsd":
+            osName = "OpenBSD";
             break;
           default:
             osName = platform;
         }
-        
+
         return `${osName} ${release} (${arch})`;
       };
-      
+
       const deviceInfo = getOSInfo();
 
       // Launch listen() asynchronously - don't wait for it to complete
@@ -661,7 +706,7 @@ export async function createServer(config: ServerConfig = {}) {
       const result = await dbInstance.execO<{ site_id: Buffer }>(
         "SELECT crsql_site_id() as site_id"
       );
-      
+
       if (!result || result.length === 0) {
         reply.status(500).send({ error: "Failed to get site_id" });
         return;
@@ -670,7 +715,7 @@ export async function createServer(config: ServerConfig = {}) {
       // Convert binary site_id to hex
       const siteIdBuffer = result[0].site_id;
       const siteIdHex = bytesToHex(new Uint8Array(siteIdBuffer));
-      
+
       reply.send({ site_id: siteIdHex });
     } catch (error) {
       debugServer("Error in /api/id:", error);
