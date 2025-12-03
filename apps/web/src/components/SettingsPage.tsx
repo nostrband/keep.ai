@@ -2,6 +2,7 @@ import { useState, useEffect, FormEvent } from "react";
 import { API_ENDPOINT } from "../const";
 import SharedHeader from "./SharedHeader";
 import { Button } from "../ui";
+import { SUPPORTED_LANGUAGES, getBrowserLanguage, getLanguageDisplayName } from "../lib/language-utils";
 // import { DEFAULT_AGENT_MODEL } from "@app/agent";
 
 interface OpenRouterModel {
@@ -49,6 +50,7 @@ interface ConfigData {
   env: {
     OPENROUTER_API_KEY?: string;
     AGENT_MODEL?: string;
+    LANG?: string;
   };
 }
 
@@ -64,6 +66,7 @@ export default function SettingsPage() {
   const [formData, setFormData] = useState({
     OPENROUTER_API_KEY: "",
     AGENT_MODEL: "",
+    LANG: "en",
   });
 
   // Load current config
@@ -82,6 +85,7 @@ export default function SettingsPage() {
         setFormData({
           OPENROUTER_API_KEY: apiKey, // ? "••••••••••••••••••••" : "",
           AGENT_MODEL: data.env.AGENT_MODEL || "anthropic/claude-sonnet-4", //DEFAULT_AGENT_MODEL,
+          LANG: data.env.LANG || getBrowserLanguage(),
         });
       } catch (err) {
         setError(
@@ -171,6 +175,7 @@ export default function SettingsPage() {
               ? config?.env.OPENROUTER_API_KEY
               : formData.OPENROUTER_API_KEY,
           AGENT_MODEL: formData.AGENT_MODEL,
+          LANG: formData.LANG,
         }),
       });
 
@@ -191,6 +196,7 @@ export default function SettingsPage() {
           OPENROUTER_API_KEY: apiKey ? "••••••••••••••••••••" : "",
           AGENT_MODEL:
             updatedConfig.env.AGENT_MODEL || "anthropic/claude-sonnet-4",
+          LANG: updatedConfig.env.LANG || getBrowserLanguage(),
         });
       }
     } catch (err) {
@@ -225,6 +231,36 @@ export default function SettingsPage() {
           </h2>
 
           <form onSubmit={handleSubmit} className="space-y-6">
+            <div>
+              <label
+                htmlFor="language"
+                className="block text-sm font-medium text-gray-700 mb-2"
+              >
+                Language
+              </label>
+              <select
+                id="language"
+                value={formData.LANG}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    LANG: e.target.value,
+                  }))
+                }
+                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                disabled={saving}
+              >
+                {SUPPORTED_LANGUAGES.map((lang) => (
+                  <option key={lang.code} value={lang.code}>
+                    {getLanguageDisplayName(lang.code)}
+                  </option>
+                ))}
+              </select>
+              <p className="text-sm text-gray-500 mt-1">
+                Select your preferred language for the assistant interface.
+              </p>
+            </div>
+
             <div>
               <label
                 htmlFor="apiKey"

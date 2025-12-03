@@ -1,6 +1,7 @@
-import { useState, FormEvent } from "react";
+import { useState, FormEvent, useEffect } from "react";
 import { API_ENDPOINT } from "../const";
 import { Button } from "../ui";
+import { SUPPORTED_LANGUAGES, getBrowserLanguage, getLanguageDisplayName } from "../lib/language-utils";
 
 // Logo component with "K" design (same as SharedHeader)
 const AssistantIcon = () => (
@@ -15,8 +16,14 @@ interface ConfigDialogProps {
 
 export function ConfigDialog({ onConfigured }: ConfigDialogProps) {
   const [apiKey, setApiKey] = useState("");
+  const [language, setLanguage] = useState("en");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
+
+  // Initialize language from browser
+  useEffect(() => {
+    setLanguage(getBrowserLanguage());
+  }, []);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -62,6 +69,7 @@ export function ConfigDialog({ onConfigured }: ConfigDialogProps) {
         },
         body: JSON.stringify({
           OPENROUTER_API_KEY: apiKey,
+          LANG: language,
         }),
       });
 
@@ -101,6 +109,25 @@ export function ConfigDialog({ onConfigured }: ConfigDialogProps) {
           <h2 className="text-lg font-medium text-gray-900 mb-4">Please configure the Assistant</h2>
           
           <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label htmlFor="language" className="block text-sm font-medium text-gray-700 mb-2">
+                Language
+              </label>
+              <select
+                id="language"
+                value={language}
+                onChange={(e) => setLanguage(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                disabled={isSubmitting}
+              >
+                {SUPPORTED_LANGUAGES.map((lang) => (
+                  <option key={lang.code} value={lang.code}>
+                    {getLanguageDisplayName(lang.code)}
+                  </option>
+                ))}
+              </select>
+            </div>
+
             <div>
               <label htmlFor="apiKey" className="block text-sm font-medium text-gray-700 mb-2">
                 OpenRouter API Key

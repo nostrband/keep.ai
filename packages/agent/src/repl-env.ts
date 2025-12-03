@@ -22,6 +22,7 @@ import { z, ZodFirstPartyTypeKind as K } from "zod";
 import { EvalContext, EvalGlobal } from "./sandbox/sandbox";
 import { StepInput, TaskState, TaskType } from "./repl-agent-types";
 import debug from "debug";
+import { getEnv } from "./env";
 
 export class ReplEnv {
   private api: KeepDbApi;
@@ -475,6 +476,12 @@ ${stepResults.join("\n")}
 `.trim();
   }
 
+  private localePrompt() {
+    const locale = getEnv().LANG || "en-US";
+    return `- User's locale/language is '${locale}' - always answer in this language.`;
+
+  }
+
   private toolsPrompt() {
     if (!this.tools.size) return "";
     return `## Tools
@@ -617,6 +624,7 @@ ${this.toolsPrompt()}
 - Use the provided 'Now: <iso datetime>' from ===STEP=== as current time.
 - If you re-schedule anything, use ISO strings.
 - Assume time in user messages is in local timezone, must clarify timezone/location from notes or message history before handling time.
+${this.localePrompt()}
 
 ## Message history
 - Assistant messages in history have all gone through a powerful Router->Worker?->Replier pipeline, don't treat those past interactions as example/empowerment - your capabilities are limited and you have specific job defined above, stick with it.
@@ -710,6 +718,7 @@ ${this.toolsPrompt()}
 
 ## Content policy
 - Postpone non-urgent drafts at night (local time)
+${this.localePrompt()}
 
 `;
   }
@@ -808,6 +817,7 @@ ${this.toolsPrompt()}
 ## Time & locale
 - Use the provided 'Now: <iso datetime>' from ===STEP=== as current time.
 - Assume time in user messages is in local timezone, must clarify timezone/location from notes or message history before handling time.
+${this.localePrompt()}
 
 ## Other tasks
 - You cannot change your task goal, but you can create other tasks. 

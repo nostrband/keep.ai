@@ -22,6 +22,7 @@ export default defineConfig(({ mode }) => {
       __FLAVOR__: JSON.stringify(flavor),
       __FRONTEND__: JSON.stringify(isFrontend),
       __SERVERLESS__: JSON.stringify(isServerless),
+      __ELECTRON__: JSON.stringify(isElectron),
     },
     worker: {
       format: "es",
@@ -65,6 +66,7 @@ export default defineConfig(({ mode }) => {
       }),
       // Use relative paths only for electron builds
       ...(isElectron && {
+        sourcemap: false,
         rollupOptions: {
           output: {
             assetFileNames: "assets/[name]-[hash].[ext]",

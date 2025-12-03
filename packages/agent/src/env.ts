@@ -3,6 +3,7 @@ export interface Env {
   OPENROUTER_BASE_URL?: string;
   AGENT_MODEL?: string;
   EXA_API_KEY?: string;
+  LANG?: string;
 }
 
 let env: Env = {};

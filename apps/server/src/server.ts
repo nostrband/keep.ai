@@ -455,7 +455,7 @@ export async function createServer(config: ServerConfig = {}) {
       }
 
       // Helper
-      const updateVar = (name: "OPENROUTER_API_KEY" | "AGENT_MODEL") => {
+      const updateVar = (name: "OPENROUTER_API_KEY" | "AGENT_MODEL" | "LANG") => {
         if (body[name] === undefined) return;
 
         // Set in ram
@@ -485,6 +485,7 @@ export async function createServer(config: ServerConfig = {}) {
       // Update each var
       updateVar("OPENROUTER_API_KEY");
       updateVar("AGENT_MODEL");
+      updateVar("LANG");
 
       // Set globally
       setEnv(newEnv);

@@ -89,7 +89,12 @@ export class KeepDbApi {
           source_id: message.id,
           target: "router",
           target_id: "",
-          timestamp: new Date().toISOString(),
+          // FIXME Since we added 'postponing' to inbox,
+          // worker started delaying tasks due to clock drift
+          // across devices. We should add created_at timestamp
+          // to track when item was created, and use timestamp
+          // for postponing
+          timestamp: "", // for now, make it empty to ensure worker starts immediately
           content: JSON.stringify(message),
           handler_thread_id: "",
           handler_timestamp: "",
