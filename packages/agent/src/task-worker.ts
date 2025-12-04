@@ -9,6 +9,7 @@ import {
 import { AssistantUIMessage } from "@app/proto";
 import debug from "debug";
 import {
+  DBInterface,
   InboxItem,
   InboxItemTarget,
   KeepDbApi,
@@ -216,11 +217,6 @@ export class TaskWorker {
 
     let statusUpdaterInterval: ReturnType<typeof setInterval> | undefined;
     try {
-      if (task.state === "finished" || task.state === "error") {
-        this.debug("Task already processed with state:", task.state);
-        return;
-      }
-
       // Type check to cast to TaskType safely
       if (
         task.type !== "worker" &&
@@ -238,6 +234,13 @@ export class TaskWorker {
         return this.finishTask(task, "Empty inbox", "Empty inbox");
       }
 
+      if (!inbox.length) {
+        if (task.state === "finished" || task.state === "error") {
+          this.debug("Task already processed with state:", task.state);
+          return;
+        }
+      }
+
       // =============================
       // Valid task, can start working
 
@@ -251,12 +254,6 @@ export class TaskWorker {
 
       // Get task state
       const state = await this.getTaskState(task);
-
-      // Sandbox
-      const sandbox = await this.createSandbox(taskType, task);
-
-      // Env
-      const env = await this.createEnv(taskType, task, sandbox);
 
       // Agent task
       const agentTask: AgentTask = {
@@ -282,6 +279,12 @@ export class TaskWorker {
         reason,
         inbox
       );
+
+      // Sandbox
+      const sandbox = await this.createSandbox(taskType, task, taskRunId);
+
+      // Env
+      const env = await this.createEnv(taskType, task, sandbox);
 
       // Init agent
       const model = getOpenRouter()(modelName);
@@ -415,7 +418,7 @@ export class TaskWorker {
           this.debug(`Task done:`, {
             reply: taskReply,
             threadId: task.thread_id,
-            cancelled
+            cancelled,
           });
         }
 
@@ -511,6 +514,16 @@ export class TaskWorker {
       input_plan: agentTask.state?.plan || "",
       input_notes: agentTask.state?.notes || "",
     });
+
+    // Worker is background so we should notify about it even if
+    // it doesn't produce side effects
+    if (agentTask.type === "worker") {
+      await this.api.chatStore.saveChatEvent(taskRunId, "main", "task_run", {
+        task_id: agentTask.id,
+        task_run_id: taskRunId,
+      });
+    }
+
     return {
       taskRunId,
       runStartTime,
@@ -558,7 +571,11 @@ export class TaskWorker {
     return env;
   }
 
-  private async createSandbox(taskType: TaskType, task: Task) {
+  private async createSandbox(
+    taskType: TaskType,
+    task: Task,
+    taskRunId: string
+  ) {
     // Sandbox
     const sandbox = await initSandbox();
 
@@ -566,8 +583,21 @@ export class TaskWorker {
     sandbox.context = {
       step: 0,
       taskId: task.id,
+      taskRunId,
       type: taskType,
       taskThreadId: task.thread_id,
+      createEvent: async (type: string, content: any, tx?: DBInterface) => {
+        // set task fields
+        content.task_id = task.id;
+        content.task_run_id = taskRunId;
+        await this.api.chatStore.saveChatEvent(
+          generateId(),
+          "main",
+          type,
+          content,
+          tx
+        );
+      },
     };
 
     return sandbox;
@@ -781,13 +811,12 @@ ${result.reply || ""}
 
   private async sendToUser(reply: string) {
     this.debug("Save user reply", reply);
-    
+
     const message = {
       id: generateId(),
       role: "assistant" as const,
       metadata: {
         createdAt: new Date().toISOString(),
-        // FIXME not good!
         threadId: "main",
       },
       parts: [

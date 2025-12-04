@@ -210,6 +210,62 @@ export class ChatStore {
       );
   }
 
+  // Get all chat events (messages + agent events)
+  async getChatEvents({
+    chatId,
+    limit = 50,
+    since,
+  }: {
+    chatId: string;
+    limit?: number;
+    since?: string;
+  }): Promise<Array<{
+    id: string;
+    type: string;
+    content: any;
+    timestamp: string;
+  }>> {
+    let sql = `SELECT * FROM chat_events WHERE chat_id = ?`;
+    const args: (string | number)[] = [chatId];
+
+    if (since) {
+      sql += ` AND timestamp > ?`;
+      args.push(since);
+    }
+
+    sql += ` ORDER BY timestamp DESC`;
+
+    if (limit) {
+      sql += ` LIMIT ?`;
+      args.push(limit);
+    }
+
+    const results = await this.db.db.execO<Record<string, unknown>>(sql, args);
+
+    if (!results) return [];
+
+    return results
+      .filter((row) => !!row.content && !!row.type)
+      .map((row) => {
+        try {
+          return {
+            id: row.id as string,
+            type: row.type as string,
+            content: JSON.parse(row.content as string),
+            timestamp: row.timestamp as string,
+          };
+        } catch (e) {
+          debugChatStore("Bad event in chat_events db", row, e);
+          return undefined;
+        }
+      })
+      .filter((event) => !!event)
+      .sort((a, b) =>
+        // Sort by timestamp ASC
+        a.timestamp < b.timestamp ? -1 : a.timestamp > b.timestamp ? 1 : 0
+      );
+  }
+
   async saveChatMessages(
     chatId: string,
     messages: AssistantUIMessage[],
@@ -232,5 +288,28 @@ export class ChatStore {
         ]
       );
     }
+  }
+
+  async saveChatEvent(
+    id: string,
+    chatId: string,
+    type: string,
+    content: any,
+    tx?: DBInterface
+  ): Promise<void> {
+    const db = tx || this.db.db;
+      if (!type || !content) throw new Error("Empty event type or content");
+
+    await db.exec(
+      `INSERT OR REPLACE INTO chat_events (id, chat_id, type, timestamp, content)
+        VALUES (?, ?, ?, ?, ?)`,
+      [
+        id,
+        chatId,
+        type,
+        new Date().toISOString(),
+        JSON.stringify(content),
+      ]
+    );
   }
 }

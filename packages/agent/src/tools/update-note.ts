@@ -1,8 +1,12 @@
 import { z } from "zod";
 import { tool } from "ai";
 import { NoteStore } from "@app/db";
+import { EvalContext } from "../sandbox/sandbox";
 
-export function makeUpdateNoteTool(noteStore: NoteStore) {
+export function makeUpdateNoteTool(
+  noteStore: NoteStore,
+  getContext: () => EvalContext
+) {
   return tool({
     description: `Update an existing note by ID. You can modify title, content, tags, and/or priority.
 Only the fields you specify will be updated - other fields remain unchanged.
@@ -34,8 +38,8 @@ Title+content+tags size must not exceed 50KB after update.`,
         .describe("New priority level of the note (optional)"),
     }),
     outputSchema: z.string().describe("ID of the updated note"),
-    execute: async (context) => {
-      const { id, title, content, tags, priority } = context;
+    execute: async (params) => {
+      const { id, title, content, tags, priority } = params;
 
       // Prepare updates object
       const updates: {
@@ -74,6 +78,11 @@ Title+content+tags size must not exceed 50KB after update.`,
         newPriority,
         existing.created
       );
+
+      await getContext().createEvent("update_note", {
+        id,
+        title: newTitle
+      })
 
       return id;
     },

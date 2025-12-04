@@ -1,10 +1,11 @@
 import { tool } from "ai";
 import { z } from "zod";
 import debug from "debug";
+import { EvalContext } from "../sandbox/sandbox";
 
 const debugGetWeather = debug("agent:get-weather");
 
-export function makeGetWeatherTool() {
+export function makeGetWeatherTool(getContext: () => EvalContext) {
   return tool({
     description:
       "Get weather forecast for a specified location for up to 16 days. If location not found, try higher-level location name.",
@@ -69,14 +70,14 @@ export function makeGetWeatherTool() {
         )
         .describe("Daily weather forecast array"),
     }),
-    execute: async (context) => {
+    execute: async (params) => {
       let place: string;
       let days: number = 1;
 
-      if (typeof context === "string") {
-        place = context;
+      if (typeof params === "string") {
+        place = params;
       } else {
-        const ctx = context || {};
+        const ctx = params || {};
         place = (ctx as any).place || (ctx as any).location;
         days = (ctx as any).days || 1;
       }
@@ -176,6 +177,8 @@ export function makeGetWeatherTool() {
         days: daily.length,
         daily,
       };
+
+      await getContext().createEvent("get_weather", { place, days });
 
       debugGetWeather("Weather forecast result:", result);
       return result;

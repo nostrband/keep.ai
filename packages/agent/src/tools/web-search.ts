@@ -3,10 +3,11 @@ import { Exa } from "exa-js";
 import { tool } from "ai";
 import { getEnv } from "../env";
 import debug from "debug";
+import { EvalContext } from "../sandbox/sandbox";
 
 const debugWebSearch = debug("agent:web-search");
 
-export function makeWebSearchTool() {
+export function makeWebSearchTool(getContext: () => EvalContext) {
   return tool({
     description:
       "Search the web using Exa API and get content from relevant web pages. Returns search results with full text content. Text content is usually cached, use live: true to get up to date results for time-sensitive data (prices, latest news, etc)",
@@ -61,7 +62,10 @@ export function makeWebSearchTool() {
             "If true, ensures results are 100% up to date and not cached"
           ),
       }),
-      z.string().min(1).describe("Search query string (shorthand for { query: string })")
+      z
+        .string()
+        .min(1)
+        .describe("Search query string (shorthand for { query: string })"),
     ]),
     execute: async (context) => {
       let query: string;
@@ -73,7 +77,7 @@ export function makeWebSearchTool() {
       let endPublishedDate: string | undefined;
       let live: boolean = false;
 
-      if (typeof context === 'string') {
+      if (typeof context === "string") {
         query = context;
       } else {
         ({
@@ -168,6 +172,8 @@ export function makeWebSearchTool() {
           live,
         },
       };
+
+      await getContext().createEvent("web_search", { query });
 
       debugWebSearch("Web search completed successfully:", {
         query,

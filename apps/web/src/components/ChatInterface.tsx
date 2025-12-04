@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useRef } from "react";
-import { useChatMessages } from "../hooks/dbChatReads";
+import { useChatEvents } from "../hooks/dbChatReads";
 import { useAddMessage, useReadChat } from "../hooks/dbWrites";
-import { MessageList } from "..//ui";
+import { MessageItem } from "../ui/components/ai-elements/message-item";
+import { TaskEventGroup } from "./TaskEventGroup";
+import { EventType, EventPayload } from "../types/events";
+import { AssistantUIMessage } from "@app/proto";
 import type { UseMutationResult } from "@tanstack/react-query";
 import React from "react";
 
@@ -86,24 +89,90 @@ export default function ChatInterface({ chatId: propChatId, promptHeight }: Chat
   const chatId = propChatId || "main";
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const { data: messages = [], isLoading } = useChatMessages(chatId);
+  const { data: events = [], isLoading } = useChatEvents(chatId);
   const addMessage = useAddMessage();
   const readChat = useReadChat();
 
   // Only re-create the status string when needed
   const status = useMemo(() => (addMessage.isPending ? "streaming" : "ready"), [addMessage.isPending]);
 
-  // Scroll to bottom when messages change
+  // Group consecutive events by task_id, respecting message boundaries
+  const organizedItems = useMemo(() => {
+    const items: Array<{
+      type: 'message' | 'task_group';
+      data: any;
+      timestamp: string;
+      key: string;
+    }> = [];
+
+    // Sort all events chronologically first
+    const sortedEvents = [...events].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+
+    let currentTaskGroup: typeof sortedEvents = [];
+    let currentTaskId: string | null = null;
+    let groupCounter = 0;
+
+    const flushCurrentGroup = () => {
+      if (currentTaskGroup.length > 0 && currentTaskId) {
+        items.push({
+          type: 'task_group',
+          data: { taskId: currentTaskId, events: currentTaskGroup },
+          timestamp: currentTaskGroup[0].timestamp,
+          key: `task-group-${currentTaskId}-${groupCounter++}`
+        });
+        currentTaskGroup = [];
+        currentTaskId = null;
+      }
+    };
+
+    sortedEvents.forEach(event => {
+      if (event.type === 'message') {
+        // Message breaks any current task group
+        flushCurrentGroup();
+        
+        // Add the message
+        const message = event.content as AssistantUIMessage;
+        items.push({
+          type: 'message',
+          data: message,
+          timestamp: event.timestamp,
+          key: `message-${event.id}`
+        });
+      } else {
+        // Non-message event
+        const taskId = event.content?.task_id;
+        
+        if (!taskId) return; // Skip events without task_id
+        
+        if (currentTaskId === taskId) {
+          // Same task, add to current group (including task_run events for grouping)
+          currentTaskGroup.push(event);
+        } else {
+          // Different task, flush current group and start new one
+          flushCurrentGroup();
+          currentTaskId = taskId;
+          currentTaskGroup = [event];
+        }
+      }
+    });
+
+    // Flush any remaining group
+    flushCurrentGroup();
+
+    return items;
+  }, [events]);
+
+  // Scroll to bottom when organized items change
   useEffect(() => {
-    if (messages.length > 0) {
+    if (organizedItems.length > 0) {
       // Use 'auto' for large jumps to avoid long smooth scrolls on big histories
-      messagesEndRef.current?.scrollIntoView({ behavior: messages.length < 50 ? "smooth" : "auto" });
+      messagesEndRef.current?.scrollIntoView({ behavior: organizedItems.length < 50 ? "smooth" : "auto" });
     }
-  }, [messages]);
+  }, [organizedItems]);
 
   // Scroll to bottom when prompt height changes significantly (input expands)
   useEffect(() => {
-    if (promptHeight && messages.length > 0) {
+    if (promptHeight && organizedItems.length > 0) {
       // Small delay to ensure layout has updated
       const timeoutId = setTimeout(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -111,7 +180,7 @@ export default function ChatInterface({ chatId: propChatId, promptHeight }: Chat
       
       return () => clearTimeout(timeoutId);
     }
-  }, [promptHeight, messages.length]);
+  }, [promptHeight, organizedItems.length]);
 
   if (isLoading) {
     return (
@@ -123,7 +192,29 @@ export default function ChatInterface({ chatId: propChatId, promptHeight }: Chat
 
   return (
     <div className="max-w-4xl mx-auto px-6">
-      <MessageList messages={messages} status={status} full={false} />
+      {organizedItems.map((item, index) => {
+        if (item.type === 'message') {
+          // Render message
+          return (
+            <MessageItem
+              key={item.key}
+              message={item.data}
+              status={index === organizedItems.length - 1 ? status : "ready"}
+              isLastMessage={index === organizedItems.length - 1}
+              full={false}
+            />
+          );
+        } else {
+          // Render task event group
+          return (
+            <TaskEventGroup
+              key={item.key}
+              taskId={item.data.taskId}
+              events={item.data.events}
+            />
+          );
+        }
+      })}
       <div ref={messagesEndRef} />
       <ScrollToBottomDetector chatId={chatId} readChat={readChat} />
     </div>

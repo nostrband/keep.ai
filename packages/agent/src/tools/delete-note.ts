@@ -1,8 +1,12 @@
 import { z } from "zod";
 import { tool } from "ai";
 import { NoteStore } from "@app/db";
+import { EvalContext } from "../sandbox/sandbox";
 
-export function makeDeleteNoteTool(noteStore: NoteStore) {
+export function makeDeleteNoteTool(
+  noteStore: NoteStore,
+  getContext: () => EvalContext
+) {
   return tool({
     description:
       "Delete a note by its ID. Returns an error if the note doesn't exist.",
@@ -18,6 +22,11 @@ export function makeDeleteNoteTool(noteStore: NoteStore) {
 
       // Delete the note directly from the database
       await noteStore.deleteNote(id);
+
+      await getContext().createEvent("delete_note", {
+        id,
+        title: note.title,
+      });
 
       // Return void - deletion successful
     },

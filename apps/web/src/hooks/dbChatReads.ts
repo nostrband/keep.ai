@@ -19,6 +19,21 @@ export function useChatMessages(chatId: string) {
   });
 }
 
+export function useChatEvents(chatId: string) {
+  const { api } = useDbQuery();
+  return useQuery({
+    queryKey: qk.chatEvents(chatId),
+    queryFn: async () => {
+      if (!api) return [];
+      // Get all chat events (messages + agent events) in chronological order
+      const events = await api.chatStore.getChatEvents({ chatId });
+      return events;
+    },
+    meta: { tables: ["chat_events"] },
+    enabled: !!api && !!chatId,
+  });
+}
+
 export function useAllChats() {
   const { api } = useDbQuery();
   return useQuery({

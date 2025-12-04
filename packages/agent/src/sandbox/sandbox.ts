@@ -7,6 +7,7 @@ import {
   shouldInterruptAfterDeadline,
 } from "quickjs-emscripten";
 import { TaskType } from "../repl-agent-types";
+import { DBInterface } from "packages/db/dist";
 
 export interface EvalGlobal {
   memory: any,
@@ -46,7 +47,9 @@ export interface EvalContext {
   step: number;
   type: TaskType;
   taskId: string;
+  taskRunId: string;
   data?: any;
+  createEvent(type: string, content: any, tx?: DBInterface): Promise<void>;
 }
 
 export class Sandbox {

@@ -1,8 +1,12 @@
 import { z } from "zod";
 import { generateId } from "ai";
 import { TaskStore } from "@app/db";
+import { EvalContext } from "../sandbox/sandbox";
 
-export function makeAddTaskTool(taskStore: TaskStore) {
+export function makeAddTaskTool(
+  taskStore: TaskStore,
+  getContext: () => EvalContext
+) {
   return {
     execute: async (opts: {
       title: string;
@@ -24,9 +28,16 @@ export function makeAddTaskTool(taskStore: TaskStore) {
         plan: "",
       });
 
+      await getContext().createEvent("add_task", {
+        id,
+        title: opts.title,
+        startAt: opts.startAt
+      });
+
       return id;
     },
-    description: "You MUST check for existing tasks before creating new one! Creates a background task. You don't have to call sendToTaskInbox after creating the task.",
+    description:
+      "You MUST check for existing tasks before creating new one! Creates a background task. You don't have to call sendToTaskInbox after creating the task.",
     inputSchema: z.object({
       title: z.string().describe("Task title for task management and audit"),
       goal: z

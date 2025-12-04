@@ -7,6 +7,7 @@ export const qk = {
   
   // Chat-related queries
   chatMessages: (chatId: string) => [{ scope: "chatMessages", chatId }] as const,
+  chatEvents: (chatId: string) => [{ scope: "chatEvents", chatId }] as const,
   chat: (chatId: string) => [{ scope: "chat", chatId }] as const,
   allChats: () => [{ scope: "allChats" }] as const,
   

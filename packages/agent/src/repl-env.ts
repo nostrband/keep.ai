@@ -92,7 +92,12 @@ export class ReplEnv {
         // Execute the tool with validated input
         try {
           const result = await tool.execute(validatedInput);
-          this.debug("Tool called", { name, input, context: this.getContext(), result });
+          this.debug("Tool called", {
+            name,
+            input,
+            context: this.getContext(),
+            result,
+          });
           return result;
         } catch (e) {
           const message = `Failed at ${ns}.${name}: ${e}.\nUsage: ${desc}`;
@@ -132,11 +137,16 @@ export class ReplEnv {
 
     // Tools
     if (this.type !== "replier") {
-      addTool(global, "Tools", "weather", makeGetWeatherTool());
+      addTool(global, "Tools", "weather", makeGetWeatherTool(this.getContext));
     }
     if (this.type === "worker") {
-      addTool(global, "Tools", "webSearch", makeWebSearchTool());
-      addTool(global, "Tools", "webFetchParse", makeWebFetchTool());
+      addTool(global, "Tools", "webSearch", makeWebSearchTool(this.getContext));
+      addTool(
+        global,
+        "Tools",
+        "webFetchParse",
+        makeWebFetchTool(this.getContext)
+      );
     }
 
     // Memory
@@ -163,19 +173,19 @@ export class ReplEnv {
           global,
           "Memory",
           "createNote",
-          makeCreateNoteTool(this.api.noteStore)
+          makeCreateNoteTool(this.api.noteStore, this.getContext)
         );
         addTool(
           global,
           "Memory",
           "updateNote",
-          makeUpdateNoteTool(this.api.noteStore)
+          makeUpdateNoteTool(this.api.noteStore, this.getContext)
         );
         addTool(
           global,
           "Memory",
           "deleteNote",
-          makeDeleteNoteTool(this.api.noteStore)
+          makeDeleteNoteTool(this.api.noteStore, this.getContext)
         );
       }
     }
@@ -192,12 +202,17 @@ export class ReplEnv {
 
     // Router or Worker
     if (this.type !== "replier") {
-      addTool(global, "Tasks", "add", makeAddTaskTool(this.api.taskStore));
+      addTool(
+        global,
+        "Tasks",
+        "add",
+        makeAddTaskTool(this.api.taskStore, this.getContext)
+      );
       addTool(
         global,
         "Tasks",
         "addRecurring",
-        makeAddTaskRecurringTool(this.api.taskStore)
+        makeAddTaskRecurringTool(this.api.taskStore, this.getContext)
       );
       addTool(global, "Tasks", "get", makeGetTaskTool(this.api.taskStore));
       addTool(global, "Tasks", "list", makeListTasksTool(this.api.taskStore));
@@ -218,7 +233,7 @@ export class ReplEnv {
           global,
           "Tasks",
           "cancelThisRecurringTask",
-          makeCancelThisRecurringTaskTool(this.api.taskStore, this.getContext)
+          makeCancelThisRecurringTaskTool(this.getContext)
         );
       }
     }
@@ -479,7 +494,6 @@ ${stepResults.join("\n")}
   private localePrompt() {
     const locale = getEnv().LANG || "en-US";
     return `- User's locale/language is '${locale}' - always answer in this language.`;
-
   }
 
   private toolsPrompt() {
@@ -551,7 +565,7 @@ If user asks what/who you are, or what you're capable of, here is what you shoul
 - you are privacy-focused (user's data stays on their devices) and proactive (can reach-out to user, not just reply to queries)
 - you can search and browse the web, run calculations, answer questions, take notes and work on tasks in the background
 - you can help user get more organized, help manage tasks, help with creative work, automate recurring work, etc
-`
+`;
   }
 
   private routerSystemPrompt() {
