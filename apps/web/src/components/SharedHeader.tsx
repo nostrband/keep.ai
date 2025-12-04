@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   Button,
 } from "../ui";
@@ -21,6 +21,18 @@ export default function SharedHeader({ title, subtitle }: SharedHeaderProps) {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const { data: agentStatus } = useAgentStatus();
+  const location = useLocation();
+  const navigate = useNavigate();
+  
+  const isRootPage = location.pathname === '/';
+  
+  const handleBackClick = () => {
+    if (window.history.length > 1) {
+      window.history.back();
+    } else {
+      navigate('/');
+    }
+  };
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -43,6 +55,28 @@ export default function SharedHeader({ title, subtitle }: SharedHeaderProps) {
       <div className="max-w-4xl mx-auto px-6 py-2">
         <div className="flex items-center justify-between">
           <div className="h-10 flex items-center gap-3">
+            {!isRootPage && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 w-8 p-0 cursor-pointer"
+                onClick={handleBackClick}
+              >
+                <svg
+                  className="h-4 w-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M15 19l-7-7 7-7"
+                  />
+                </svg>
+              </Button>
+            )}
             <AssistantIcon />
             <div>
               <h1 className="text-lg font-bold text-gray-900">{title}</h1>

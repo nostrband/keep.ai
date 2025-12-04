@@ -1,4 +1,5 @@
 import React from "react";
+import { Link } from "react-router-dom";
 import { useTask } from "../hooks/dbTaskReads";
 import { EventItem } from "./EventItem";
 import { EventType, EventPayload } from "../types/events";
@@ -26,6 +27,9 @@ export function TaskEventGroup({ taskId, events }: TaskEventGroupProps) {
 
   const taskTitle = task?.title || "Unknown Task";
 
+  // Get task_run_id from any event (all events have task_run_id)
+  const taskRunId = events.length > 0 ? events[0].content?.task_run_id : null;
+
   // Filter out task_run events (they are invisible markers for grouping)
   const visibleEvents = events.filter(event => event.type !== 'task_run');
   
@@ -35,27 +39,54 @@ export function TaskEventGroup({ taskId, events }: TaskEventGroupProps) {
   return (
     <div className={`mx-0 my-3 border border-gray-200 bg-gray-50 ${isEmpty ? 'rounded-lg' : 'rounded-lg'}`}>
       {/* Task Title Header */}
-      <div className={`flex items-center justify-between px-2 py-0 bg-gray-50 ${isEmpty ? 'rounded-lg' : 'border-b border-gray-200 rounded-t-lg'}`}>
-        <div className="flex items-center flex-1 min-w-0">
-          <span className="text-sm text-gray-600 font-medium">
-            {task?.type === "worker" ? (
-              <>
-                ⚙ Working: <span className="text-gray-800">{taskTitle}</span>
-              </>
-            ) : (
-              <>💭 Replying</>
-            )}
-          </span>
-        </div>
-
-        <button
-          onClick={handleTaskMenuClick}
-          className="ml-2 px-2 py-1 text-gray-400 hover:text-gray-600 flex-shrink-0"
-          aria-label="Task actions"
+      {taskRunId ? (
+        <Link
+          to={`/tasks/${taskId}/run/${taskRunId}`}
+          className={`flex items-center justify-between px-2 py-0 bg-gray-50 ${isEmpty ? 'rounded-lg' : 'border-b border-gray-200 rounded-t-lg'} hover:bg-gray-100 cursor-pointer transition-colors duration-200`}
         >
-          ···
-        </button>
-      </div>
+          <div className="flex items-center flex-1 min-w-0">
+            <span className="text-sm text-gray-600">
+              {task?.type === "worker" ? (
+                <>
+                  ⚙ Working: <span className="text-gray-600">{taskTitle}</span>
+                </>
+              ) : (
+                <>💭 Replying</>
+              )}
+            </span>
+          </div>
+
+          <button
+            onClick={handleTaskMenuClick}
+            className="ml-2 px-2 py-1 text-gray-400 hover:text-gray-600 flex-shrink-0"
+            aria-label="Task actions"
+          >
+            ···
+          </button>
+        </Link>
+      ) : (
+        <div className={`flex items-center justify-between px-2 py-0 bg-gray-50 ${isEmpty ? 'rounded-lg' : 'border-b border-gray-200 rounded-t-lg'}`}>
+          <div className="flex items-center flex-1 min-w-0">
+            <span className="text-sm text-gray-600">
+              {task?.type === "worker" ? (
+                <>
+                  ⚙ Working: <span className="text-gray-600">{taskTitle}</span>
+                </>
+              ) : (
+                <>💭 Replying</>
+              )}
+            </span>
+          </div>
+
+          <button
+            onClick={handleTaskMenuClick}
+            className="ml-2 px-2 py-1 text-gray-400 hover:text-gray-600 flex-shrink-0"
+            aria-label="Task actions"
+          >
+            ···
+          </button>
+        </div>
+      )}
 
       {/* Events List - only show if there are visible events */}
       {!isEmpty && (
