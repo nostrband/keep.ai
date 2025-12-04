@@ -52,6 +52,7 @@ interface ConfigData {
     AGENT_MODEL?: string;
     LANG?: string;
     EXA_API_KEY?: string;
+    EXTRA_SYSTEM_PROMPT?: string;
   };
 }
 
@@ -69,6 +70,7 @@ export default function SettingsPage() {
     AGENT_MODEL: "",
     LANG: "en",
     EXA_API_KEY: "",
+    EXTRA_SYSTEM_PROMPT: "",
   });
 
   // Load current config
@@ -88,6 +90,7 @@ export default function SettingsPage() {
           AGENT_MODEL: data.env.AGENT_MODEL || "anthropic/claude-sonnet-4", //DEFAULT_AGENT_MODEL,
           LANG: data.env.LANG || getBrowserLanguage(),
           EXA_API_KEY: data.env.EXA_API_KEY || "",
+          EXTRA_SYSTEM_PROMPT: data.env.EXTRA_SYSTEM_PROMPT || "",
         });
       } catch (err) {
         setError(
@@ -176,6 +179,7 @@ export default function SettingsPage() {
           AGENT_MODEL: formData.AGENT_MODEL,
           LANG: formData.LANG,
           EXA_API_KEY: formData.EXA_API_KEY,
+          EXTRA_SYSTEM_PROMPT: formData.EXTRA_SYSTEM_PROMPT,
         }),
       });
 
@@ -197,6 +201,7 @@ export default function SettingsPage() {
             updatedConfig.env.AGENT_MODEL || "anthropic/claude-sonnet-4",
           LANG: updatedConfig.env.LANG || getBrowserLanguage(),
           EXA_API_KEY: updatedConfig.env.EXA_API_KEY || "",
+          EXTRA_SYSTEM_PROMPT: updatedConfig.env.EXTRA_SYSTEM_PROMPT || "",
         });
       }
     } catch (err) {
@@ -383,6 +388,32 @@ export default function SettingsPage() {
               )}
               <p className="text-sm text-gray-500 mt-1">
                 The AI model to use for the assistant.
+              </p>
+            </div>
+
+            <div>
+              <label
+                htmlFor="extraSystemPrompt"
+                className="block text-sm font-medium text-gray-700 mb-2"
+              >
+                Extra System Prompt
+              </label>
+              <textarea
+                id="extraSystemPrompt"
+                value={formData.EXTRA_SYSTEM_PROMPT}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    EXTRA_SYSTEM_PROMPT: e.target.value,
+                  }))
+                }
+                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                placeholder="Enter additional system prompts or instructions for the AI assistant..."
+                disabled={saving}
+                rows={4}
+              />
+              <p className="text-sm text-gray-500 mt-1">
+                Optional additional system prompt to customize the AI assistant's behavior. This will be added to the system instructions.
               </p>
             </div>
 

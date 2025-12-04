@@ -4,6 +4,7 @@ export interface Env {
   AGENT_MODEL?: string;
   EXA_API_KEY?: string;
   LANG?: string;
+  EXTRA_SYSTEM_PROMPT?: string;
 }
 
 let env: Env = {};

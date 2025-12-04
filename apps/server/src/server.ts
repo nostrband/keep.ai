@@ -83,6 +83,7 @@ setEnv({
   OPENROUTER_BASE_URL: process.env.OPENROUTER_BASE_URL,
   AGENT_MODEL: process.env.AGENT_MODEL,
   EXA_API_KEY: process.env.EXA_API_KEY,
+  EXTRA_SYSTEM_PROMPT: process.env.EXTRA_SYSTEM_PROMPT,
 });
 
 // For CommonJS compatibility
@@ -532,7 +533,12 @@ export async function createServer(config: ServerConfig = {}) {
 
       // Helper
       const updateVar = (
-        name: "OPENROUTER_API_KEY" | "AGENT_MODEL" | "LANG" | "EXA_API_KEY"
+        name:
+          | "OPENROUTER_API_KEY"
+          | "AGENT_MODEL"
+          | "LANG"
+          | "EXA_API_KEY"
+          | "EXTRA_SYSTEM_PROMPT"
       ) => {
         if (body[name] === undefined) return;
 
@@ -540,7 +546,17 @@ export async function createServer(config: ServerConfig = {}) {
         newEnv[name] = body[name];
 
         // Find & replace/append the .env row
-        const row = `${name}=${newEnv[name]}`;
+        // For EXTRA_SYSTEM_PROMPT, escape newlines and double quotes for .env storage
+        let envValue = newEnv[name];
+        if (name === "EXTRA_SYSTEM_PROMPT" && envValue) {
+          envValue = `"${
+            envValue
+              .replace(/\\/g, "\\\\") // Escape backslashes first
+              .replace(/"/g, '\\"') // Escape double quotes
+              .replace(/\n/g, "\\n") // Escape newlines
+          }"`;
+        }
+        const row = `${name}=${envValue}`;
         let found = false;
         const lines = envContent.split("\n");
         for (let i = 0; i < lines.length; i++) {
@@ -565,6 +581,7 @@ export async function createServer(config: ServerConfig = {}) {
       updateVar("AGENT_MODEL");
       updateVar("LANG");
       updateVar("EXA_API_KEY");
+      updateVar("EXTRA_SYSTEM_PROMPT");
 
       // Set globally
       setEnv(newEnv);

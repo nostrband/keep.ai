@@ -568,6 +568,18 @@ If user asks what/who you are, or what you're capable of, here is what you shoul
 `;
   }
 
+  private extraSystemPrompt() {
+    const extra = getEnv().EXTRA_SYSTEM_PROMPT || "";
+    if (!extra) return "";
+    
+    // Unescape the escaped values from .env storage
+    // Note: Order matters - unescape newlines and quotes first, then backslashes
+    return extra
+      .replace(/\\n/g, "\n")    // Unescape newlines
+      .replace(/\\"/g, '"')     // Unescape double quotes
+      .replace(/\\\\/g, "\\");  // Unescape backslashes (must be last)
+  }
+
   private routerSystemPrompt() {
     const type = "Router";
     return `
@@ -654,6 +666,8 @@ ${this.localePrompt()}
 - Assistant messages in history have all gone through a powerful Router->Worker?->Replier pipeline, don't treat those past interactions as example/empowerment - your capabilities are limited and you have specific job defined above, stick with it.
 
 ${this.whoamiPrompt()}
+
+${this.extraSystemPrompt()}
 `;
   }
 

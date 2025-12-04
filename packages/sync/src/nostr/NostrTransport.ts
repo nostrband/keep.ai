@@ -321,6 +321,12 @@ class PeerRecv {
     return events.length > 0;
   }
 
+  /**
+   * Fetch all events up to one referencing recv_changes_event_id,
+   * if such event isn't found (and we fetched everything) then
+   * undefined is returned and we're forced to restart the sync
+   * from current db cursor
+   */
   private async fetch(filter: Filter) {
     let until: number | undefined;
     let buffer: Event[] = [];
@@ -349,7 +355,9 @@ class PeerRecv {
 
       // Find the next expected event index
       const lastIndex = events.findIndex((e) => {
-        return e.id === this.recvCursor!.recv_changes_event_id;
+        // If 'e' is empty that's the first event,
+        // and if recv_changes_event_id is empty we're expecting the first event
+        return (tv(e, "e") || "") === this.recvCursor!.recv_changes_event_id;
       });
       this.debug(
         "Changes from peer",
@@ -1000,7 +1008,6 @@ class PeerSend {
   }
 
   private async publishPending() {
-
     // NOTE: very important! We assume ordered delivery everywhere,
     // order by db_version asc to make sure we're doing it properly
     const ordered = this.pending.sort((a, b) => a.db_version - b.db_version);
