@@ -84,6 +84,7 @@ setEnv({
   AGENT_MODEL: process.env.AGENT_MODEL,
   EXA_API_KEY: process.env.EXA_API_KEY,
   EXTRA_SYSTEM_PROMPT: process.env.EXTRA_SYSTEM_PROMPT,
+  DESKTOP_NOTIFICATIONS: process.env.DESKTOP_NOTIFICATIONS,
 });
 
 // For CommonJS compatibility
@@ -582,6 +583,7 @@ export async function createServer(config: ServerConfig = {}) {
       updateVar("LANG");
       updateVar("EXA_API_KEY");
       updateVar("EXTRA_SYSTEM_PROMPT");
+      updateVar("DESKTOP_NOTIFICATIONS");
 
       // Set globally
       setEnv(newEnv);

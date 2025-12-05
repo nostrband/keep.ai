@@ -707,8 +707,8 @@ class PeerRecv {
     } catch (e) {
       this.debug("Failed to resync, will retry, ", e);
 
-      // Retry later
-      if (!this.resyncTimer) {
+      // Retry later if not stopped
+      if (!this.resyncTimer && this.localCursor) {
         this.resyncTimer = setTimeout(() => {
           this.resyncTimer = undefined;
           if (this.localCursor) this.resync();
@@ -1016,7 +1016,7 @@ class PeerSend {
     let batches: PeerMessage[] = [];
     let batch: PeerMessage | undefined;
     let size = 0;
-    for (const c of this.pending) {
+    for (const c of ordered) {
       const nextSize =
         c.cid.length +
         c.pk.length +
@@ -1115,7 +1115,7 @@ class PeerSend {
     });
 
     // Aborted?
-    if (!this.sendCursor) return;
+    if (!this.sendCursor) return false;
 
     this.debug(
       "Encrypted content size",

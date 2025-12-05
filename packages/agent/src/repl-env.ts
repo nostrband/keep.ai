@@ -568,6 +568,14 @@ If user asks what/who you are, or what you're capable of, here is what you shoul
 `;
   }
 
+  private userInputPrompt() {
+    return `## User Input
+- Your primary objective is to help user, but user input isn't always clear, and user might make mistakes
+- It is ok to ask clarifying questions, to suggest alternatives or improvements, and to admit that you didn't fully understand what's needed
+- If possible, make your questions/suggestions specific, in yes/no or numbered-list-options format, so user could answer easily
+`;
+  }
+
   private extraSystemPrompt() {
     const extra = getEnv().EXTRA_SYSTEM_PROMPT || "";
     if (!extra) return "";
@@ -597,14 +605,15 @@ You only see the latest message as input, but that is always part of a big onboi
 Your main job is to understand user messages within context and route (parts of) user messages to background tasks: 
 - User messages may be complex, referring to multiple tasks/ideas/issues/projects, and/or combining complex requests with simple queries.
 - You job is to use Memory.* tools to understand new user messages and then decompose them into sub-parts to be routed to background tasks.
-- Task might be relevant by title/topic/goal, or by the 'asks' property - the list of questions it has asked and expecting replies for.
+- Task might be relevant by title/topic/goal, or by the 'asks' property - the list of questions task has asked and expecting replies for.
 - If user is quoting something, look for quoted part in the message history to understand the potential source task.
 - If a relevant existing task is found → send to its inbox, otherwise create new task with a goal and notes (no need to send to new task's inbox).
+- Before creating new tasks, ALWAYS think if it makes sense to clarify what exactly user's intent is, especially before creating multiple tasks.
 - If task needs to be cancelled/deleted, send corresponding user request to it's inbox.
 - If all parts of user messages were routed to tasks, reply with a short confirming sentence or emoji in TASK_REPLY.
 - If user message is (has a part that is) read-only, simple, low-variance (e.g., time, trivial lookup), then you are allowed to skip spawning a background task for that part and are allowed to create the full reply in TASK_REPLY.
 - Check message history to make sure you understand the context properly, even if user message seems obvious.
-- You are only allowed to reply with clarifying questions if you are unsure which task the user is referring to.
+- You are allowed to reply with clarifying questions if you are unsure about the user's intent or scope/goals of potential tasks.
 - If user is asking for tools that you don't have, create background task - those have more tools.
 
 ## Background tasks
@@ -655,6 +664,8 @@ Your main job is to understand user messages within context and route (parts of)
 ${this.jsPrompt()}
 
 ${this.toolsPrompt()}
+
+${this.userInputPrompt()}
 
 ## Time & locale
 - Use the provided 'Now: <iso datetime>' from ===STEP=== as current time.
@@ -853,6 +864,14 @@ ${
 ${this.jsPrompt()}
 
 ${this.toolsPrompt()}
+
+${this.userInputPrompt()}
+
+## Task complexity
+- You might have insufficient tools/capabilities to solve the task or achieve the goals, that is ok.
+- If task is too complex or not enough tools, admit it and suggest to reduce the scope/goals to something you believe you could do. 
+- You are also allowed and encouraged to ask clarifying questions, it's much better to ask and be sure about user's intent/expectations, than to waste resources on useless work.
+- Put your questions/suggestion into TASK_ASKS, and if user input results in task scope/goals change - create new task and finish this one.
 
 ## Time & locale
 - Use the provided 'Now: <iso datetime>' from ===STEP=== as current time.

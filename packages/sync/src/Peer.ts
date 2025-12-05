@@ -175,7 +175,7 @@ export class Peer extends EventEmitter<{
     }
     if (peer.transport !== transport) {
       console.error("onSync wrong transport for peer", peerId);
-      throw new Error("Wrong transport for peerr");
+      throw new Error("Wrong transport for peer");
     }
 
     // activate
@@ -271,7 +271,7 @@ export class Peer extends EventEmitter<{
     }
     if (peer.transport !== transport) {
       console.error("onSync wrong transport for peer", peerId);
-      throw new Error("Wrong transport for peerr");
+      throw new Error("Wrong transport for peer");
     }
     switch (msg.type) {
       case "changes":
@@ -600,6 +600,7 @@ export class Peer extends EventEmitter<{
   }
 
   private async broadcastLocalChanges(): Promise<void> {
+    if (!this.isStarted) return;
     try {
       const lastDbVersion = this.cursor.peers.get(this.id) || 0;
       const dbChanges = await this.db.execO<Change>(
@@ -843,7 +844,7 @@ export function isCursorOlder(a: Cursor, b: Cursor) {
     // a has no info on this id?
     // or a has older version than b?
     if (av === undefined || av < bv) {
-      console.log("older cursor", id, av, bv);
+      // console.log("older cursor", id, av, bv);
       return true;
     }
   }

@@ -5,6 +5,7 @@ export interface Env {
   EXA_API_KEY?: string;
   LANG?: string;
   EXTRA_SYSTEM_PROMPT?: string;
+  DESKTOP_NOTIFICATIONS?: string;
 }
 
 let env: Env = {};

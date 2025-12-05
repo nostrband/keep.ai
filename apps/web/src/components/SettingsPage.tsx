@@ -53,6 +53,7 @@ interface ConfigData {
     LANG?: string;
     EXA_API_KEY?: string;
     EXTRA_SYSTEM_PROMPT?: string;
+    DESKTOP_NOTIFICATIONS?: string;
   };
 }
 
@@ -71,6 +72,7 @@ export default function SettingsPage() {
     LANG: "en",
     EXA_API_KEY: "",
     EXTRA_SYSTEM_PROMPT: "",
+    DESKTOP_NOTIFICATIONS: "on",
   });
 
   // Load current config
@@ -91,6 +93,7 @@ export default function SettingsPage() {
           LANG: data.env.LANG || getBrowserLanguage(),
           EXA_API_KEY: data.env.EXA_API_KEY || "",
           EXTRA_SYSTEM_PROMPT: data.env.EXTRA_SYSTEM_PROMPT || "",
+          DESKTOP_NOTIFICATIONS: data.env.DESKTOP_NOTIFICATIONS || "on",
         });
       } catch (err) {
         setError(
@@ -180,6 +183,7 @@ export default function SettingsPage() {
           LANG: formData.LANG,
           EXA_API_KEY: formData.EXA_API_KEY,
           EXTRA_SYSTEM_PROMPT: formData.EXTRA_SYSTEM_PROMPT,
+          DESKTOP_NOTIFICATIONS: formData.DESKTOP_NOTIFICATIONS,
         }),
       });
 
@@ -202,6 +206,7 @@ export default function SettingsPage() {
           LANG: updatedConfig.env.LANG || getBrowserLanguage(),
           EXA_API_KEY: updatedConfig.env.EXA_API_KEY || "",
           EXTRA_SYSTEM_PROMPT: updatedConfig.env.EXTRA_SYSTEM_PROMPT || "",
+          DESKTOP_NOTIFICATIONS: updatedConfig.env.DESKTOP_NOTIFICATIONS || "on",
         });
       }
     } catch (err) {
@@ -414,6 +419,33 @@ export default function SettingsPage() {
               />
               <p className="text-sm text-gray-500 mt-1">
                 Optional additional system prompt to customize the AI assistant's behavior. This will be added to the system instructions.
+              </p>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between">
+                <label
+                  htmlFor="desktopNotifications"
+                  className="text-sm font-medium text-gray-700"
+                >
+                  Desktop Notifications
+                </label>
+                <input
+                  type="checkbox"
+                  id="desktopNotifications"
+                  checked={formData.DESKTOP_NOTIFICATIONS === "on"}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      DESKTOP_NOTIFICATIONS: e.target.checked ? "on" : "off",
+                    }))
+                  }
+                  className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                  disabled={saving}
+                />
+              </div>
+              <p className="text-sm text-gray-500 mt-1">
+                Enable or disable desktop notifications for new messages (separate from web push notifications).
               </p>
             </div>
 

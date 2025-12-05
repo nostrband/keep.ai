@@ -2,9 +2,12 @@ import { AssistantUIMessage } from "@app/proto";
 import { notificationSound } from "./notification-sound";
 import { KeepDbApi } from "@app/db";
 import { notifyTablesChanged } from "../queryClient";
+import { API_ENDPOINT } from "../const";
 
 export class MessageNotifications {
   private isRunning = false;
+  private desktopNotificationsEnabled: boolean | null = null;
+  private lastConfigCheck = 0;
 
   async checkNewMessages(api: KeepDbApi): Promise<void> {
     // If already running, this is a noop
@@ -46,7 +49,36 @@ export class MessageNotifications {
     }
   }
 
+  private async checkDesktopNotificationsEnabled(): Promise<boolean> {
+    // Cache the setting for 60 seconds to avoid excessive API calls
+    const now = Date.now();
+    if (this.desktopNotificationsEnabled !== null && now - this.lastConfigCheck < 60000) {
+      return this.desktopNotificationsEnabled;
+    }
+
+    try {
+      const response = await fetch(`${API_ENDPOINT}/get_config`);
+      if (response.ok) {
+        const config = await response.json();
+        this.desktopNotificationsEnabled = config.env.DESKTOP_NOTIFICATIONS !== "off";
+        this.lastConfigCheck = now;
+        return this.desktopNotificationsEnabled;
+      }
+    } catch (error) {
+      console.debug("Failed to fetch desktop notifications setting:", error);
+    }
+
+    // Default to enabled if we can't fetch the setting
+    return true;
+  }
+
   private async showNotification(message: AssistantUIMessage): Promise<void> {
+    // Check if desktop notifications are enabled
+    const notificationsEnabled = await this.checkDesktopNotificationsEnabled();
+    if (!notificationsEnabled) {
+      return;
+    }
+
     // Only show notifications if we're not looking at the UI tab
     if (globalThis.document?.visibilityState !== "visible") {
       // Only show notifications for non-user messages (assistant messages)
