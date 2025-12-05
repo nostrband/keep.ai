@@ -215,10 +215,12 @@ export class ChatStore {
     chatId,
     limit = 50,
     since,
+    before,
   }: {
     chatId: string;
     limit?: number;
     since?: string;
+    before?: string;
   }): Promise<Array<{
     id: string;
     type: string;
@@ -233,6 +235,12 @@ export class ChatStore {
       args.push(since);
     }
 
+    if (before) {
+      sql += ` AND timestamp < ?`;
+      args.push(before);
+    }
+
+    // Order by timestamp DESC to get newest first, then we'll reverse for pagination
     sql += ` ORDER BY timestamp DESC`;
 
     if (limit) {
@@ -259,11 +267,8 @@ export class ChatStore {
           return undefined;
         }
       })
-      .filter((event) => !!event)
-      .sort((a, b) =>
-        // Sort by timestamp ASC
-        a.timestamp < b.timestamp ? -1 : a.timestamp > b.timestamp ? 1 : 0
-      );
+      .filter((event) => !!event);
+      // Don't sort here - keep the DESC order from database
   }
 
   async saveChatMessages(

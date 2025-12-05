@@ -1,10 +1,8 @@
-import { useEffect, useMemo, useRef } from "react";
-import { useChatEvents } from "../hooks/dbChatReads";
+import { useEffect, useRef, useCallback, useMemo } from "react";
+import { useChatRows } from "../hooks/useChatRows";
 import { useAddMessage, useReadChat } from "../hooks/dbWrites";
 import { MessageItem } from "../ui/components/ai-elements/message-item";
 import { TaskEventGroup } from "./TaskEventGroup";
-import { EventType, EventPayload } from "../types/events";
-import { AssistantUIMessage } from "@app/proto";
 import type { UseMutationResult } from "@tanstack/react-query";
 import React from "react";
 
@@ -13,7 +11,12 @@ interface ChatInterfaceProps {
   promptHeight?: number;
 }
 
-type ReadChatMutation = UseMutationResult<void, Error, { chatId: string }, unknown>;
+type ReadChatMutation = UseMutationResult<
+  void,
+  Error,
+  { chatId: string },
+  unknown
+>;
 
 /** Detects when the user is near the bottom of the page and marks the chat as read. */
 const ScrollToBottomDetector = React.memo(function ScrollToBottomDetector({
@@ -30,9 +33,15 @@ const ScrollToBottomDetector = React.memo(function ScrollToBottomDetector({
   const mutateRef = useRef(readChat.mutate);
   const pendingRef = useRef(readChat.isPending);
 
-  useEffect(() => { chatIdRef.current = chatId; }, [chatId]);
-  useEffect(() => { mutateRef.current = readChat.mutate; }, [readChat.mutate]);
-  useEffect(() => { pendingRef.current = readChat.isPending; }, [readChat.isPending]);
+  useEffect(() => {
+    chatIdRef.current = chatId;
+  }, [chatId]);
+  useEffect(() => {
+    mutateRef.current = readChat.mutate;
+  }, [readChat.mutate]);
+  useEffect(() => {
+    pendingRef.current = readChat.isPending;
+  }, [readChat.isPending]);
 
   // Throttling via rAF
   const rafRef = useRef<number | null>(null);
@@ -85,104 +94,161 @@ const ScrollToBottomDetector = React.memo(function ScrollToBottomDetector({
   return null;
 });
 
-export default function ChatInterface({ chatId: propChatId, promptHeight }: ChatInterfaceProps) {
+export default function ChatInterface({
+  chatId: propChatId,
+  promptHeight,
+}: ChatInterfaceProps) {
   const chatId = propChatId || "main";
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
-  const { data: events = [], isLoading } = useChatEvents(chatId);
+  const {
+    rows,
+    isLoading,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    hasData,
+  } = useChatRows(chatId);
+
   const addMessage = useAddMessage();
   const readChat = useReadChat();
 
   // Only re-create the status string when needed
-  const status = useMemo(() => (addMessage.isPending ? "streaming" : "ready"), [addMessage.isPending]);
+  const status = addMessage.isPending ? "streaming" : "ready";
 
-  // Group consecutive events by task_id, respecting message boundaries
-  const organizedItems = useMemo(() => {
-    const items: Array<{
-      type: 'message' | 'task_group';
-      data: any;
-      timestamp: string;
-      key: string;
-    }> = [];
+  // Smart scroll-to-bottom logic
+  const lastTimestampRef = useRef<string | null>(null);
+  const wasAtBottomRef = useRef(true); // Start assuming at bottom
+  const isFirstLoadRef = useRef(true);
+  const isLoadingMoreRef = useRef(false);
 
-    // Sort all events chronologically first
-    const sortedEvents = [...events].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+  // Scroll position tracking for restoration when loading more at top
+  const previousRowsLengthRef = useRef(0);
 
-    let currentTaskGroup: typeof sortedEvents = [];
-    let currentTaskId: string | null = null;
-    let groupCounter = 0;
+  // Check if user is at bottom
+  const checkIfAtBottom = useCallback(() => {
+    const el = document.documentElement;
+    const { scrollTop, clientHeight, scrollHeight } = el;
+    const distanceFromBottom = scrollHeight - (scrollTop + clientHeight);
+    return distanceFromBottom <= 30; // 30px threshold
+  }, []);
 
-    const flushCurrentGroup = () => {
-      if (currentTaskGroup.length > 0 && currentTaskId) {
-        items.push({
-          type: 'task_group',
-          data: { taskId: currentTaskId, events: currentTaskGroup },
-          timestamp: currentTaskGroup[0].timestamp,
-          key: `task-group-${currentTaskId}-${groupCounter++}`
+  // Track scroll position to know if user is at bottom and remember distance from bottom
+  useEffect(() => {
+    const onScroll = () => {
+      const el = document.documentElement;
+      const { scrollTop, clientHeight, scrollHeight } = el;
+      const distanceFromBottom = scrollHeight - (scrollTop + clientHeight);
+      
+      wasAtBottomRef.current = distanceFromBottom <= 30;
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  // Get last message timestamp
+  const lastMessageTimestamp = useMemo(() => {
+    if (rows.length === 0) return null;
+    const lastRow = rows[rows.length - 1];
+    return lastRow.timestamp;
+  }, [rows]);
+
+  // Detect when we need to load more data (infinite scroll up for older messages)
+  useEffect(() => {
+    const onScroll = () => {
+      if (isLoadingMoreRef.current || !hasData) return;
+      const el = document.documentElement;
+      const { scrollTop } = el;
+      
+      // When scrolled near the top, load more messages
+      if (scrollTop < 200 && hasNextPage && !isFetchingNextPage) {
+        isLoadingMoreRef.current = true;
+        
+        // Remember scroll position from bottom before loading
+        const { scrollTop: currentScrollTop, clientHeight, scrollHeight } = el;
+        const currentScrollFromBottom = scrollHeight - (currentScrollTop + clientHeight);
+        
+        fetchNextPage().then(() => {
+          // After loading, restore scroll position relative to bottom
+          setTimeout(() => {
+            const { clientHeight: newClientHeight, scrollHeight: newScrollHeight } = document.documentElement;
+            const targetScrollTop = newScrollHeight - newClientHeight - currentScrollFromBottom;
+            document.documentElement.scrollTop = targetScrollTop;
+            isLoadingMoreRef.current = false;
+          }, 50);
         });
-        currentTaskGroup = [];
-        currentTaskId = null;
       }
     };
 
-    sortedEvents.forEach(event => {
-      if (event.type === 'message') {
-        // Message breaks any current task group
-        flushCurrentGroup();
-        
-        // Add the message
-        const message = event.content as AssistantUIMessage;
-        items.push({
-          type: 'message',
-          data: message,
-          timestamp: event.timestamp,
-          key: `message-${event.id}`
-        });
-      } else {
-        // Non-message event
-        const taskId = event.content?.task_id;
-        
-        if (!taskId) return; // Skip events without task_id
-        
-        if (currentTaskId === taskId) {
-          // Same task, add to current group (including task_run events for grouping)
-          currentTaskGroup.push(event);
-        } else {
-          // Different task, flush current group and start new one
-          flushCurrentGroup();
-          currentTaskId = taskId;
-          currentTaskGroup = [event];
-        }
-      }
-    });
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, [hasNextPage, fetchNextPage, isFetchingNextPage, hasData]);
 
-    // Flush any remaining group
-    flushCurrentGroup();
-
-    return items;
-  }, [events]);
-
-  // Scroll to bottom when organized items change
-  useEffect(() => {
-    if (organizedItems.length > 0) {
-      // Use 'auto' for large jumps to avoid long smooth scrolls on big histories
-      messagesEndRef.current?.scrollIntoView({ behavior: organizedItems.length < 50 ? "smooth" : "auto" });
-    }
-  }, [organizedItems]);
-
-  // Scroll to bottom when prompt height changes significantly (input expands)
-  useEffect(() => {
-    if (promptHeight && organizedItems.length > 0) {
-      // Small delay to ensure layout has updated
-      const timeoutId = setTimeout(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-      }, 50);
+  const scrollToBottom = useCallback(
+    (behavior: "auto" | "smooth", onDone?: () => void) => {
+      window.scrollTo({
+        top: document.documentElement.scrollHeight,
+        behavior,
+      });
       
-      return () => clearTimeout(timeoutId);
-    }
-  }, [promptHeight, organizedItems.length]);
+      // Ensure we're actually at the bottom after any dynamic content loads
+      const int = setInterval(() => {
+        const el = document.documentElement;
+        const bottom = el.clientHeight + el.scrollTop;
+        if (el.scrollHeight > bottom) {
+          window.scrollTo(0, el.scrollHeight);
+        } else {
+          clearInterval(int);
+          wasAtBottomRef.current = true;
+          if (onDone) onDone();
+        }
+      }, 50);
+    },
+    []
+  );
 
-  if (isLoading) {
+  // Smart scroll logic - handles first load and new messages
+  useEffect(() => {
+    if (!hasData || isFetchingNextPage || isLoadingMoreRef.current) return;
+
+    // First load - scroll to bottom immediately without animation
+    if (isFirstLoadRef.current && rows.length > 0) {
+      isFirstLoadRef.current = false;
+      lastTimestampRef.current = lastMessageTimestamp;
+      scrollToBottom("auto");
+      return;
+    }
+
+    // Check if we have a new message (timestamp comparison)
+    const hasNewMessage =
+      lastMessageTimestamp &&
+      lastTimestampRef.current &&
+      lastMessageTimestamp > lastTimestampRef.current;
+
+    // Only scroll if we have new message AND user was at bottom
+    if (hasNewMessage && wasAtBottomRef.current) {
+      scrollToBottom("smooth");
+    }
+
+    // Update last timestamp
+    if (lastMessageTimestamp) {
+      lastTimestampRef.current = lastMessageTimestamp;
+    }
+    
+    // Update previous rows length for scroll restoration
+    previousRowsLengthRef.current = rows.length;
+  }, [hasData, lastMessageTimestamp, rows.length, isFetchingNextPage, scrollToBottom]);
+
+  // Reset first load flag when chatId changes
+  useEffect(() => {
+    isFirstLoadRef.current = true;
+    lastTimestampRef.current = null;
+    wasAtBottomRef.current = true;
+    isLoadingMoreRef.current = false;
+    previousRowsLengthRef.current = 0;
+  }, [chatId]);
+
+  if (isLoading && !hasData) {
     return (
       <div className="max-w-4xl mx-auto px-6 py-6 flex items-center justify-center">
         <div>Loading messages...</div>
@@ -191,31 +257,40 @@ export default function ChatInterface({ chatId: propChatId, promptHeight }: Chat
   }
 
   return (
-    <div className="max-w-4xl mx-auto px-6">
-      {organizedItems.map((item, index) => {
-        if (item.type === 'message') {
-          // Render message
-          return (
-            <MessageItem
-              key={item.key}
-              message={item.data}
-              status={index === organizedItems.length - 1 ? status : "ready"}
-              isLastMessage={index === organizedItems.length - 1}
-              full={false}
-            />
-          );
-        } else {
-          // Render task event group
-          return (
-            <TaskEventGroup
-              key={item.key}
-              taskId={item.data.taskId}
-              events={item.data.events}
-            />
-          );
-        }
-      })}
-      <div ref={messagesEndRef} />
+    <div ref={containerRef} className="max-w-4xl mx-auto">
+      <div className="px-6">
+        {hasNextPage && (
+          <div className="py-4 text-center text-gray-500">
+            {isFetchingNextPage ? "Loading older messages..." : "Scroll up to load older messages"}
+          </div>
+        )}
+        {rows.map((row, index) => {
+          if (row.type === "message") {
+            return (
+              <MessageItem
+                key={row.id}
+                message={row.data}
+                status={index === rows.length - 1 ? status : "ready"}
+                isLastMessage={index === rows.length - 1}
+                full={false}
+              />
+            );
+          } else {
+            return (
+              <TaskEventGroup
+                key={row.id}
+                taskId={row.data.taskId}
+                events={row.data.events}
+              />
+            );
+          }
+        })}
+        {rows.length === 0 && hasData && (
+          <div className="py-4 text-center text-gray-500">
+            Beginning of conversation
+          </div>
+        )}
+      </div>
       <ScrollToBottomDetector chatId={chatId} readChat={readChat} />
     </div>
   );

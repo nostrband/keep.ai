@@ -331,7 +331,8 @@ ${systemPrompt}
     } else {
       if (input.result?.ok)
         job.push(
-          "- Read PREV_STEP_RESULT to understand what was returned by previous code step."
+          "- Read PREV_STEP_RESULT to understand what was returned by previous code step.",
+          this.localePrompt()
         );
       else
         job.push(
@@ -493,7 +494,7 @@ ${stepResults.join("\n")}
 
   private localePrompt() {
     const locale = getEnv().LANG || "en-US";
-    return `- User's locale/language is '${locale}' - always answer in this language.`;
+    return `- User's locale/language is '${locale}' - always write TASK_REPLY and TASK_ASKS in this language.`;
   }
 
   private toolsPrompt() {
@@ -579,13 +580,13 @@ If user asks what/who you are, or what you're capable of, here is what you shoul
   private extraSystemPrompt() {
     const extra = getEnv().EXTRA_SYSTEM_PROMPT || "";
     if (!extra) return "";
-    
+
     // Unescape the escaped values from .env storage
     // Note: Order matters - unescape newlines and quotes first, then backslashes
     return extra
-      .replace(/\\n/g, "\n")    // Unescape newlines
-      .replace(/\\"/g, '"')     // Unescape double quotes
-      .replace(/\\\\/g, "\\");  // Unescape backslashes (must be last)
+      .replace(/\\n/g, "\n") // Unescape newlines
+      .replace(/\\"/g, '"') // Unescape double quotes
+      .replace(/\\\\/g, "\\"); // Unescape backslashes (must be last)
   }
 
   private routerSystemPrompt() {

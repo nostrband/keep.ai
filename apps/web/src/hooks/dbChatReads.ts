@@ -1,5 +1,5 @@
 // Database chat read hooks using TanStack Query
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useInfiniteQuery } from "@tanstack/react-query";
 import { qk } from "./queryKeys";
 import { useDbQuery } from "./dbQuery";
 
@@ -21,16 +21,41 @@ export function useChatMessages(chatId: string) {
 
 export function useChatEvents(chatId: string) {
   const { api } = useDbQuery();
-  return useQuery({
+  return useInfiniteQuery({
     queryKey: qk.chatEvents(chatId),
-    queryFn: async () => {
-      if (!api) return [];
-      // Get all chat events (messages + agent events) in chronological order
-      const events = await api.chatStore.getChatEvents({ chatId });
-      return events;
+    queryFn: async ({ pageParam }: { pageParam?: string }) => {
+      if (!api) return { events: [], nextCursor: undefined };
+      
+      // Get chat events with pagination
+      // pageParam is the timestamp to get events before (older events)
+      const events = await api.chatStore.getChatEvents({
+        chatId,
+        limit: 50,
+        before: pageParam
+      });
+      
+      // The nextCursor is the timestamp of the oldest event in this page
+      // Since events come in DESC order, the oldest is the last one
+      const nextCursor = events.length === 50 && events.length > 0
+        ? events[events.length - 1].timestamp
+        : undefined;
+      
+      return { events, nextCursor };
     },
+    getNextPageParam: (lastPage) => lastPage.nextCursor,
+    initialPageParam: undefined,
     meta: { tables: ["chat_events"] },
     enabled: !!api && !!chatId,
+    select: (data) => {
+      // Flatten all pages but maintain DESC order (newest first)
+      // Each page is already in DESC order from the database
+      const allEvents = data.pages.flatMap(page => page.events);
+      return {
+        pages: data.pages,
+        pageParams: data.pageParams,
+        events: allEvents,
+      };
+    },
   });
 }
 
