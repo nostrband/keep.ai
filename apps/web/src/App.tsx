@@ -5,6 +5,7 @@ import {
   Route,
   Navigate,
 } from "react-router-dom";
+import { useState } from "react";
 import ChatPage from "./components/ChatPage";
 import ThreadsPage from "./components/ThreadsPage";
 import ThreadDetailPage from "./components/ThreadDetailPage";
@@ -23,6 +24,81 @@ import { useConfig } from "./hooks/useConfig";
 
 // Access build-time constants
 declare const __SERVERLESS__: boolean;
+
+function SyncingStatus({ isServerless }: { isServerless: boolean }) {
+  const [showTroubleOptions, setShowTroubleOptions] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const { resyncTransport, reconnectServerless } = useDbQuery();
+
+  const handleResync = async () => {
+    if (isProcessing) return;
+    setIsProcessing(true);
+    
+    try {
+      await resyncTransport();
+      // The page will reload after 3 seconds from the resyncTransport function
+    } catch (error) {
+      console.error("Resync failed:", error);
+      setIsProcessing(false);
+    }
+  };
+
+  const handleReconnect = async () => {
+    if (isProcessing) return;
+    setIsProcessing(true);
+    
+    try {
+      await reconnectServerless();
+      // The page will reload after 3 seconds from the reconnectServerless function
+    } catch (error) {
+      console.error("Reconnect failed:", error);
+      setIsProcessing(false);
+    }
+  };
+
+  if (isProcessing) {
+    return <div>Please wait...</div>;
+  }
+
+  return (
+    <div className="text-center">
+      <div className="mb-4">Updating database...</div>
+      {isServerless && (
+        <div>
+          {!showTroubleOptions ? (
+            <button
+              onClick={() => setShowTroubleOptions(true)}
+              className="text-blue-600 hover:text-blue-800 underline"
+            >
+              Having trouble?
+            </button>
+          ) : (
+            <div className="space-y-2">
+              <div>
+                Try to{" "}
+                <button
+                  onClick={handleResync}
+                  className="text-blue-600 hover:text-blue-800 underline"
+                >
+                  re-sync
+                </button>
+              </div>
+              <div>
+                If that doesn't help,{" "}
+                <button
+                  onClick={handleReconnect}
+                  className="text-blue-600 hover:text-blue-800 underline"
+                >
+                  reconnect
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function App() {
   const { dbStatus, error } = useDbQuery();
@@ -68,7 +144,7 @@ function App() {
   if (dbStatus === "syncing") {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div>Updating database...</div>
+        <SyncingStatus isServerless={isServerless} />
       </div>
     );
   }

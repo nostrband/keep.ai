@@ -192,6 +192,10 @@ export class NostrTransport implements Transport {
     for (const p of this.recvs.values()) p.reconnect();
   }
 
+  async resync() {
+    for (const p of this.recvs.values()) p.restart();
+  }
+
   async sync(peerId: string, localCursor: Cursor): Promise<void> {
     const recv = this.recvs.get(peerId);
     if (!recv) throw new Error("Peer not found " + peerId);
@@ -625,7 +629,7 @@ class PeerRecv {
     }
   }
 
-  private async restart() {
+  async restart() {
     this.debug("Restarting recv from peer", this.peer.peer_pubkey);
     await this.abort();
     try {

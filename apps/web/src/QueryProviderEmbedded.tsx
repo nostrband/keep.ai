@@ -47,6 +47,8 @@ interface QueryContextType {
   getWorkerSiteId: () => string | null;
   api: KeepDbApi | null;
   connectDevice: (connectionString: string) => Promise<void>;
+  resyncTransport: () => Promise<void>;
+  reconnectServerless: () => Promise<void>;
 }
 
 const QueryContext = createContext<QueryContextType | undefined>(undefined);
@@ -343,6 +345,76 @@ export function QueryProviderEmbedded({
     }
   };
 
+  const resyncTransport = async (): Promise<void> => {
+    if (!isServerless) {
+      throw new Error("Resync only available in serverless mode");
+    }
+    
+    if (!transport || !peer) {
+      throw new Error("Transport or peer not available");
+    }
+
+    try {
+      // Call resync on NostrTransport
+      await (transport as NostrTransport).resync();
+      
+      // Show "Please wait..." and reload after 3 seconds
+      setTimeout(() => {
+        window.location.reload();
+      }, 3000);
+    } catch (err) {
+      console.error("Resync failed:", err);
+      throw err;
+    }
+  };
+
+  const reconnectServerless = async (): Promise<void> => {
+    if (!isServerless) {
+      throw new Error("Reconnect only available in serverless mode");
+    }
+
+    try {
+      // Stop everything - transport, peer, db
+      if (transport) {
+        await (transport as NostrTransport).stop();
+      }
+      if (peer) {
+        peer.stop();
+      }
+      if (db) {
+        await db.close();
+      }
+
+      // Delete the indexeddb database 'idb-batch-atomic'
+      if ('indexedDB' in window) {
+        try {
+          await new Promise<void>((resolve, reject) => {
+            const deleteReq = indexedDB.deleteDatabase('idb-batch-atomic');
+            deleteReq.onerror = () => reject(deleteReq.error);
+            deleteReq.onsuccess = () => resolve();
+            deleteReq.onblocked = () => {
+              console.warn('Database deletion blocked');
+              resolve(); // Continue anyway
+            };
+          });
+        } catch (err) {
+          console.warn('Failed to delete indexedDB:', err);
+        }
+      }
+
+      // Delete local_key from localStorage
+      localStorage.removeItem('local_key');
+
+      // Show "Please wait..." and reload after 3 seconds
+      setTimeout(() => {
+        window.location.reload();
+      }, 3000);
+    } catch (err) {
+      console.error("Reconnect failed:", err);
+      throw err;
+    }
+  };
+
   const contextValue: QueryContextType = {
     dbStatus,
     error,
@@ -353,6 +425,8 @@ export function QueryProviderEmbedded({
     getWorkerSiteId,
     api,
     connectDevice,
+    resyncTransport,
+    reconnectServerless,
   };
 
   return (
