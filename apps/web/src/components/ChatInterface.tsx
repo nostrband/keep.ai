@@ -122,17 +122,6 @@ export default function ChatInterface({
   const isFirstLoadRef = useRef(true);
   const isLoadingMoreRef = useRef(false);
 
-  // Scroll position tracking for restoration when loading more at top
-  const previousRowsLengthRef = useRef(0);
-
-  // Check if user is at bottom
-  const checkIfAtBottom = useCallback(() => {
-    const el = document.documentElement;
-    const { scrollTop, clientHeight, scrollHeight } = el;
-    const distanceFromBottom = scrollHeight - (scrollTop + clientHeight);
-    return distanceFromBottom <= 30; // 30px threshold
-  }, []);
-
   // Track scroll position to know if user is at bottom and remember distance from bottom
   useEffect(() => {
     const onScroll = () => {
@@ -186,6 +175,7 @@ export default function ChatInterface({
 
   const scrollToBottom = useCallback(
     (behavior: "auto" | "smooth", onDone?: () => void) => {
+      console.log("scroll", behavior);
       window.scrollTo({
         top: document.documentElement.scrollHeight,
         behavior,
@@ -235,8 +225,6 @@ export default function ChatInterface({
       lastTimestampRef.current = lastMessageTimestamp;
     }
     
-    // Update previous rows length for scroll restoration
-    previousRowsLengthRef.current = rows.length;
   }, [hasData, lastMessageTimestamp, rows.length, isFetchingNextPage, scrollToBottom]);
 
   // Reset first load flag when chatId changes
@@ -245,7 +233,6 @@ export default function ChatInterface({
     lastTimestampRef.current = null;
     wasAtBottomRef.current = true;
     isLoadingMoreRef.current = false;
-    previousRowsLengthRef.current = 0;
   }, [chatId]);
 
   if (isLoading && !hasData) {

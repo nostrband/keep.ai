@@ -25,7 +25,7 @@ import { useConfig } from "./hooks/useConfig";
 // Access build-time constants
 declare const __SERVERLESS__: boolean;
 
-function SyncingStatus({ isServerless }: { isServerless: boolean }) {
+function SyncingStatus({ isServerless, isInitializing }: { isServerless: boolean; isInitializing: boolean }) {
   const [showTroubleOptions, setShowTroubleOptions] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const { resyncTransport, reconnectServerless } = useDbQuery();
@@ -62,7 +62,7 @@ function SyncingStatus({ isServerless }: { isServerless: boolean }) {
 
   return (
     <div className="text-center">
-      <div className="mb-4">Updating database...</div>
+      <div className="mb-4">{isInitializing ? "Initializing database..." : "Updating database..."}</div>
       {isServerless && (
         <div>
           {!showTroubleOptions ? (
@@ -136,7 +136,7 @@ function App() {
   if (dbStatus === "initializing") {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div>Initializing database...</div>
+        <SyncingStatus isServerless={isServerless} isInitializing={true} />
       </div>
     );
   }
@@ -144,7 +144,7 @@ function App() {
   if (dbStatus === "syncing") {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <SyncingStatus isServerless={isServerless} />
+        <SyncingStatus isServerless={isServerless} isInitializing={false} />
       </div>
     );
   }
