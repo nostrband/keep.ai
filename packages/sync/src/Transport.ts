@@ -50,4 +50,7 @@ export interface Transport {
   // failures, only on invalid input, shouldn't throw if
   // peer temporarily disconnected
   send(peerId: string, changes: PeerMessage): Promise<void>;
+  // Optional backpressure promise so that peer wouldn't be 
+  // able to overload the transport
+  waitCanSend?(): Promise<void>;
 }

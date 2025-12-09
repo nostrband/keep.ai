@@ -45,6 +45,7 @@ import { bytesToHex } from "nostr-tools/utils";
 import { randomBytes } from "@noble/hashes/utils";
 
 const MAX_RECV_BUFFER_SIZE = 10000;
+const MAX_SEND_BUFFER_SIZE = 10000;
 const MAX_BATCH_BYTES = 200000;
 
 // Signer, connecting the transport with key storage
@@ -206,6 +207,10 @@ export class NostrTransport implements Transport {
     const send = this.sends.get(peerId);
     if (!send) throw new Error("Peer not found " + peerId);
     return send.send(changes);
+  }
+
+  async waitCanSend(): Promise<void> {
+    await Promise.all([...this.sends.values()].map((s) => s.waitCanSend()));
   }
 
   async stop() {
@@ -599,7 +604,14 @@ class PeerRecv {
     // Aborted
     if (!this.recvCursor) return;
 
-    this.debug("Processing changes", JSON.stringify(msg));
+    this.debug(
+      "Processing changes",
+      JSON.stringify({
+        event_id: msg.event_id,
+        prev_event_id: msg.prev_event_id,
+        created_at: msg.created_at,
+      })
+    );
 
     try {
       // Notify the Peer
@@ -816,10 +828,13 @@ class PeerSend {
   private sub?: SubCloser;
   private debug: ReturnType<typeof debug>;
   private pending: PeerChange[] = [];
+  private pendingCount = 0;
   private schemaVersion: number = 0;
   private lastCursorCreatedAt = 0;
   private reconnectTimeout?: ReturnType<typeof setTimeout>;
   private nextSendTimer?: ReturnType<typeof setTimeout>;
+  private waitCanSendPromise?: Promise<void>;
+  private waitCanSendCallback?: () => void;
 
   constructor(parent: NostrTransport, peer: NostrPeer) {
     this.peer = peer;
@@ -849,8 +864,13 @@ class PeerSend {
     if (this.nextSendTimer) clearTimeout(this.nextSendTimer);
     this.nextSendTimer = undefined;
     this.pending.length = 0;
+    this.pendingCount = 0;
     this.schemaVersion = 0;
     this.lastCursorCreatedAt = 0;
+    // unblock clients
+    this.waitCanSendCallback?.();
+    this.waitCanSendCallback = undefined;
+    this.waitCanSendPromise = undefined;
   }
 
   async reconnect() {
@@ -998,16 +1018,32 @@ class PeerSend {
     this.schedule(changes.data);
   }
 
+  async waitCanSend(): Promise<void> {
+    if (!this.waitCanSendPromise) return Promise.resolve();
+    return this.waitCanSendPromise;
+  }
+
   private schedule(data: PeerChange[]) {
     this.pending.push(...data);
+    this.pendingCount += data.length;
+
+    // Should apply backpressure?
+    if (this.pendingCount >= MAX_SEND_BUFFER_SIZE) {
+      if (!this.waitCanSendPromise) {
+        this.debug("Backpressure, pending changes", this.pendingCount);
+        this.waitCanSendPromise = new Promise<void>(
+          (ok) => (this.waitCanSendCallback = ok)
+        );
+      }
+    }
+
     if (!this.nextSendTimer) {
       // Schedule next send in 100 ms
       this.nextSendTimer = setTimeout(async () => {
+        // This will clear the timeout or set next one
+        // if more data is pending
         await this.publishPending();
-
-        // Reset after sending
-        this.nextSendTimer = undefined;
-      }, 100);
+      }, 100); // small delay to improve batching
     }
   }
 
@@ -1060,15 +1096,37 @@ class PeerSend {
     this.pending.length = 0;
 
     // Send batches, watch for stop signal
+    let ok = false;
     while (batches.length) {
       const msg = batches.shift()!;
 
-      const ok = await this.publish(msg);
+      ok = await this.publish(msg);
 
       // Aborted?
       if (!this.sendCursor) break;
 
-      if (!ok) {
+      if (ok) {
+        this.pendingCount -= msg.data.length;
+        this.debug(
+          "Send changes",
+          msg.data.length,
+          "pending",
+          this.pendingCount
+        );
+
+        // Notify clients blocked on backpressure
+        if (this.waitCanSendPromise && this.waitCanSendCallback) {
+          if (this.pendingCount < MAX_SEND_BUFFER_SIZE) {
+            this.debug(
+              "Unblock back-pressed clients, pending",
+              this.pendingCount
+            );
+            this.waitCanSendCallback();
+            this.waitCanSendCallback = undefined;
+            this.waitCanSendPromise = undefined;
+          }
+        }
+      } else {
         this.debug(
           "Will retry publish changes",
           msg.data.length,
@@ -1080,19 +1138,22 @@ class PeerSend {
         // note that the db_version asc ordering is broken after these pushes
         this.pending.push(...msg.data);
         this.pending.push(...batches.map((b) => b.data).flat());
-
-        // If the next publish is scheduled
-        if (this.nextSendTimer) clearTimeout(this.nextSendTimer);
-
-        // Schedule next try in 10 sec
-        this.nextSendTimer = setTimeout(async () => {
-          await this.publishPending();
-
-          // Reset after sending
-          this.nextSendTimer = undefined;
-        }, 10000);
         break;
       }
+    }
+
+    // Clear now after we're done
+    this.nextSendTimer = undefined;
+
+    // Not everything was sent or new pending stuff arrived?
+    if (this.pending.length > 0) {
+      // Schedule next try, pause on error
+      this.nextSendTimer = setTimeout(
+        async () => {
+          await this.publishPending();
+        },
+        ok ? 0 : 10000
+      );
     }
   }
 
@@ -1153,6 +1214,8 @@ class PeerSend {
       this.peer.peer_pubkey,
       "by local pubkey",
       this.peer.local_pubkey,
+      "prev id",
+      this.sendCursor.send_changes_event_id,
       "relays",
       this.relays
     );
@@ -1173,6 +1236,8 @@ class PeerSend {
       msg.data.length,
       "event",
       signedEvent.id,
+      "prev",
+      this.sendCursor.send_changes_event_id,
       "stream",
       this.sendCursor.send_cursor_id
     );

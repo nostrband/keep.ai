@@ -655,7 +655,11 @@ export class Peer extends EventEmitter<{
     );
   }
 
-  private sendToPeer(peer: PeerInfo, msg: PeerMessage) {
+  private async sendToPeer(peer: PeerInfo, msg: PeerMessage) {
+    // React on backpressure if transport supports that
+    if (peer.transport.waitCanSend)
+      await peer.transport.waitCanSend();
+
     // Making sure transport.send can't synchronously
     // call Peer's callbacks
     queueMicrotask(async () => {
@@ -667,8 +671,8 @@ export class Peer extends EventEmitter<{
     });
   }
 
-  private sendChanges(peer: PeerInfo, changes: PeerChange[]) {
-    this.sendToPeer(peer, {
+  private async sendChanges(peer: PeerInfo, changes: PeerChange[]) {
+    await this.sendToPeer(peer, {
       type: "changes",
       data: changes,
       schemaVersion: this.schemaVersion,
@@ -683,7 +687,7 @@ export class Peer extends EventEmitter<{
       if (p.id === exceptPeerId || !p.active) continue;
 
       const newChanges = filterChanges(changes, p.cursor);
-      this.sendChanges(p, newChanges);
+      await this.sendChanges(p, newChanges);
     }
   }
 
@@ -699,14 +703,11 @@ export class Peer extends EventEmitter<{
           serializeCursor(peer.cursor)
         )}`
       );
-      const start = Date.now();
 
       // for each site_id:db_version of peer cursor,
       // fetch known changes since then,
       // plus all changes from third-parties not known to peer,
       // and send to peer
-
-      const changes: PeerChange[] = [];
 
       // Copy the peer's site_id:db_version map
       const map = new Map(peer.cursor.peers);
@@ -729,48 +730,64 @@ export class Peer extends EventEmitter<{
         args.push(db_version);
       }
 
-      // // Collect changes from third-parties that peer didn't know about
-      // const otherPeerIds = [...this.cursor.peers.keys()]
-      //   // from our cursor (all site_ids we know) remove ones the peer knows about
-      //   .filter((s) => s !== peer.id && !peer.cursor.peers.has(s))
-      //   .map((site_id) => hexToBytes(site_id));
-      // if (otherPeerIds.length) {
-      //   const bindString = new Array(otherPeerIds.length).fill("?").join(",");
-      //   sql += ` OR site_id IN (${bindString})`;
-      //   args.push(...otherPeerIds);
-      // }
+      // Offset+limit might require defined order
+      sql += " ORDER BY site_id, db_version ";
 
       this.debug("Collecting changes with crsql_change_history", sql, args);
 
-      const dbChanges = await this.db.execO<Change>(sql, args);
+      // Batch the query to avoid SQLite limits with large result sets
+      const batchSize = 10000;
+      let offset = 0;
+      let totalChanges = 0;
 
-      if (dbChanges) changes.push(...serializeChanges(dbChanges));
+      while (true) {
+        const batchSql = `${sql} LIMIT ? OFFSET ?`;
+        const batchArgs = [...args, batchSize, offset];
 
-      this.debug(
-        "Collected changes for peer",
-        peer.id,
-        "changes",
-        changes.length,
-        "in",
-        Date.now() - start,
-        "ms"
-      );
+        const start = Date.now();
+        this.debug(`Fetching batch: offset=${offset}, limit=${batchSize}`);
+        const dbChangesBatch = await this.db.execO<Change>(batchSql, batchArgs);
 
-      // Convert to peer changes
-      if (changes.length > 0) {
+        if (!dbChangesBatch || dbChangesBatch.length === 0) {
+          break; // No more results
+        }
+
+        const changes = serializeChanges(dbChangesBatch);
+        this.debug(
+          "Collected changes batch for peer",
+          peer.id,
+          "changes",
+          changes.length,
+          "offset",
+          offset,
+          "in",
+          Date.now() - start,
+          "ms"
+        );
+
+        // Convert to peer changes
         this.debug(`Sync to peer '${peer.id}' changes ${changes.length}`);
 
         // Send to peer
-        this.sendChanges(peer, changes);
+        await this.sendChanges(peer, changes);
 
         // Assume peer knows these changes now
         this.updatePeerCursor(peer.id, changes);
-      } else {
-        this.debug(`No changes to sync for peer ${peer.id}`);
+
+        totalChanges += dbChangesBatch.length;
+
+        // If we got fewer results than the batch size, we're done
+        if (dbChangesBatch.length < batchSize) {
+          break;
+        }
+
+        offset += batchSize;
       }
 
+      if (!totalChanges) this.debug(`No changes to sync for peer ${peer.id}`);
+
       // Send EOSE
-      this.sendToPeer(peer, {
+      await this.sendToPeer(peer, {
         type: "eose",
         data: [],
       });
