@@ -1,7 +1,7 @@
 import { generateId } from "ai";
 import { CRSqliteDB } from "./database";
 import { DBInterface } from "./interfaces";
-import { AssistantUIMessage } from "@app/proto";
+import { AssistantUIMessage, ChatEvent } from "@app/proto";
 import debug from "debug";
 
 const debugChatStore = debug("db:chat-store");
@@ -221,12 +221,7 @@ export class ChatStore {
     limit?: number;
     since?: string;
     before?: string;
-  }): Promise<Array<{
-    id: string;
-    type: string;
-    content: any;
-    timestamp: string;
-  }>> {
+  }): Promise<Array<ChatEvent>> {
     let sql = `SELECT * FROM chat_events WHERE chat_id = ?`;
     const args: (string | number)[] = [chatId];
 

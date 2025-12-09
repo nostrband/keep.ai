@@ -24,14 +24,34 @@ export function setOnLocalChanges(callback: (() => void) | null) {
 }
 
 // Call this from your sync/applyChanges code.
-export function notifyTablesChanged(tables: string[], isLocalChange: boolean, api: KeepDbApi) {
+export function notifyTablesChanged(
+  tables: string[],
+  isLocalChange: boolean,
+  api: KeepDbApi
+) {
   console.log("notifyTablesChanged", tables, isLocalChange, globalThis);
   const set = new Set(tables);
   queryClient.invalidateQueries({
     predicate(q) {
-      const t = (q.meta as any)?.tables as string[] | undefined;
+      const meta = q.meta as any;
+      if (!meta) return false;
+
+      const t = meta.tables as string[] | undefined;
       if (!t) return false;
-      return t.some(x => set.has(x));
+
+      const queryTables = t.filter((x) => set.has(x));
+      if (!queryTables.length) return false;
+
+      if (meta.onTablesUpdate) {
+        // Custom handler
+        meta
+          .onTablesUpdate(queryTables)
+          .catch((e: any) => console.log("error", e));
+        return false;
+      } else {
+        // Invalidate
+        return true;
+      }
     },
   });
 

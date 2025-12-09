@@ -540,6 +540,7 @@ export async function createServer(config: ServerConfig = {}) {
           | "LANG"
           | "EXA_API_KEY"
           | "EXTRA_SYSTEM_PROMPT"
+          | "DESKTOP_NOTIFICATIONS"
       ) => {
         if (body[name] === undefined) return;
 

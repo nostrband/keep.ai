@@ -12,13 +12,14 @@ interface ChatInterfaceProps {
 }
 
 type ReadChatMutation = UseMutationResult<
-  void,
+  boolean,
   Error,
   { chatId: string },
   unknown
 >;
 
 /** Detects when the user is near the bottom of the page and marks the chat as read. */
+// FIXME this is some unnecessarily complex bs!
 const ScrollToBottomDetector = React.memo(function ScrollToBottomDetector({
   chatId,
   readChat,
@@ -55,7 +56,6 @@ const ScrollToBottomDetector = React.memo(function ScrollToBottomDetector({
       const isAtBottom = distanceFromBottom <= bottomThreshold;
 
       if (isAtBottom && chatIdRef.current && !pendingRef.current) {
-        // console.log("isAtBottom", true);
         mutateRef.current({ chatId: chatIdRef.current });
       }
     };
@@ -101,14 +101,8 @@ export default function ChatInterface({
   const chatId = propChatId || "main";
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const {
-    rows,
-    isLoading,
-    fetchNextPage,
-    hasNextPage,
-    isFetchingNextPage,
-    hasData,
-  } = useChatRows(chatId);
+  const { rows, isLoading, fetchNextPage, hasNextPage, isFetching, hasData } =
+    useChatRows(chatId);
 
   const addMessage = useAddMessage();
   const readChat = useReadChat();
@@ -118,9 +112,10 @@ export default function ChatInterface({
 
   // Smart scroll-to-bottom logic
   const lastTimestampRef = useRef<string | null>(null);
+  const currentScrollFromBottom = useRef<number | null>(null);
   const wasAtBottomRef = useRef(true); // Start assuming at bottom
   const isFirstLoadRef = useRef(true);
-  const isLoadingMoreRef = useRef(false);
+  // const isLoadingMoreRef = useRef(false);
 
   // Track scroll position to know if user is at bottom and remember distance from bottom
   useEffect(() => {
@@ -128,7 +123,10 @@ export default function ChatInterface({
       const el = document.documentElement;
       const { scrollTop, clientHeight, scrollHeight } = el;
       const distanceFromBottom = scrollHeight - (scrollTop + clientHeight);
-      
+
+      // Store to use it when restoring scroll cursor
+      currentScrollFromBottom.current = distanceFromBottom;
+
       wasAtBottomRef.current = distanceFromBottom <= 30;
     };
     window.addEventListener("scroll", onScroll, { passive: true });
@@ -145,61 +143,34 @@ export default function ChatInterface({
   // Detect when we need to load more data (infinite scroll up for older messages)
   useEffect(() => {
     const onScroll = () => {
-      if (isLoadingMoreRef.current || !hasData) return;
+      if (isFetching || !hasData) return; // isLoadingMoreRef.current
       const el = document.documentElement;
       const { scrollTop } = el;
-      
+
       // When scrolled near the top, load more messages
-      if (scrollTop < 200 && hasNextPage && !isFetchingNextPage) {
-        isLoadingMoreRef.current = true;
-        
-        // Remember scroll position from bottom before loading
-        const { scrollTop: currentScrollTop, clientHeight, scrollHeight } = el;
-        const currentScrollFromBottom = scrollHeight - (currentScrollTop + clientHeight);
-        
-        fetchNextPage().then(() => {
-          // After loading, restore scroll position relative to bottom
-          setTimeout(() => {
-            const { clientHeight: newClientHeight, scrollHeight: newScrollHeight } = document.documentElement;
-            const targetScrollTop = newScrollHeight - newClientHeight - currentScrollFromBottom;
-            document.documentElement.scrollTop = targetScrollTop;
-            isLoadingMoreRef.current = false;
-          }, 50);
+      if (scrollTop < 200 && hasNextPage && !isFetching) {
+        fetchNextPage().catch((e) => {
+          console.error("Error loading", e);
         });
       }
     };
 
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
-  }, [hasNextPage, fetchNextPage, isFetchingNextPage, hasData]);
+  }, [hasNextPage, fetchNextPage, isFetching, hasData]);
 
-  const scrollToBottom = useCallback(
-    (behavior: "auto" | "smooth", onDone?: () => void) => {
-      console.log("scroll", behavior);
-      window.scrollTo({
-        top: document.documentElement.scrollHeight,
-        behavior,
-      });
-      
-      // Ensure we're actually at the bottom after any dynamic content loads
-      const int = setInterval(() => {
-        const el = document.documentElement;
-        const bottom = el.clientHeight + el.scrollTop;
-        if (el.scrollHeight > bottom) {
-          window.scrollTo(0, el.scrollHeight);
-        } else {
-          clearInterval(int);
-          wasAtBottomRef.current = true;
-          if (onDone) onDone();
-        }
-      }, 50);
-    },
-    []
-  );
+  const scrollToBottom = useCallback((behavior: "auto" | "smooth") => {
+    // console.log("scroll", behavior);
+    window.scrollTo({
+      top: document.documentElement.scrollHeight,
+      behavior,
+    });
+  }, []);
 
   // Smart scroll logic - handles first load and new messages
   useEffect(() => {
-    if (!hasData || isFetchingNextPage || isLoadingMoreRef.current) return;
+    // console.log("rows", rows.length, hasData, isFetching);
+    if (!hasData || isFetching) return; //  || isLoadingMoreRef.current
 
     // First load - scroll to bottom immediately without animation
     if (isFirstLoadRef.current && rows.length > 0) {
@@ -216,23 +187,31 @@ export default function ChatInterface({
       lastMessageTimestamp > lastTimestampRef.current;
 
     // Only scroll if we have new message AND user was at bottom
-    if (hasNewMessage && wasAtBottomRef.current) {
-      scrollToBottom("smooth");
+    if (hasNewMessage) {
+      // NOTE: if were down - scroll to show it,
+      // otherwise don't touch scrollTop to keep position
+      if (wasAtBottomRef.current) scrollToBottom("smooth");
+    } else if (currentScrollFromBottom.current) {
+      const { clientHeight: newClientHeight, scrollHeight: newScrollHeight } =
+        document.documentElement;
+      const targetScrollTop =
+        newScrollHeight - newClientHeight - currentScrollFromBottom.current;
+      document.documentElement.scrollTop = targetScrollTop;
     }
 
     // Update last timestamp
     if (lastMessageTimestamp) {
       lastTimestampRef.current = lastMessageTimestamp;
     }
-    
-  }, [hasData, lastMessageTimestamp, rows.length, isFetchingNextPage, scrollToBottom]);
+  }, [hasData, lastMessageTimestamp, rows.length, isFetching, scrollToBottom]);
 
   // Reset first load flag when chatId changes
   useEffect(() => {
     isFirstLoadRef.current = true;
     lastTimestampRef.current = null;
     wasAtBottomRef.current = true;
-    isLoadingMoreRef.current = false;
+    // isLoadingMoreRef.current = false;
+    currentScrollFromBottom.current = 0;
   }, [chatId]);
 
   if (isLoading && !hasData) {
@@ -248,7 +227,9 @@ export default function ChatInterface({
       <div className="px-6">
         {hasNextPage && (
           <div className="py-4 text-center text-gray-500">
-            {isFetchingNextPage ? "Loading older messages..." : "Scroll up to load older messages"}
+            {isFetching
+              ? "Loading older messages..."
+              : "Scroll up to load older messages"}
           </div>
         )}
         {rows.map((row, index) => {

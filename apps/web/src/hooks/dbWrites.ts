@@ -1,8 +1,10 @@
 // Database write hooks using TanStack Query mutations
-import { useMutation } from "@tanstack/react-query";
+import { InfiniteData, useMutation } from "@tanstack/react-query";
 import { notifyTablesChanged, queryClient } from "../queryClient";
 import { qk } from "./queryKeys";
 import { useDbQuery } from "./dbQuery";
+import { ChatEvent } from "@app/proto";
+import { UseChatEventsResult } from "./dbChatReads";
 
 export function useAddMessage() {
   const { api } = useDbQuery();
@@ -23,39 +25,12 @@ export function useAddMessage() {
 
       return message;
     },
-    // onMutate: async ({ threadId, role, content, userId = 'default-user' }) => {
-    //   await queryClient.cancelQueries({ queryKey: qk.threadMessages(threadId) });
-
-    //   const messagesKey = qk.threadMessages(threadId);
-    //   const prevMessages = queryClient.getQueryData<any[]>(messagesKey) ?? [];
-
-    //   const optimistic = {
-    //     id: `opt_${Date.now()}`,
-    //     thread_id: threadId,
-    //     role,
-    //     content,
-    //     created_at: new Date().toISOString()
-    //   };
-
-    //   queryClient.setQueryData(messagesKey, [...prevMessages, optimistic]);
-
-    //   return { messagesKey, prevMessages };
-    // },
-    // onError: (_err, _vars, ctx) => {
-    //   if (ctx) {
-    //     queryClient.setQueryData(ctx.messagesKey, ctx.prevMessages);
-    //   }
-    // },
-    onSuccess: (_result, { threadId }) => {
-      // Invalidate to get fresh data from DB
-      queryClient.invalidateQueries({ queryKey: qk.threadMessages(threadId) });
-      queryClient.invalidateQueries({ queryKey: qk.thread(threadId) });
-      // Also invalidate chat-related queries since chatId === threadId
-      queryClient.invalidateQueries({ queryKey: qk.chatMessages(threadId) });
-      queryClient.invalidateQueries({ queryKey: qk.chat(threadId) });
-      queryClient.invalidateQueries({ queryKey: qk.allChats() });
-
-      notifyTablesChanged(["messages", "threads", "chats"], true, api!);
+    onSuccess: () => {
+      notifyTablesChanged(
+        ["messages", "threads", "chats", "chat_events"],
+        true,
+        api!
+      );
     },
   });
 }
@@ -64,19 +39,29 @@ export function useReadChat() {
   const { api } = useDbQuery();
 
   return useMutation({
-    mutationFn: async (input: {
-      chatId: string;
-    }) => {
+    mutationFn: async (input: { chatId: string }) => {
       if (!api) throw new Error("Chat store not available");
 
-      await api.chatStore.readChat(input.chatId);
-    },
-    onSuccess: (_result, { chatId }) => {
-      // Invalidate chat-related queries to reflect the updated read_at timestamp
-      queryClient.invalidateQueries({ queryKey: qk.chat(chatId) });
-      queryClient.invalidateQueries({ queryKey: qk.allChats() });
+      const chat = await api.chatStore.getChat(input.chatId);
+      const events = await api.chatStore.getChatEvents({
+        chatId: input.chatId,
+        limit: 1,
+      });
 
-      notifyTablesChanged(["chats"], true, api!);
+      // Only update if last read timestamp was less than latest event's timestamp
+      if (events.length && events[0].timestamp > (chat?.read_at || "")) {
+        // FIXME in theory event might have timestamp in the future,
+        // and without passing it to the read method and having it set 'now' as read_at,
+        // we'll be updating it on every scroll until that future timestamp
+        await api.chatStore.readChat(input.chatId);
+        return true;
+      } else {
+        // No need to update
+        return false;
+      }
+    },
+    onSuccess: (updated) => {
+      if (updated) notifyTablesChanged(["chats"], true, api!);
     },
   });
 }
@@ -85,15 +70,12 @@ export function useUpdateTask() {
   const { api } = useDbQuery();
 
   return useMutation({
-    mutationFn: async (input: {
-      taskId: string;
-      timestamp: number;
-    }) => {
+    mutationFn: async (input: { taskId: string; timestamp: number }) => {
       if (!api) throw new Error("Task store not available");
 
       // Get the current task first
       const task = await api.taskStore.getTask(input.taskId);
-      
+
       // Update the task with new timestamp
       await api.taskStore.updateTask({
         ...task,
@@ -121,7 +103,7 @@ export function useDeletePeer() {
       if (!api) throw new Error("Nostr peer store not available");
 
       const pubkeys = Array.isArray(peerPubkey) ? peerPubkey : [peerPubkey];
-      
+
       // Delete all specified peers using bulk delete
       await api.nostrPeerStore.deletePeers(pubkeys);
     },
