@@ -4,6 +4,7 @@ import { Loader2 } from "lucide-react";
 import { parseConnectionString } from "@app/sync";
 import { useNostrPeers, useLocalSiteId } from "../hooks/dbNostrPeerReads";
 import { useDeletePeer } from "../hooks/dbWrites";
+import { useDbQuery } from "../hooks/dbQuery";
 import SharedHeader from "./SharedHeader";
 import { Button, Badge } from "../ui";
 import { API_ENDPOINT } from "../const";
@@ -94,7 +95,11 @@ function QRModal({
         </div>
 
         <div className="mt-6 flex justify-end">
-          <Button onClick={onClose} variant="outline">
+          <Button
+            onClick={onClose}
+            variant="outline"
+            className="border border-gray-300 cursor-pointer"
+          >
             Close
           </Button>
         </div>
@@ -108,6 +113,7 @@ export default function DevicesPage() {
   const { data: allPeers = [], isLoading } = useNostrPeers();
   const { data: localSiteId } = useLocalSiteId();
   const deletePeerMutation = useDeletePeer();
+  const { resyncTransport, reconnectServerless } = useDbQuery();
   const [isConnecting, setIsConnecting] = useState(false);
   const [qrModalOpen, setQrModalOpen] = useState(false);
   const [connectionString, setConnectionString] = useState("");
@@ -115,6 +121,7 @@ export default function DevicesPage() {
   const [peerToDelete, setPeerToDelete] = useState<{ pubkey: string; deviceInfo: string } | null>(null);
   const [expectedPeerPubkey, setExpectedPeerPubkey] = useState<string | null>(null);
   const [isAwaitingPeer, setIsAwaitingPeer] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
 
   // Filter to show only remote peers (where peer_id !== localSiteId)
   const peers = useMemo(() => {
@@ -158,6 +165,32 @@ export default function DevicesPage() {
       alert("Failed to create connection. Please try again.");
     } finally {
       setIsConnecting(false);
+    }
+  };
+
+  const handleResync = async () => {
+    if (isProcessing) return;
+    setIsProcessing(true);
+    
+    try {
+      await resyncTransport();
+      // The page will reload after 3 seconds from the resyncTransport function
+    } catch (error) {
+      console.error("Resync failed:", error);
+      setIsProcessing(false);
+    }
+  };
+
+  const handleReconnect = async () => {
+    if (isProcessing) return;
+    setIsProcessing(true);
+    
+    try {
+      await reconnectServerless();
+      // The page will reload after 3 seconds from the reconnectServerless function
+    } catch (error) {
+      console.error("Reconnect failed:", error);
+      setIsProcessing(false);
     }
   };
 
@@ -230,15 +263,37 @@ export default function DevicesPage() {
       {/* Main content */}
       <div className="pt-6 pb-6">
         <div className="max-w-4xl mx-auto px-6">
-          {/* Connect device button */}
+          {/* Connect device button for non-serverless mode */}
           {!isServerless && (
             <div className="mb-6 text-center">
               <Button
                 onClick={handleConnectDevice}
                 disabled={isConnecting}
-                className="bg-blue-600 hover:bg-blue-700 text-white"
+                className="bg-blue-600 hover:bg-blue-700 text-white border border-blue-600 cursor-pointer"
               >
                 {isConnecting ? "Connecting..." : "Connect Device"}
+              </Button>
+            </div>
+          )}
+
+          {/* Resync and Reconnect buttons for serverless mode */}
+          {isServerless && (
+            <div className="mb-6 text-center space-x-4">
+              <Button
+                onClick={handleResync}
+                disabled={isProcessing}
+                variant="outline"
+                className="bg-white hover:bg-gray-50 text-gray-700 border border-gray-300 cursor-pointer"
+              >
+                {isProcessing ? "Processing..." : "Resync"}
+              </Button>
+              <Button
+                onClick={handleReconnect}
+                disabled={isProcessing}
+                variant="outline"
+                className="bg-white hover:bg-gray-50 text-gray-700 border border-gray-300 cursor-pointer"
+              >
+                {isProcessing ? "Processing..." : "Reconnect"}
               </Button>
             </div>
           )}
@@ -376,13 +431,14 @@ export default function DevicesPage() {
                 onClick={handleCancelDelete}
                 variant="outline"
                 disabled={deletePeerMutation.isPending}
+                className="border border-gray-300 cursor-pointer"
               >
                 Cancel
               </Button>
               <Button
                 onClick={handleConfirmDelete}
                 disabled={deletePeerMutation.isPending}
-                className="bg-red-600 hover:bg-red-700 text-white"
+                className="bg-red-600 hover:bg-red-700 text-white border border-red-600 cursor-pointer"
               >
                 {deletePeerMutation.isPending ? "Deleting..." : "Delete"}
               </Button>

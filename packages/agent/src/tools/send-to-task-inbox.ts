@@ -41,8 +41,8 @@ export function makeSendToTaskInboxTool(
       });
 
       await context.createEvent("send_to_task_inbox", {
-        id: task.id,
-        task_title: task.title 
+        target_task_id: task.id,
+        target_task_title: task.title 
       })
 
       // Return void - message sent successfully

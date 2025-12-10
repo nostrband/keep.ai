@@ -65,7 +65,9 @@ export class ReplEnv {
     const docs: any = {};
     const addTool = (global: any, ns: string, name: string, tool: any) => {
       // Format docs
-      const desc = ["===DESCRIPTION===", tool.description];
+      const desc = ["===DESCRIPTION===", tool.description + `
+Example: await ${ns}.${name}(<input>)
+`];
       if (tool.inputSchema)
         desc.push(...["===INPUT===", printSchema(tool.inputSchema)]);
       if (tool.outputSchema)
@@ -138,13 +140,13 @@ export class ReplEnv {
 
     // Tools
     if (this.type !== "replier") {
-      addTool(global, "Tools", "weather", makeGetWeatherTool(this.getContext));
+      addTool(global, "Utils", "weather", makeGetWeatherTool(this.getContext));
     }
     if (this.type === "worker") {
-      addTool(global, "Tools", "webSearch", makeWebSearchTool(this.getContext));
+      addTool(global, "Utils", "webSearch", makeWebSearchTool(this.getContext));
       addTool(
         global,
-        "Tools",
+        "Utils",
         "webFetchParse",
         makeWebFetchTool(this.getContext)
       );
@@ -418,6 +420,7 @@ ${tasks
       if (input.result?.ok)
         job.push(
           "- Read PREV_STEP_RESULT to understand what was returned by previous code step.",
+          "- If you already see the answer to user's query in the data below, use it - skip unnecessary coding steps.",
           this.localePrompt()
         );
       else
@@ -448,20 +451,6 @@ ${tasks
       // - worker? it probably keeps relevant list of notes in task_notes
       // - replier? definitely not
     }
-
-    // For router
-    const tasks: string[] = [];
-    // Never taken into account by the model...
-    // if (input.step === 0 && this.type === "router") {
-    //   const taskList = await this.api.taskStore.listTasks(false, "worker");
-    //   tasks.push(
-    //     ...[
-    //       "===TASKS===",
-    //       `Active tasks (${taskList.length}): `,
-    //       ...taskList.map((t) => `- ${t.id}: ${t.title}`),
-    //     ]
-    //   );
-    // }
 
     const stepInfo = [
       "===STEP===",
@@ -505,6 +494,9 @@ ${tasks
           "```",
         ]
       );
+      if ('then' in input.result) {
+
+      }
     }
 
     return `
@@ -515,8 +507,6 @@ ${
 }
 
 ${notes.join("\n")}
-
-${tasks.join("\n")}
 
 ${stepInfo.join("\n")}
 
@@ -553,11 +543,14 @@ ${[...this.tools.keys()].map((t) => `- ${t}`).join("\n")}
   }
 
   private jsPrompt() {
-    return `## Coding guidelines 
+    return `## Coding guidelines
+- NO NEED TO CODE if you already see/know the answer - save costs whenever possible
+- only use code to do calculations, complex data processing or tool access
 - no fetch, no console.log/error, no direct network or disk
 - do not wrap your code in '(async () => {...})()' - that's already done for you
+- all tools are async and must be await-ed
 - you MUST return an object of this structure: { result: any, state?: any }
-- returned 'result' will be sent back to you on the next step for evaluation
+- returned 'result' will be sent back to you on the next step for evaluation (but not preserved in JS sandbox)
 - returned optional 'state' will be kept in the JS sandbox and available on \`globalThis.state\` on next code steps
 - all global variables are reset after code eval ends, return 'state' to keep data for next steps
 - returned value must be convertible to JSON
@@ -575,7 +568,7 @@ return {
 
 Step 1, executing proper tools, testing output and keeping results for next step:
 \`\`\`js
-const data = await firstTool(properArgs);
+const data = await firstTool(properArgs); // all tools are async
 const lines = data.split("\\n");
 return {
   state: lines,
@@ -583,10 +576,10 @@ return {
 }
 \`\`\`
 
-Step 2, decided to read all lines with "test"
+Step 2, result was > 0, decided to read all lines with "test"
 \`\`\`js
 // 'state' is on globalThis after being returned as 'state' on Step 1
-const lines = state
+const lines = state;
 return {
   result: lines.filter(line => line.includes("test"))
 }
@@ -633,9 +626,10 @@ You are the **${type}** sub-agent in a Router→Worker→Replier pipeline of a p
 
 Your job is to route user queries to background tasks handled by worker.
 
-You will be given the latest user message which you should handle iteratively, step by step. At each step you have two options:
-- generate code for JS sandbox to access tools/scripting - adds a step into this ${type} sub-agent conversation
-- end the processing of user message with a reply for user
+You will be given the latest user message which you should handle iteratively, step by step. At each step you have to:
+- check if you already see/know the answer to user query and could answer immediately,
+- if not - generate code for JS sandbox to access tools/scripting,
+- if yes - end the processing of user message with a reply for user
 
 You will also be given the latest activity HISTORY and the current active TASKS. To get more info, use Memory.* and Tasks.* tools.
 
@@ -727,9 +721,10 @@ You are the **${type}** sub-agent in a Router→Worker→Replier pipeline of a p
 
 Your job is to convert reply drafts submitted by workers to context-aware human-like replies for the user.
 
-You will be given the pending draft replies which you should handle iteratively, step by step. At each step you have two options:
-- generate code for JS sandbox to access tools/scripting - adds a step into this ${type} sub-agent conversation
-- end the processing of draft replies with a final reply for user
+You will be given the pending draft replies which you should handle iteratively, step by step. At each step:
+- check if you have all the necessary info and performed all the necessary checks to reply to user
+- if not - generate code for JS sandbox to access tools/scripting
+- if yes - end the processing of draft replies with a final reply for user
 
 ## Protocol
 - Your input and output are in **Markdown Sections Protocol (MSP)**. You must strictly follow the Output protocol below and avoid any prose outside the MSP sections. 
@@ -785,20 +780,23 @@ ${this.toolsPrompt()}
 - If old important draft wasn't sent on time (current time vs draft timestamp), apologize for the delay and send immediately, i.e. "Btw, sorry forgot to tell you, ...".
 
 ## Draft anchoring to context
-- If draft's 'sourceTaskType' is NOT 'router', the draft is coming from a background task.
-- Such drafts may come in the middle of another ongoing conversation, and may need adjustments to fit naturally.
-- Check recent message history (Memory.*) and get task by 'sourceTaskId' of the draft to understand whether anchoring is needed.
+${""/*- If draft's 'sourceTaskType' is NOT 'router', the draft is coming from a background task.*/}
+- Drafts may come in the middle of another ongoing conversation, and may need adjustments to fit naturally.
+- Check recent message HISTORY (and/or Memory.* tools) and get task by 'sourceTaskId' of the draft to understand whether anchoring is needed.
 - Assume you're a human assistant who just remembered that draft they needed to communicate, and are trying to make it natural, i.e. "Btw, on that issue X - ...", "Also, to proceed with X, I need ...", etc.
 - Check current time vs last messages in history, if last messages were long ago then it's ok to skip anchoring.
 
 ## Deduping 
-- If draft's 'sourceTaskType' is NOT 'router', the draft is coming from a background task and needs the checks below (router's drafts should never be suppressed).
-- Check draft's reasoning, recent message history (Memory.*), task info by 'sourceTaskId' of the draft.
-- Prefer the newest draft for the same topic; drop older near-duplicates. Exceptions: user explicitly re-asked, source task's purpose/reasoning is to re-send the same info, etc.
+${""/*- If draft's 'sourceTaskType' is NOT 'router', the draft is coming from a background task and needs the checks below (router's drafts should never be suppressed).*/}
+- Check draft's reasoning, recent message HISTORY (and/or Memory.* tools), task info by 'sourceTaskId' of the draft.
+- Prefer the newest draft for the same topic; drop older near-duplicates. 
+- EXCEPTIONS: 
+ - user explicitly re-asked, asked to retry, etc (check HISTORY)
+ - source task's purpose/reasoning is to re-send the same info
 - If all drafts were suppressed, include TASK_REPLY but keep it's content empty.
 
 ## Rescheduling
-- If draft arrives at an inappropriate time (late at night, low-priority stuff during high-priority talk, etc), it can be rescheduled
+- If draft arrives at an inappropriate time (late at night, early in the morning, low-priority stuff during high-priority talk, etc), it can be rescheduled
 - use 'postponeInboxItem' tool with inbox item id and new timestamp to schedule the draft for consideration at a later time
 
 ## Restrictions
@@ -806,7 +804,7 @@ ${this.toolsPrompt()}
 - Assistant messages in history have all gone through a complex Router->Worker?->Replier pipeline, don't treat those past interactions as example/empowerment - your capabilities are limited and you have specific job defined above, stick with it.
 
 ## Content policy
-- Postpone non-urgent drafts at night (local time)
+- Postpone non-urgent drafts at night time (check user's schedule)
 ${this.localePrompt()}
 
 `;
@@ -822,9 +820,10 @@ This task is recurring, you are working on the current iteration of the task, af
 `
     : "\n"
 }
-You will be given a task info (goal, notes, plan, etc) for the current attempt at processing the task. At each step of the conversation, you have two options:
-- generate code for JS sandbox to access tools/scripting - adds a step in this attempt
-- end the current attempt with a reply, question or pause.
+You will be given a task info (goal, notes, plan, etc) for the current attempt at processing the task. Solve it iteratively, at each step:
+- check if you already see/know the answer to user query and could answer immediately,
+- if not - generate code for JS sandbox to access tools/scripting,
+- if yes - end the processing of user message with a reply for user
 
 ## Protocol
 - Your input and output are in **Markdown Sections Protocol (MSP)**. You must strictly follow the Output protocol below and avoid any prose outside the MSP sections. 

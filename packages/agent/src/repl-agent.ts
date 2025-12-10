@@ -183,7 +183,16 @@ export class ReplAgent {
       { role: "system", content: system },
       ...convertToModelMessages(this.history),
     ];
-    console.log("llm request messages", JSON.stringify(messages, null, 2));
+
+    // Set caching marker for anthropic at pre-last message
+    // FIXME doesn't seem to work, why?
+    messages.at(-2)!.providerOptions = {
+      anthropic: {
+        cacheControl: { type: "ephemeral" },
+      },
+    };
+
+    this.debug("llm request messages", JSON.stringify(messages, null, 2));
 
     // Call LLM
     const result = streamText({
