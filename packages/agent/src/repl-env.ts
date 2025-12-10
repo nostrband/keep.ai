@@ -9,7 +9,6 @@ import {
   makeUpdateNoteTool,
   makeWebFetchTool,
   makeWebSearchTool,
-  makeListMessagesTool,
   makeAddTaskTool,
   makeGetTaskTool,
   makeListTasksTool,
@@ -17,12 +16,14 @@ import {
   makeAddTaskRecurringTool,
   makeCancelThisRecurringTaskTool,
   makePostponeInboxItemTool,
+  makeListEventsTool,
 } from "./tools";
 import { z, ZodFirstPartyTypeKind as K } from "zod";
 import { EvalContext, EvalGlobal } from "./sandbox/sandbox";
 import { StepInput, TaskState, TaskType } from "./repl-agent-types";
 import debug from "debug";
 import { getEnv } from "./env";
+import { ChatEvent } from "packages/proto/dist";
 
 export class ReplEnv {
   private api: KeepDbApi;
@@ -190,12 +191,12 @@ export class ReplEnv {
       }
     }
 
-    // Message history available for all agent types
+    // Event history available for all agent types
     addTool(
       global,
       "Memory",
-      "listMessages",
-      makeListMessagesTool(this.api.chatStore)
+      "listEvents",
+      makeListEventsTool(this.api.chatStore, this.api.taskStore)
     );
 
     // Tasks
@@ -272,6 +273,91 @@ export class ReplEnv {
     return `
 ${systemPrompt}
 `.trim();
+  }
+
+  async buildContext(input: StepInput): Promise<string[]> {
+    if (this.type !== "router" && this.type !== "replier") return [];
+
+    let tokens = 0;
+    const history: ChatEvent[] = [];
+
+    const MAX_TOKENS = 5000;
+    let before: string | undefined;
+    while (tokens < MAX_TOKENS) {
+      const events = await this.api.chatStore.getChatEvents({
+        chatId: "main",
+        limit: 100,
+        before,
+      });
+
+      if (!events.length) break;
+
+      before = events.at(-1)!.timestamp;
+
+      for (const e of events) {
+        // Skip messages that we're putting to inbox
+        if (e.type === "message") {
+          const isInInbox = input.inbox.find((i) => {
+            // FIXME this is really ugly!
+            try {
+              return JSON.parse(i).id === e.id;
+            } catch {}
+          });
+          if (isInInbox) continue;
+        }
+
+        // rough token estimate
+        tokens += Math.ceil(JSON.stringify(e).length / 2);
+        history.push(e);
+
+        if (tokens >= MAX_TOKENS) break;
+      }
+
+      if (tokens >= MAX_TOKENS) break;
+    }
+
+    // Re-sort in ASC order
+    history.sort(
+      (a, b) =>
+        new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    );
+
+    const tasks = await this.api.taskStore.listTasks();
+    const states = await this.api.taskStore.getStates(tasks.map((t) => t.id));
+
+    const context = [
+      `===HISTORY===
+Below are recent events (messages and actions performed by assistant) for context, use Memory.listEvents tool to get more.
+\`\`\`json
+${history.map((e) => JSON.stringify(e)).join("\n")}
+\`\`\`
+`,
+    ];
+
+    if (this.type === "router") {
+      context.push(`
+===TASKS===
+Below are the active tasks, use Tasks.* tools to get more info.
+\`\`\`json
+${tasks
+  .map((task) =>
+    JSON.stringify({
+      id: task.id,
+      title: task.title,
+      type: task.type,
+      state: task.state,
+      cron: task.cron,
+      // Active tasks don't have it, and we don't want task replies to leak to router
+      // reply: task.reply,
+      goal: states.find((s) => s.id === task.id)?.goal || "",
+      asks: states.find((s) => s.id === task.id)?.asks || "",
+    })
+  )
+  .join("\n")}
+\`\`\``);
+    }
+
+    return context;
   }
 
   async buildUser(
@@ -354,53 +440,6 @@ ${systemPrompt}
     //     );
     // }
 
-    // For router and replier
-    const history: string[] = [];
-    if (
-      // FIXME looks useless
-      false &&
-      input.step === 0 &&
-      (this.type === "router" || this.type === "replier")
-    ) {
-      const COUNT = 3;
-      // FIXME use chatStore.getChatMessages
-      const messages = await this.api.memoryStore.getMessages({
-        threadId: "main",
-        limit: 10,
-      });
-      const filtered =
-        this.type === "router"
-          ? messages.filter((m) => {
-              return !input.inbox.find((i) => {
-                // FIXME this is really ugly!
-                try {
-                  return JSON.parse(i).id === m.id;
-                } catch {}
-              });
-            })
-          : messages;
-      // Messages are recent-last, leave last 3 messages
-      if (filtered.length > COUNT) filtered.splice(0, filtered.length - COUNT);
-
-      history.push(
-        ...[
-          "===HISTORY===",
-          "Recent message history for context (use Memory.* tools for more).",
-          "```json",
-          ...filtered.map(
-            (m) =>
-              `- ${JSON.stringify({
-                id: m.id,
-                role: m.role,
-                parts: m.parts,
-                metadata: m.metadata,
-              })}`
-          ),
-          "```",
-        ]
-      );
-    }
-
     // For router
     const notes: string[] = [];
     if (input.step === 0 && this.type === "router") {
@@ -474,8 +513,6 @@ ${job.join("\n")}
 ${
   "" // tools.join("\n")
 }
-
-${history.join("\n")}
 
 ${notes.join("\n")}
 
@@ -600,12 +637,13 @@ You will be given the latest user message which you should handle iteratively, s
 - generate code for JS sandbox to access tools/scripting - adds a step into this ${type} sub-agent conversation
 - end the processing of user message with a reply for user
 
-You only see the latest message as input, but that is always part of a big onboing conversation. Always start by checking message history (Memory.* tools) and tasks (Tasks.* tools) to understand what user is talking about and what the active tasks are.
+You will also be given the latest activity HISTORY and the current active TASKS. To get more info, use Memory.* and Tasks.* tools.
 
 ## Decision rubric
 Your main job is to understand user messages within context and route (parts of) user messages to background tasks: 
 - User messages may be complex, referring to multiple tasks/ideas/issues/projects, and/or combining complex requests with simple queries.
-- You job is to use Memory.* tools to understand new user messages and then decompose them into sub-parts to be routed to background tasks.
+- You job is to understand new user message in the context of HISTORY and TASKS and then decompose them into sub-parts to be routed to background tasks.
+- If unsure about the message meaning, dig deeper into history and tasks using Memory.* and Tasks.* tools.
 - Task might be relevant by title/topic/goal, or by the 'asks' property - the list of questions task has asked and expecting replies for.
 - If user is quoting something, look for quoted part in the message history to understand the potential source task.
 - If a relevant existing task is found → send to its inbox, otherwise create new task with a goal and notes (no need to send to new task's inbox).
@@ -613,7 +651,6 @@ Your main job is to understand user messages within context and route (parts of)
 - If task needs to be cancelled/deleted, send corresponding user request to it's inbox.
 - If all parts of user messages were routed to tasks, reply with a short confirming sentence or emoji in TASK_REPLY.
 - If user message is (has a part that is) read-only, simple, low-variance (e.g., time, trivial lookup), then you are allowed to skip spawning a background task for that part and are allowed to create the full reply in TASK_REPLY.
-- Check message history to make sure you understand the context properly, even if user message seems obvious.
 - You are allowed to reply with clarifying questions if you are unsure about the user's intent or scope/goals of potential tasks.
 - If user is asking for tools that you don't have, create background task - those have more tools.
 

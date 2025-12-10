@@ -144,6 +144,25 @@ export class ReplAgent {
 
   async runStep(input: StepInput): Promise<StepOutput> {
     const system = await this.env.buildSystem();
+
+    // Context
+    if (input.step === 0) {
+      const contexts = await this.env.buildContext(input);
+      for (const c of contexts) {
+        const contextMessage: AssistantUIMessage = {
+          id: generateId(),
+          role: "assistant",
+          parts: [{ type: "text", text: c }],
+          metadata: {
+            createdAt: new Date().toISOString(),
+          },
+        };
+
+        // Put to history
+        this.history.push(contextMessage);
+      }
+    }
+
     const user = await this.env.buildUser(this.taskId, input, this.state);
 
     // New user message
@@ -208,6 +227,7 @@ export class ReplAgent {
   }
 
   private updateUsage(usage: LanguageModelV2Usage) {
+    this.debug("Token Usage", JSON.stringify(usage));
     this.usage.cachedInputTokens =
       this.usage.cachedInputTokens! + (usage.cachedInputTokens || 0);
     this.usage.inputTokens = this.usage.inputTokens! + (usage.inputTokens || 0);

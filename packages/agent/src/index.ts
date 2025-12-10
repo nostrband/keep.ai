@@ -11,7 +11,7 @@ export {
 } from "./tools";
 
 // Environment configuration
-export { setEnv, getEnv, type Env } from "./env";
+export { setEnv, getEnv, setEnvFromProcess, type Env } from "./env";
 
 // Model configuration
 export { getOpenRouter, getModelName, DEFAULT_AGENT_MODEL } from "./model";

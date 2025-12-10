@@ -210,7 +210,7 @@ export class ChatStore {
       );
   }
 
-  // Get all chat events (messages + agent events)
+  // Get all chat events (messages + agent events) in DESC order
   async getChatEvents({
     chatId,
     limit = 50,

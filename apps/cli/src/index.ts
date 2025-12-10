@@ -7,7 +7,7 @@ import { registerInitCommand } from './commands/init';
 import { registerSandboxCommand } from './commands/sandbox';
 import { registerVacuumCommand } from './commands/vacuum';
 import { KEEPAI_DIR } from './const';
-import { Env, setEnv } from '@app/agent';
+import { Env, setEnv, setEnvFromProcess } from '@app/agent';
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
@@ -44,7 +44,7 @@ function setupEnvironment(): void {
       EXA_API_KEY: process.env.EXA_API_KEY,
     };
     
-    setEnv(env);
+    setEnvFromProcess(process.env);
     debugCli('Environment variables set for agent');
   } catch (error) {
     debugCli('Error setting up environment:', error);

@@ -1,6 +1,6 @@
 import { useMemo, useRef } from "react";
 import { useChatEvents } from "./dbChatReads";
-import { AssistantUIMessage } from "@app/proto";
+import { AssistantUIMessage, ChatAgentEvent } from "@app/proto";
 
 export interface ChatRow {
   type: "message" | "task_group";
@@ -66,8 +66,7 @@ export function useChatRows(chatId: string) {
         });
       } else {
         // Non-message event
-        const taskId = event.content?.task_id;
-
+        const taskId = (event.content as ChatAgentEvent).task_id;
         if (!taskId) return; // Skip events without task_id
 
         if (currentTaskId === taskId) {

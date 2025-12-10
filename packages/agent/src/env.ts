@@ -10,6 +10,13 @@ export interface Env {
 
 let env: Env = {};
 
+export function setEnvFromProcess(processEnv: any) {
+  env = {
+    ...env,
+    ...processEnv
+  }
+}
+
 export function setEnv(newEnv: Env) {
   env = {
     ...env,

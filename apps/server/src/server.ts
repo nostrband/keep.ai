@@ -20,6 +20,7 @@ import {
   TaskWorker,
   Env,
   DEFAULT_AGENT_MODEL,
+  setEnvFromProcess,
 } from "@app/agent";
 import debug from "debug";
 import path from "path";
@@ -78,14 +79,7 @@ const getNostrRelays = (): string[] => {
 };
 
 // Set environment in agent package
-setEnv({
-  OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
-  OPENROUTER_BASE_URL: process.env.OPENROUTER_BASE_URL,
-  AGENT_MODEL: process.env.AGENT_MODEL,
-  EXA_API_KEY: process.env.EXA_API_KEY,
-  EXTRA_SYSTEM_PROMPT: process.env.EXTRA_SYSTEM_PROMPT,
-  DESKTOP_NOTIFICATIONS: process.env.DESKTOP_NOTIFICATIONS,
-});
+setEnvFromProcess(process.env);
 
 // For CommonJS compatibility
 const __dirname = process.cwd();
