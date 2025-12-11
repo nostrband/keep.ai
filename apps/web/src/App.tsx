@@ -25,6 +25,7 @@ import { useConfig } from "./hooks/useConfig";
 
 // Access build-time constants
 declare const __SERVERLESS__: boolean;
+declare const __ELECTRON__: boolean;
 
 function SyncingStatus({ isServerless, isInitializing }: { isServerless: boolean; isInitializing: boolean }) {
   const [showTroubleOptions, setShowTroubleOptions] = useState(false);
@@ -104,6 +105,7 @@ function SyncingStatus({ isServerless, isInitializing }: { isServerless: boolean
 function App() {
   const { dbStatus, error } = useDbQuery();
   const isServerless = __SERVERLESS__;
+  const isElectron = __ELECTRON__;
   const {
     isConfigValid,
     isLoading: configLoading,
@@ -191,7 +193,7 @@ function App() {
   // }
 
   // Use HashRouter in Electron to avoid file:// protocol issues with routing
-  const isElectron = (window as any).env?.API_ENDPOINT?.includes("localhost:");
+  // const isElectron = (window as any).env?.API_ENDPOINT?.includes("localhost:");
   const Router = isElectron ? HashRouter : BrowserRouter;
 
   return (

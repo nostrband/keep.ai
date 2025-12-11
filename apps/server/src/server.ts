@@ -16,12 +16,14 @@ import {
   FileStore,
   type File,
 } from "@app/db";
-import { MultipartFile } from "@fastify/multipart";
+
+import multipart, { MultipartFile } from "@fastify/multipart";
+// import { MultipartFile } from "@fastify/multipart";
+
 import {
   setEnv,
   getEnv,
   TaskWorker,
-  ReplWorkerConfig,
   Env,
   DEFAULT_AGENT_MODEL,
   setEnvFromProcess,
@@ -50,6 +52,7 @@ import {
 } from "nostr-tools";
 import { bytesToHex, hexToBytes } from "nostr-tools/utils";
 import { randomBytes } from "crypto";
+import { Readable } from "stream";
 
 const debugServer = debug("server:server");
 
@@ -470,7 +473,7 @@ export async function createServer(config: ServerConfig = {}) {
   check();
 
   // Register multipart plugin for file uploads
-  await app.register(require("@fastify/multipart"), {
+  await app.register(multipart, {
     limits: {
       fileSize: 10 * 1024 * 1024, // 10MB limit
     },

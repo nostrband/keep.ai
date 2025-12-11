@@ -24,10 +24,13 @@ import { getPublicKey, SimplePool } from "nostr-tools";
 import { tryBecomeActiveTab } from "./lib/tab-lock";
 import { PushNotificationManager } from "./lib/PushNotificationManager";
 
+declare const __SERVERLESS__: boolean;
+declare const __ELECTRON__: boolean;
+
 // Serverless mode (nostr-sync with main device)
-const isServerless = (import.meta as any).env?.VITE_FLAVOR === "serverless";
+const isServerless = __SERVERLESS__; // (import.meta as any).env?.VITE_FLAVOR === "serverless";
 // Electron (desktop)
-const isElectron = (import.meta as any).env?.VITE_FLAVOR === "electron";
+const isElectron = __ELECTRON__; // (import.meta as any).env?.VITE_FLAVOR === "electron";
 
 type DbStatus =
   | "initializing"

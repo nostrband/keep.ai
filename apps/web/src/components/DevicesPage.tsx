@@ -9,6 +9,9 @@ import SharedHeader from "./SharedHeader";
 import { Button, Badge } from "../ui";
 import { API_ENDPOINT } from "../const";
 
+declare const __SERVERLESS__: boolean;
+const isServerless = __SERVERLESS__; // import.meta.env.VITE_FLAVOR === "serverless";
+
 interface QRModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -109,7 +112,6 @@ function QRModal({
 }
 
 export default function DevicesPage() {
-  const isServerless = import.meta.env.VITE_FLAVOR === "serverless";
   const { data: allPeers = [], isLoading } = useNostrPeers();
   const { data: localSiteId } = useLocalSiteId();
   const deletePeerMutation = useDeletePeer();

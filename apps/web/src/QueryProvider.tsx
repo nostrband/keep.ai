@@ -13,7 +13,8 @@ import { Peer, Transport, TransportClientHttp } from "@app/sync";
 import { createDB } from "./db";
 
 // Serverless mode (nostr-sync with main device)
-const isServerless = (import.meta as any).env?.VITE_FLAVOR === "serverless";
+declare const __SERVERLESS__: boolean;
+const isServerless = __SERVERLESS__; // (import.meta as any).env?.VITE_FLAVOR === "serverless";
 
 type DbStatus =
   | "initializing"

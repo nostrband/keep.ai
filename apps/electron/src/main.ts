@@ -23,10 +23,20 @@ createDebug.log = (...args) => {
 };
 
 // Now import the rest
-import { app, BrowserWindow, Menu, ipcMain, Tray, nativeImage } from "electron";
+import {
+  app,
+  BrowserWindow,
+  Menu,
+  ipcMain,
+  Tray,
+  nativeImage,
+  protocol,
+  net,
+} from "electron";
 import path from "path";
 import { createServer } from "@app/server";
 import contextMenu from "electron-context-menu";
+import { fileURLToPath } from "node:url";
 
 const disposeContextMenu = contextMenu({
   showSaveImageAs: true,
@@ -170,6 +180,95 @@ function createTray(): void {
   });
 }
 
+// Small helper for local files
+function guessMimeType(filePath: string) {
+  const ext = path.extname(filePath).toLowerCase();
+  switch (ext) {
+    case ".html":
+    case ".htm":
+      return "text/html";
+    case ".js":
+      return "application/javascript";
+    case ".css":
+      return "text/css";
+    case ".png":
+      return "image/png";
+    case ".jpg":
+    case ".jpeg":
+      return "image/jpeg";
+    case ".gif":
+      return "image/gif";
+    case ".svg":
+      return "image/svg+xml";
+    case ".json":
+      return "application/json";
+    case ".wasm":
+      return "application/wasm";
+    default:
+      return "application/octet-stream";
+  }
+}
+
+async function fetchFile(fileIdOrName: string) {
+  const url = `${process.env.API_ENDPOINT}/file/get?url=${encodeURIComponent(
+    fileIdOrName
+  )}`;
+
+  const res = await fetch(url);
+
+  if (!res.ok) {
+    throw new Error(`Fetch error: ${res.status} ${res.statusText}`);
+  }
+
+  const arrayBuffer = await res.arrayBuffer();
+  const buffer = Buffer.from(arrayBuffer);
+  const mimeType =
+    res.headers.get("content-type") || "application/octet-stream";
+
+  return { buffer, mimeType };
+}
+
+function setupDownloadHandler() {
+  // Handle all file:// requests in this session
+  protocol.handle("file", async (request) => {
+    try {
+      const url = new URL(request.url);
+      const { pathname } = url;
+
+      // file:///files/get/<id>  (because your <img src="/files/get/...">)
+      if (pathname.startsWith("/files/get/")) {
+        const fileIdOrName = pathname.slice("/files/get/".length);
+
+        // Build request to server
+        const apiUrl = `${
+          process.env.API_ENDPOINT
+        }/file/get?url=${encodeURIComponent(fileIdOrName)}`;
+
+        // Use Electron's net.fetch so cookies/session etc are consistent
+        // This returns a Response that protocol.handle can return directly.
+        return net.fetch(apiUrl);
+      }
+
+      // Everything else: serve local file from disk
+      // request.url is file:///absolute/path/to/file
+      const filePath = fileURLToPath(request.url);
+
+      const data = await fs.promises.readFile(filePath);
+      const mimeType = guessMimeType(filePath);
+
+      return new Response(data, {
+        headers: { "content-type": mimeType },
+      });
+    } catch (err) {
+      console.error("[protocol.handle(file)] error:", err);
+      return new Response("Internal error", {
+        status: 500,
+        headers: { "content-type": "text/plain" },
+      });
+    }
+  });
+}
+
 // This method will be called when Electron has finished initialization
 app.whenReady().then(async () => {
   try {
@@ -189,6 +288,7 @@ app.whenReady().then(async () => {
     // Set environment variable for SPA
     process.env.API_ENDPOINT = `http://localhost:${port}/api`;
 
+    setupDownloadHandler();
     setupIpcHandlers();
     createWindow();
     createTray();

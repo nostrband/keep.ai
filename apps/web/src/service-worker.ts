@@ -4,7 +4,8 @@ import { Event } from "nostr-tools";
 import { nip44_v3 } from "@app/sync";
 import { API_ENDPOINT } from "./const";
 
-const isServerless = (import.meta as any).env?.VITE_FLAVOR === "serverless";
+declare const __SERVERLESS__: boolean;
+const isServerless = __SERVERLESS__; // (import.meta as any).env?.VITE_FLAVOR === "serverless";
 
 declare const self: ServiceWorkerGlobalScope;
 
@@ -99,7 +100,7 @@ async function handleFileRequest(request: Request) {
   }
 
   // FIXME in serverless, we need nostr protocol to download
-  const response = await fetch(`${API_ENDPOINT}/file/get?url=${name}`);
+  const response = await fetch(`${API_ENDPOINT}/file/get?url=${encodeURIComponent(name)}`);
 
   // 3) Put into cache for next time
   // Note: must clone before putting, because a Response body can only be used once

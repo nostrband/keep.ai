@@ -15,7 +15,8 @@ import { bytesToHex } from "nostr-tools/utils";
 import { createDB } from "../db";
 import { DB_FILE } from "../const";
 
-const isServerless = import.meta.env.VITE_FLAVOR === "serverless";
+declare const __SERVERLESS__: boolean;
+const isServerless = __SERVERLESS__; // import.meta.env.VITE_FLAVOR === "serverless";
 
 export class SyncWorker {
   private readonly backendUrl?: string;

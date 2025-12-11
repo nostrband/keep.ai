@@ -5,9 +5,11 @@ import { useDbQuery } from "./dbQuery";
 import { bytesToHex } from "nostr-tools/utils";
 import { API_ENDPOINT } from "../const";
 
+declare const __SERVERLESS__: boolean;
+const isServerless = __SERVERLESS__; // import.meta.env.VITE_FLAVOR === "serverless";
+
 export function useLocalSiteId() {
   const { api } = useDbQuery();
-  const isServerless = import.meta.env.VITE_FLAVOR === "serverless";
 
   return useQuery({
     queryKey: ["localSiteId"],

@@ -1,6 +1,6 @@
 {
   "name": "keep-ai",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "private": true,
   "description": "Privacy-focused AI assistant app with peer-to-peer sync",
   "main": "apps/electron/dist/main.cjs",
@@ -28,6 +28,7 @@
   "dependencies": {
     "@app/server": "file:./apps/server",
     "@fastify/cors": "^11.1.0",
+    "@fastify/multipart": "^9.3.0",
     "@jitl/quickjs-ffi-types": "^0.31.0",
     "@jitl/quickjs-wasmfile-debug-asyncify": "^0.31.0",
     "@jitl/quickjs-wasmfile-debug-sync": "^0.31.0",

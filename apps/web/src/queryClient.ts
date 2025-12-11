@@ -3,7 +3,8 @@ import { QueryClient } from "@tanstack/react-query";
 import { messageNotifications } from "./lib/MessageNotifications";
 import type { KeepDbApi } from "@app/db";
 
-const isServerless = (import.meta as any).env?.VITE_FLAVOR === "serverless";
+declare const __SERVERLESS__: boolean;
+const isServerless = __SERVERLESS__;
 
 export const queryClient = new QueryClient({
   defaultOptions: {
