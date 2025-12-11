@@ -14,6 +14,7 @@ import TaskDetailPage from "./components/TaskDetailPage";
 import TaskRunDetailPage from "./components/TaskRunDetailPage";
 import NotesPage from "./components/NotesPage";
 import NoteDetailPage from "./components/NoteDetailPage";
+import FilesPage from "./components/FilesPage";
 import DevicesPage from "./components/DevicesPage";
 import ConsolePage from "./components/ConsolePage";
 import SettingsPage from "./components/SettingsPage";
@@ -204,6 +205,7 @@ function App() {
         <Route path="/tasks/:id/run/:runId" element={<TaskRunDetailPage />} />
         <Route path="/notes" element={<NotesPage />} />
         <Route path="/notes/:id" element={<NoteDetailPage />} />
+        <Route path="/files" element={<FilesPage />} />
         <Route path="/devices" element={<DevicesPage />} />
         <Route path="/console" element={<ConsolePage />} />
         {!isServerless && <Route path="/settings" element={<SettingsPage />} />}

@@ -2,6 +2,9 @@
 
 import { Event } from "nostr-tools";
 import { nip44_v3 } from "@app/sync";
+import { API_ENDPOINT } from "./const";
+
+const isServerless = (import.meta as any).env?.VITE_FLAVOR === "serverless";
 
 declare const self: ServiceWorkerGlobalScope;
 
@@ -67,13 +70,51 @@ self.addEventListener("fetch", (event: FetchEvent) => {
     return;
   }
 
-  event.respondWith(
-    caches.match(event.request).then((response) => {
-      // Return cached version or fetch from network
-      return response || fetch(event.request);
-    })
-  );
+  const url = new URL(event.request.url);
+
+  // Intercept /files/get/* requests
+  if (url.pathname.startsWith("/files/get/")) {
+    event.respondWith(handleFileRequest(event.request));
+  } else {
+    event.respondWith(
+      caches.match(event.request).then((response) => {
+        // Return cached version or fetch from network
+        return response || fetch(event.request);
+      })
+    );
+  }
 });
+
+async function handleFileRequest(request: Request) {
+  const url = new URL(request.url);
+  const name = url.pathname.replace("/files/get/", "");
+
+  const cache = await caches.open("files-v1");
+
+  // 1) Try cache first
+  const cachedResponse = await cache.match(request);
+  if (cachedResponse) {
+    console.log("[SW] Serving file from cache", name);
+    return cachedResponse;
+  }
+
+  // FIXME in serverless, we need nostr protocol to download
+  const response = await fetch(`${API_ENDPOINT}/file/get?url=${name}`);
+
+  // 3) Put into cache for next time
+  // Note: must clone before putting, because a Response body can only be used once
+  await cache.put(request, response.clone());
+
+  return response;
+
+  // For nostr, something like
+  // const { buffer, mimeType } = await getImageFromCustomAPI(name);
+  // // buffer should be ArrayBuffer or Uint8Array
+
+  // return new Response(buffer, {
+  //   headers: { 'Content-Type': mimeType || 'image/png' },
+  // });
+}
 
 const handlePush = async (event: PushEvent) => {
   console.log("[SW] Push notification received:", event);
@@ -162,30 +203,32 @@ const handlePush = async (event: PushEvent) => {
 };
 
 // Push notification event
-self.addEventListener("push", (event) => event.waitUntil(handlePush(event)));
+if (isServerless) {
+  self.addEventListener("push", (event) => event.waitUntil(handlePush(event)));
 
-// Notification click event
-self.addEventListener("notificationclick", (event: NotificationEvent) => {
-  console.log("[SW] Notification click received:", event);
+  // Notification click event
+  self.addEventListener("notificationclick", (event: NotificationEvent) => {
+    console.log("[SW] Notification click received:", event);
 
-  event.notification.close();
+    event.notification.close();
 
-  if (event.action === "view" || !event.action) {
-    // Open or focus the app
-    event.waitUntil(
-      self.clients.matchAll({ type: "window" }).then((clients) => {
-        // Check if app is already open
-        for (const client of clients) {
-          if (client.url.includes(self.location.origin)) {
-            return client.focus();
+    if (event.action === "view" || !event.action) {
+      // Open or focus the app
+      event.waitUntil(
+        self.clients.matchAll({ type: "window" }).then((clients) => {
+          // Check if app is already open
+          for (const client of clients) {
+            if (client.url.includes(self.location.origin)) {
+              return client.focus();
+            }
           }
-        }
-        // Open new window if not already open
-        return self.clients.openWindow("/");
-      })
-    );
-  }
-});
+          // Open new window if not already open
+          return self.clients.openWindow("/");
+        })
+      );
+    }
+  });
+}
 
 // Helper function to get stored push configuration
 async function getStoredPushConfig(): Promise<{

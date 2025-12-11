@@ -17,7 +17,7 @@ import { QueryProvider } from "./QueryProvider.tsx";
 // import sharedWorkerUrl from "./shared-worker.ts?sharedworker&url";
 import dedicatedWorkerUrl from "./worker.ts?sharedworker&url";
 
-const isServerless = (import.meta as any).env?.VITE_FLAVOR === "serverless";
+const isElectron = (import.meta as any).env?.VITE_FLAVOR === "electron";
 
 // FIXME debug
 debug.enable("*");
@@ -49,7 +49,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
 );
 
 // Register service worker for PWA and push notifications
-if (isServerless && "serviceWorker" in navigator) {
+if (!isElectron && "serviceWorker" in navigator) {
   window.addEventListener("load", async () => {
     try {
       const registration = await navigator.serviceWorker.register(

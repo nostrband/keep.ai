@@ -1,5 +1,5 @@
 import { Command } from "commander";
-import { createDBNode, getCurrentUser, getDBPath } from "@app/node";
+import { createDBNode, getCurrentUser, getDBPath, getUserPath } from "@app/node";
 import debug from "debug";
 import { KeepDb, KeepDbApi } from "@app/db";
 import { TaskWorker } from "packages/agent/dist";
@@ -52,6 +52,8 @@ async function runWorkerCommand(): Promise<void> {
   try {
     // Get database path based on current user
     const pubkey = await getCurrentUser();
+    const userPath = getUserPath(pubkey);
+
     const dbPath = getDBPath(pubkey);
     debugWorker("Connecting to database:", dbPath);
 
@@ -69,6 +71,7 @@ async function runWorkerCommand(): Promise<void> {
     const worker = new TaskWorker({
       api,
       stepLimit: 20,
+      userPath
     });
 
     // Start worker

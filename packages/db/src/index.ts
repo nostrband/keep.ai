@@ -31,5 +31,9 @@ export type { NostrPeer, NostrPeerCursorSend, NostrPeerCursorRecv } from "./nost
 export { InboxStore } from "./inbox-store";
 export type { InboxItem, InboxItemSource, InboxItemTarget } from "./inbox-store";
 
+// File store
+export { FileStore } from "./file-store";
+export type { File } from "./file-store";
+
 // Api
 export * from "./api";

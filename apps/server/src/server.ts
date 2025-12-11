@@ -1,4 +1,4 @@
-import fastify from "fastify";
+import fastify, { FastifyRequest } from "fastify";
 import {
   TransportServerFastify,
   createDBNode,
@@ -13,11 +13,15 @@ import {
   KeepDbApi,
   NostrPeerStore,
   ChatStore,
+  FileStore,
+  type File,
 } from "@app/db";
+import { MultipartFile } from "@fastify/multipart";
 import {
   setEnv,
   getEnv,
   TaskWorker,
+  ReplWorkerConfig,
   Env,
   DEFAULT_AGENT_MODEL,
   setEnvFromProcess,
@@ -26,7 +30,9 @@ import debug from "debug";
 import path from "path";
 import os from "os";
 import fs from "fs";
+import { createHash } from "crypto";
 import dotenv from "dotenv";
+import { detectBufferMime, detectFilenameMime, mimeToExt } from "mime-detect";
 import {
   NostrSigner,
   NostrTransport,
@@ -84,10 +90,11 @@ setEnvFromProcess(process.env);
 // For CommonJS compatibility
 const __dirname = process.cwd();
 
-async function createReplWorker(keepDB: KeepDb) {
+async function createReplWorker(keepDB: KeepDb, userPath: string) {
   const worker = new TaskWorker({
     api: new KeepDbApi(keepDB),
     stepLimit: 20,
+    userPath,
   });
 
   return worker;
@@ -408,6 +415,7 @@ export async function createServer(config: ServerConfig = {}) {
   const api = new KeepDbApi(keepDB);
   const peerStore = api.nostrPeerStore;
   const chatStore = api.chatStore;
+  const fileStore = new FileStore(keepDB);
   const keyStore = new KeyStore(path.join(userPath, "keys.db"));
   await keyStore.start();
 
@@ -425,7 +433,7 @@ export async function createServer(config: ServerConfig = {}) {
   await nostr.start(peer.getConfig());
 
   // Performs background operations
-  const worker = await createReplWorker(keepDB);
+  const worker = await createReplWorker(keepDB, userPath);
 
   // Notify nostr transport if peer set changes
   peer.on("change", async (tables) => {
@@ -460,6 +468,13 @@ export async function createServer(config: ServerConfig = {}) {
     setTimeout(check, 1000);
   };
   check();
+
+  // Register multipart plugin for file uploads
+  await app.register(require("@fastify/multipart"), {
+    limits: {
+      fileSize: 10 * 1024 * 1024, // 10MB limit
+    },
+  });
 
   // Register worker routes under /api/worker prefix
   await app.register(
@@ -735,6 +750,185 @@ export async function createServer(config: ServerConfig = {}) {
       debugServer("Error in /api/id:", error);
       reply.status(500).send({
         error: "Failed to get site_id",
+        message: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
+  // POST /api/file/upload - Upload file endpoint
+  app.post("/api/file/upload", async (request: FastifyRequest, reply) => {
+    try {
+      const data = (await (request as any).file()) as MultipartFile;
+      if (!data) {
+        reply.status(400).send({ error: "No file provided" });
+        return;
+      }
+
+      // Check file size (10MB limit) and read file to buffer
+      const MAX_FILE_SIZE = 10 * 1024 * 1024;
+      const chunks: Buffer[] = [];
+      let totalSize = 0;
+
+      for await (const chunk of data.file) {
+        totalSize += chunk.length;
+        if (totalSize > MAX_FILE_SIZE) {
+          reply.status(400).send({
+            error: "File size exceeds limit",
+            size: totalSize,
+            limit: MAX_FILE_SIZE,
+          });
+          return;
+        }
+        chunks.push(chunk);
+      }
+
+      const fileBuffer = Buffer.concat(chunks);
+
+      // Calculate SHA256 hash as ID
+      const hash = createHash("sha256");
+      hash.update(fileBuffer);
+      const fileId = hash.digest("hex");
+
+      // Check if file already exists
+      const existingFile = await fileStore.getFile(fileId);
+      if (existingFile) {
+        reply.send(existingFile);
+        return;
+      }
+
+      // Uploaded filename
+      const filename = data.filename || "unknown";
+
+      // Detect media type using mime-detect
+      let mediaType = await detectBufferMime(fileBuffer);
+
+      // Refine using filename if result is generic
+      if (!mediaType && filename && filename !== "unknown") {
+        mediaType = detectFilenameMime(filename, mediaType);
+      }
+
+      // Get file extension from filename, or take from media-type
+      const extensionMatch = filename.match(/\.([^.]+)$/);
+      const extension = extensionMatch
+        ? extensionMatch[1]
+        : mimeToExt(mediaType);
+
+      // Format file path: <userPath>/files/<id>.<extension>
+      const filesDir = path.join(userPath, "files");
+      if (!fs.existsSync(filesDir)) {
+        fs.mkdirSync(filesDir, { recursive: true });
+      }
+
+      const fileNameLocal = `${fileId}${extension ? `.${extension}` : ""}`;
+      const filePathLocal = path.join(filesDir, fileNameLocal);
+
+      // Write file to local path
+      fs.writeFileSync(filePathLocal, fileBuffer);
+
+      // Create file record
+      const fileRecord: File = {
+        id: fileId,
+        name: filename,
+        path: fileNameLocal,
+        size: fileBuffer.length,
+        summary: "", // Empty summary initially
+        upload_time: new Date().toISOString(),
+        media_type: mediaType || "",
+      };
+
+      // Insert file to database
+      await fileStore.insertFile(fileRecord);
+
+      reply.send(fileRecord);
+    } catch (error) {
+      debugServer("Error in /api/upload:", error);
+      reply.status(500).send({
+        error: "Failed to upload file",
+        message: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
+  // GET /api/file/get?url=<url> - Read file endpoint
+  app.get("/api/file/get", async (request, reply) => {
+    try {
+      const query = request.query as { url?: string };
+      const { url } = query;
+
+      if (!url) {
+        reply.status(400).send({ error: "url parameter is required" });
+        return;
+      }
+
+      // Extract file ID from URL (assuming URL format like /files/:id or just :id)
+      const fileId = path.basename(url, path.extname(url));
+
+      // Get file record from database
+      const fileRecord = await fileStore.getFile(fileId);
+      if (!fileRecord) {
+        reply.status(404).send({ error: "File not found" });
+        return;
+      }
+
+      const filesDir = path.join(userPath, "files");
+      const filePathLocal = path.join(filesDir, fileRecord.path);
+
+      // Check if file exists on disk
+      if (!fs.existsSync(filePathLocal)) {
+        reply.status(404).send({ error: "File not found on disk" });
+        return;
+      }
+      console.log("fileRecord", fileRecord);
+
+      // Set appropriate headers
+      reply.header("Content-Type", fileRecord.media_type);
+      reply.header("Content-Length", fileRecord.size);
+      reply.header(
+        "Content-Disposition",
+        `inline; filename="${fileRecord.name}"`
+      );
+
+      // Stream the file
+      const fileStream = fs.createReadStream(filePathLocal);
+      return reply.send(fileStream);
+    } catch (error) {
+      debugServer("Error in /api/file:", error);
+      reply.status(500).send({
+        error: "Failed to serve file",
+        message: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
+  // GET /api/file/info?url=<url> - Get file info from database
+  app.get("/api/file/info", async (request, reply) => {
+    try {
+      const query = request.query as { url?: string };
+      const { url } = query;
+
+      if (!url) {
+        reply.status(400).send({ error: "url parameter is required" });
+        return;
+      }
+
+      // Extract file ID from URL (assuming URL format like /files/:id or just :id)
+      const fileId = url.includes("/")
+        ? path.basename(url, path.extname(url))
+        : url;
+
+      // Get file record from database
+      const fileRecord = await fileStore.getFile(fileId);
+      if (!fileRecord) {
+        reply.status(404).send({ error: "File not found" });
+        return;
+      }
+
+      // Return only the file info from database
+      reply.send(fileRecord);
+    } catch (error) {
+      debugServer("Error in /api/file/info:", error);
+      reply.status(500).send({
+        error: "Failed to get file info",
         message: error instanceof Error ? error.message : "Unknown error",
       });
     }

@@ -32,11 +32,13 @@ import { Cron } from "croner";
 export interface TaskWorkerConfig {
   api: KeepDbApi;
   stepLimit?: number; // default 50
+  userPath?: string; // path to user files directory
 }
 
 export class TaskWorker {
   private api: KeepDbApi;
   private stepLimit: number;
+  private userPath?: string;
 
   private isRunning: boolean = false;
   private isShuttingDown: boolean = false;
@@ -47,6 +49,7 @@ export class TaskWorker {
   constructor(config: TaskWorkerConfig) {
     this.api = config.api;
     this.stepLimit = config.stepLimit || 50;
+    this.userPath = config.userPath;
     this.debug("Constructed");
   }
 
@@ -564,7 +567,8 @@ export class TaskWorker {
       this.api,
       taskType,
       task.cron,
-      () => sandbox.context!
+      () => sandbox.context!,
+      this.userPath
     );
     sandbox.setGlobal(await env.createGlobal());
 

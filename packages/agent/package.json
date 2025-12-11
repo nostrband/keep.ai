@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "@app/db": "file:../db",
+    "@app/node": "file:../node",
     "@app/proto": "file:../proto",
     "@openrouter/ai-sdk-provider": "^1.2.0",
     "ai": "^5.0.76",

@@ -50,7 +50,7 @@ export default defineConfig(({ mode }) => {
       outDir: `dist/${flavor}`, // <- separate directories
       sourcemap: true,
       // Service worker stuff
-      ...(isServerless && {
+      ...((isServerless || isFrontend) && {
         rollupOptions: {
           input: {
             main: path.resolve(__dirname, "index.html"),

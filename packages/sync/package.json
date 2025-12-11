@@ -18,7 +18,6 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "@app/agent": "file:../agent",
     "@app/db": "file:../db",
     "@app/proto": "file:../proto",
     "debug": "^4.3.4",

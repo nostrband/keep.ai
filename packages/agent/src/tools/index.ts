@@ -16,3 +16,7 @@ export { makeListTasksTool } from "./list-tasks";
 export { makeSendToTaskInboxTool } from "./send-to-task-inbox";
 export { makeCancelThisRecurringTaskTool } from "./cancel-this-recurring-task";
 export { makePostponeInboxItemTool } from "./postpone-inbox-item";
+export { makeReadFileTool } from "./read-file";
+export { makeListFilesTool } from "./list-files";
+export { makeSearchFilesTool } from "./search-files";
+export { makeImagesGenerateTool } from "./images-generate";

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   Button,
@@ -139,6 +139,13 @@ export default function SharedHeader({ title, subtitle }: SharedHeaderProps) {
                     onClick={() => setIsOpen(false)}
                   >
                     Notes
+                  </Link>
+                  <Link
+                    to="/files"
+                    className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                    onClick={() => setIsOpen(false)}
+                  >
+                    Files
                   </Link>
                   <Link
                     to="/devices"

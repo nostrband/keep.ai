@@ -1,5 +1,10 @@
 import { Command } from "commander";
-import { createDBNode, getCurrentUser, getDBPath } from "@app/node";
+import {
+  createDBNode,
+  getCurrentUser,
+  getDBPath,
+  getUserPath,
+} from "@app/node";
 import type { Sandbox } from "@app/agent";
 import * as readline from "readline";
 import debug from "debug";
@@ -33,6 +38,7 @@ async function runSandboxCommand(type: string): Promise<void> {
 
   const pubkey = await getCurrentUser();
   const dbPath = getDBPath(pubkey);
+  const userPath = getUserPath(pubkey);
   debugSandbox("Connecting to database:", dbPath);
 
   const dbInterface = await createDBNode(dbPath);
@@ -45,7 +51,8 @@ async function runSandboxCommand(type: string): Promise<void> {
   // Create store instances
   const api = new KeepDbApi(keepDB);
 
-  if (type !== "router" && type !== "worker" && type !== "replier") throw new Error("Invalid type");
+  if (type !== "router" && type !== "worker" && type !== "replier")
+    throw new Error("Invalid type");
   const taskType = type;
 
   try {
@@ -55,16 +62,18 @@ async function runSandboxCommand(type: string): Promise<void> {
       taskId: "",
       taskThreadId: "",
       type: taskType,
+      taskRunId: "",
+      createEvent: async (type, content, tx) => {},
     };
 
-    const env = new ReplEnv(api, taskType, () => sandbox!.context!);
+    const env = new ReplEnv(api, taskType, "", () => sandbox!.context!, userPath);
     const gl = await env.createGlobal();
     console.log("global", gl);
     sandbox.setGlobal(gl);
 
     debugSandbox("Sandbox initialized, tools: ", env.tools);
 
-    let state: any | undefined
+    let state: any | undefined;
     for await (const line of rl) {
       const source = normalizeSource(line);
       if (source === undefined) {
@@ -72,7 +81,10 @@ async function runSandboxCommand(type: string): Promise<void> {
       }
 
       try {
-        const evaluation = await sandbox.eval(source, { timeoutMs: 5000, state });
+        const evaluation = await sandbox.eval(source, {
+          timeoutMs: 60000,
+          state,
+        });
         if (evaluation.ok) {
           console.log(JSON.stringify(evaluation.result, null, 2));
           if (evaluation.state) state = evaluation.state;

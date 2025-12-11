@@ -36,4 +36,10 @@ export const qk = {
   // Inbox-related queries
   inboxItems: (options?: { source?: string; target?: string; handled?: boolean; limit?: number; }) => [{ scope: "inboxItems", options }] as const,
   inboxItem: (id: string) => [{ scope: "inboxItem", id }] as const,
+  
+  // File-related queries
+  allFiles: () => [{ scope: "allFiles" }] as const,
+  file: (fileId: string) => [{ scope: "file", fileId }] as const,
+  searchFiles: (query: string) => [{ scope: "searchFiles", query }] as const,
+  filesByMediaType: (mediaType: string) => [{ scope: "filesByMediaType", mediaType }] as const,
 };

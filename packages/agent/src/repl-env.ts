@@ -17,6 +17,10 @@ import {
   makeCancelThisRecurringTaskTool,
   makePostponeInboxItemTool,
   makeListEventsTool,
+  makeReadFileTool,
+  makeListFilesTool,
+  makeSearchFilesTool,
+  makeImagesGenerateTool,
 } from "./tools";
 import { z, ZodFirstPartyTypeKind as K } from "zod";
 import { EvalContext, EvalGlobal } from "./sandbox/sandbox";
@@ -37,7 +41,8 @@ export class ReplEnv {
     api: KeepDbApi,
     type: TaskType,
     cron: string,
-    getContext: () => EvalContext
+    getContext: () => EvalContext,
+    private userPath?: string
   ) {
     this.api = api;
     this.type = type;
@@ -65,9 +70,13 @@ export class ReplEnv {
     const docs: any = {};
     const addTool = (global: any, ns: string, name: string, tool: any) => {
       // Format docs
-      const desc = ["===DESCRIPTION===", tool.description + `
+      const desc = [
+        "===DESCRIPTION===",
+        tool.description +
+          `
 Example: await ${ns}.${name}(<input>)
-`];
+`,
+      ];
       if (tool.inputSchema)
         desc.push(...["===INPUT===", printSchema(tool.inputSchema)]);
       if (tool.outputSchema)
@@ -85,6 +94,8 @@ Example: await ${ns}.${name}(<input>)
           try {
             validatedInput = tool.inputSchema.parse(input);
           } catch (error) {
+            this.debug(`Bad input for '${ns}.${name}' input ${JSON.stringify(input)} schema ${tool.inputSchema} error ${error}`)
+
             // NOTE: do not print zod error codes as those are too verbose, we're
             // already printing Usage which is more useful.
             const message = `Invalid input for ${ns}.${name}.\nUsage: ${desc}`;
@@ -245,9 +256,43 @@ Example: await ${ns}.${name}(<input>)
     if (this.type === "replier") {
       addTool(
         global,
-        "inbox",
+        "Inbox",
         "postponeInboxItem",
         makePostponeInboxItemTool(this.api.inboxStore, this.getContext)
+      );
+    }
+
+    // File tools for router and worker
+    if (this.type === "router" || this.type === "worker") {
+      if (this.type === "worker") {
+        addTool(
+          global,
+          "Files",
+          "read",
+          makeReadFileTool(this.api.fileStore, this.userPath)
+        );
+      }
+      addTool(
+        global,
+        "Files",
+        "list",
+        makeListFilesTool(this.api.fileStore)
+      );
+      addTool(
+        global,
+        "Files",
+        "search",
+        makeSearchFilesTool(this.api.fileStore)
+      );
+    }
+
+    // Image generation tool for worker only
+    if (this.type === "worker") {
+      addTool(
+        global,
+        "Images",
+        "generate",
+        makeImagesGenerateTool(this.api.fileStore, this.userPath, this.getContext)
       );
     }
 
@@ -494,8 +539,7 @@ ${tasks
           "```",
         ]
       );
-      if ('then' in input.result) {
-
+      if ("then" in input.result) {
       }
     }
 
@@ -586,6 +630,16 @@ return {
 \`\`\`
 
 Step 3: reply to user with some info from returned 'lines'.
+`;
+  }
+
+  private filesPrompt() {
+    return `## Files & Images
+You have access to files on user's device:
+- use Files.* tools to access files, Images.* tools to work with images
+- if you need to mention a file when replying to user, use markdown links with '/files/get/' path prefix, i.e. [<file.name>](/files/get/<file.path>)
+- if you need to show an image when replying to user, use markdown images with '/files/get/' path prefix, i.e. ![<file.name>](/files/get/<file.path>)
+${this.type !== 'worker' ? `- create background task to read/process full file content, to generate images, etc` : ''}
 `;
   }
 
@@ -697,6 +751,8 @@ ${this.jsPrompt()}
 
 ${this.toolsPrompt()}
 
+${this.filesPrompt()}
+
 ${this.userInputPrompt()}
 
 ## Time & locale
@@ -780,14 +836,18 @@ ${this.toolsPrompt()}
 - If old important draft wasn't sent on time (current time vs draft timestamp), apologize for the delay and send immediately, i.e. "Btw, sorry forgot to tell you, ...".
 
 ## Draft anchoring to context
-${""/*- If draft's 'sourceTaskType' is NOT 'router', the draft is coming from a background task.*/}
+${
+  "" /*- If draft's 'sourceTaskType' is NOT 'router', the draft is coming from a background task.*/
+}
 - Drafts may come in the middle of another ongoing conversation, and may need adjustments to fit naturally.
 - Check recent message HISTORY (and/or Memory.* tools) and get task by 'sourceTaskId' of the draft to understand whether anchoring is needed.
 - Assume you're a human assistant who just remembered that draft they needed to communicate, and are trying to make it natural, i.e. "Btw, on that issue X - ...", "Also, to proceed with X, I need ...", etc.
 - Check current time vs last messages in history, if last messages were long ago then it's ok to skip anchoring.
 
 ## Deduping 
-${""/*- If draft's 'sourceTaskType' is NOT 'router', the draft is coming from a background task and needs the checks below (router's drafts should never be suppressed).*/}
+${
+  "" /*- If draft's 'sourceTaskType' is NOT 'router', the draft is coming from a background task and needs the checks below (router's drafts should never be suppressed).*/
+}
 - Check draft's reasoning, recent message HISTORY (and/or Memory.* tools), task info by 'sourceTaskId' of the draft.
 - Prefer the newest draft for the same topic; drop older near-duplicates. 
 - EXCEPTIONS: 
@@ -806,6 +866,8 @@ ${""/*- If draft's 'sourceTaskType' is NOT 'router', the draft is coming from a 
 ## Content policy
 - Postpone non-urgent drafts at night time (check user's schedule)
 ${this.localePrompt()}
+
+${this.filesPrompt()}
 
 `;
   }
@@ -904,8 +966,10 @@ ${this.toolsPrompt()}
 
 ${this.userInputPrompt()}
 
+${this.filesPrompt()}
+
 ## Task complexity
-- You might have insufficient tools/capabilities to solve the task or achieve the goals, that is ok.
+- You might have insufficient tools/capabilities to solve the task or achieve the goals, that is normal and it's ok to admit it.
 - If task is too complex or not enough tools, admit it and suggest to reduce the scope/goals to something you believe you could do. 
 - You are also allowed and encouraged to ask clarifying questions, it's much better to ask and be sure about user's intent/expectations, than to waste resources on useless work.
 - Put your questions/suggestion into TASK_ASKS, and if user input results in task scope/goals change - create new task and finish this one.
