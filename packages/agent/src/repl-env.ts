@@ -21,6 +21,10 @@ import {
   makeListFilesTool,
   makeSearchFilesTool,
   makeImagesGenerateTool,
+  makeImagesExplainTool,
+  makeImagesTransformTool,
+  makePdfExplainTool,
+  makeAudioExplainTool,
 } from "./tools";
 import { z, ZodFirstPartyTypeKind as K } from "zod";
 import { EvalContext, EvalGlobal } from "./sandbox/sandbox";
@@ -286,13 +290,45 @@ Example: await ${ns}.${name}(<input>)
       );
     }
 
-    // Image generation tool for worker only
+    // Image tools for worker only
     if (this.type === "worker") {
       addTool(
         global,
         "Images",
         "generate",
         makeImagesGenerateTool(this.api.fileStore, this.userPath, this.getContext)
+      );
+      addTool(
+        global,
+        "Images",
+        "explain",
+        makeImagesExplainTool(this.api.fileStore, this.userPath, this.getContext)
+      );
+      addTool(
+        global,
+        "Images",
+        "transform",
+        makeImagesTransformTool(this.api.fileStore, this.userPath, this.getContext)
+      );
+    }
+
+    // PDF tools for worker only
+    if (this.type === "worker") {
+      addTool(
+        global,
+        "PDF",
+        "explain",
+        makePdfExplainTool(this.api.fileStore, this.userPath, this.getContext)
+      );
+    }
+
+    // Audio tools for worker only
+    if (this.type === "worker") {
+      addTool(
+        global,
+        "Audio",
+        "explain",
+        makeAudioExplainTool(this.api.fileStore, this.userPath, this.getContext)
       );
     }
 

@@ -7,6 +7,7 @@ import { API_ENDPOINT } from "../const";
 const ALLOWED_FILE_TYPES = [
   'image/*',
   'text/*',
+  'audio/*',
   'application/pdf',
   'application/json',
   'application/zip',
@@ -64,16 +65,15 @@ export default function FilesPage() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileSelect = () => {
     fileInputRef.current?.click();
   };
 
-  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
+  // Reusable file upload function
+  const uploadFile = async (file: File) => {
     // Reset states
     setUploadError(null);
     setIsUploading(true);
@@ -130,11 +130,65 @@ export default function FilesPage() {
       setIsUploading(false);
       setUploadProgress(0);
     }
+  };
+
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    await uploadFile(file);
 
     // Reset file input
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
+  };
+
+  // Drag and drop handlers
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    // Only set dragover to false if we're leaving the drop zone entirely
+    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+      setIsDragOver(false);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+
+    const files = Array.from(e.dataTransfer.files);
+    const file = files[0]; // Take only the first file
+
+    if (!file) return;
+
+    // Check if file type is allowed
+    const fileExtension = '.' + file.name.split('.').pop()?.toLowerCase();
+    const isAllowed = ALLOWED_FILE_TYPES.some(type =>
+      type === fileExtension ||
+      file.type.startsWith(type.replace('/*', '')) ||
+      type === 'text/*' && file.type.startsWith('text/')
+    );
+
+    if (!isAllowed) {
+      setUploadError(`File type not allowed. Allowed types: ${ALLOWED_FILE_TYPES.join(', ')}`);
+      return;
+    }
+
+    await uploadFile(file);
   };
 
   const handleDownload = async (fileId: string, fileName: string) => {
@@ -165,16 +219,47 @@ export default function FilesPage() {
 
       <div className="max-w-4xl mx-auto px-6 py-6">
         {/* Upload Section */}
-        <div className="mb-6 p-4 bg-white rounded-lg border border-gray-200">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-medium text-gray-900">Upload File</h2>
-            <Button
-              onClick={handleFileSelect}
-              disabled={isUploading}
-              className="bg-blue-600 hover:bg-blue-700 text-white"
-            >
-              {isUploading ? 'Uploading...' : 'Select File'}
-            </Button>
+        <div
+          className={`mb-6 p-6 bg-white rounded-lg border-2 border-dashed transition-colors ${
+            isDragOver
+              ? 'border-blue-400 bg-blue-50'
+              : 'border-gray-300 hover:border-gray-400'
+          }`}
+          onDragEnter={handleDragEnter}
+          onDragLeave={handleDragLeave}
+          onDragOver={handleDragOver}
+          onDrop={handleDrop}
+        >
+          <div className="text-center">
+            <div className={`mx-auto mb-4 ${isDragOver ? 'scale-110' : ''} transition-transform`}>
+              <svg className="w-12 h-12 text-gray-400 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+              </svg>
+            </div>
+            
+            {isDragOver ? (
+              <div className="text-blue-600 font-medium">
+                <p className="text-lg">Drop your file here!</p>
+                <p className="text-sm mt-1">Release to upload</p>
+              </div>
+            ) : (
+              <div>
+                <h2 className="text-lg font-medium text-gray-900 mb-2">Upload File</h2>
+                <p className="text-gray-600 mb-4">
+                  Drag and drop a file here, or click to select
+                </p>
+                <Button
+                  onClick={handleFileSelect}
+                  disabled={isUploading}
+                  className="bg-blue-600 hover:bg-blue-700 text-white"
+                >
+                  {isUploading ? 'Uploading...' : 'Select File'}
+                </Button>
+                <p className="text-xs text-gray-500 mt-2">
+                  Supported: Images, Documents, PDFs, Text files
+                </p>
+              </div>
+            )}
           </div>
           
           <input

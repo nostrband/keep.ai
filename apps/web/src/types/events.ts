@@ -11,6 +11,10 @@ export const EVENT_TYPES = {
   WEB_FETCH: "web_fetch",
   GET_WEATHER: "get_weather",
   IMAGES_GENERATE: "images_generate",
+  IMAGES_EXPLAIN: "images_explain",
+  IMAGES_TRANSFORM: "images_transform",
+  PDF_EXPLAIN: "pdf_explain",
+  AUDIO_EXPLAIN: "audio_explain",
   TASK_RUN: "task_run",
 } as const;
 
@@ -79,6 +83,32 @@ export interface ImagesGenerateEventPayload extends BaseEventPayload {
   files: string[];
 }
 
+export interface ImagesExplainEventPayload extends BaseEventPayload {
+  file: string;
+  question: string;
+  explanation: string;
+}
+
+export interface ImagesTransformEventPayload extends BaseEventPayload {
+  source_file: string;
+  prompt: string;
+  aspect_ratio: string;
+  count: number;
+  files: string[];
+}
+
+export interface PdfExplainEventPayload extends BaseEventPayload {
+  file: string;
+  prompt: string;
+  explanation: string;
+}
+
+export interface AudioExplainEventPayload extends BaseEventPayload {
+  file: string;
+  prompt: string;
+  explanation: string;
+}
+
 export interface TaskRunEventPayload extends BaseEventPayload {
   // task_run events are invisible markers for grouping
 }
@@ -96,6 +126,10 @@ export type EventPayload =
   | WebFetchEventPayload
   | GetWeatherEventPayload
   | ImagesGenerateEventPayload
+  | ImagesExplainEventPayload
+  | ImagesTransformEventPayload
+  | PdfExplainEventPayload
+  | AudioExplainEventPayload
   | TaskRunEventPayload;
 
 // Event interface that matches the database structure
@@ -197,6 +231,39 @@ export const EVENT_CONFIGS: Record<EventType, EventConfig> = {
       return `Generated ${imageCount} image${imageCount > 1 ? "s" : ""}: ${
         imgPayload.prompt
       }`;
+    },
+    hasId: false,
+  },
+  [EVENT_TYPES.IMAGES_EXPLAIN]: {
+    emoji: "🔍",
+    title: (payload) => {
+      const explainPayload = payload as ImagesExplainEventPayload;
+      return `Analyzed image: ${explainPayload.file}`;
+    },
+    hasId: false,
+  },
+  [EVENT_TYPES.IMAGES_TRANSFORM]: {
+    emoji: "🖼️",
+    title: (payload) => {
+      const transformPayload = payload as ImagesTransformEventPayload;
+      const imageCount = transformPayload.count || transformPayload.files?.length || 1;
+      return `Transformed ${transformPayload.source_file} → ${imageCount} image${imageCount > 1 ? "s" : ""}`;
+    },
+    hasId: false,
+  },
+  [EVENT_TYPES.PDF_EXPLAIN]: {
+    emoji: "📄",
+    title: (payload) => {
+      const pdfPayload = payload as PdfExplainEventPayload;
+      return `Analyzed PDF: ${pdfPayload.file}`;
+    },
+    hasId: false,
+  },
+  [EVENT_TYPES.AUDIO_EXPLAIN]: {
+    emoji: "🎵",
+    title: (payload) => {
+      const audioPayload = payload as AudioExplainEventPayload;
+      return `Analyzed audio: ${audioPayload.file}`;
     },
     hasId: false,
   },

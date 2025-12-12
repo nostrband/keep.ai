@@ -20,3 +20,7 @@ export { makeReadFileTool } from "./read-file";
 export { makeListFilesTool } from "./list-files";
 export { makeSearchFilesTool } from "./search-files";
 export { makeImagesGenerateTool } from "./images-generate";
+export { makeImagesExplainTool } from "./images-explain";
+export { makeImagesTransformTool } from "./images-transform";
+export { makePdfExplainTool } from "./pdf-explain";
+export { makeAudioExplainTool } from "./audio-explain";

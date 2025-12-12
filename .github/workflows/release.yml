@@ -24,8 +24,8 @@ jobs:
             build_target: -l    # linux
           - os: windows-latest
             build_target: -w    # windows
-          - os: macos-latest
-            build_target: -m    # mac
+          # - os: macos-latest
+          #   build_target: -m    # mac
 
     steps:
       - name: Checkout

@@ -8,6 +8,8 @@ export {
   makeSearchNotesTool,
   makeUpdateNoteTool,
   makeWebSearchTool,
+  makePdfExplainTool,
+  makeAudioExplainTool,
 } from "./tools";
 
 // Environment configuration

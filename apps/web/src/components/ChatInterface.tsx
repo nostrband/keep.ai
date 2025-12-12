@@ -165,6 +165,21 @@ export default function ChatInterface({
       top: document.documentElement.scrollHeight,
       behavior,
     });
+
+    const int = setInterval(() => {
+      if (
+        document.documentElement.scrollTop +
+          document.documentElement.clientHeight <
+        document.documentElement.scrollHeight
+      ) {
+        window.scrollTo({
+          top: document.documentElement.scrollHeight,
+          behavior,
+        });
+      } else {
+        clearInterval(int);
+      }
+    }, 50);
   }, []);
 
   // Smart scroll logic - handles first load and new messages
