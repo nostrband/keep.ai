@@ -1,6 +1,5 @@
-
-// Export browser worker classes
-export * from "./LeaderWebWorker";
-export * from "./WorkerTransport";
-export * from "./startWorker";
-export * from "./createDB";
+export * from './compression';
+export { createDBBrowser } from './createDB';
+export { LeaderWebWorker, stableName } from './LeaderWebWorker';
+export { startWorker } from './startWorker';
+export { WorkerTransport } from './WorkerTransport';

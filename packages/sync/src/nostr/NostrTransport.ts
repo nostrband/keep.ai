@@ -922,7 +922,7 @@ class PeerSend {
         if (valid) this.lastCursorCreatedAt = e.created_at;
 
         if (restart)
-          this.parent.onSync(this.peer.peer_id, this.sendCursor!.send_cursor);
+          this.onSync();
       },
     });
 
@@ -931,7 +931,12 @@ class PeerSend {
 
     // Have stored cursor on first start? Launch immediately
     if (this.sendCursor && !reconnect)
-      this.parent.onSync(this.peer.peer_id, this.sendCursor.send_cursor);
+      this.onSync();
+  }
+
+  private onSync() {
+    if (!this.sendCursor) throw new Error("No send cursor");
+    this.parent.onSync(this.peer.peer_id, this.sendCursor.send_cursor);
   }
 
   private async handleCursorEvent(event: Event) {

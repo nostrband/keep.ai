@@ -786,14 +786,17 @@ export async function createServer(config: ServerConfig = {}) {
       }
 
       const fileBuffer = Buffer.concat(chunks);
+      debugServer("Got file buffer", fileBuffer.length);
 
       // Calculate SHA256 hash as ID
       const hash = createHash("sha256");
       hash.update(fileBuffer);
       const fileId = hash.digest("hex");
+      debugServer("File hash", fileId);
 
       // Check if file already exists
       const existingFile = await fileStore.getFile(fileId);
+      debugServer("Existing file", existingFile);
       if (existingFile) {
         reply.send(existingFile);
         return;
@@ -815,18 +818,23 @@ export async function createServer(config: ServerConfig = {}) {
       const extension = extensionMatch
         ? extensionMatch[1]
         : mimeToExt(mediaType);
+      debugServer("Filename", filename, "extension", extension, "media type", mediaType);
 
       // Format file path: <userPath>/files/<id>.<extension>
       const filesDir = path.join(userPath, "files");
+      debugServer("Files dir", filesDir);
       if (!fs.existsSync(filesDir)) {
         fs.mkdirSync(filesDir, { recursive: true });
+        debugServer("Files dir created");
       }
 
       const fileNameLocal = `${fileId}${extension ? `.${extension}` : ""}`;
       const filePathLocal = path.join(filesDir, fileNameLocal);
 
       // Write file to local path
+      debugServer("Writing to", filePathLocal);
       fs.writeFileSync(filePathLocal, fileBuffer);
+      debugServer("Finished writing to", filePathLocal);
 
       // Create file record
       const fileRecord: File = {

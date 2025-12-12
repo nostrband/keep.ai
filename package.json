@@ -1,6 +1,6 @@
 {
   "name": "keep-ai",
-  "version": "0.1.12",
+  "version": "0.1.13",
   "private": true,
   "description": "Privacy-focused AI assistant app with peer-to-peer sync",
   "main": "apps/electron/dist/main.cjs",

@@ -12,6 +12,7 @@ export const KIND_CHANGES = 4680;
 export * from "./NostrConnector";
 export * from "./NostrTransport";
 export * from "./nip44-v3";
+export * from "./stream";
 
 export async function publish(
   event: Event,
