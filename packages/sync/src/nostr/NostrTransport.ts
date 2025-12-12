@@ -122,12 +122,12 @@ export class NostrTransport implements Transport {
     return this.#localPeerId;
   }
 
-  onSync(peerId: string, peerCursor: Cursor) {
-    return this.callbacks!.onSync(this, peerId, peerCursor);
+  onSync(peerId: string, sendStreamId: string, peerCursor: Cursor) {
+    return this.callbacks!.onSync(this, peerId, sendStreamId, peerCursor);
   }
 
-  onReceive(peerId: string, msg: PeerMessage) {
-    return this.callbacks!.onReceive(this, peerId, msg);
+  onReceive(peerId: string, recvStreamId: string, msg: PeerMessage) {
+    return this.callbacks!.onReceive(this, peerId, recvStreamId, msg);
   }
 
   async start(
@@ -197,16 +197,20 @@ export class NostrTransport implements Transport {
     for (const p of this.recvs.values()) p.restart();
   }
 
-  async sync(peerId: string, localCursor: Cursor): Promise<void> {
+  async sync(peerId: string, localCursor: Cursor): Promise<string> {
     const recv = this.recvs.get(peerId);
     if (!recv) throw new Error("Peer not found " + peerId);
     return recv.sync(localCursor);
   }
 
-  async send(peerId: string, changes: PeerMessage): Promise<void> {
+  async send(
+    peerId: string,
+    sendStreamId: string,
+    changes: PeerMessage
+  ): Promise<void> {
     const send = this.sends.get(peerId);
     if (!send) throw new Error("Peer not found " + peerId);
-    return send.send(changes);
+    return send.send(sendStreamId, changes);
   }
 
   async waitCanSend(): Promise<void> {
@@ -249,6 +253,7 @@ class PeerRecv {
   private debug: ReturnType<typeof debug>;
   private reconnectTimeout?: ReturnType<typeof setTimeout>;
   private resyncTimer?: ReturnType<typeof setTimeout>;
+  private peerStreamId: string = "";
 
   constructor(parent: NostrTransport, peer: NostrPeer) {
     this.peer = peer;
@@ -281,7 +286,7 @@ class PeerRecv {
     await this.subscribe();
   }
 
-  async sync(localCursor: Cursor): Promise<void> {
+  async sync(localCursor: Cursor): Promise<string> {
     if (this.localCursor) throw new Error("Already syncing");
 
     // Store for future reference
@@ -313,6 +318,10 @@ class PeerRecv {
       // Subscribe to proceed with existing CURSOR event
       await this.subscribe();
     }
+
+    // Return the recv stream ID
+    this.peerStreamId = bytesToHex(randomBytes(16));
+    return this.peerStreamId;
   }
 
   private async havePublishedCursor() {
@@ -442,7 +451,7 @@ class PeerRecv {
     await this.processBuffer();
 
     // Send EOSE after we've handled all stored events
-    await this.parent.onReceive(this.peer.peer_id, {
+    await this.parent.onReceive(this.peer.peer_id, this.peerStreamId, {
       type: "eose",
       data: [],
     });
@@ -614,8 +623,12 @@ class PeerRecv {
     );
 
     try {
-      // Notify the Peer
-      await this.parent.onReceive(this.peer.peer_id, msg.msg);
+      // Notify the Peer (use the recv cursor ID as recv stream ID)
+      await this.parent.onReceive(
+        this.peer.peer_id,
+        this.peerStreamId,
+        msg.msg
+      );
 
       // Update recv cursor w/ new changes
       updateCursor(this.recvCursor.recv_cursor, msg.msg.data);
@@ -835,6 +848,7 @@ class PeerSend {
   private nextSendTimer?: ReturnType<typeof setTimeout>;
   private waitCanSendPromise?: Promise<void>;
   private waitCanSendCallback?: () => void;
+  private publishPendingPromise?: Promise<void>;
 
   constructor(parent: NostrTransport, peer: NostrPeer) {
     this.peer = peer;
@@ -871,6 +885,7 @@ class PeerSend {
     this.waitCanSendCallback?.();
     this.waitCanSendCallback = undefined;
     this.waitCanSendPromise = undefined;
+    this.publishPendingPromise = undefined;
   }
 
   async reconnect() {
@@ -921,8 +936,7 @@ class PeerSend {
         });
         if (valid) this.lastCursorCreatedAt = e.created_at;
 
-        if (restart)
-          this.onSync();
+        if (restart) this.onSync();
       },
     });
 
@@ -930,13 +944,24 @@ class PeerSend {
     this.sub = sub;
 
     // Have stored cursor on first start? Launch immediately
-    if (this.sendCursor && !reconnect)
-      this.onSync();
+    if (this.sendCursor && !reconnect) this.onSync();
   }
 
-  private onSync() {
+  private async onSync() {
     if (!this.sendCursor) throw new Error("No send cursor");
-    this.parent.onSync(this.peer.peer_id, this.sendCursor.send_cursor);
+
+    // Wait until previous queue-sending is cancelled
+    if (this.publishPendingPromise) await this.publishPendingPromise;
+
+    // Clear old pending stuff, we've got new stream
+    this.pending.length = 0;
+
+    // Use the send cursor ID as send stream ID
+    this.parent.onSync(
+      this.peer.peer_id,
+      this.sendCursor.send_cursor_id,
+      this.sendCursor.send_cursor
+    );
   }
 
   private async handleCursorEvent(event: Event) {
@@ -1009,8 +1034,17 @@ class PeerSend {
     };
   }
 
-  async send(changes: PeerMessage): Promise<void> {
+  async send(sendStreamId: string, changes: PeerMessage): Promise<void> {
     if (!this.sendCursor) throw new Error("No send cursor");
+
+    // Verify that the sendStreamId matches our current sendCursor ID
+    if (sendStreamId !== this.sendCursor.send_cursor_id) {
+      this.debug("Ignoring send: stream ID mismatch", {
+        expected: this.sendCursor.send_cursor_id,
+        received: sendStreamId,
+      });
+      return;
+    }
 
     // Do not send 'EOSE', we have synthetic event for that
     if (changes.type === "eose") return;
@@ -1044,15 +1078,15 @@ class PeerSend {
 
     if (!this.nextSendTimer) {
       // Schedule next send in 100 ms
-      this.nextSendTimer = setTimeout(async () => {
+      this.nextSendTimer = setTimeout(() => {
         // This will clear the timeout or set next one
         // if more data is pending
-        await this.publishPending();
+        this.publishPendingPromise = this.publishPending();
       }, 100); // small delay to improve batching
     }
   }
 
-  private async publishPending() {
+  private splitPendingToBatches() {
     // NOTE: very important! We assume ordered delivery everywhere,
     // order by db_version asc to make sure we're doing it properly
     const ordered = this.pending.sort((a, b) => a.db_version - b.db_version);
@@ -1100,70 +1134,63 @@ class PeerSend {
     // Clear the buffer
     this.pending.length = 0;
 
+    return batches;
+  }
+
+  private async publishPending() {
+    if (!this.sendCursor) return;
+
+    // Remember current cursor, we're about to enter buffer-clearing
+    // loop, and we must detect a concurrently-changed cursor if receiver
+    // sends a new one
+    const currentSendCursor = this.sendCursor;
+
+    // Convert this.pending to batches that can fit one nostr event
+    const batches = this.splitPendingToBatches();
+
     // Send batches, watch for stop signal
-    let ok = false;
-    while (batches.length) {
+    while (currentSendCursor === this.sendCursor && batches.length) {
       const msg = batches.shift()!;
 
-      ok = await this.publish(msg);
+      // Publish will retry sending the same signed event
+      // on relay failures, we can't re-sign the same changeset
+      // as we can't be sure about failure and might split the
+      // chain.
+      await this.publish(currentSendCursor, msg);
 
-      // Aborted?
-      if (!this.sendCursor) break;
+      // Count these changes
+      this.pendingCount -= msg.data.length;
+      this.debug("Send changes", msg.data.length, "pending", this.pendingCount);
 
-      if (ok) {
-        this.pendingCount -= msg.data.length;
-        this.debug(
-          "Send changes",
-          msg.data.length,
-          "pending",
-          this.pendingCount
-        );
-
-        // Notify clients blocked on backpressure
-        if (this.waitCanSendPromise && this.waitCanSendCallback) {
-          if (this.pendingCount < MAX_SEND_BUFFER_SIZE) {
-            this.debug(
-              "Unblock back-pressed clients, pending",
-              this.pendingCount
-            );
-            this.waitCanSendCallback();
-            this.waitCanSendCallback = undefined;
-            this.waitCanSendPromise = undefined;
-          }
+      // Notify clients blocked on backpressure
+      if (this.waitCanSendPromise && this.waitCanSendCallback) {
+        if (this.pendingCount < MAX_SEND_BUFFER_SIZE) {
+          this.debug(
+            "Unblock back-pressed clients, pending",
+            this.pendingCount
+          );
+          this.waitCanSendCallback();
+          this.waitCanSendCallback = undefined;
+          this.waitCanSendPromise = undefined;
         }
-      } else {
-        this.debug(
-          "Will retry publish changes",
-          msg.data.length,
-          "and batches",
-          batches.length
-        );
-
-        // Put msg and remaining batches back to pending,
-        // note that the db_version asc ordering is broken after these pushes
-        this.pending.push(...msg.data);
-        this.pending.push(...batches.map((b) => b.data).flat());
-        break;
       }
     }
 
     // Clear now after we're done
     this.nextSendTimer = undefined;
 
-    // Not everything was sent or new pending stuff arrived?
+    // New pending stuff arrived?
     if (this.pending.length > 0) {
-      // Schedule next try, pause on error
-      this.nextSendTimer = setTimeout(
-        async () => {
-          await this.publishPending();
-        },
-        ok ? 0 : 10000
-      );
+      // Schedule next try
+      this.nextSendTimer = setTimeout(() => {
+        this.publishPendingPromise = this.publishPending();
+      }, 0);
     }
   }
 
-  private async publish(msg: PeerMessage) {
-    if (!this.sendCursor) throw new Error("No send cursor");
+  private async publish(currentSendCursor: SendCursor, msg: PeerMessage) {
+    if (currentSendCursor !== this.sendCursor)
+      throw new Error("No/wrong send cursor");
 
     const payload: ChangesPayload = {
       peer_id: this.parent.localPeerId!,
@@ -1185,7 +1212,7 @@ class PeerSend {
     });
 
     // Aborted?
-    if (!this.sendCursor) return false;
+    if (currentSendCursor !== this.sendCursor) return;
 
     this.debug(
       "Encrypted content size",
@@ -1201,18 +1228,18 @@ class PeerSend {
       pubkey: this.peer.local_pubkey,
       created_at: now,
       tags: [
-        ["r", this.sendCursor.send_cursor_id],
+        ["r", currentSendCursor.send_cursor_id],
         ["expiration", (now + this.parent.expiryPeriod).toString()],
-        ...(this.sendCursor.send_changes_event_id
-          ? [["e", this.sendCursor.send_changes_event_id]]
+        ...(currentSendCursor.send_changes_event_id
+          ? [["e", currentSendCursor.send_changes_event_id]]
           : []),
       ],
       content,
     };
 
     // Ensure the timestamp never goes back
-    if (changesEvent.created_at < this.sendCursor.send_changes_timestamp)
-      changesEvent.created_at = this.sendCursor.send_changes_timestamp;
+    if (changesEvent.created_at < currentSendCursor.send_changes_timestamp)
+      changesEvent.created_at = currentSendCursor.send_changes_timestamp;
 
     this.debug(
       "Signing changes for peer",
@@ -1220,18 +1247,23 @@ class PeerSend {
       "by local pubkey",
       this.peer.local_pubkey,
       "prev id",
-      this.sendCursor.send_changes_event_id,
+      currentSendCursor.send_changes_event_id,
       "relays",
       this.relays
     );
     const signedEvent = await this.parent.signer.signEvent(changesEvent);
 
     // Publish to all relays
-    try {
-      await publish(signedEvent, this.parent.pool, this.relays);
-    } catch (e) {
-      this.debug("Failed to publish changes", e);
-      return false;
+    while (this.sendCursor === currentSendCursor) {
+      try {
+        await publish(signedEvent, this.parent.pool, this.relays);
+        // done!
+        break;
+      } catch (e) {
+        this.debug("Failed to publish changes, will retry: ", e);
+        // wait 10 sec
+        await new Promise((ok) => setTimeout(ok, 10000));
+      }
     }
 
     this.debug(
@@ -1242,13 +1274,13 @@ class PeerSend {
       "event",
       signedEvent.id,
       "prev",
-      this.sendCursor.send_changes_event_id,
+      currentSendCursor.send_changes_event_id,
       "stream",
-      this.sendCursor.send_cursor_id
+      currentSendCursor.send_cursor_id
     );
 
     // If not aborted
-    if (this.sendCursor) {
+    if (this.sendCursor === currentSendCursor) {
       // Advance peer cursor
       updateCursor(this.sendCursor.send_cursor, msg.data);
       this.sendCursor.send_changes_event_id = signedEvent.id;
@@ -1257,8 +1289,6 @@ class PeerSend {
       // Write to db
       await this.writeSendCursor();
     }
-
-    return true;
   }
 
   private async readSendCursor() {

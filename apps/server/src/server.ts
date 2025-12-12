@@ -804,13 +804,16 @@ export async function createServer(config: ServerConfig = {}) {
 
       // Uploaded filename
       const filename = data.filename || "unknown";
+      debugServer("Filename", filename);
 
       // Detect media type using mime-detect
       let mediaType = await detectBufferMime(fileBuffer);
+      debugServer("Mime buffer", mediaType);
 
       // Refine using filename if result is generic
       if (!mediaType && filename && filename !== "unknown") {
         mediaType = detectFilenameMime(filename, mediaType);
+        debugServer("Mime filename", mediaType);
       }
 
       // Get file extension from filename, or take from media-type

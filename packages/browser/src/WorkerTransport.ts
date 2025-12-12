@@ -34,11 +34,13 @@ export class WorkerTransport implements Transport {
   private onSyncCallback?: (
     transport: Transport,
     peerId: string,
+    sendStreamId: string,
     peerCursor: Cursor
   ) => Promise<void>;
   private onReceiveCallback?: (
     transport: Transport,
     peerId: string,
+    recvStreamId: string,
     msg: PeerMessage
   ) => Promise<void>;
   private onDisconnectCallback?: (
@@ -72,7 +74,7 @@ export class WorkerTransport implements Transport {
     await this.processBufferedMessages();
   }
 
-  async sync(peerId: string, localCursor: Cursor): Promise<void> {
+  async sync(peerId: string, localCursor: Cursor): Promise<string> {
     if (this.stopped) {
       throw new Error("Transport is stopped");
     }
@@ -80,7 +82,7 @@ export class WorkerTransport implements Transport {
     const port = this.activePorts.get(peerId);
     if (!port) {
       debugTransport(`Ignoring sync for unknown peer: ${peerId}`);
-      return;
+      return "";
     }
 
     const message: TransportMessage = {
@@ -95,9 +97,11 @@ export class WorkerTransport implements Transport {
     } catch (error) {
       debugTransport(`Failed to send sync message to peer ${peerId}:`, error);
     }
+    
+    return "";
   }
 
-  async send(peerId: string, changes: PeerMessage): Promise<void> {
+  async send(peerId: string, sendStreamId: string, changes: PeerMessage): Promise<void> {
     if (this.stopped) {
       throw new Error("Transport is stopped");
     }
@@ -293,14 +297,14 @@ export class WorkerTransport implements Transport {
     if (!this.onSyncCallback) throw new Error("Peer message before start()");
     if (!message.cursor) throw new Error("Sync message without cursor");
     const peerCursor = deserializeCursor(message.cursor);
-    await this.onSyncCallback(this, peerId, peerCursor);
+    await this.onSyncCallback(this, peerId, "", peerCursor);
   }
 
   private async handleData(peerId: string, data: PeerMessage): Promise<void> {
     debugTransport(`Received data from peer: ${peerId}`, data);
 
     if (!this.onReceiveCallback) throw new Error("Peer message before start()");
-    await this.onReceiveCallback(this, peerId, data);
+    await this.onReceiveCallback(this, peerId, "", data);
   }
 
   private async handleCallbackError(peerId: string): Promise<void> {

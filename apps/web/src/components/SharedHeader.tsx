@@ -5,6 +5,9 @@ import {
 } from "../ui";
 import { useAgentStatus } from "../hooks/dbApiReads";
 
+// Access build-time constants
+declare const __SERVERLESS__: boolean;
+
 // Logo component with "K" design
 const AssistantIcon = () => (
   <div className="w-8 h-8 border-2 rounded flex items-center justify-center" style={{ borderColor: '#D6A642' }}>
@@ -23,6 +26,7 @@ export default function SharedHeader({ title, subtitle }: SharedHeaderProps) {
   const { data: agentStatus } = useAgentStatus();
   const location = useLocation();
   const navigate = useNavigate();
+  const isServerless = __SERVERLESS__;
   
   const isRootPage = location.pathname === '/';
   
@@ -161,13 +165,15 @@ export default function SharedHeader({ title, subtitle }: SharedHeaderProps) {
                   >
                     Console
                   </Link>
-                  <Link
-                    to="/settings"
-                    className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-                    onClick={() => setIsOpen(false)}
-                  >
-                    Settings
-                  </Link>
+                  {!isServerless && (
+                    <Link
+                      to="/settings"
+                      className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                      onClick={() => setIsOpen(false)}
+                    >
+                      Settings
+                    </Link>
+                  )}
                 </div>
               </div>
             )}

@@ -72,16 +72,16 @@ export class TransportClientHttp implements Transport {
     await this.connectSSE();
   }
 
-  async sync(peerId: string, localCursor: Cursor): Promise<void> {
+  async sync(peerId: string, localCursor: Cursor): Promise<string> {
     if (!this.localPeerId) {
       debugTransport("Cannot sync: transport not started");
-      return;
+      return "";
     }
     if (peerId !== this.remotePeerId) {
       debugTransport(
         `Cannot sync: unknown peer '${peerId} expected '${this.remotePeerId}''`
       );
-      return;
+      return "";
     }
 
     try {
@@ -108,9 +108,11 @@ export class TransportClientHttp implements Transport {
       debugTransport(`Error sending sync for peer ${peerId}:`, error);
       // Don't throw - transport failures should be handled gracefully
     }
+    
+    return "";
   }
 
-  async send(peerId: string, message: PeerMessage): Promise<void> {
+  async send(peerId: string, sendStreamId: string, message: PeerMessage): Promise<void> {
     if (!this.localPeerId) {
       debugTransport("Cannot send: transport not started");
       return;
@@ -236,7 +238,7 @@ export class TransportClientHttp implements Transport {
           }
           debugTransport(`Received sync from peer: ${message.peerId}`);
           const cursor = deserializeCursor(message.cursor);
-          await this.callbacks.onSync(this, message.peerId, cursor);
+          await this.callbacks.onSync(this, message.peerId, "", cursor);
           break;
 
         case "data":
@@ -247,7 +249,7 @@ export class TransportClientHttp implements Transport {
           debugTransport(
             `Received ${message.data.type} from peer: ${message.peerId} with ${message.data.data.length} changes`
           );
-          await this.callbacks.onReceive(this, message.peerId, message.data);
+          await this.callbacks.onReceive(this, message.peerId, "", message.data);
           break;
 
         case "ping":

@@ -36,6 +36,13 @@ interface PeerInfo {
   active: boolean;
   // transport used by this peer
   transport: Transport;
+  // stream IDs for sending and receiving
+  sendStreamId: string;
+  recvStreamId: string;
+  // cancel sync?
+  syncCancel?: boolean;
+  // to cancel and await
+  syncPromise?: Promise<void>;
 }
 
 export class Peer extends EventEmitter<{
@@ -143,6 +150,8 @@ export class Peer extends EventEmitter<{
       cursor: new Cursor(),
       active: false,
       transport: transport,
+      sendStreamId: "",
+      recvStreamId: "",
     };
     this.peers.set(peerId, peer);
     this.debug(`Peer '${peerId}' connected`);
@@ -155,7 +164,8 @@ export class Peer extends EventEmitter<{
     // synchronously re-enter into Peer's callbacks
     queueMicrotask(async () => {
       try {
-        await transport.sync(peerId, this.cursor);
+        const recvStreamId = await transport.sync(peerId, this.cursor);
+        peer.recvStreamId = recvStreamId;
       } catch (e) {
         this.debug("Sync error with peer", peerId, "cursor", this.cursor, e);
       }
@@ -165,6 +175,7 @@ export class Peer extends EventEmitter<{
   private async onSync(
     transport: Transport,
     peerId: string,
+    sendStreamId: string,
     peerCursor: Cursor
   ): Promise<void> {
     this.debug("onSync", peerId, peerCursor);
@@ -178,11 +189,18 @@ export class Peer extends EventEmitter<{
       throw new Error("Wrong transport for peer");
     }
 
+    // Cancel existing sync
+    if (peer.syncPromise) {
+      peer.syncCancel = true;
+      await peer.syncPromise;
+    }
+
     // activate
     peer.active = true;
 
-    // set it's cursor
+    // set it's cursor and send stream ID
     peer.cursor = peerCursor;
+    peer.sendStreamId = sendStreamId;
 
     // Notify about peer sync start
     this.emit("sync", peerId, transport);
@@ -192,7 +210,7 @@ export class Peer extends EventEmitter<{
     // we'll block all peer access (bcs onSync/onReceive are serialized),
     // so we don't await - there are no races in having
     // this method interleave with other callbacks
-    this.syncPeer(peer);
+    peer.syncPromise = this.syncPeer(peer);
   }
 
   private async onReceiveChanges(
@@ -262,16 +280,23 @@ export class Peer extends EventEmitter<{
   private async onReceive(
     transport: Transport,
     peerId: string,
+    recvStreamId: string,
     msg: PeerMessage
   ): Promise<void> {
     const peer = this.peers.get(peerId);
     if (!peer) {
-      console.error("onSync for unknown peer", peerId);
+      console.error("onReceive for unknown peer", peerId);
       throw new Error("Peer not found");
     }
     if (peer.transport !== transport) {
-      console.error("onSync wrong transport for peer", peerId);
+      console.error("onReceive wrong transport for peer", peerId);
       throw new Error("Wrong transport for peer");
+    }
+    
+    // Ignore input if recv stream id doesn't match current one
+    if (recvStreamId !== peer.recvStreamId) {
+      this.debug(`Ignoring message from peer ${peerId}: stream ID mismatch (expected ${peer.recvStreamId}, got ${recvStreamId})`);
+      return;
     }
     switch (msg.type) {
       case "changes":
@@ -657,14 +682,13 @@ export class Peer extends EventEmitter<{
 
   private async sendToPeer(peer: PeerInfo, msg: PeerMessage) {
     // React on backpressure if transport supports that
-    if (peer.transport.waitCanSend)
-      await peer.transport.waitCanSend();
+    if (peer.transport.waitCanSend) await peer.transport.waitCanSend();
 
     // Making sure transport.send can't synchronously
     // call Peer's callbacks
     queueMicrotask(async () => {
       try {
-        await peer.transport.send(peer.id, msg);
+        await peer.transport.send(peer.id, peer.sendStreamId, msg);
       } catch (e) {
         this.debug("Send error with peer", peer.id, "msg", msg, e);
       }
@@ -697,6 +721,7 @@ export class Peer extends EventEmitter<{
   // is updatePeerCursor which is safe to call in any
   // order and thus seems race-free.
   private async syncPeer(peer: PeerInfo): Promise<void> {
+    peer.syncCancel = false;
     try {
       this.debug(
         `Syncing peer ${peer.id} cursor ${JSON.stringify(
@@ -740,7 +765,7 @@ export class Peer extends EventEmitter<{
       let offset = 0;
       let totalChanges = 0;
 
-      while (true) {
+      while (!peer.syncCancel) {
         const batchSql = `${sql} LIMIT ? OFFSET ?`;
         const batchArgs = [...args, batchSize, offset];
 
@@ -784,14 +809,18 @@ export class Peer extends EventEmitter<{
         offset += batchSize;
       }
 
-      if (!totalChanges) this.debug(`No changes to sync for peer ${peer.id}`);
+      if (!peer.syncCancel) {
+        if (!totalChanges) this.debug(`No changes to sync for peer ${peer.id}`);
 
-      // Send EOSE
-      await this.sendToPeer(peer, {
-        type: "eose",
-        data: [],
-      });
-      this.debug(`Sent to peer '${peer.id}' EOSE`);
+        // Send EOSE
+        await this.sendToPeer(peer, {
+          type: "eose",
+          data: [],
+        });
+        this.debug(`Sent to peer '${peer.id}' EOSE`);
+      } else {
+        this.debug(`Sync cancelled to peer '${peer.id}'`);
+      }
     } catch (error) {
       this.debug("Error sending changes to", peer, error);
       throw error;

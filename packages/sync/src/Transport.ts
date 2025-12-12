@@ -22,6 +22,7 @@ export interface TransportCallbacks {
   onSync: (
     transport: Transport,
     peerId: string,
+    sendStreamId: string,
     peerCursor: Cursor
   ) => Promise<void>;
   // Received msg from remote peer (change or eose),
@@ -29,6 +30,7 @@ export interface TransportCallbacks {
   onReceive: (
     transport: Transport,
     peerId: string,
+    recvStreamId: string,
     msg: PeerMessage
   ) => Promise<void>;
   // When remote peer is permanently disconnected, Peer should stop tracking it and
@@ -45,11 +47,12 @@ export interface Transport {
   start(config: { localPeerId: string } & TransportCallbacks): Promise<void>;
   // Request sync from peer, shouldn't throw unless invalid input,
   // shouldn't throw if peer temporarily disconnected
-  sync(peerId: string, localCursor: Cursor): Promise<void>;
+  // Returns recv stream id
+  sync(peerId: string, localCursor: Cursor): Promise<string>;
   // Send some changes to peer, shouldn't throw on transport
   // failures, only on invalid input, shouldn't throw if
   // peer temporarily disconnected
-  send(peerId: string, changes: PeerMessage): Promise<void>;
+  send(peerId: string, sendStreamId: string, changes: PeerMessage): Promise<void>;
   // Optional backpressure promise so that peer wouldn't be 
   // able to overload the transport
   waitCanSend?(): Promise<void>;

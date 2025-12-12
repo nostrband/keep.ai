@@ -184,7 +184,7 @@ export class TransportServerFastify implements Transport {
           }
 
           const cursor = deserializeCursor(msg.cursor);
-          await this.callbacks.onSync(this, msg.peerId, cursor);
+          await this.callbacks.onSync(this, msg.peerId, "", cursor);
           reply.send({ success: true });
         } catch (error) {
           console.error("/sync error", error);
@@ -235,7 +235,7 @@ export class TransportServerFastify implements Transport {
             return;
           }
 
-          await this.callbacks.onReceive(this, msg.peerId, msg.data);
+          await this.callbacks.onReceive(this, msg.peerId, "", msg.data);
           reply.send({ success: true });
         } catch (error) {
           console.error("/data error", error);
@@ -305,11 +305,11 @@ export class TransportServerFastify implements Transport {
   }
 
   // Transport interface methods
-  async sync(peerId: string, localCursor: Cursor): Promise<void> {
+  async sync(peerId: string, localCursor: Cursor): Promise<string> {
     const client = this.sseClients.get(peerId);
     if (!client) {
       debugTransport(`Cannot sync with ${peerId}: client not connected`);
-      return;
+      return "";
     }
 
     try {
@@ -324,9 +324,11 @@ export class TransportServerFastify implements Transport {
       debugTransport(`Error sending sync to ${peerId}:`, error);
       this.sseClients.delete(peerId);
     }
+    
+    return "";
   }
 
-  async send(peerId: string, message: PeerMessage): Promise<void> {
+  async send(peerId: string, sendStreamId: string, message: PeerMessage): Promise<void> {
     const client = this.sseClients.get(peerId);
     if (!client) {
       debugTransport(`Cannot send to ${peerId}: client not connected`);

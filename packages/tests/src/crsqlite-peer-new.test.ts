@@ -41,24 +41,26 @@ class DirectTransport implements Transport {
     }, 10);
   }
 
-  async sync(peerId: string, localCursor: Cursor): Promise<void> {
+  async sync(peerId: string, localCursor: Cursor): Promise<string> {
     if (!this.otherTransport || !this.otherTransport.callbacks) {
       console.warn(`Cannot sync with ${peerId} - not connected`);
-      return;
+      return "";
     }
 
     if (peerId !== this.otherTransport.localPeerId) {
       console.warn(`Cannot sync with ${peerId} - unknown peer`);
-      return;
+      return "";
     }
 
     // Forward sync request to the other peer
     setTimeout(async () => {
-      await this.otherTransport!.callbacks!.onSync(this.otherTransport!, this.localPeerId, localCursor);
+      await this.otherTransport!.callbacks!.onSync(this.otherTransport!, this.localPeerId, "", localCursor);
     }, 5);
+    
+    return "";
   }
 
-  async send(peerId: string, message: PeerMessage): Promise<void> {
+  async send(peerId: string, sendStreamId: string, message: PeerMessage): Promise<void> {
     if (!this.otherTransport || !this.otherTransport.callbacks) {
       console.warn(`Cannot send to ${peerId} - not connected`);
       return;
@@ -71,7 +73,7 @@ class DirectTransport implements Transport {
 
     // Forward message to the other peer
     setTimeout(async () => {
-      await this.otherTransport!.callbacks!.onReceive(this.otherTransport!, this.localPeerId, message);
+      await this.otherTransport!.callbacks!.onReceive(this.otherTransport!, this.localPeerId, "", message);
     }, 5);
   }
 
