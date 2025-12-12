@@ -826,6 +826,7 @@ export async function createServer(config: ServerConfig = {}) {
 
       const fileNameLocal = `${fileId}${extension ? `.${extension}` : ""}`;
       const filePathLocal = path.join(filesDir, fileNameLocal);
+      return reply.status(400).send({ error: "test", message: "test message" });
 
       // Write file to local path
       debugServer("Writing to", filePathLocal);
