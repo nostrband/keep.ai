@@ -52,7 +52,6 @@ import {
 } from "nostr-tools";
 import { bytesToHex, hexToBytes } from "nostr-tools/utils";
 import { randomBytes } from "crypto";
-import { Readable } from "stream";
 
 const debugServer = debug("server:server");
 
@@ -491,12 +490,12 @@ export async function createServer(config: ServerConfig = {}) {
   app.get("/api/check_config", async (request, reply) => {
     const currentEnv = getEnv();
     const ok = !!currentEnv.OPENROUTER_API_KEY?.trim();
-    reply.send({ ok });
+    return reply.send({ ok });
   });
 
   app.get("/api/get_config", async (request, reply) => {
     const currentEnv = getEnv();
-    reply.send({ env: currentEnv });
+    return reply.send({ env: currentEnv });
   });
 
   app.post("/api/set_config", async (request, reply) => {
@@ -506,8 +505,7 @@ export async function createServer(config: ServerConfig = {}) {
       const wasOk = !!getEnv().OPENROUTER_API_KEY?.trim();
 
       if (!body.OPENROUTER_API_KEY?.trim()) {
-        reply.status(400).send({ error: "OpenRouter API key is required" });
-        return;
+        return reply.status(400).send({ error: "OpenRouter API key is required" });
       }
 
       // Test the OpenRouter API key first
@@ -517,21 +515,19 @@ export async function createServer(config: ServerConfig = {}) {
       );
 
       if (!openRouterTest.success) {
-        reply.status(400).send({
+        return reply.status(400).send({
           error:
             openRouterTest.error || "Failed to validate OpenRouter API key",
         });
-        return;
       }
 
       // Test Exa.ai API key if provided
       if (body.EXA_API_KEY && body.EXA_API_KEY.trim()) {
         const exaTest = await testExaKey(body.EXA_API_KEY);
         if (!exaTest.success) {
-          reply.status(400).send({
+          return reply.status(400).send({
             error: exaTest.error || "Failed to validate Exa.ai API key",
           });
-          return;
         }
       }
 
@@ -631,10 +627,10 @@ export async function createServer(config: ServerConfig = {}) {
         }
       }
 
-      reply.send({ ok: true });
+      return reply.send({ ok: true });
     } catch (error) {
       debugServer("Error in /api/set_config:", error);
-      reply.status(500).send({
+      return reply.status(500).send({
         error: "Failed to save configuration",
         message: error instanceof Error ? error.message : "Unknown error",
       });
@@ -722,10 +718,10 @@ export async function createServer(config: ServerConfig = {}) {
       })();
 
       // Return connection string to client
-      reply.send({ str: connectionInfo.str });
+      return reply.send({ str: connectionInfo.str });
     } catch (error) {
       debugServer("Error in /api/connect:", error);
-      reply.status(500).send({
+      return reply.status(500).send({
         error: "Failed to create connection string",
         message: error instanceof Error ? error.message : "Unknown error",
       });
@@ -740,18 +736,17 @@ export async function createServer(config: ServerConfig = {}) {
       );
 
       if (!result || result.length === 0) {
-        reply.status(500).send({ error: "Failed to get site_id" });
-        return;
+        return reply.status(500).send({ error: "Failed to get site_id" });
       }
 
       // Convert binary site_id to hex
       const siteIdBuffer = result[0].site_id;
       const siteIdHex = bytesToHex(new Uint8Array(siteIdBuffer));
 
-      reply.send({ site_id: siteIdHex });
+      return reply.send({ site_id: siteIdHex });
     } catch (error) {
       debugServer("Error in /api/id:", error);
-      reply.status(500).send({
+      return reply.status(500).send({
         error: "Failed to get site_id",
         message: error instanceof Error ? error.message : "Unknown error",
       });
@@ -763,8 +758,7 @@ export async function createServer(config: ServerConfig = {}) {
     try {
       const data = (await (request as any).file()) as MultipartFile;
       if (!data) {
-        reply.status(400).send({ error: "No file provided" });
-        return;
+        return reply.status(400).send({ error: "No file provided" });
       }
 
       // Check file size (10MB limit) and read file to buffer
@@ -775,15 +769,15 @@ export async function createServer(config: ServerConfig = {}) {
       for await (const chunk of data.file) {
         totalSize += chunk.length;
         if (totalSize > MAX_FILE_SIZE) {
-          reply.status(400).send({
+          return reply.status(400).send({
             error: "File size exceeds limit",
             size: totalSize,
             limit: MAX_FILE_SIZE,
           });
-          return;
         }
         chunks.push(chunk);
       }
+      debugServer("Filename", data.filename);
 
       const fileBuffer = Buffer.concat(chunks);
       debugServer("Got file buffer", fileBuffer.length);
@@ -798,8 +792,7 @@ export async function createServer(config: ServerConfig = {}) {
       const existingFile = await fileStore.getFile(fileId);
       debugServer("Existing file", existingFile);
       if (existingFile) {
-        reply.send(existingFile);
-        return;
+        return reply.send(existingFile);
       }
 
       // Uploaded filename
@@ -853,10 +846,10 @@ export async function createServer(config: ServerConfig = {}) {
       // Insert file to database
       await fileStore.insertFile(fileRecord);
 
-      reply.send(fileRecord);
+      return reply.send(fileRecord);
     } catch (error) {
       debugServer("Error in /api/upload:", error);
-      reply.status(500).send({
+      return reply.status(500).send({
         error: "Failed to upload file",
         message: error instanceof Error ? error.message : "Unknown error",
       });
@@ -870,8 +863,7 @@ export async function createServer(config: ServerConfig = {}) {
       const { url } = query;
 
       if (!url) {
-        reply.status(400).send({ error: "url parameter is required" });
-        return;
+        return reply.status(400).send({ error: "url parameter is required" });
       }
 
       // Extract file ID from URL (assuming URL format like /files/:id or just :id)
@@ -880,8 +872,7 @@ export async function createServer(config: ServerConfig = {}) {
       // Get file record from database
       const fileRecord = await fileStore.getFile(fileId);
       if (!fileRecord) {
-        reply.status(404).send({ error: "File not found" });
-        return;
+        return reply.status(404).send({ error: "File not found" });
       }
 
       const filesDir = path.join(userPath, "files");
@@ -889,8 +880,7 @@ export async function createServer(config: ServerConfig = {}) {
 
       // Check if file exists on disk
       if (!fs.existsSync(filePathLocal)) {
-        reply.status(404).send({ error: "File not found on disk" });
-        return;
+        return reply.status(404).send({ error: "File not found on disk" });
       }
       console.log("fileRecord", fileRecord);
 
@@ -907,7 +897,7 @@ export async function createServer(config: ServerConfig = {}) {
       return reply.send(fileStream);
     } catch (error) {
       debugServer("Error in /api/file:", error);
-      reply.status(500).send({
+      return reply.status(500).send({
         error: "Failed to serve file",
         message: error instanceof Error ? error.message : "Unknown error",
       });
@@ -921,8 +911,7 @@ export async function createServer(config: ServerConfig = {}) {
       const { url } = query;
 
       if (!url) {
-        reply.status(400).send({ error: "url parameter is required" });
-        return;
+        return reply.status(400).send({ error: "url parameter is required" });
       }
 
       // Extract file ID from URL (assuming URL format like /files/:id or just :id)
@@ -933,15 +922,14 @@ export async function createServer(config: ServerConfig = {}) {
       // Get file record from database
       const fileRecord = await fileStore.getFile(fileId);
       if (!fileRecord) {
-        reply.status(404).send({ error: "File not found" });
-        return;
+        return reply.status(404).send({ error: "File not found" });
       }
 
       // Return only the file info from database
-      reply.send(fileRecord);
+      return reply.send(fileRecord);
     } catch (error) {
       debugServer("Error in /api/file/info:", error);
-      reply.status(500).send({
+      return reply.status(500).send({
         error: "Failed to get file info",
         message: error instanceof Error ? error.message : "Unknown error",
       });
@@ -962,13 +950,12 @@ export async function createServer(config: ServerConfig = {}) {
     app.setNotFoundHandler((request, reply) => {
       // Don't serve index.html for API routes
       if (request.url.startsWith("/api/")) {
-        reply.status(404).send({ error: "API endpoint not found" });
-        return;
+        return reply.status(404).send({ error: "API endpoint not found" });
       }
 
       // Serve index.html for SPA routes
       // @ts-ignore
-      reply.sendFile("index.html");
+      return reply.sendFile("index.html");
     });
   }
 
