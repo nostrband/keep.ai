@@ -5,7 +5,7 @@ import { EvalContext } from "../sandbox/sandbox";
 import { getEnv } from "../env";
 import { createHash } from "crypto";
 import { fileUtils } from "@app/node";
-import { detectBufferMime, mimeToExt } from "mime-detect";
+import { detectBufferMime, mimeToExt } from "@app/node";
 import fs from "fs";
 import debug from "debug";
 

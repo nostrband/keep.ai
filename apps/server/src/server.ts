@@ -35,7 +35,7 @@ import os from "os";
 import fs from "fs";
 import { createHash } from "crypto";
 import dotenv from "dotenv";
-import { detectBufferMime, detectFilenameMime, mimeToExt } from "mime-detect";
+import { detectBufferMime, detectFilenameMime, mimeToExt } from "@app/node";
 import {
   NostrSigner,
   NostrTransport,
@@ -532,7 +532,7 @@ export async function createServer(config: ServerConfig = {}) {
 
     let mediaType: string = "";
     try {
-      // Detect media type using mime-detect
+      // Detect media type using file-type
       mediaType = await detectBufferMime(fileBuffer);
       debugServer("Mime buffer", mediaType);
     } catch (e) {

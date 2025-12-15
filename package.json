@@ -1,6 +1,6 @@
 {
   "name": "keep-ai",
-  "version": "0.1.15",
+  "version": "0.1.16",
   "private": true,
   "description": "Privacy-focused AI assistant app with peer-to-peer sync",
   "main": "apps/electron/dist/main.cjs",
@@ -16,6 +16,7 @@
   },
   "devDependencies": {
     "@types/debug": "^4.1.12",
+    "@types/mime-types": "^3.0.1",
     "rimraf": "^6.1.2",
     "tsup": "^8.5.0",
     "turbo": "^2.6.0",
@@ -38,7 +39,9 @@
     "bindings": "^1.5.0",
     "debug": "^4.4.3",
     "fastify": "^5.6.1",
+    "file-type": "^21.1.1",
     "file-uri-to-path": "^1.0.0",
+    "mime-types": "^3.0.2",
     "quickjs-emscripten": "^0.31.0",
     "quickjs-emscripten-core": "^0.31.0",
     "sqlite3": "^5.1.7"
