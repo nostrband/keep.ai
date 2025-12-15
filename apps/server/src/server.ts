@@ -462,7 +462,7 @@ export async function createServer(config: ServerConfig = {}) {
     try {
       // Extract file ID from file_path (remove extension)
       const fileId = path.basename(file_path, path.extname(file_path));
-      
+
       // Get file info from fileStore using the fileId
       const fileRecord = await fileStore.getFile(fileId);
       if (!fileRecord) {
@@ -530,13 +530,22 @@ export async function createServer(config: ServerConfig = {}) {
       return existingFile;
     }
 
-    // Detect media type using mime-detect
-    let mediaType = await detectBufferMime(fileBuffer);
-    debugServer("Mime buffer", mediaType);
+    let mediaType: string = "";
+    try {
+      // Detect media type using mime-detect
+      mediaType = await detectBufferMime(fileBuffer);
+      debugServer("Mime buffer", mediaType);
+    } catch (e) {
+      console.error("Error in detectBufferMime", e);
+    }
 
     // Refine using filename if result is generic
     if (!mediaType && filename && filename !== "unknown") {
-      mediaType = detectFilenameMime(filename, mediaType);
+      try {
+        mediaType = detectFilenameMime(filename, mediaType);
+      } catch (e) {
+        console.error("Error in detectFilenameMime", e);
+      }
       debugServer("Mime filename", mediaType);
     }
 
