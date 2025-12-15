@@ -6,6 +6,7 @@ import {
   getCurrentUser,
   getDBPath,
   getUserPath,
+  getDefaultCompression,
 } from "@app/node";
 import {
   DBInterface,
@@ -42,6 +43,10 @@ import {
   NostrConnector,
   nip44_v3,
   publish,
+  FileSender,
+  FileReceiver,
+  getStreamFactory,
+  DEFAULT_RELAYS,
 } from "@app/sync";
 import {
   UnsignedEvent,
@@ -437,9 +442,266 @@ export async function createServer(config: ServerConfig = {}) {
   // Performs background operations
   const worker = await createReplWorker(keepDB, userPath);
 
+  // File transfer instances for each peer
+  const fileSenders = new Map<string, FileSender>();
+  const fileReceivers = new Map<string, FileReceiver>();
+
+  // Helper function to handle file download requests
+  const handleDownload = async (
+    downloadId: string,
+    file_path: string,
+    peerPubkey: string
+  ) => {
+    debugServer(
+      "Download requested for file:",
+      file_path,
+      "by peer:",
+      peerPubkey
+    );
+
+    try {
+      // Extract file ID from file_path (remove extension)
+      const fileId = path.basename(file_path, path.extname(file_path));
+      
+      // Get file info from fileStore using the fileId
+      const fileRecord = await fileStore.getFile(fileId);
+      if (!fileRecord) {
+        debugServer("File not found:", file_path);
+        return;
+      }
+
+      // Get the full file path
+      const filesDir = path.join(userPath, "files");
+      const fullFilePath = path.join(filesDir, fileRecord.path);
+
+      if (!fs.existsSync(fullFilePath)) {
+        debugServer("File not found on disk:", fullFilePath);
+        return;
+      }
+
+      // Create file reader stream
+      const fileStream = fs.createReadStream(fullFilePath);
+
+      // Convert to async iterable
+      async function* fileIterator() {
+        for await (const chunk of fileStream) {
+          yield new Uint8Array(chunk);
+        }
+      }
+
+      // Get the file sender for this peer
+      const sender = fileSenders.get(peerPubkey);
+      if (!sender) {
+        debugServer("No file sender found for peer:", peerPubkey);
+        return;
+      }
+
+      // Upload the file
+      await sender.upload(
+        { filename: fileRecord.name, mimeType: fileRecord.media_type },
+        fileIterator(),
+        downloadId
+      );
+      debugServer("File uploaded successfully:", fileRecord.name);
+    } catch (error) {
+      debugServer("Error handling download request:", error);
+    }
+  };
+
+  // Helper function to store file data (common logic for all upload methods)
+  async function storeFileData(
+    fileBuffer: Buffer,
+    filename: string,
+    userPath: string,
+    fileStore: FileStore
+  ): Promise<File> {
+    debugServer("Processing file data", filename, "size:", fileBuffer.length);
+
+    // Calculate SHA256 hash as ID
+    const hash = createHash("sha256");
+    hash.update(fileBuffer);
+    const fileId = hash.digest("hex");
+    debugServer("File hash", fileId);
+
+    // Check if file already exists
+    const existingFile = await fileStore.getFile(fileId);
+    debugServer("Existing file", existingFile);
+    if (existingFile) {
+      return existingFile;
+    }
+
+    // Detect media type using mime-detect
+    let mediaType = await detectBufferMime(fileBuffer);
+    debugServer("Mime buffer", mediaType);
+
+    // Refine using filename if result is generic
+    if (!mediaType && filename && filename !== "unknown") {
+      mediaType = detectFilenameMime(filename, mediaType);
+      debugServer("Mime filename", mediaType);
+    }
+
+    // Get file extension from filename, or take from media-type
+    const extensionMatch = filename.match(/\.([^.]+)$/);
+    const extension = extensionMatch ? extensionMatch[1] : mimeToExt(mediaType);
+    debugServer(
+      "Filename",
+      filename,
+      "extension",
+      extension,
+      "media type",
+      mediaType
+    );
+
+    // Format file path: <userPath>/files/<id>.<extension>
+    const filesDir = path.join(userPath, "files");
+    debugServer("Files dir", filesDir);
+    if (!fs.existsSync(filesDir)) {
+      fs.mkdirSync(filesDir, { recursive: true });
+      debugServer("Files dir created");
+    }
+
+    const fileNameLocal = `${fileId}${extension ? `.${extension}` : ""}`;
+    const filePathLocal = path.join(filesDir, fileNameLocal);
+
+    // Write file to local path
+    debugServer("Writing to", filePathLocal);
+    fs.writeFileSync(filePathLocal, fileBuffer);
+    debugServer("Finished writing to", filePathLocal);
+
+    // Create file record
+    const fileRecord: File = {
+      id: fileId,
+      name: filename,
+      path: fileNameLocal,
+      size: fileBuffer.length,
+      summary: "", // Empty summary initially
+      upload_time: new Date().toISOString(),
+      media_type: mediaType || "",
+    };
+
+    // Insert file to database
+    await fileStore.insertFile(fileRecord);
+
+    return fileRecord;
+  }
+
+  // Helper function to handle file uploads from peers
+  const handleUpload = async (
+    filename: string,
+    stream: AsyncIterable<string | Uint8Array>
+  ) => {
+    debugServer("Upload received:", filename);
+
+    try {
+      let totalSize = 0;
+      const chunks: Buffer[] = [];
+
+      // Read all chunks from stream
+      for await (const chunk of stream) {
+        const buffer =
+          chunk instanceof Uint8Array
+            ? Buffer.from(chunk)
+            : Buffer.from(chunk, "utf-8");
+        chunks.push(buffer);
+        totalSize += buffer.length;
+
+        // Same size limit as HTTP uploads
+        if (totalSize > 10 * 1024 * 1024) {
+          throw new Error("File size exceeds limit");
+        }
+      }
+
+      const fileBuffer = Buffer.concat(chunks);
+
+      // Use shared storage logic
+      const fileRecord = await storeFileData(
+        fileBuffer,
+        filename,
+        userPath,
+        fileStore
+      );
+      debugServer("File uploaded via nostr:", fileRecord);
+    } catch (error) {
+      debugServer("Error handling upload:", error);
+    }
+  };
+
+  // Setup file transfer for each peer
+  const setupFileTransfer = async () => {
+    try {
+      // Clear existing instances
+      for (const sender of fileSenders.values()) {
+        sender.stop();
+      }
+      for (const receiver of fileReceivers.values()) {
+        receiver.stop();
+      }
+      fileSenders.clear();
+      fileReceivers.clear();
+
+      // Get all peers for this device
+      const allPeers = await peerStore.listPeers();
+      const devicePeers = allPeers.filter((p) => p.local_id === peer.id);
+
+      debugServer("Setting up file transfer for", devicePeers.length, "peers");
+
+      // Setup stream factory with compression
+      const streamFactory = getStreamFactory();
+      streamFactory.compression = getDefaultCompression();
+
+      for (const peerRow of devicePeers) {
+        const { peer_pubkey, local_pubkey } = peerRow;
+
+        // Create file sender
+        const sender = new FileSender({
+          signer: keyStore,
+          pool,
+          factory: streamFactory,
+          compression: "none", // Let the factory handle compression
+          encryption: "nip44_v3",
+          localPubkey: local_pubkey,
+          peerPubkey: peer_pubkey,
+          relays: DEFAULT_RELAYS,
+        });
+
+        // Create file receiver
+        const receiver = new FileReceiver({
+          signer: keyStore,
+          pool,
+          factory: streamFactory,
+          localPubkey: local_pubkey,
+          peerPubkey: peer_pubkey,
+          onUpload: handleUpload,
+          relays: DEFAULT_RELAYS,
+        });
+
+        // Start both sender and receiver
+        sender.start((downloadId: string, file_path: string) =>
+          handleDownload(downloadId, file_path, peer_pubkey)
+        );
+        receiver.start();
+
+        // Store instances
+        fileSenders.set(peer_pubkey, sender);
+        fileReceivers.set(peer_pubkey, receiver);
+
+        debugServer("File transfer setup for peer:", peer_pubkey);
+      }
+    } catch (error) {
+      debugServer("Error setting up file transfer:", error);
+    }
+  };
+
+  // Initial setup
+  await setupFileTransfer();
+
   // Notify nostr transport if peer set changes
   peer.on("change", async (tables) => {
-    if (tables.includes("nostr_peers")) nostr.updatePeers();
+    if (tables.includes("nostr_peers")) {
+      // Update both nostr transport and file transfer
+      nostr.updatePeers();
+      await setupFileTransfer();
+    }
     if (tables.includes("tasks") || tables.includes("inbox"))
       worker.checkWork();
 
@@ -505,7 +767,9 @@ export async function createServer(config: ServerConfig = {}) {
       const wasOk = !!getEnv().OPENROUTER_API_KEY?.trim();
 
       if (!body.OPENROUTER_API_KEY?.trim()) {
-        return reply.status(400).send({ error: "OpenRouter API key is required" });
+        return reply
+          .status(400)
+          .send({ error: "OpenRouter API key is required" });
       }
 
       // Test the OpenRouter API key first
@@ -753,6 +1017,33 @@ export async function createServer(config: ServerConfig = {}) {
     }
   });
 
+  // Helper function to process file uploads from HTTP multipart
+  async function processFileUpload(
+    data: MultipartFile,
+    userPath: string,
+    fileStore: FileStore
+  ): Promise<File> {
+    // Check file size (10MB limit) and read file to buffer
+    const MAX_FILE_SIZE = 10 * 1024 * 1024;
+    const chunks: Buffer[] = [];
+    let totalSize = 0;
+
+    for await (const chunk of data.file) {
+      totalSize += chunk.length;
+      if (totalSize > MAX_FILE_SIZE) {
+        throw new Error(
+          `File size exceeds limit: ${totalSize} > ${MAX_FILE_SIZE}`
+        );
+      }
+      chunks.push(chunk);
+    }
+
+    const fileBuffer = Buffer.concat(chunks);
+    const filename = data.filename || "unknown";
+
+    return storeFileData(fileBuffer, filename, userPath, fileStore);
+  }
+
   // POST /api/file/upload - Upload file endpoint
   app.post("/api/file/upload", async (request: FastifyRequest, reply) => {
     try {
@@ -761,92 +1052,7 @@ export async function createServer(config: ServerConfig = {}) {
         return reply.status(400).send({ error: "No file provided" });
       }
 
-      // Check file size (10MB limit) and read file to buffer
-      const MAX_FILE_SIZE = 10 * 1024 * 1024;
-      const chunks: Buffer[] = [];
-      let totalSize = 0;
-
-      for await (const chunk of data.file) {
-        totalSize += chunk.length;
-        if (totalSize > MAX_FILE_SIZE) {
-          return reply.status(400).send({
-            error: "File size exceeds limit",
-            size: totalSize,
-            limit: MAX_FILE_SIZE,
-          });
-        }
-        chunks.push(chunk);
-      }
-      debugServer("Filename", data.filename);
-
-      const fileBuffer = Buffer.concat(chunks);
-      debugServer("Got file buffer", fileBuffer.length);
-
-      // Calculate SHA256 hash as ID
-      const hash = createHash("sha256");
-      hash.update(fileBuffer);
-      const fileId = hash.digest("hex");
-      debugServer("File hash", fileId);
-
-      // Check if file already exists
-      const existingFile = await fileStore.getFile(fileId);
-      debugServer("Existing file", existingFile);
-      if (existingFile) {
-        return reply.send(existingFile);
-      }
-
-      // Uploaded filename
-      const filename = data.filename || "unknown";
-      debugServer("Filename", filename);
-
-      // Detect media type using mime-detect
-      let mediaType = await detectBufferMime(fileBuffer);
-      debugServer("Mime buffer", mediaType);
-
-      // Refine using filename if result is generic
-      if (!mediaType && filename && filename !== "unknown") {
-        mediaType = detectFilenameMime(filename, mediaType);
-        debugServer("Mime filename", mediaType);
-      }
-
-      // Get file extension from filename, or take from media-type
-      const extensionMatch = filename.match(/\.([^.]+)$/);
-      const extension = extensionMatch
-        ? extensionMatch[1]
-        : mimeToExt(mediaType);
-      debugServer("Filename", filename, "extension", extension, "media type", mediaType);
-
-      // Format file path: <userPath>/files/<id>.<extension>
-      const filesDir = path.join(userPath, "files");
-      debugServer("Files dir", filesDir);
-      if (!fs.existsSync(filesDir)) {
-        fs.mkdirSync(filesDir, { recursive: true });
-        debugServer("Files dir created");
-      }
-
-      const fileNameLocal = `${fileId}${extension ? `.${extension}` : ""}`;
-      const filePathLocal = path.join(filesDir, fileNameLocal);
-      return reply.status(400).send({ error: "test", message: "test message" });
-
-      // Write file to local path
-      debugServer("Writing to", filePathLocal);
-      fs.writeFileSync(filePathLocal, fileBuffer);
-      debugServer("Finished writing to", filePathLocal);
-
-      // Create file record
-      const fileRecord: File = {
-        id: fileId,
-        name: filename,
-        path: fileNameLocal,
-        size: fileBuffer.length,
-        summary: "", // Empty summary initially
-        upload_time: new Date().toISOString(),
-        media_type: mediaType || "",
-      };
-
-      // Insert file to database
-      await fileStore.insertFile(fileRecord);
-
+      const fileRecord = await processFileUpload(data, userPath, fileStore);
       return reply.send(fileRecord);
     } catch (error) {
       debugServer("Error in /api/upload:", error);
@@ -976,6 +1182,16 @@ export async function createServer(config: ServerConfig = {}) {
       return { port, host };
     },
     async close() {
+      // Clean up file transfer instances
+      for (const sender of fileSenders.values()) {
+        sender.stop();
+      }
+      for (const receiver of fileReceivers.values()) {
+        receiver.stop();
+      }
+      fileSenders.clear();
+      fileReceivers.clear();
+
       await app.close();
       await keyStore.stop();
     },

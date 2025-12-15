@@ -4,6 +4,7 @@ import {
   useState,
   useEffect,
   ReactNode,
+  useRef,
 } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { KeepDb, KeepDbApi } from "@app/db";
@@ -23,6 +24,59 @@ import { bytesToHex, hexToBytes } from "nostr-tools/utils";
 import { getPublicKey, SimplePool } from "nostr-tools";
 import { tryBecomeActiveTab } from "./lib/tab-lock";
 import { PushNotificationManager } from "./lib/PushNotificationManager";
+
+// Helper function to send key data to service worker
+async function getActiveServiceWorker() {
+  if (navigator.serviceWorker.controller) {
+    // Page already under SW control
+    return navigator.serviceWorker.controller;
+  }
+
+  // Wait until the SW is ready
+  const reg = await navigator.serviceWorker.ready;
+  return reg.active;
+}
+
+async function sendKeyDataToServiceWorker(
+  localPrivkey: Uint8Array,
+  api: KeepDbApi
+) {
+  try {
+    const sw = await getActiveServiceWorker();
+    if (!sw) {
+      console.warn("No active service worker controller");
+      return;
+    }
+
+    const localPubkey = getPublicKey(localPrivkey);
+
+    // Get peer data from store
+    const peers = await api.nostrPeerStore.listPeers();
+    const peer = peers.find((p) => p.local_pubkey === localPubkey);
+
+    if (!peer) {
+      console.warn("No peer found for local pubkey");
+      return;
+    }
+
+    // Send the data to service worker
+    const data = {
+      type: "FILE_TRANSFER_KEYS",
+      payload: {
+        localPrivkey: bytesToHex(localPrivkey),
+        peerPubkey: peer.peer_pubkey,
+      },
+    };
+
+    sw.postMessage(data);
+    dbg("Sent key data to service worker", {
+      localPubkey,
+      peerPubkey: peer.peer_pubkey,
+    });
+  } catch (error) {
+    console.error("Failed to send key data to service worker:", error);
+  }
+}
 
 declare const __SERVERLESS__: boolean;
 declare const __ELECTRON__: boolean;
@@ -67,7 +121,7 @@ interface QueryProviderProps {
 const dbg = debug("QueryProviderEmbedded");
 const pool = new SimplePool({
   enablePing: true,
-  enableReconnect: true
+  enableReconnect: true,
 });
 
 export function QueryProviderEmbedded({
@@ -85,7 +139,30 @@ export function QueryProviderEmbedded({
   const [api, setApi] = useState<KeepDbApi | null>(null);
   const [signer] = useState<ServerlessNostrSigner>(new ServerlessNostrSigner());
 
+  const apiRef = useRef<KeepDbApi | null>(null);
+
   useEffect(() => {
+    const handleControllerChange = async () => {
+      console.log("Service worker controller change");
+
+      // Re-send key data to new service worker
+      const localKey = localStorage.getItem("local_key");
+      if (localKey && apiRef.current) {
+        try {
+          const keyBytes = hexToBytes(localKey);
+          await sendKeyDataToServiceWorker(keyBytes, apiRef.current);
+          dbg("Re-sent key data to new service worker controller");
+        } catch (error) {
+          dbg("Failed to re-send key data to new service worker:", error);
+        }
+      }
+    };
+
+    navigator.serviceWorker.addEventListener(
+      "controllerchange",
+      handleControllerChange
+    );
+
     let onResumeHandler: (() => void) | undefined;
 
     initializeDatabase().then(({ onResume }) => {
@@ -100,6 +177,10 @@ export function QueryProviderEmbedded({
 
     // Cleanup on unmount
     return () => {
+      navigator.serviceWorker.removeEventListener(
+        "controllerchange",
+        handleControllerChange
+      );
       cleanup(onResumeHandler);
     };
   }, []);
@@ -148,6 +229,7 @@ export function QueryProviderEmbedded({
       // Create store instance
       const api = new KeepDbApi(keepDB);
       setApi(api);
+      apiRef.current = api;
 
       // Create and configure tab sync with callback
       dbg("Starting worker", {
@@ -165,7 +247,7 @@ export function QueryProviderEmbedded({
         transport = new NostrTransport({
           store: api.nostrPeerStore,
           signer,
-          pool
+          pool,
         });
       }
 
@@ -235,6 +317,11 @@ export function QueryProviderEmbedded({
             getPublicKey(keyBytes)
           );
 
+          // Send key data to service worker for file operations
+          sendKeyDataToServiceWorker(keyBytes, api).catch((error) =>
+            dbg("Failed to send key data to service worker:", error)
+          );
+
           // Can setup push notifications now, don't await to avoid blocking
           // on it
           setupPush(signer, api);
@@ -264,6 +351,7 @@ export function QueryProviderEmbedded({
     setDb(null);
     setPeer(null);
     setApi(null);
+    apiRef.current = null;
 
     // Retry initialization
     await initializeDatabase();
@@ -302,7 +390,7 @@ export function QueryProviderEmbedded({
       signer.setKey(result.key);
 
       // Give sender some time to start sending data
-      await new Promise(ok => setTimeout(ok, 3000));
+      await new Promise((ok) => setTimeout(ok, 3000));
 
       // Add peer to the store
       await api?.nostrPeerStore.addPeer({
@@ -322,6 +410,11 @@ export function QueryProviderEmbedded({
       localStorage.setItem("local_key", bytesToHex(result.key));
 
       dbg("Device connected and key saved");
+
+      // Send key data to service worker for file operations
+      sendKeyDataToServiceWorker(result.key, api).catch((error) =>
+        dbg("Failed to send key data to service worker:", error)
+      );
 
       // Setup push notifications after device connection,
       // don't await for it, might take long due to sw init delays
@@ -352,7 +445,7 @@ export function QueryProviderEmbedded({
     if (!isServerless) {
       throw new Error("Resync only available in serverless mode");
     }
-    
+
     if (!transport || !peer) {
       throw new Error("Transport or peer not available");
     }
@@ -360,7 +453,7 @@ export function QueryProviderEmbedded({
     try {
       // Call resync on NostrTransport
       await (transport as NostrTransport).resync();
-      
+
       // Show "Please wait..." and reload after 3 seconds
       setTimeout(() => {
         window.location.reload();
@@ -389,24 +482,24 @@ export function QueryProviderEmbedded({
       }
 
       // Delete the indexeddb database 'idb-batch-atomic'
-      if ('indexedDB' in window) {
+      if ("indexedDB" in window) {
         try {
           await new Promise<void>((resolve, reject) => {
-            const deleteReq = indexedDB.deleteDatabase('idb-batch-atomic');
+            const deleteReq = indexedDB.deleteDatabase("idb-batch-atomic");
             deleteReq.onerror = () => reject(deleteReq.error);
             deleteReq.onsuccess = () => resolve();
             deleteReq.onblocked = () => {
-              console.warn('Database deletion blocked');
+              console.warn("Database deletion blocked");
               resolve(); // Continue anyway
             };
           });
         } catch (err) {
-          console.warn('Failed to delete indexedDB:', err);
+          console.warn("Failed to delete indexedDB:", err);
         }
       }
 
       // Delete local_key from localStorage
-      localStorage.removeItem('local_key');
+      localStorage.removeItem("local_key");
 
       // Show "Please wait..." and reload after 3 seconds
       setTimeout(() => {

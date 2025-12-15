@@ -15,6 +15,12 @@ export { StreamReader, StreamReaderError } from './StreamReader';
 export { DefaultStreamFactory, getStreamFactory } from './DefaultStreamFactory';
 export type { StreamFactory, StreamWriterInterface } from './interfaces';
 
+// Export FileSender and FileReceiver
+export { FileSender, UPLOAD_KIND, UPLOAD_READY_KIND, DOWNLOAD_KIND } from './FileSender';
+export type { UploadParams } from './FileSender';
+export { FileReceiver } from './FileReceiver';
+export type { DownloadResult } from './FileReceiver';
+
 // Export Encryption
 export {
   DefaultEncryption,

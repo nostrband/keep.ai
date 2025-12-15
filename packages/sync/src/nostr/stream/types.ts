@@ -3,6 +3,7 @@
  */
 
 import { Event } from 'nostr-tools';
+import { CompressionMethod } from '../../compression';
 
 /**
  * Event kinds for NIP-173 (Streaming Over Nostr)
@@ -11,10 +12,8 @@ export const STREAM_METADATA_KIND = 173;
 export const STREAM_CHUNK_KIND = 20173;
 
 
-/**
- * Supported compression formats for NIP-173 streams
- */
-export type CompressionMethod = 'none' | 'gzip' | (string & {});
+// Import and re-export from compression interface
+export type { CompressionMethod } from '../../compression';
 
 /**
  * Supported encryption schemes for NIP-173 streams

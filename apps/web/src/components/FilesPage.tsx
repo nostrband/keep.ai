@@ -1,8 +1,18 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useMemo } from "react";
 import { useFiles } from "../hooks/dbFileReads";
+import { useNostrPeers, useLocalSiteId } from "../hooks/dbNostrPeerReads";
+import { useQueryProvider } from "../QueryProviderEmbedded";
 import SharedHeader from "./SharedHeader";
 import { Button, Progress, Badge } from "../ui";
 import { API_ENDPOINT } from "../const";
+import { DEFAULT_RELAYS, FileSender, getStreamFactory } from "@app/sync";
+import { getDefaultCompression } from "@app/browser";
+import { SimplePool, getPublicKey } from "nostr-tools";
+import { hexToBytes } from "nostr-tools/utils";
+import { ServerlessNostrSigner } from "../lib/signer";
+
+declare const __SERVERLESS__: boolean;
+const isServerless = __SERVERLESS__;
 
 const ALLOWED_FILE_TYPES = [
   'image/*',
@@ -60,39 +70,151 @@ const getFileIcon = (mediaType: string = '', fileName: string = '') => {
   );
 };
 
+// Helper function to determine if file should use no compression
+const shouldUseNoCompression = (fileName: string): boolean => {
+  const extension = fileName.toLowerCase().split('.').pop();
+  if (!extension) return false;
+  
+  const imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg', 'tiff', 'ico', 'heic', 'heif'];
+  const audioExtensions = ['mp3', 'wav', 'flac', 'aac', 'ogg', 'm4a', 'wma', 'opus'];
+  const videoExtensions = ['mp4', 'avi', 'mov', 'mkv', 'wmv', 'flv', 'webm', 'm4v', 'ogv'];
+  
+  return imageExtensions.includes(extension) ||
+         audioExtensions.includes(extension) ||
+         videoExtensions.includes(extension);
+};
+
 export default function FilesPage() {
   const { data: files = [], isLoading, refetch } = useFiles();
+  const { data: allNostrPeers = [] } = useNostrPeers();
+  const { data: localSiteId } = useLocalSiteId();
+  const queryProvider = useQueryProvider();
+  
+  // Filter peers by local_id (same logic as server.ts)
+  const nostrPeers = useMemo(() => {
+    if (!localSiteId) return [];
+    return allNostrPeers.filter((p) => p.local_id === localSiteId);
+  }, [allNostrPeers, localSiteId]);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [downloadingFiles, setDownloadingFiles] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileSelect = () => {
     fileInputRef.current?.click();
   };
 
-  // Reusable file upload function
-  const uploadFile = async (file: File) => {
-    // Reset states
-    setUploadError(null);
-    setIsUploading(true);
-    setUploadProgress(0);
-
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-
-      const xhr = new XMLHttpRequest();
+  // Create async iterable from file for FileSender
+  async function* createFileDataSource(file: File): AsyncIterable<Uint8Array> {
+    const chunkSize = 64 * 1024; // 64KB chunks
+    let offset = 0;
+    
+    while (offset < file.size) {
+      const chunk = file.slice(offset, offset + chunkSize);
+      const arrayBuffer = await chunk.arrayBuffer();
+      yield new Uint8Array(arrayBuffer);
+      offset += chunkSize;
       
-      // Track upload progress
-      xhr.upload.onprogress = (event) => {
-        if (event.lengthComputable) {
-          const progress = (event.loaded / event.total) * 100;
-          setUploadProgress(progress);
-        }
-      };
+      // Update progress
+      const progress = Math.min((offset / file.size) * 100, 100);
+      setUploadProgress(progress);
+    }
+  }
 
+  // Serverless upload using FileSender
+  const uploadFileServerless = async (file: File) => {
+    try {
+      // Check if we have exactly one peer
+      if (nostrPeers.length !== 1) {
+        throw new Error(`Expected 1 peer, found ${nostrPeers.length}`);
+      }
+
+      const peer = nostrPeers[0];
+      
+      // Get local private key from localStorage
+      const localKey = localStorage.getItem("local_key");
+      if (!localKey) {
+        throw new Error("No local key found");
+      }
+
+      const localPrivkey = hexToBytes(localKey);
+      const localPubkey = getPublicKey(localPrivkey);
+      const peerPubkey = peer.peer_pubkey;
+
+      // Create signer
+      const signer = new ServerlessNostrSigner();
+      signer.setKey(localPrivkey);
+
+      // Create pool
+      const pool = new SimplePool({
+        enablePing: false,
+        enableReconnect: true
+      });
+
+      // Create stream factory
+      const factory = getStreamFactory();
+      factory.compression = getDefaultCompression();
+
+      // Determine compression based on file type
+      const compression = shouldUseNoCompression(file.name) ? 'none' : 'gzip';
+
+      // Create FileSender
+      const fileSender = new FileSender({
+        signer,
+        pool,
+        factory,
+        compression,
+        encryption: 'nip44_v3',
+        localPubkey,
+        peerPubkey,
+        relays: DEFAULT_RELAYS
+      });
+
+      // Start FileSender without onDownload callback
+      fileSender.start();
+
+      try {
+        // Create file data source
+        const source = createFileDataSource(file);
+        
+        // Upload file (without downloadId for direct upload)
+        await fileSender.upload({ filename: file.name }, source);
+        
+        console.log("File uploaded successfully via nostr:", file.name);
+        
+        // Refresh file list
+        refetch();
+        
+      } finally {
+        // Clean up
+        fileSender.stop();
+        pool.destroy();
+      }
+      
+    } catch (error) {
+      console.error("Serverless upload failed:", error);
+      throw error;
+    }
+  };
+
+  // Regular upload using API
+  const uploadFileAPI = async (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const xhr = new XMLHttpRequest();
+    
+    // Track upload progress
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) {
+        const progress = (event.loaded / event.total) * 100;
+        setUploadProgress(progress);
+      }
+    };
+
+    return new Promise<void>((resolve, reject) => {
       // Handle response
       xhr.onload = () => {
         if (xhr.status === 200) {
@@ -103,28 +225,48 @@ export default function FilesPage() {
             setIsUploading(false);
             setUploadProgress(0);
           }, 1000);
+          resolve();
         } else {
           try {
             const errorResponse = JSON.parse(xhr.responseText);
-            setUploadError(errorResponse.error || 'Upload failed');
+            reject(new Error(errorResponse.error || 'Upload failed'));
           } catch {
-            setUploadError('Upload failed with status: ' + xhr.status);
+            reject(new Error('Upload failed with status: ' + xhr.status));
           }
-          setIsUploading(false);
-          setUploadProgress(0);
         }
       };
 
       xhr.onerror = () => {
-        setUploadError('Network error during upload');
-        setIsUploading(false);
-        setUploadProgress(0);
+        reject(new Error('Network error during upload'));
       };
 
       // Start the upload
       xhr.open('POST', `${API_ENDPOINT}/file/upload`);
       xhr.send(formData);
+    });
+  };
 
+  // Unified file upload function
+  const uploadFile = async (file: File) => {
+    // Reset states
+    setUploadError(null);
+    setIsUploading(true);
+    setUploadProgress(0);
+
+    try {
+      if (isServerless) {
+        await uploadFileServerless(file);
+      } else {
+        await uploadFileAPI(file);
+      }
+      
+      // Success
+      setUploadProgress(100);
+      setTimeout(() => {
+        setIsUploading(false);
+        setUploadProgress(0);
+      }, 1000);
+      
     } catch (error) {
       setUploadError(error instanceof Error ? error.message : 'Unknown error');
       setIsUploading(false);
@@ -192,8 +334,12 @@ export default function FilesPage() {
   };
 
   const handleDownload = async (fileId: string, fileName: string) => {
+    // Set downloading state
+    setDownloadingFiles(prev => new Set(prev).add(fileId));
+    
     try {
-      const response = await fetch(`${API_ENDPOINT}/file/get?url=${fileId}`);
+      // Use service worker route that will handle API or nostr routing
+      const response = await fetch(`/files/get/${fileId}`);
       if (!response.ok) {
         throw new Error('Failed to download file');
       }
@@ -210,6 +356,13 @@ export default function FilesPage() {
     } catch (error) {
       console.error('Download failed:', error);
       alert('Failed to download file');
+    } finally {
+      // Clear downloading state
+      setDownloadingFiles(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(fileId);
+        return newSet;
+      });
     }
   };
 
@@ -350,12 +503,24 @@ export default function FilesPage() {
                         variant="outline"
                         size="sm"
                         onClick={() => handleDownload(file.id, file.name)}
+                        disabled={downloadingFiles.has(file.id)}
                         className="h-8 px-3"
                       >
-                        <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                        </svg>
-                        Download
+                        {downloadingFiles.has(file.id) ? (
+                          <>
+                            <svg className="w-4 h-4 mr-1 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                            </svg>
+                            Downloading...
+                          </>
+                        ) : (
+                          <>
+                            <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                            </svg>
+                            Download
+                          </>
+                        )}
                       </Button>
                     </div>
                   </div>

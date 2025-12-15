@@ -12,22 +12,9 @@ import {
   STREAM_CHUNK_KIND,
 } from "./types";
 import { Encryption, getEncryption } from "./encryption";
+import { Compression } from "../../compression";
+import { base64 } from "@scure/base";
 
-// Compression will be provided via constructor or use a default that throws
-interface CompressionInterface {
-  decompress(
-    data: string | Uint8Array,
-    method: string,
-    binary?: boolean
-  ): Promise<string | Uint8Array>;
-}
-
-// Default compression implementation that throws - compression should be provided externally
-const defaultCompression: CompressionInterface = {
-  async decompress() {
-    throw new Error("Compression implementation not provided. Please provide compression via constructor.");
-  }
-};
 
 const debugStream = debug("sync:stream:reader");
 const debugError = debug("sync:stream:reader:error");
@@ -62,7 +49,7 @@ export class StreamReader implements AsyncIterable<string | Uint8Array> {
   private metadata: StreamMetadata;
   private pool: SimplePool;
   private config: Required<StreamReaderConfig>;
-  private compression: any;
+  private compression: Compression;
   private encryption: Encryption;
   private buffer: Map<string, Event> = new Map();
   private resultBuffer: IteratorResult<string | Uint8Array, any>[] = [];
@@ -90,13 +77,13 @@ export class StreamReader implements AsyncIterable<string | Uint8Array> {
     metadata: StreamMetadata,
     pool: SimplePool,
     config: StreamReaderConfig = {},
-    compression?: any,
+    compression: Compression,
     encryption?: Encryption
   ) {
     this.metadata = metadata;
     this.pool = pool;
     this.config = { ...DEFAULT_CONFIG, ...config };
-    this.compression = compression || defaultCompression;
+    this.compression = compression;
     this.encryption = encryption || getEncryption();
 
     // Validate metadata
@@ -349,7 +336,6 @@ export class StreamReader implements AsyncIterable<string | Uint8Array> {
         // str2bin - convert base64 string to binary
         try {
           // Use base64 decode from @scure/base
-          const { base64 } = await import('@scure/base');
           decodedData = base64.decode(content);
         } catch (err) {
           throw new StreamReaderError(

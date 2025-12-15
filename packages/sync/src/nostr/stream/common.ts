@@ -2,7 +2,7 @@
  * Common helper functions for NIP-173 streaming
  */
 
-import { Event, UnsignedEvent, getPublicKey, finalizeEvent, validateEvent, verifyEvent } from 'nostr-tools';
+import { Event, UnsignedEvent, getPublicKey, finalizeEvent, validateEvent, verifyEvent, SimplePool } from 'nostr-tools';
 
 /**
  * Creates a signed Nostr event
@@ -75,7 +75,7 @@ export const DEFAULT_RELAYS = [
 export async function publishToRelays(
   event: Event,
   relays: string[],
-  pool: any // SimplePool
+  pool: SimplePool
 ): Promise<string[]> {
   let c = 0;
   const successfulRelays: string[] = [];

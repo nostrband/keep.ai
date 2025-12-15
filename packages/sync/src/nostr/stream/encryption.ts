@@ -9,6 +9,7 @@ import { base64 } from '@scure/base';
 import { nip44_v3 } from '../nip44-v3';
 import { EncryptionMethod } from './types';
 
+const debugEnc = debug('sync:encryption');
 const debugError = debug('sync:encryption:error');
 
 // Encryption types
@@ -139,6 +140,7 @@ export class DefaultEncryption implements Encryption {
       try {
         // Get conversation key and encrypt
         const conversationKey = nip44.getConversationKey(senderPrivkey, recipientPubkey);
+        debugEnc("Encrypting nip44 for pubkey", recipientPubkey, "length", stringData.length);
         return nip44.encrypt(stringData, conversationKey);
       } catch (error) {
         debugError("NIP-44 encryption failed:", error);
@@ -153,6 +155,7 @@ export class DefaultEncryption implements Encryption {
       try {
         // Get conversation key and encrypt using nip44_v3
         const conversationKey = nip44_v3.getConversationKey(senderPrivkey, recipientPubkey);
+        debugEnc("Encrypting nip44_v3 for pubkey", recipientPubkey, "length", stringData.length);
         return nip44_v3.encrypt(stringData, conversationKey);
       } catch (error) {
         debugError("NIP-44 v3 encryption failed:", error);
@@ -194,6 +197,7 @@ export class DefaultEncryption implements Encryption {
       try {
         // Get conversation key and decrypt
         const conversationKey = nip44.getConversationKey(recipientPrivkey, senderPubkey);
+        debugEnc("Decrypting nip44 from pubkey", senderPubkey, "length", data.length);
         decryptedString = nip44.decrypt(data, conversationKey);
       } catch (error) {
         debugError("NIP-44 decryption failed:", error);
@@ -208,6 +212,7 @@ export class DefaultEncryption implements Encryption {
       try {
         // Get conversation key and decrypt using nip44_v3
         const conversationKey = nip44_v3.getConversationKey(recipientPrivkey, senderPubkey);
+        debugEnc("Decrypting nip44_v3 from pubkey", senderPubkey, "length", data.length);
         decryptedString = nip44_v3.decrypt(data, conversationKey);
       } catch (error) {
         debugError("NIP-44 v3 decryption failed:", error);

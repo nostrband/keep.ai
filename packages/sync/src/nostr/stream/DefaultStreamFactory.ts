@@ -7,6 +7,7 @@ import { StreamFactory, StreamWriterInterface } from "./interfaces";
 import { StreamReader } from "./StreamReader";
 import { StreamWriter } from "./StreamWriter";
 import { StreamMetadata, StreamReaderConfig, StreamWriterConfig } from "./types";
+import { Compression } from "../../compression";
 
 /**
  * Default implementation of StreamFactory
@@ -16,6 +17,7 @@ export class DefaultStreamFactory implements StreamFactory {
 
   #readerConfig?: StreamReaderConfig;
   #writerConfig?: StreamWriterConfig;
+  #compression?: Compression;
 
   get readerConfig() {
     return this.#readerConfig;
@@ -33,6 +35,14 @@ export class DefaultStreamFactory implements StreamFactory {
     this.#writerConfig = c;
   }
 
+  get compression(): Compression | undefined {
+    return this.#compression;
+  }
+
+  set compression(c: Compression | undefined) {
+    this.#compression = c;
+  }
+
   /**
    * Creates a StreamReader for reading from a stream
    *
@@ -46,7 +56,10 @@ export class DefaultStreamFactory implements StreamFactory {
     pool: SimplePool,
     config?: StreamReaderConfig
   ): Promise<AsyncIterable<string | Uint8Array>> {
-    return new StreamReader(metadata, pool, config || this.#readerConfig);
+    if (!this.#compression) {
+      throw new Error('Compression implementation is required for createReader');
+    }
+    return new StreamReader(metadata, pool, config || this.#readerConfig, this.#compression);
   }
 
   /**
@@ -64,7 +77,10 @@ export class DefaultStreamFactory implements StreamFactory {
     senderPrivkey: Uint8Array,
     config?: StreamWriterConfig
   ): Promise<StreamWriterInterface> {
-    return new StreamWriter(metadata, pool, senderPrivkey, config || this.#writerConfig);
+    if (!this.#compression) {
+      throw new Error('Compression implementation is required for createWriter');
+    }
+    return new StreamWriter(metadata, pool, senderPrivkey, config || this.#writerConfig, this.#compression);
   }
 }
 

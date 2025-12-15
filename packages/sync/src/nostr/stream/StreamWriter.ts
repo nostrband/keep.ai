@@ -4,35 +4,19 @@
 
 import { SimplePool, getPublicKey } from "nostr-tools";
 import debug from "debug";
-import { StreamMetadata, StreamWriterConfig, StreamStatus, STREAM_CHUNK_KIND } from "./types";
+import {
+  StreamMetadata,
+  StreamWriterConfig,
+  StreamStatus,
+  STREAM_CHUNK_KIND,
+} from "./types";
 import { Encryption, getEncryption } from "./encryption";
 import { createEvent, publishToRelays } from "./common";
+import { Compression } from "../../compression";
+import { base64 } from "@scure/base";
 
 const debugStream = debug("sync:stream:writer");
 const debugError = debug("sync:stream:writer:error");
-
-// Compression interfaces
-interface CompressionInterface {
-  startCompress(
-    method: string,
-    binary?: boolean,
-    maxResultSize?: number
-  ): Promise<CompressionInstance>;
-}
-
-interface CompressionInstance {
-  maxChunkSize(): Promise<number | undefined>;
-  add(chunk: string | Uint8Array): Promise<number>;
-  finish(): Promise<string | Uint8Array>;
-  dispose(): void;
-}
-
-// Default compression implementation that throws
-const defaultCompression: CompressionInterface = {
-  async startCompress() {
-    throw new Error("Compression implementation not provided. Please provide compression via constructor.");
-  }
-};
 
 /**
  * Default configuration values for StreamWriter
@@ -51,9 +35,9 @@ export class StreamWriter {
   private metadata: StreamMetadata;
   private pool: SimplePool;
   private config: Required<StreamWriterConfig>;
-  private compression: CompressionInterface;
+  private compression: Compression;
   private encryption: Encryption;
-  private compressor: CompressionInstance | null = null;
+  private compressor: any | null = null;
   private senderPrivkey: Uint8Array;
   private chunkIndex = 0;
   private batchTimer: ReturnType<typeof setTimeout> | null = null;
@@ -77,13 +61,13 @@ export class StreamWriter {
     pool: SimplePool,
     senderPrivkey: Uint8Array,
     config: StreamWriterConfig = {},
-    compression?: CompressionInterface,
+    compression: Compression,
     encryption?: Encryption
   ) {
     this.metadata = metadata;
     this.pool = pool;
     this.config = { ...DEFAULT_CONFIG, ...config };
-    this.compression = compression || defaultCompression;
+    this.compression = compression;
     this.encryption = encryption || getEncryption();
     this.senderPrivkey = senderPrivkey;
 
@@ -98,7 +82,9 @@ export class StreamWriter {
 
     // Validate version
     if (metadata.version !== undefined && metadata.version !== "1") {
-      throw new Error(`Unsupported protocol version: ${metadata.version}. Only version "1" is supported.`);
+      throw new Error(
+        `Unsupported protocol version: ${metadata.version}. Only version "1" is supported.`
+      );
     }
 
     // Validate encryption requirements
@@ -337,6 +323,7 @@ export class StreamWriter {
    */
   async error(code: string, message: string) {
     if (this.isDone) {
+      console.log("writer error", code, message);
       throw new Error("Stream is already done");
     }
 
@@ -444,7 +431,6 @@ export class StreamWriter {
 
           if (needsStringConversion) {
             // bin2str - convert binary to base64 string
-            const { base64 } = await import('@scure/base');
             eventContent = base64.encode(compressedData);
           } else {
             // If it's already a string and no compression, just decode
@@ -456,7 +442,7 @@ export class StreamWriter {
         if (!this.metadata.receiver_pubkey) {
           throw new Error("Missing recipient public key for encryption");
         }
-        
+
         // Use the receiver_pubkey from metadata
         const recipientPubkey = this.metadata.receiver_pubkey;
 
@@ -516,7 +502,12 @@ export class StreamWriter {
     }
 
     // Create and sign the event
-    const event = createEvent(STREAM_CHUNK_KIND, content, tags, this.senderPrivkey);
+    const event = createEvent(
+      STREAM_CHUNK_KIND,
+      content,
+      tags,
+      this.senderPrivkey
+    );
 
     // Store this event ID for the next chunk
     this.lastChunkId = event.id;
@@ -532,11 +523,7 @@ export class StreamWriter {
     }
 
     // Publish to relays
-    const promise = publishToRelays(
-      event,
-      this.metadata.relays,
-      this.pool
-    )
+    const promise = publishToRelays(event, this.metadata.relays, this.pool)
       .then((successfulRelays) => {
         // Drop this finished promise
         this.publishPromises = this.publishPromises.filter(

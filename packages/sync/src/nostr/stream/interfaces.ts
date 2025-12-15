@@ -4,6 +4,7 @@
 
 import { SimplePool } from "nostr-tools";
 import { StreamMetadata, StreamStatus, StreamWriterConfig, StreamReaderConfig } from "./types";
+import { Compression } from "../../compression";
 
 /**
  * Interface for StreamWriter
@@ -44,6 +45,11 @@ export interface StreamWriterInterface {
  * Defines methods for creating StreamReader and StreamWriter instances
  */
 export interface StreamFactory {
+  /**
+   * Compression implementation used by the factory
+   */
+  compression?: Compression;
+
   /**
    * Creates a StreamReader for reading from a stream
    *

@@ -1,13 +1,27 @@
 /// <reference lib="webworker" />
 
-import { Event } from "nostr-tools";
-import { nip44_v3 } from "@app/sync";
+import { Event, getPublicKey, SimplePool } from "nostr-tools";
+import { DEFAULT_RELAYS, nip44_v3 } from "@app/sync";
 import { API_ENDPOINT } from "./const";
+import { FileReceiver, getStreamFactory } from "@app/sync";
+import { getDefaultCompression } from "@app/browser";
+import { hexToBytes } from "nostr-tools/utils";
+import { ServerlessNostrSigner } from "./lib/signer";
 
 declare const __SERVERLESS__: boolean;
 const isServerless = __SERVERLESS__; // (import.meta as any).env?.VITE_FLAVOR === "serverless";
 
 declare const self: ServiceWorkerGlobalScope;
+
+// Storage for file transfer keys
+interface FileTransferKeys {
+  localPrivkey: string;
+  peerPubkey: string;
+}
+
+let fileTransferKeys: FileTransferKeys | null = null;
+let fileReceiver: FileReceiver | null = null;
+let pool: SimplePool | null = null;
 
 // PWA cache configuration
 const CACHE_NAME = "keep-ai-v1";
@@ -30,7 +44,7 @@ self.addEventListener("install", (event: ExtendableEvent) => {
         return cache.addAll(urlsToCache);
       })
       .then(() => {
-        console.log("[SW] Resources cached");
+        console.log("[SW] Resources cached ");
         return self.skipWaiting();
       })
   );
@@ -86,6 +100,69 @@ self.addEventListener("fetch", (event: FetchEvent) => {
   }
 });
 
+// Listen for messages from main thread
+self.addEventListener("message", async (event) => {
+  console.log("[SW] got message", event);
+  const { type, payload } = event.data || {};
+
+  if (type === "FILE_TRANSFER_KEYS") {
+    console.log("[SW] Received file transfer keys");
+    fileTransferKeys = payload;
+
+    // Initialize FileReceiver and pool when we get keys
+    try {
+      await initializeFileReceiver();
+    } catch (error) {
+      console.error("[SW] Failed to initialize FileReceiver:", error);
+    }
+  }
+});
+
+// Initialize FileReceiver with the received keys
+async function initializeFileReceiver() {
+  if (!fileTransferKeys) {
+    console.warn("[SW] No file transfer keys available");
+    return;
+  }
+
+  try {
+    // Create pool if not exists
+    if (!pool) {
+      pool = new SimplePool({
+        enablePing: true,
+        enableReconnect: true,
+      });
+    }
+
+    // Create ServerlessNostrSigner for the service worker
+    const localPrivkey = hexToBytes(fileTransferKeys.localPrivkey);
+    const swSigner = new ServerlessNostrSigner();
+    swSigner.setKey(localPrivkey);
+
+    // Create stream factory
+    const factory = getStreamFactory();
+    factory.compression = getDefaultCompression();
+
+    // Create FileReceiver
+    const localPubkey = getPublicKey(localPrivkey);
+
+    fileReceiver = new FileReceiver({
+      signer: swSigner,
+      pool,
+      factory,
+      localPubkey,
+      peerPubkey: fileTransferKeys.peerPubkey,
+      relays: DEFAULT_RELAYS,
+    });
+
+    // Start the receiver
+    fileReceiver.start();
+    console.log("[SW] FileReceiver initialized and started");
+  } catch (error) {
+    console.error("[SW] Error initializing FileReceiver:", error);
+  }
+}
+
 async function handleFileRequest(request: Request) {
   const url = new URL(request.url);
   const name = url.pathname.replace("/files/get/", "");
@@ -99,22 +176,92 @@ async function handleFileRequest(request: Request) {
     return cachedResponse;
   }
 
-  // FIXME in serverless, we need nostr protocol to download
-  const response = await fetch(`${API_ENDPOINT}/file/get?url=${encodeURIComponent(name)}`);
+  // 2) In serverless mode, check if FileReceiver is ready
+  console.log("[SW] fetch", url, {
+    isServerless,
+    fileReceiver,
+    fileTransferKeys,
+  });
+  if (isServerless) {
+    // Check if receiver or keys are not set - return error response
+    if (!fileReceiver || !fileTransferKeys) {
+      console.warn("[SW] Service worker not ready - missing receiver or keys");
+      return new Response(
+        JSON.stringify({ error: "Service worker not ready, reload the page" }),
+        {
+          status: 503,
+          statusText: "Service worker not ready, reload the page",
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+    }
 
-  // 3) Put into cache for next time
+    console.log("[SW] Downloading file via nostr:", name);
+
+    try {
+      // Download file using FileReceiver
+      let { stream: reader, mimeType: contentType } =
+        await fileReceiver.download(name);
+
+      // Collect all chunks
+      const chunks: Uint8Array[] = [];
+      for await (const chunk of reader) {
+        if (chunk instanceof Uint8Array) {
+          chunks.push(chunk);
+        }
+      }
+
+      // Combine chunks into single buffer
+      const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+      const fileData = new Uint8Array(totalLength);
+      let offset = 0;
+      for (const chunk of chunks) {
+        fileData.set(chunk, offset);
+        offset += chunk.length;
+      }
+
+      // Determine content type from filename extension
+      const ext = name.split(".").pop()?.toLowerCase();
+      if (!contentType) {
+        contentType = "application/octet-stream";
+        if (ext === "jpg" || ext === "jpeg") contentType = "image/jpeg";
+        else if (ext === "png") contentType = "image/png";
+        else if (ext === "gif") contentType = "image/gif";
+        else if (ext === "pdf") contentType = "application/pdf";
+        else if (ext === "txt") contentType = "text/plain";
+        else if (ext === "json") contentType = "application/json";
+      }
+
+      // Create response
+      const response = new Response(fileData, {
+        headers: {
+          "Content-Type": contentType,
+          "Cache-Control": "public, max-age=3600",
+        },
+      });
+
+      // Cache the response
+      await cache.put(request, response.clone());
+
+      console.log("[SW] Downloaded and cached file via nostr:", name);
+      return response;
+    } catch (error) {
+      console.error("[SW] Failed to download file via nostr:", error);
+      // Fall through to API download as fallback
+    }
+  }
+
+  // 3) Fallback to API download
+  console.log("[SW] Downloading file via API:", name);
+  const response = await fetch(
+    `${API_ENDPOINT}/file/get?url=${encodeURIComponent(name)}`
+  );
+
+  // 4) Put into cache for next time
   // Note: must clone before putting, because a Response body can only be used once
   await cache.put(request, response.clone());
 
   return response;
-
-  // For nostr, something like
-  // const { buffer, mimeType } = await getImageFromCustomAPI(name);
-  // // buffer should be ArrayBuffer or Uint8Array
-
-  // return new Response(buffer, {
-  //   headers: { 'Content-Type': mimeType || 'image/png' },
-  // });
 }
 
 const handlePush = async (event: PushEvent) => {

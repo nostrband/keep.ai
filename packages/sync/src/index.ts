@@ -1,4 +1,5 @@
 // Worker package exports
+export * from './compression';
 export * from './Peer';
 export * from './Transport';
 export * from './TransportClientHttp';

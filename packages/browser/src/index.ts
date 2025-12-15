@@ -1,5 +1,5 @@
 export * from './compression';
 export { createDBBrowser } from './createDB';
 export { LeaderWebWorker, stableName } from './LeaderWebWorker';
-export { startWorker } from './startWorker';
-export { WorkerTransport } from './WorkerTransport';
+export { startWorker, type WorkerPort } from './startWorker';
+export { WorkerTransport, type MessagePortLike } from './WorkerTransport';

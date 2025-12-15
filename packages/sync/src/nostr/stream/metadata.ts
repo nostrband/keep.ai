@@ -8,14 +8,16 @@ import { StreamMetadata, STREAM_METADATA_KIND } from './types';
 
 /**
  * Creates a stream metadata event (kind:173) from a StreamMetadata object
- * 
+ *
  * @param metadata - Stream metadata
  * @param senderPrivkey - Private key to sign the event
+ * @param extraTags - Additional tags to include in the event
  * @returns Signed stream metadata event
  */
 export function createStreamMetadataEvent(
   metadata: StreamMetadata,
-  senderPrivkey: Uint8Array
+  senderPrivkey: Uint8Array,
+  extraTags: string[][] = []
 ): Event {
   // Create tags for the stream metadata event
   const tags: string[][] = [
@@ -34,6 +36,9 @@ export function createStreamMetadataEvent(
   if (metadata.encryption !== "none" && metadata.receiver_pubkey) {
     tags.push(["receiver_pubkey", metadata.receiver_pubkey]);
   }
+  
+  // Add any extra tags
+  tags.push(...extraTags);
   
   // Create and sign the stream metadata event
   return createEvent(STREAM_METADATA_KIND, "", tags, senderPrivkey);
