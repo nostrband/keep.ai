@@ -82,7 +82,7 @@ async function runSandboxCommand(type: string): Promise<void> {
 
       try {
         const evaluation = await sandbox.eval(source, {
-          timeoutMs: 60000,
+          timeoutMs: 120000,
           state,
         });
         if (evaluation.ok) {

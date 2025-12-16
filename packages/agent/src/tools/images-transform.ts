@@ -24,42 +24,62 @@ Supports png, jpeg, webp and gif input formats. Returns information about the ge
       file_path: z
         .string()
         .min(1)
-        .describe("File path of the input image to transform - filename (without extension) will be used as ID to look up in database"),
+        .describe(
+          "File path of the input image to transform - filename (without extension) will be used as ID to look up in database"
+        ),
       prompt: z
         .string()
         .min(1)
         .max(1000)
-        .describe("Textual description of the desired transformation or modification to apply to the image"),
+        .describe(
+          "Textual description of the desired transformation or modification to apply to the image"
+        ),
       file_prefix: z
         .string()
         .min(1)
         .max(50)
-        .describe("Prefix to use for the filename of generated images, no spaces, filename-suitable symbols only"),
+        .describe(
+          "Prefix to use for the filename of generated images, no spaces, filename-suitable symbols only"
+        ),
       aspect_ratio: z
         .string()
         .optional()
         .nullable()
-        .describe("Aspect ratio for the generated image (e.g., '16:9', '1:1', '4:3'). Defaults to '1:1' if not specified"),
+        .describe(
+          "Aspect ratio for the generated image (e.g., '16:9', '1:1', '4:3'). Defaults to '1:1' if not specified"
+        ),
     }),
     outputSchema: z.object({
-      images: z.array(z.object({
-        id: z.string().describe("File ID of the generated image"),
-        name: z.string().describe("Filename of the generated image"),
-        path: z.string().describe("Local file path"),
-        size: z.number().describe("File size in bytes"),
-        media_type: z.string().describe("MIME type of the image"),
-        summary: z.string().describe("Summary/description of the image"),
-        upload_time: z.string().describe("Generation timestamp"),
-      })).describe("Array of generated image file records"),
-      source_file: z.object({
-        id: z.string().describe("Source file ID"),
-        name: z.string().describe("Source filename"),
-        media_type: z.string().describe("Source MIME type"),
-        size: z.number().describe("Source file size in bytes"),
-      }).describe("Information about the source image file"),
+      images: z
+        .array(
+          z.object({
+            id: z.string().describe("File ID of the generated image"),
+            name: z.string().describe("Filename of the generated image"),
+            path: z.string().describe("Local file path"),
+            size: z.number().describe("File size in bytes"),
+            media_type: z.string().describe("MIME type of the image"),
+            summary: z.string().describe("Summary/description of the image"),
+            upload_time: z.string().describe("Generation timestamp"),
+          })
+        )
+        .describe("Array of generated image file records"),
+      source_file: z
+        .object({
+          id: z.string().describe("Source file ID"),
+          name: z.string().describe("Source filename"),
+          media_type: z.string().describe("Source MIME type"),
+          size: z.number().describe("Source file size in bytes"),
+        })
+        .describe("Information about the source image file"),
+      reasoning: z.string().describe("Image model's reasoning"),
     }),
     execute: async (input) => {
-      const { file_path: file, prompt, file_prefix, aspect_ratio = "1:1" } = input;
+      const {
+        file_path: file,
+        prompt,
+        file_prefix,
+        aspect_ratio = "1:1",
+      } = input;
 
       if (!userPath) {
         throw new Error("User path not configured");
@@ -75,7 +95,7 @@ Supports png, jpeg, webp and gif input formats. Returns information about the ge
 
       // Extract filename without extension to use as ID
       const filename = fileUtils.basename(file, fileUtils.extname(file));
-      
+
       // Get file record from database
       const fileRecord = await fileStore.getFile(filename);
       if (!fileRecord) {
@@ -83,24 +103,36 @@ Supports png, jpeg, webp and gif input formats. Returns information about the ge
       }
 
       // Validate that it's a supported image format
-      const supportedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/gif'];
+      const supportedTypes = [
+        "image/png",
+        "image/jpeg",
+        "image/jpg",
+        "image/webp",
+        "image/gif",
+      ];
       if (!supportedTypes.includes(fileRecord.media_type)) {
-        throw new Error(`Unsupported image format: ${fileRecord.media_type}. Supported formats: ${supportedTypes.join(', ')}`);
+        throw new Error(
+          `Unsupported image format: ${
+            fileRecord.media_type
+          }. Supported formats: ${supportedTypes.join(", ")}`
+        );
       }
 
       // Construct full path to actual file
       const fullPath = fileUtils.join(userPath, "files", fileRecord.path);
-      
+
       // Check if file exists
       if (!fileUtils.existsSync(fullPath)) {
         throw new Error(`Source image file not found on disk: ${fullPath}`);
       }
 
       try {
-        debugImgTransform(`Transforming image ${fileRecord.name} with aspect ratio ${aspect_ratio}, prompt: ${prompt}`);
+        debugImgTransform(
+          `Transforming image ${fileRecord.name} with aspect ratio ${aspect_ratio}, prompt: ${prompt}`
+        );
 
         // Read the source image file and convert to base64
-        const fd = fileUtils.openSync(fullPath, 'r');
+        const fd = fileUtils.openSync(fullPath, "r");
         let imageBuffer: Uint8Array;
         try {
           const stats = fileUtils.fstatSync(fd);
@@ -110,45 +142,52 @@ Supports png, jpeg, webp and gif input formats. Returns information about the ge
         } finally {
           fileUtils.closeSync(fd);
         }
-        
-        const base64Image = `data:${fileRecord.media_type};base64,${fileUtils.bufferToBase64(imageBuffer)}`;
+
+        const base64Image = `data:${
+          fileRecord.media_type
+        };base64,${fileUtils.bufferToBase64(imageBuffer)}`;
 
         // Call OpenRouter API for image transformation/generation
-        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            model: imageModel,
-            messages: [
-              {
-                role: 'user',
-                content: [
-                  {
-                    type: 'text',
-                    text: prompt,
-                  },
-                  {
-                    type: 'image_url',
-                    image_url: {
-                      url: base64Image,
-                    },
-                  },
-                ],
-              },
-            ],
-            modalities: ['image', 'text'],
-            image_config: {
-              aspect_ratio: aspect_ratio,
+        const response = await fetch(
+          "https://openrouter.ai/api/v1/chat/completions",
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
+              "Content-Type": "application/json",
             },
-          }),
-        });
+            body: JSON.stringify({
+              model: imageModel,
+              messages: [
+                {
+                  role: "user",
+                  content: [
+                    {
+                      type: "text",
+                      text: prompt,
+                    },
+                    {
+                      type: "image_url",
+                      image_url: {
+                        url: base64Image,
+                      },
+                    },
+                  ],
+                },
+              ],
+              modalities: ["image", "text"],
+              image_config: {
+                aspect_ratio: aspect_ratio,
+              },
+            }),
+          }
+        );
 
         if (!response.ok) {
           const errorText = await response.text();
-          throw new Error(`OpenRouter API error: ${response.status} - ${errorText}`);
+          throw new Error(
+            `OpenRouter API error: ${response.status} - ${errorText}`
+          );
         }
 
         const result = await response.json();
@@ -158,6 +197,9 @@ Supports png, jpeg, webp and gif input formats. Returns information about the ge
         }
 
         const message = result.choices[0].message;
+        const reasoning: string = message.reasoning;
+        debugImgTransform("Generated images reasoning", reasoning);
+
         if (!message.images || message.images.length === 0) {
           throw new Error("No images found in the response");
         }
@@ -173,10 +215,14 @@ Supports png, jpeg, webp and gif input formats. Returns information about the ge
           // Download the image from the URL
           const imageResponse = await fetch(imageUrl);
           if (!imageResponse.ok) {
-            throw new Error(`Failed to download image ${index + 1}: ${imageResponse.status}`);
+            throw new Error(
+              `Failed to download image ${index + 1}: ${imageResponse.status}`
+            );
           }
 
-          const generatedImageBuffer = Buffer.from(await imageResponse.arrayBuffer());
+          const generatedImageBuffer = Buffer.from(
+            await imageResponse.arrayBuffer()
+          );
 
           // Calculate SHA256 hash as ID
           const hash = createHash("sha256");
@@ -202,7 +248,9 @@ Supports png, jpeg, webp and gif input formats. Returns information about the ge
 
           // Generate filename
           const timestamp = new Date().toISOString().replace(/[:.T]/g, "-");
-          const filename = `${file_prefix}-${timestamp}-${index + 1}.${extension}`;
+          const filename = `${file_prefix}-${timestamp}-${
+            index + 1
+          }.${extension}`;
 
           // Ensure files directory exists
           const filesDir = fileUtils.join(userPath, "files");
@@ -242,7 +290,7 @@ Supports png, jpeg, webp and gif input formats. Returns information about the ge
           prompt,
           aspect_ratio,
           count: generatedFiles.length,
-          files: generatedFiles.map(f => f.path)
+          files: generatedFiles.map((f) => f.path),
         });
 
         return {
@@ -253,10 +301,14 @@ Supports png, jpeg, webp and gif input formats. Returns information about the ge
             media_type: fileRecord.media_type,
             size: fileRecord.size,
           },
+          reasoning,
         };
-
       } catch (error) {
-        throw new Error(`Image transformation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        throw new Error(
+          `Image transformation failed: ${
+            error instanceof Error ? error.message : "Unknown error"
+          }`
+        );
       }
     },
   });

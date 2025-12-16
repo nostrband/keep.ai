@@ -108,8 +108,9 @@ export class ReplAgent {
 
           // Eval
           stepResult = await this.sandbox.eval(output.code, {
-            // worker can run for long time
-            timeoutMs: this.task.type === "worker" ? 60000 : 5000,
+            // worker can run for long time,
+            // calls to Images.transform etc are very slow
+            timeoutMs: this.task.type === "worker" ? 300000 : 5000,
             state: jsState,
           });
           this.debug("step", step, "result", stepResult);

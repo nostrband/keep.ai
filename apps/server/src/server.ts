@@ -630,8 +630,11 @@ export async function createServer(config: ServerConfig = {}) {
         fileStore
       );
       debugServer("File uploaded via nostr:", fileRecord);
+
+      return fileRecord;
     } catch (error) {
       debugServer("Error handling upload:", error);
+      throw error;
     }
   };
 

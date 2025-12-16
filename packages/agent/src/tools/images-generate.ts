@@ -47,6 +47,7 @@ Generates images and saves them to files. Returns information about the generate
         summary: z.string().describe("Summary/description of the image"),
         upload_time: z.string().describe("Generation timestamp"),
       })).describe("Array of generated image file records"),
+      reasoning: z.string().describe("Image model's reasoning"),
     }),
     execute: async (input) => {
       const { prompt, file_prefix, aspect_ratio = "1:1" } = input;
@@ -99,6 +100,9 @@ Generates images and saves them to files. Returns information about the generate
         }
 
         const message = result.choices[0].message;
+        const reasoning: string = message.reasoning;
+        debugImg("Generated images reasoning", reasoning);
+
         if (!message.images || message.images.length === 0) {
           throw new Error("No images found in the response");
         }
@@ -187,6 +191,7 @@ Generates images and saves them to files. Returns information about the generate
 
         return {
           images: generatedFiles,
+          reasoning
         };
 
       } catch (error) {

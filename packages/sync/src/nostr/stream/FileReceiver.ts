@@ -22,6 +22,7 @@ const debugFile = debug("sync:file-receiver");
 export const UPLOAD_KIND = 24690;
 export const UPLOAD_READY_KIND = 24691;
 export const DOWNLOAD_KIND = 24692;
+export const UPLOAD_DONE_KIND = 24693;
 
 export interface DownloadResult {
   stream: AsyncIterable<string | Uint8Array>;
@@ -71,7 +72,7 @@ export class FileReceiver {
       filename: string,
       stream: AsyncIterable<string | Uint8Array>,
       mimeType?: string
-    ) => Promise<void>;
+    ) => Promise<any>;
   }) {
     this.signer = signer;
     this.pool = pool;
@@ -143,9 +144,7 @@ export class FileReceiver {
    * @param file_path - Path to the file to download
    * @returns Promise that resolves with an object containing the reader and optional mimeType
    */
-  async download(
-    file_path: string
-  ): Promise<DownloadResult> {
+  async download(file_path: string): Promise<DownloadResult> {
     if (!this.started) {
       throw new Error("FileReceiver not started. Call start() first.");
     }
@@ -172,37 +171,34 @@ export class FileReceiver {
 
     // Create promise that will be resolved/rejected when download completes
     return new Promise<DownloadResult>((resolve, reject) => {
-        // Store pending download with TTL
-        const ttlTimer = setTimeout(() => {
+      // Store pending download with TTL
+      const ttlTimer = setTimeout(() => {
+        this.pendingDownloads.delete(downloadEvent.id);
+        debugFile("Download request timed out for:", file_path);
+        reject(new Error("Download request timed out after 60 seconds"));
+      }, 60000);
+
+      const pendingDownload: PendingDownload = {
+        downloadId: downloadEvent.id,
+        file_path,
+        resolve,
+        reject,
+        ttlTimer,
+      };
+
+      this.pendingDownloads.set(downloadEvent.id, pendingDownload);
+
+      // Publish download request
+      publish(downloadEvent, this.pool, this.relays)
+        .then(() => {
+          debugFile("Published download request to relays");
+        })
+        .catch((error) => {
           this.pendingDownloads.delete(downloadEvent.id);
-          debugFile("Download request timed out for:", file_path);
-          reject(new Error("Download request timed out after 60 seconds"));
-        }, 60000);
-
-        const pendingDownload: PendingDownload = {
-          downloadId: downloadEvent.id,
-          file_path,
-          resolve,
-          reject,
-          ttlTimer,
-        };
-
-        this.pendingDownloads.set(downloadEvent.id, pendingDownload);
-
-        // Publish download request
-        publish(downloadEvent, this.pool, this.relays)
-          .then(() => {
-            debugFile("Published download request to relays");
-          })
-          .catch((error) => {
-            this.pendingDownloads.delete(downloadEvent.id);
-            clearTimeout(ttlTimer);
-            reject(
-              new Error("Failed to publish download request to any relay")
-            );
-          });
-      }
-    );
+          clearTimeout(ttlTimer);
+          reject(new Error("Failed to publish download request to any relay"));
+        });
+    });
   }
 
   private async processUploadEvent(
@@ -211,7 +207,7 @@ export class FileReceiver {
       filename: string,
       stream: AsyncIterable<Uint8Array | string>,
       mimeType?: string
-    ) => void,
+    ) => Promise<any>,
     reject?: (err: any) => void
   ) {
     // Extract metadata tag
@@ -236,7 +232,7 @@ export class FileReceiver {
     // Extract filename and mime type from metadata event tags
     const filenameTag = metadataEvent.tags.find((tag) => tag[0] === "filename");
     const filename = filenameTag ? filenameTag[1] : "unknown";
-    
+
     const mimeTag = metadataEvent.tags.find((tag) => tag[0] === "mime");
     const mimeType = mimeTag ? mimeTag[1] : undefined;
 
@@ -269,7 +265,10 @@ export class FileReceiver {
       const reader = await this.factory.createReader(streamMetadata, this.pool);
 
       // Resolve the download promise with the reader and mimeType
-      resolve(filename, reader, mimeType);
+      const result = await resolve(filename, reader, mimeType);
+
+      // If onUpload returned result, send back to uploader
+      if (result) await this.sendUploadDone(event.id, result);
 
       debugFile("Upload reader started for:", filename);
     } catch (readerError) {
@@ -284,6 +283,10 @@ export class FileReceiver {
 
   private async handleUploadEvent(event: Event): Promise<void> {
     debugFile("Received upload event:", event.id);
+    if (event.created_at < Math.floor(Date.now() / 1000) - 30) {
+      debugFile("Ignoring old upload event", event.id);
+      return;
+    }
 
     // Extract download_id from 'e' tag
     const eTag = event.tags.find((tag) => tag[0] === "e");
@@ -321,7 +324,10 @@ export class FileReceiver {
       try {
         await this.processUploadEvent(
           event,
-          (_, stream, mimeType) => pendingDownload?.resolve({ stream, mimeType }),
+          (_, stream, mimeType) => {
+            pendingDownload?.resolve({ stream, mimeType });
+            return Promise.resolve(false);
+          },
           pendingDownload.reject
         );
       } catch (error) {
@@ -360,6 +366,41 @@ export class FileReceiver {
     } catch (error) {
       debugFile("Failed to publish upload_ready event to any relay");
       throw new Error("Failed to publish upload_ready event");
+    }
+  }
+
+  private async sendUploadDone(
+    uploadEventId: string,
+    result: any
+  ): Promise<void> {
+    debugFile("Sending upload_done for event:", uploadEventId, result);
+
+    const encryptedContent = await this.signer.encrypt({
+      plaintext: JSON.stringify(result),
+      receiverPubkey: this.peerPubkey,
+      senderPubkey: this.localPubkey,
+    });
+
+    // Create upload_ready event (kind 24691)
+    const unsignedEvent: UnsignedEvent = {
+      kind: UPLOAD_DONE_KIND,
+      created_at: Math.floor(Date.now() / 1000),
+      tags: [
+        ["e", uploadEventId], // Reference to the upload event
+      ],
+      content: encryptedContent,
+      pubkey: this.localPubkey,
+    };
+
+    const uploadDoneEvent = await this.signer.signEvent(unsignedEvent);
+
+    // Publish to relays using proper publish method
+    try {
+      await publish(uploadDoneEvent, this.pool, this.relays);
+      debugFile("Published upload_done event to relays");
+    } catch (error) {
+      debugFile("Failed to publish upload_done event to any relay");
+      throw new Error("Failed to publish upload_done event");
     }
   }
 }

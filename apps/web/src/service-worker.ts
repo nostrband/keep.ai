@@ -89,7 +89,7 @@ self.addEventListener("fetch", (event: FetchEvent) => {
 
   // Intercept /files/get/* requests
   if (url.pathname.startsWith("/files/get/")) {
-    event.respondWith(handleFileRequest(event.request));
+    event.respondWith(handleFileRequest(event));
   } else {
     event.respondWith(
       caches.match(event.request).then((response) => {
@@ -163,7 +163,85 @@ async function initializeFileReceiver() {
   }
 }
 
-async function handleFileRequest(request: Request) {
+async function fetchNostr(name: string) {
+  // Check if receiver or keys are not set - return error response
+  if (!fileReceiver || !fileTransferKeys) {
+    console.warn("[SW] Service worker not ready - missing receiver or keys");
+    return new Response(
+      JSON.stringify({ error: "Service worker not ready, reload the page" }),
+      {
+        status: 503,
+        statusText: "Service worker not ready, reload the page",
+        headers: { "Content-Type": "application/json" },
+      }
+    );
+  }
+
+  try {
+    // Download file using FileReceiver
+    let { stream: reader, mimeType: contentType } = await fileReceiver.download(
+      name
+    );
+
+    // Determine content type from filename extension
+    const ext = name.split(".").pop()?.toLowerCase();
+    if (!contentType) {
+      contentType = "application/octet-stream";
+      if (ext === "jpg" || ext === "jpeg") contentType = "image/jpeg";
+      else if (ext === "png") contentType = "image/png";
+      else if (ext === "gif") contentType = "image/gif";
+      else if (ext === "pdf") contentType = "application/pdf";
+      else if (ext === "txt") contentType = "text/plain";
+      else if (ext === "json") contentType = "application/json";
+    }
+
+    // Create a readable stream that wraps the async iterable reader
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        try {
+          for await (const chunk of reader) {
+            if (chunk instanceof Uint8Array) {
+              controller.enqueue(chunk);
+            }
+          }
+          controller.close();
+        } catch (err) {
+          controller.error(err);
+        }
+      },
+      cancel(reason) {
+        console.log("[SW] Stream cancelled:", reason);
+      },
+    });
+
+    // Create response with streaming body
+    const response = new Response(stream, {
+      status: 200,
+      headers: {
+        "Content-Type": contentType,
+        "Cache-Control": "public, max-age=3600",
+      },
+    });
+
+    console.log("[SW] Streaming file via nostr:", name);
+    return response;
+  } catch (error) {
+    console.error("[SW] Failed to download file via nostr:", error);
+    return new Response(
+      JSON.stringify({
+        error: "Service worker failed, try to reload the page",
+      }),
+      {
+        status: 503,
+        statusText: "Service worker failed, try to reload the page",
+        headers: { "Content-Type": "application/json" },
+      }
+    );
+  }
+}
+
+async function handleFileRequest(event: FetchEvent) {
+  const { request } = event;
   const url = new URL(request.url);
   const name = url.pathname.replace("/files/get/", "");
 
@@ -176,90 +254,37 @@ async function handleFileRequest(request: Request) {
     return cachedResponse;
   }
 
-  // 2) In serverless mode, check if FileReceiver is ready
   console.log("[SW] fetch", url, {
     isServerless,
     fileReceiver,
     fileTransferKeys,
   });
+
+  let response: Response;
   if (isServerless) {
-    // Check if receiver or keys are not set - return error response
-    if (!fileReceiver || !fileTransferKeys) {
-      console.warn("[SW] Service worker not ready - missing receiver or keys");
-      return new Response(
-        JSON.stringify({ error: "Service worker not ready, reload the page" }),
-        {
-          status: 503,
-          statusText: "Service worker not ready, reload the page",
-          headers: { "Content-Type": "application/json" },
-        }
-      );
-    }
-
-    console.log("[SW] Downloading file via nostr:", name);
-
-    try {
-      // Download file using FileReceiver
-      let { stream: reader, mimeType: contentType } =
-        await fileReceiver.download(name);
-
-      // Collect all chunks
-      const chunks: Uint8Array[] = [];
-      for await (const chunk of reader) {
-        if (chunk instanceof Uint8Array) {
-          chunks.push(chunk);
-        }
-      }
-
-      // Combine chunks into single buffer
-      const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
-      const fileData = new Uint8Array(totalLength);
-      let offset = 0;
-      for (const chunk of chunks) {
-        fileData.set(chunk, offset);
-        offset += chunk.length;
-      }
-
-      // Determine content type from filename extension
-      const ext = name.split(".").pop()?.toLowerCase();
-      if (!contentType) {
-        contentType = "application/octet-stream";
-        if (ext === "jpg" || ext === "jpeg") contentType = "image/jpeg";
-        else if (ext === "png") contentType = "image/png";
-        else if (ext === "gif") contentType = "image/gif";
-        else if (ext === "pdf") contentType = "application/pdf";
-        else if (ext === "txt") contentType = "text/plain";
-        else if (ext === "json") contentType = "application/json";
-      }
-
-      // Create response
-      const response = new Response(fileData, {
-        headers: {
-          "Content-Type": contentType,
-          "Cache-Control": "public, max-age=3600",
-        },
-      });
-
-      // Cache the response
-      await cache.put(request, response.clone());
-
-      console.log("[SW] Downloaded and cached file via nostr:", name);
-      return response;
-    } catch (error) {
-      console.error("[SW] Failed to download file via nostr:", error);
-      // Fall through to API download as fallback
-    }
+    // Download over Nostr
+    console.log("[SW] Downloading file via Nostr:", name);
+    response = await fetchNostr(name);
+  } else {
+    // Download from API
+    console.log("[SW] Downloading file via API:", name);
+    response = await fetch(
+      `${API_ENDPOINT}/file/get?url=${encodeURIComponent(name)}`
+    );
   }
 
-  // 3) Fallback to API download
-  console.log("[SW] Downloading file via API:", name);
-  const response = await fetch(
-    `${API_ENDPOINT}/file/get?url=${encodeURIComponent(name)}`
+  // Clone for cache and stream into cache in the background
+  const responseForCache = response.clone();
+  event.waitUntil(
+    (async () => {
+      try {
+        await cache.put(request, responseForCache);
+        console.log("[SW] Downloaded and cached file:", name);
+      } catch (error) {
+        console.error("[SW] Failed to cache file:", error);
+      }
+    })()
   );
-
-  // 4) Put into cache for next time
-  // Note: must clone before putting, because a Response body can only be used once
-  await cache.put(request, response.clone());
 
   return response;
 }

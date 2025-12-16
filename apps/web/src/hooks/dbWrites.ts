@@ -5,6 +5,7 @@ import { qk } from "./queryKeys";
 import { useDbQuery } from "./dbQuery";
 import { ChatEvent } from "@app/proto";
 import { UseChatEventsResult } from "./dbChatReads";
+import { File } from "@app/db";
 
 export function useAddMessage() {
   const { api } = useDbQuery();
@@ -14,6 +15,7 @@ export function useAddMessage() {
       threadId: string;
       role: "user" | "assistant";
       content: string;
+      files?: File[];
     }) => {
       if (!api) throw new Error("Memory store not available");
 
@@ -21,6 +23,7 @@ export function useAddMessage() {
         threadId: input.threadId,
         role: input.role,
         content: input.content,
+        files: input.files,
       });
 
       return message;

@@ -16,6 +16,7 @@ import {
 } from "../ui";
 import { PlusIcon } from "lucide-react";
 import type { FileUIPart } from "ai";
+import { type File as DbFile } from "@app/db";
 
 type PromptInputMessage = {
   text?: string;
@@ -38,7 +39,8 @@ export default function ChatPage() {
       return;
     }
 
-    let messageContent = message.text || "";
+    const messageContent = message.text || "";
+    let attachedFiles: DbFile[] = [];
 
     // Upload files if any are attached
     if (hasAttachments && message.files) {
@@ -59,22 +61,21 @@ export default function ChatPage() {
         // Upload the files
         const uploadResults = await uploadFiles(files);
 
-        // Append file links to message content
-        for (const result of uploadResults) {
-          messageContent += `\nAttached: [${result.name}](/files/get/${result.path})`;
-        }
+        // Collect file paths for the message parts
+        attachedFiles = uploadResults;
       } catch (error) {
         console.error('File upload failed:', error);
         // Still send the message without file attachments
-        messageContent += `\nNote: File upload failed - ${error instanceof Error ? error.message : 'Unknown error'}`;
+        // We could add error handling here if needed
       }
     }
 
-    // Send the message (now with file links if uploads succeeded)
+    // Send the message with file paths array
     addMessage.mutate({
       threadId: id, // threadId === chatId
       role: "user",
       content: messageContent,
+      files: attachedFiles,
     });
 
     setInput("");

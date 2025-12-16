@@ -8,7 +8,7 @@ import { bytesToHex } from "@noble/ciphers/utils";
 import { randomBytes } from "@noble/ciphers/crypto";
 import { NostrPeerStore } from "./nostr-peer-store";
 import { InboxItem, InboxStore } from "./inbox-store";
-import { FileStore } from "./file-store";
+import { File, FileStore } from "./file-store";
 
 export const MAX_STATUS_TTL = 60 * 1000; // 1 minute in milliseconds
 
@@ -37,6 +37,7 @@ export class KeepDbApi {
     threadId: string;
     content: string;
     role?: "user" | "assistant"; // default = user
+    files?: File[]; // array of file paths
   }): Promise<AssistantUIMessage> {
     return await this.db.db.tx(async (tx) => {
       const now = new Date();
@@ -60,10 +61,26 @@ export class KeepDbApi {
       }
 
       // Create the message in AssistantUIMessage format
+      const parts: AssistantUIMessage['parts'] = [
+        { type: "text", text: input.content }
+      ];
+      
+      // Add file parts if files are provided
+      if (input.files && input.files.length > 0) {
+        for (const file of input.files) {
+          parts.push({
+            type: "file",
+            url: file.path,
+            mediaType: file.media_type,
+            filename: file.name,
+          });
+        }
+      }
+
       const message: AssistantUIMessage = {
         id: bytesToHex(randomBytes(16)),
         role,
-        parts: [{ type: "text", text: input.content }],
+        parts,
         metadata: {
           threadId: input.threadId,
           createdAt: now.toISOString(),
