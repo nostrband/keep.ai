@@ -37,6 +37,9 @@ import path from "path";
 import { createServer } from "@app/server";
 import contextMenu from "electron-context-menu";
 import { fileURLToPath } from "node:url";
+import debug from "debug";
+
+const debugMain = debug("main");
 
 const disposeContextMenu = contextMenu({
   showSaveImageAs: true,
@@ -231,13 +234,14 @@ async function fetchFile(fileIdOrName: string) {
 function setupDownloadHandler() {
   // Handle all file:// requests in this session
   protocol.handle("file", async (request) => {
+    debugMain("fetch", request.url);
     try {
       const url = new URL(request.url);
       const { pathname } = url;
 
-      // file:///files/get/<id>  (because your <img src="/files/get/...">)
-      if (pathname.startsWith("/files/get/")) {
-        const fileIdOrName = pathname.slice("/files/get/".length);
+      // file:///files/get/<id>  or file:///C:/files/get/<id>
+      if (pathname.includes("/files/get/")) {
+        const fileIdOrName = pathname.split("/files/get/")[1];
 
         // Build request to server
         const apiUrl = `${

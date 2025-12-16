@@ -2,20 +2,19 @@ import React, { useState, useCallback, useRef, useEffect } from "react";
 import ChatInterface from "./ChatInterface";
 import SharedHeader from "./SharedHeader";
 import { useAddMessage } from "../hooks/dbWrites";
+import { useFileUpload } from "../hooks/useFileUpload";
 import {
   PromptInput,
-  PromptInputActionAddAttachments,
-  PromptInputActionMenu,
-  PromptInputActionMenuContent,
-  PromptInputActionMenuTrigger,
   PromptInputAttachment,
   PromptInputAttachments,
   PromptInputBody,
+  PromptInputButton,
   PromptInputSubmit,
   PromptInputTextarea,
   PromptInputToolbar,
   PromptInputTools,
 } from "../ui";
+import { PlusIcon } from "lucide-react";
 import type { FileUIPart } from "ai";
 
 type PromptInputMessage = {
@@ -29,8 +28,9 @@ export default function ChatPage() {
   const [promptHeight, setPromptHeight] = useState(0);
   const promptContainerRef = useRef<HTMLDivElement>(null);
   const addMessage = useAddMessage();
+  const { uploadFiles, uploadState } = useFileUpload();
 
-  const handleSubmit = useCallback((message: PromptInputMessage) => {
+  const handleSubmit = useCallback(async (message: PromptInputMessage) => {
     const hasText = Boolean(message.text);
     const hasAttachments = Boolean(message.files?.length);
 
@@ -38,14 +38,47 @@ export default function ChatPage() {
       return;
     }
 
+    let messageContent = message.text || "";
+
+    // Upload files if any are attached
+    if (hasAttachments && message.files) {
+      try {
+        // Convert FileUIPart[] to File[] by fetching blob URLs
+        const files: File[] = [];
+        for (const fileUIPart of message.files) {
+          if (fileUIPart.url) {
+            const response = await fetch(fileUIPart.url);
+            const blob = await response.blob();
+            const file = new File([blob], fileUIPart.filename || 'unknown', {
+              type: fileUIPart.mediaType || 'application/octet-stream'
+            });
+            files.push(file);
+          }
+        }
+
+        // Upload the files
+        const uploadResults = await uploadFiles(files);
+
+        // Append file links to message content
+        for (const result of uploadResults) {
+          messageContent += `\nAttached: [${result.name}](/files/get/${result.path})`;
+        }
+      } catch (error) {
+        console.error('File upload failed:', error);
+        // Still send the message without file attachments
+        messageContent += `\nNote: File upload failed - ${error instanceof Error ? error.message : 'Unknown error'}`;
+      }
+    }
+
+    // Send the message (now with file links if uploads succeeded)
     addMessage.mutate({
       threadId: id, // threadId === chatId
       role: "user",
-      content: message.text || "Sent with attachments",
+      content: messageContent,
     });
 
     setInput("");
-  }, [addMessage]);
+  }, [addMessage, uploadFiles]);
 
   // Track prompt input height changes
   useEffect(() => {
@@ -83,6 +116,29 @@ export default function ChatPage() {
       {/* Fixed prompt input at viewport bottom */}
       <div className="fixed bottom-0 left-0 right-0 z-10 bg-gray-50 border-t border-gray-200">
         <div ref={promptContainerRef} className="max-w-4xl mx-auto px-6 py-4">
+          {/* Upload progress indicator */}
+          {uploadState.isUploading && uploadState.uploadProgress && (
+            <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+              <div className="flex items-center justify-between text-sm text-blue-600 mb-2">
+                <span>Uploading {uploadState.uploadProgress.fileName}...</span>
+                <span>{Math.round(uploadState.uploadProgress.progress)}%</span>
+              </div>
+              <div className="w-full bg-blue-200 rounded-full h-2">
+                <div
+                  className="bg-blue-600 h-2 rounded-full transition-all duration-200"
+                  style={{ width: `${uploadState.uploadProgress.progress}%` }}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Upload error indicator */}
+          {uploadState.error && (
+            <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-lg">
+              <p className="text-sm text-red-600">{uploadState.error}</p>
+            </div>
+          )}
+
           <PromptInput
             onSubmit={handleSubmit}
             globalDrop
@@ -99,14 +155,20 @@ export default function ChatPage() {
             </PromptInputBody>
             <PromptInputToolbar>
               <PromptInputTools>
-                <PromptInputActionMenu>
-                  <PromptInputActionMenuTrigger />
-                  <PromptInputActionMenuContent>
-                    <PromptInputActionAddAttachments />
-                  </PromptInputActionMenuContent>
-                </PromptInputActionMenu>
+                <PromptInputButton
+                  onClick={() => {
+                    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+                    fileInput?.click();
+                  }}
+                  aria-label="Add files"
+                >
+                  <PlusIcon className="size-4" />
+                </PromptInputButton>
               </PromptInputTools>
-              <PromptInputSubmit disabled={!input} />
+              <PromptInputSubmit
+                disabled={(!input && !uploadState.isUploading) || uploadState.isUploading}
+                status={uploadState.isUploading ? "submitted" : undefined}
+              />
             </PromptInputToolbar>
           </PromptInput>
         </div>

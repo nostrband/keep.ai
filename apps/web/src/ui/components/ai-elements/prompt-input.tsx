@@ -83,26 +83,29 @@ export function PromptInputAttachment({
 
   return (
     <div
-      className={cn("group relative h-14 w-14 rounded-md border", className)}
+      className={cn("group relative flex items-center gap-2 px-3 py-2 rounded-md border bg-background", className)}
       key={data.id}
       {...props}
     >
       {data.mediaType?.startsWith("image/") && data.url ? (
         <img
           alt={data.filename || "attachment"}
-          className="size-full rounded-md object-cover"
-          height={56}
+          className="h-8 w-8 rounded object-cover"
+          height={32}
           src={data.url}
-          width={56}
+          width={32}
         />
       ) : (
-        <div className="flex size-full items-center justify-center text-muted-foreground">
+        <div className="flex h-8 w-8 items-center justify-center text-muted-foreground">
           <PaperclipIcon className="size-4" />
         </div>
       )}
+      <span className="text-sm text-foreground truncate">
+        File: {data.filename || "Unknown"}
+      </span>
       <Button
         aria-label="Remove attachment"
-        className="-right-1.5 -top-1.5 absolute h-6 w-6 rounded-full opacity-0 group-hover:opacity-100"
+        className="ml-auto h-6 w-6 rounded-full opacity-0 group-hover:opacity-100"
         onClick={() => attachments.remove(data.id)}
         size="icon"
         type="button"
@@ -637,7 +640,12 @@ export const PromptInputActionMenuContent = ({
   className,
   ...props
 }: PromptInputActionMenuContentProps) => (
-  <DropdownMenuContent align="start" className={cn(className)} {...props} />
+  <DropdownMenuContent
+    align="start"
+    side="top"
+    className={cn(className)}
+    {...props}
+  />
 );
 
 export type PromptInputActionMenuItemProps = ComponentProps<
