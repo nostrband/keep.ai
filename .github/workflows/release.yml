@@ -15,6 +15,7 @@ jobs:
   build:
     name: Build for ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    environment: production # to get the secrets.*
     env:
       NODE_OPTIONS: --max_old_space_size=4096   # 4GB, tune as needed
       BUILD_GMAIL_SECRET: ${{ secrets.BUILD_GMAIL_SECRET }}
@@ -46,21 +47,31 @@ jobs:
 
       - name: Build deps
         run: npm exec turbo run build -- --filter=@app/browser --filter=@app/agent
+        env:
+          BUILD_GMAIL_SECRET: ${{ secrets.BUILD_GMAIL_SECRET }}
 
       - name: Build electron SPA 
         run: npm exec turbo run build:electron -- --filter=@app/web
+        env:
+          BUILD_GMAIL_SECRET: ${{ secrets.BUILD_GMAIL_SECRET }}
 
       - name: Build server
         run: npm run build
         working-directory: apps/server
+        env:
+          BUILD_GMAIL_SECRET: ${{ secrets.BUILD_GMAIL_SECRET }}
 
       - name: Build node
         run: npm run build
         working-directory: packages/node
+        env:
+          BUILD_GMAIL_SECRET: ${{ secrets.BUILD_GMAIL_SECRET }}
 
       - name: Build electron app
         run: npm run build
         working-directory: apps/electron
+        env:
+          BUILD_GMAIL_SECRET: ${{ secrets.BUILD_GMAIL_SECRET }}
 
       - name: Build distributables with electron-builder
         run: |
