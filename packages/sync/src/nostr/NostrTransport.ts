@@ -390,7 +390,7 @@ class PeerRecv {
 
       // Got it? Append everything up to last event to buffer
       if (lastIndex >= 0) {
-        buffer.push(...events.slice(0, lastIndex));
+        buffer.push(...events.slice(0, lastIndex + 1));
         return buffer;
       }
 

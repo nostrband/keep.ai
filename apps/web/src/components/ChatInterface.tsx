@@ -191,7 +191,7 @@ export default function ChatInterface({
     if (isFirstLoadRef.current && rows.length > 0) {
       isFirstLoadRef.current = false;
       lastTimestampRef.current = lastMessageTimestamp;
-      scrollToBottom("auto");
+      // scrollToBottom("auto");
       return;
     }
 
