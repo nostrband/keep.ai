@@ -16,6 +16,7 @@ export const EVENT_TYPES = {
   PDF_EXPLAIN: "pdf_explain",
   AUDIO_EXPLAIN: "audio_explain",
   TASK_RUN: "task_run",
+  GMAIL_API_CALL: "gmail_api_call",
 } as const;
 
 export type EventType = (typeof EVENT_TYPES)[keyof typeof EVENT_TYPES];
@@ -113,6 +114,11 @@ export interface TaskRunEventPayload extends BaseEventPayload {
   // task_run events are invisible markers for grouping
 }
 
+export interface GmailApiCallEventPayload extends BaseEventPayload {
+  method: string;
+  params: any;
+}
+
 // Union type for all event payloads
 export type EventPayload =
   | CreateNoteEventPayload
@@ -130,7 +136,8 @@ export type EventPayload =
   | ImagesTransformEventPayload
   | PdfExplainEventPayload
   | AudioExplainEventPayload
-  | TaskRunEventPayload;
+  | TaskRunEventPayload
+  | GmailApiCallEventPayload;
 
 // Event interface that matches the database structure
 export interface ChatEvent {
@@ -270,6 +277,14 @@ export const EVENT_CONFIGS: Record<EventType, EventConfig> = {
   [EVENT_TYPES.TASK_RUN]: {
     emoji: "⚙️",
     title: () => "Task Run",
+    hasId: false,
+  },
+  [EVENT_TYPES.GMAIL_API_CALL]: {
+    emoji: "📧",
+    title: (payload) => {
+      const gmailPayload = payload as GmailApiCallEventPayload;
+      return `Gmail: ${gmailPayload.method}`;
+    },
     hasId: false,
   },
 };

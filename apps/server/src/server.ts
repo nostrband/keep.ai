@@ -33,6 +33,7 @@ import debug from "debug";
 import path from "path";
 import os from "os";
 import fs from "fs";
+import { promises as fsPromises } from "fs";
 import { createHash } from "crypto";
 import dotenv from "dotenv";
 import { detectBufferMime, detectFilenameMime, mimeToExt } from "@app/node";
@@ -57,6 +58,7 @@ import {
 } from "nostr-tools";
 import { bytesToHex, hexToBytes } from "nostr-tools/utils";
 import { randomBytes } from "crypto";
+import { google } from "googleapis";
 
 const debugServer = debug("server:server");
 
@@ -78,6 +80,10 @@ if (fs.existsSync(envPath)) {
 const DEFAULT_PUSH_SERVER_PUBKEY =
   "e46b5c98fe12661a765ded00ca05866ea0b58bd175454aed703fba2589f6c666";
 
+// Gmail OAuth configuration
+const GMAIL_CLIENT_ID = "642393276548-lfrhhkuf7nfuo6o3542tmibj8306a17m.apps.googleusercontent.com";
+const GMAIL_CLIENT_SECRET = process.env.GMAIL_SECRET || process.env.BUILD_GMAIL_SECRET;
+
 // Parse NOSTR_RELAYS environment variable
 const getNostrRelays = (): string[] => {
   const relaysEnv = process.env.NOSTR_RELAYS;
@@ -97,11 +103,44 @@ setEnvFromProcess(process.env);
 // For CommonJS compatibility
 const __dirname = process.cwd();
 
+async function createGmailOAuth2Client(userPath: string) {
+  try {
+    if (!GMAIL_CLIENT_SECRET) {
+      return null;
+    }
+
+    const gmailTokenPath = path.join(userPath, "gmail.json");
+    
+    if (!fs.existsSync(gmailTokenPath)) {
+      return null;
+    }
+
+    // Load stored tokens
+    const tokenData = await fsPromises.readFile(gmailTokenPath, "utf8");
+    const tokens = JSON.parse(tokenData);
+
+    // Create OAuth client with stored tokens
+    const oAuth2Client = new google.auth.OAuth2(
+      GMAIL_CLIENT_ID,
+      GMAIL_CLIENT_SECRET
+    );
+    oAuth2Client.setCredentials(tokens);
+
+    return oAuth2Client;
+  } catch (error) {
+    debugServer("Failed to create Gmail OAuth2 client:", error);
+    return null;
+  }
+}
+
 async function createReplWorker(keepDB: KeepDb, userPath: string) {
+  const gmailOAuth2Client = await createGmailOAuth2Client(userPath);
+  
   const worker = new TaskWorker({
     api: new KeepDbApi(keepDB),
     stepLimit: 20,
     userPath,
+    gmailOAuth2Client,
   });
 
   return worker;
@@ -909,6 +948,377 @@ export async function createServer(config: ServerConfig = {}) {
       return reply.status(500).send({
         error: "Failed to save configuration",
         message: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
+  // Gmail integration endpoints
+  app.get("/api/gmail/status", async (request, reply) => {
+    try {
+      const gmailTokenPath = path.join(userPath, "gmail.json");
+      const isConnected = fs.existsSync(gmailTokenPath);
+      return reply.send({ connected: isConnected });
+    } catch (error) {
+      debugServer("Error in /api/gmail/status:", error);
+      return reply.status(500).send({
+        error: "Failed to check Gmail status",
+        message: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
+  app.post("/api/gmail/connect", async (request, reply) => {
+    try {
+      if (!GMAIL_CLIENT_SECRET) {
+        return reply.status(500).send({
+          error: "Gmail client secret not configured"
+        });
+      }
+
+      const redirectUri = `${request.protocol}://${request.hostname}${request.hostname === 'localhost' ? `:${process.env.PORT || 3000}` : ''}/api/gmail/callback`;
+      
+      const oAuth2Client = new google.auth.OAuth2(
+        GMAIL_CLIENT_ID,
+        GMAIL_CLIENT_SECRET,
+        redirectUri
+      );
+
+      const authUrl = oAuth2Client.generateAuthUrl({
+        access_type: "offline",
+        scope: ["https://www.googleapis.com/auth/gmail.modify"],
+        prompt: "consent",
+      });
+
+      return reply.send({ authUrl });
+    } catch (error) {
+      debugServer("Error in /api/gmail/connect:", error);
+      return reply.status(500).send({
+        error: "Failed to generate Gmail auth URL",
+        message: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
+  app.get("/api/gmail/callback", async (request, reply) => {
+    try {
+      const query = request.query as { code?: string; error?: string };
+      const { code, error } = query;
+
+      if (error) {
+        reply.header('Content-Type', 'text/html');
+        return reply.send(`
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <title>Keep.AI</title>
+              <style>
+                body {
+                  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                  display: flex;
+                  justify-content: center;
+                  align-items: center;
+                  min-height: 100vh;
+                  margin: 0;
+                  background-color: #f5f5f5;
+                }
+                .container {
+                  text-align: center;
+                  background: white;
+                  padding: 40px;
+                  border-radius: 8px;
+                  box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+                }
+                .logo {
+                  width: 64px;
+                  height: 64px;
+                  border: 2px solid #D6A642;
+                  border-radius: 4px;
+                  margin: 0 auto 20px auto;
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                  font-size: 32px;
+                  font-weight: bold;
+                }
+                .title {
+                  font-size: 24px;
+                  font-weight: bold;
+                  margin-bottom: 20px;
+                  color: #333;
+                }
+                .error {
+                  color: #dc3545;
+                  margin: 20px 0;
+                }
+                .countdown {
+                  color: #666;
+                  font-size: 14px;
+                  margin-top: 10px;
+                }
+              </style>
+            </head>
+            <body>
+              <div class="container">
+                <div class="logo">K</div>
+                <div class="title">Keep.AI</div>
+                <div class="error">
+                  <h2>Authorization Failed</h2>
+                  <p>Error: ${error}</p>
+                </div>
+                <div class="countdown">This page will close in <span id="countdown">5</span> seconds</div>
+              </div>
+              <script>
+                let timeLeft = 5;
+                const countdownEl = document.getElementById('countdown');
+                const timer = setInterval(() => {
+                  timeLeft--;
+                  countdownEl.textContent = timeLeft;
+                  if (timeLeft <= 0) {
+                    clearInterval(timer);
+                    window.close();
+                  }
+                }, 1000);
+              </script>
+            </body>
+          </html>
+        `);
+      }
+
+      if (!code) {
+        return reply.status(400).send({ error: "No authorization code received" });
+      }
+
+      if (!GMAIL_CLIENT_SECRET) {
+        return reply.status(500).send({
+          error: "Gmail client secret not configured"
+        });
+      }
+
+      const redirectUri = `${request.protocol}://${request.hostname}${request.hostname === 'localhost' ? `:${process.env.PORT || 3000}` : ''}/api/gmail/callback`;
+      
+      const oAuth2Client = new google.auth.OAuth2(
+        GMAIL_CLIENT_ID,
+        GMAIL_CLIENT_SECRET,
+        redirectUri
+      );
+
+      const { tokens } = await oAuth2Client.getToken(code);
+      
+      const gmailTokenPath = path.join(userPath, "gmail.json");
+      await fsPromises.writeFile(gmailTokenPath, JSON.stringify(tokens, null, 2), { mode: 0o600 });
+
+      reply.header('Content-Type', 'text/html');
+      return reply.send(`
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <title>Keep.AI</title>
+            <style>
+              body {
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                min-height: 100vh;
+                margin: 0;
+                background-color: #f5f5f5;
+              }
+              .container {
+                text-align: center;
+                background: white;
+                padding: 40px;
+                border-radius: 8px;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+              }
+              .logo {
+                width: 64px;
+                height: 64px;
+                border: 2px solid #D6A642;
+                border-radius: 4px;
+                margin: 0 auto 20px auto;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 32px;
+                font-weight: bold;
+              }
+              .title {
+                font-size: 24px;
+                font-weight: bold;
+                margin-bottom: 20px;
+                color: #333;
+              }
+              .success {
+                color: #28a745;
+                margin: 20px 0;
+              }
+              .countdown {
+                color: #666;
+                font-size: 14px;
+                margin-top: 10px;
+              }
+            </style>
+          </head>
+          <body>
+            <div class="container">
+              <div class="logo">K</div>
+              <div class="title">Keep.AI</div>
+              <div class="success">
+                <h2>Connected!</h2>
+                <p>Gmail has been successfully connected to your Keep.AI account.</p>
+              </div>
+              <div class="countdown">This page will close in <span id="countdown">5</span> seconds</div>
+            </div>
+            <script>
+              let timeLeft = 5;
+              const countdownEl = document.getElementById('countdown');
+              const timer = setInterval(() => {
+                timeLeft--;
+                countdownEl.textContent = timeLeft;
+                if (timeLeft <= 0) {
+                  clearInterval(timer);
+                  window.close();
+                }
+              }, 1000);
+            </script>
+          </body>
+        </html>
+      `);
+    } catch (error) {
+      debugServer("Error in /api/gmail/callback:", error);
+      reply.header('Content-Type', 'text/html');
+      return reply.send(`
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <title>Keep.AI</title>
+            <style>
+              body {
+                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                min-height: 100vh;
+                margin: 0;
+                background-color: #f5f5f5;
+              }
+              .container {
+                text-align: center;
+                background: white;
+                padding: 40px;
+                border-radius: 8px;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+              }
+              .logo {
+                width: 64px;
+                height: 64px;
+                border: 2px solid #D6A642;
+                border-radius: 4px;
+                margin: 0 auto 20px auto;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 32px;
+                font-weight: bold;
+              }
+              .title {
+                font-size: 24px;
+                font-weight: bold;
+                margin-bottom: 20px;
+                color: #333;
+              }
+              .error {
+                color: #dc3545;
+                margin: 20px 0;
+              }
+              .countdown {
+                color: #666;
+                font-size: 14px;
+                margin-top: 10px;
+              }
+            </style>
+          </head>
+          <body>
+            <div class="container">
+              <div class="logo">K</div>
+              <div class="title">Keep.AI</div>
+              <div class="error">
+                <h2>Connection Failed</h2>
+                <p>There was an error connecting Gmail to your account.</p>
+              </div>
+              <div class="countdown">This page will close in <span id="countdown">5</span> seconds</div>
+            </div>
+            <script>
+              let timeLeft = 5;
+              const countdownEl = document.getElementById('countdown');
+              const timer = setInterval(() => {
+                timeLeft--;
+                countdownEl.textContent = timeLeft;
+                if (timeLeft <= 0) {
+                  clearInterval(timer);
+                  window.close();
+                }
+              }, 1000);
+            </script>
+          </body>
+        </html>
+      `);
+    }
+  });
+
+  app.post("/api/gmail/check", async (request, reply) => {
+    try {
+      const gmailTokenPath = path.join(userPath, "gmail.json");
+      
+      if (!fs.existsSync(gmailTokenPath)) {
+        return reply.status(400).send({
+          success: false,
+          error: "Gmail token not found. Please connect Gmail first."
+        });
+      }
+
+      if (!GMAIL_CLIENT_SECRET) {
+        return reply.status(500).send({
+          success: false,
+          error: "Gmail client secret not configured"
+        });
+      }
+
+      // Load stored tokens
+      const tokenData = await fsPromises.readFile(gmailTokenPath, "utf8");
+      const tokens = JSON.parse(tokenData);
+
+      // Create OAuth client with stored tokens
+      const oAuth2Client = new google.auth.OAuth2(
+        GMAIL_CLIENT_ID,
+        GMAIL_CLIENT_SECRET
+      );
+      oAuth2Client.setCredentials(tokens);
+
+      // Create Gmail API client
+      const gmail = google.gmail({ version: "v1", auth: oAuth2Client });
+
+      // Make a basic API call to test the connection
+      const response = await gmail.users.getProfile({ userId: "me" });
+      
+      if (response.data && response.data.emailAddress) {
+        return reply.send({
+          success: true,
+          email: response.data.emailAddress,
+          messagesTotal: response.data.messagesTotal || 0,
+          threadsTotal: response.data.threadsTotal || 0
+        });
+      } else {
+        return reply.status(500).send({
+          success: false,
+          error: "Invalid response from Gmail API"
+        });
+      }
+    } catch (error) {
+      debugServer("Error in /api/gmail/check:", error);
+      return reply.status(500).send({
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error checking Gmail connection"
       });
     }
   });

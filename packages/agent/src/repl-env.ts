@@ -25,6 +25,7 @@ import {
   makeImagesTransformTool,
   makePdfExplainTool,
   makeAudioExplainTool,
+  makeGmailTool,
 } from "./tools";
 import { z, ZodFirstPartyTypeKind as K } from "zod";
 import { EvalContext, EvalGlobal } from "./sandbox/sandbox";
@@ -46,7 +47,8 @@ export class ReplEnv {
     type: TaskType,
     cron: string,
     getContext: () => EvalContext,
-    private userPath?: string
+    private userPath?: string,
+    private gmailOAuth2Client?: any
   ) {
     this.api = api;
     this.type = type;
@@ -329,6 +331,16 @@ Example: await ${ns}.${name}(<input>)
         "Audio",
         "explain",
         makeAudioExplainTool(this.api.fileStore, this.userPath, this.getContext)
+      );
+    }
+
+    // Gmail tools for worker only
+    if (this.type !== "replier" && this.gmailOAuth2Client) {
+      addTool(
+        global,
+        "Gmail",
+        "api",
+        makeGmailTool(this.getContext, this.gmailOAuth2Client)
       );
     }
 

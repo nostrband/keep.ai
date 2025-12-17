@@ -2,7 +2,22 @@ import React from "react";
 import { Link } from "react-router-dom";
 import { useTask } from "../hooks/dbTaskReads";
 import { EventItem } from "./EventItem";
-import { EventType, EventPayload } from "../types/events";
+import { EventType, EventPayload, GmailApiCallEventPayload, EVENT_TYPES } from "../types/events";
+
+// Transform Gmail API method names to simpler, user-friendly names
+function transformGmailMethod(method: string): string {
+  const methodMap: Record<string, string> = {
+    "users.messages.list": "messages",
+    "users.messages.get": "messages",
+    "users.messages.attachments.get": "attachments",
+    "users.history.list": "history",
+    "users.threads.get": "threads",
+    "users.threads.list": "threads",
+    "users.getProfile": "profile"
+  };
+  
+  return methodMap[method] || method.split('.').pop() || method;
+}
 
 interface TaskEvent {
   id: string;
@@ -33,8 +48,38 @@ export function TaskEventGroup({ taskId, events }: TaskEventGroupProps) {
   // Filter out task_run events (they are invisible markers for grouping)
   const visibleEvents = events.filter(event => event.type !== 'task_run');
   
+  // Separate gmail_api_call events from other events
+  const gmailEvents = visibleEvents.filter(event => event.type === EVENT_TYPES.GMAIL_API_CALL);
+  const nonGmailEvents = visibleEvents.filter(event => event.type !== EVENT_TYPES.GMAIL_API_CALL);
+  
+  // Create consolidated gmail event if there are gmail events
+  let consolidatedGmailEvent = null;
+  if (gmailEvents.length > 0) {
+    // Extract unique methods from all gmail events
+    const uniqueMethods = Array.from(new Set(
+      gmailEvents.map(event => transformGmailMethod((event.content as GmailApiCallEventPayload).method))
+    ));
+    
+    // Create a consolidated event
+    consolidatedGmailEvent = {
+      id: `gmail-consolidated-${gmailEvents[0].id}`,
+      type: EVENT_TYPES.GMAIL_API_CALL,
+      content: {
+        ...gmailEvents[0].content,
+        method: `${uniqueMethods.join(', ')}`
+      } as GmailApiCallEventPayload,
+      timestamp: gmailEvents[0].timestamp
+    };
+  }
+  
+  // Combine non-gmail events with consolidated gmail event
+  const finalEvents = [
+    ...nonGmailEvents,
+    ...(consolidatedGmailEvent ? [consolidatedGmailEvent] : [])
+  ];
+  
   // Check if this is an empty group (only task_run events)
-  const isEmpty = visibleEvents.length === 0;
+  const isEmpty = finalEvents.length === 0;
 
   return (
     <div className={`mx-0 my-3 border border-gray-200 bg-gray-50 ${isEmpty ? 'rounded-lg' : 'rounded-lg'}`}>
@@ -91,7 +136,7 @@ export function TaskEventGroup({ taskId, events }: TaskEventGroupProps) {
       {/* Events List - only show if there are visible events */}
       {!isEmpty && (
         <div className="p-2 space-y-1">
-          {visibleEvents.map((event) => (
+          {finalEvents.map((event) => (
             <EventItem
               key={event.id}
               type={event.type as EventType}

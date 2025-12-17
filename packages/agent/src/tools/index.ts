@@ -24,3 +24,4 @@ export { makeImagesExplainTool } from "./images-explain";
 export { makeImagesTransformTool } from "./images-transform";
 export { makePdfExplainTool } from "./pdf-explain";
 export { makeAudioExplainTool } from "./audio-explain";
+export { makeGmailTool } from "./gmail";

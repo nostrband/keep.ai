@@ -33,12 +33,14 @@ export interface TaskWorkerConfig {
   api: KeepDbApi;
   stepLimit?: number; // default 50
   userPath?: string; // path to user files directory
+  gmailOAuth2Client?: any; // Gmail OAuth2 client
 }
 
 export class TaskWorker {
   private api: KeepDbApi;
   private stepLimit: number;
   private userPath?: string;
+  private gmailOAuth2Client?: any;
 
   private isRunning: boolean = false;
   private isShuttingDown: boolean = false;
@@ -50,6 +52,7 @@ export class TaskWorker {
     this.api = config.api;
     this.stepLimit = config.stepLimit || 50;
     this.userPath = config.userPath;
+    this.gmailOAuth2Client = config.gmailOAuth2Client;
     this.debug("Constructed");
   }
 
@@ -568,7 +571,8 @@ export class TaskWorker {
       taskType,
       task.cron,
       () => sandbox.context!,
-      this.userPath
+      this.userPath,
+      this.gmailOAuth2Client
     );
     sandbox.setGlobal(await env.createGlobal());
 

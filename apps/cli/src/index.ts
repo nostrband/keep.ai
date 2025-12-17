@@ -6,6 +6,7 @@ import { registerWorkerCommand } from './commands/worker';
 import { registerInitCommand } from './commands/init';
 import { registerSandboxCommand } from './commands/sandbox';
 import { registerVacuumCommand } from './commands/vacuum';
+import { registerGmailCommand } from './commands/gmail';
 import { KEEPAI_DIR } from './const';
 import { Env, setEnv, setEnvFromProcess } from '@app/agent';
 import * as path from 'path';
@@ -68,6 +69,7 @@ registerWorkerCommand(program);
 registerSandboxCommand(program);
 registerAgentCommand(program);
 registerVacuumCommand(program);
+registerGmailCommand(program);
 
 // Parse command line arguments
 program.parse(process.argv);
