@@ -32,6 +32,7 @@ import {
   nativeImage,
   protocol,
   net,
+  shell,
 } from "electron";
 import path from "path";
 import { createServer } from "@app/server";
@@ -102,29 +103,34 @@ function setupIpcHandlers(): void {
     return app.getVersion();
   });
 
-  // Handle message sending
-  ipcMain.handle("app:sendMessage", (event: any, message: string) => {
-    console.log("Received message from renderer:", message);
-
-    // Echo the message back with a timestamp
-    const response = `Echo: ${message} (received at ${new Date().toLocaleTimeString()})`;
-
-    // You could also send a message back to the renderer
-    if (mainWindow) {
-      mainWindow.webContents.send(
-        "app:message",
-        `Main process received: ${message}`
-      );
-    }
-
-    return response;
+  // Handle external URL opening
+  ipcMain.handle('open-external', async (_event, url: string) => {
+    await shell.openExternal(url);
   });
 
-  // Handle dialog operations
-  ipcMain.handle("dialog:openPath", async (event: any, path: string) => {
-    console.log("Opening path:", path);
-    return `Path opened: ${path}`;
-  });
+  // // Handle message sending
+  // ipcMain.handle("app:sendMessage", (event: any, message: string) => {
+  //   console.log("Received message from renderer:", message);
+
+  //   // Echo the message back with a timestamp
+  //   const response = `Echo: ${message} (received at ${new Date().toLocaleTimeString()})`;
+
+  //   // You could also send a message back to the renderer
+  //   if (mainWindow) {
+  //     mainWindow.webContents.send(
+  //       "app:message",
+  //       `Main process received: ${message}`
+  //     );
+  //   }
+
+  //   return response;
+  // });
+
+  // // Handle dialog operations
+  // ipcMain.handle("dialog:openPath", async (event: any, path: string) => {
+  //   console.log("Opening path:", path);
+  //   return `Path opened: ${path}`;
+  // });
 }
 
 function createTray(): void {
@@ -264,7 +270,7 @@ function setupDownloadHandler() {
         headers: { "content-type": mimeType },
       });
     } catch (err) {
-      console.error("[protocol.handle(file)] error:", err);
+      debugMain("[protocol.handle(file)] error:", err);
       return new Response("Internal error", {
         status: 500,
         headers: { "content-type": "text/plain" },
@@ -287,7 +293,7 @@ app.whenReady().then(async () => {
     });
 
     serverPort = port;
-    console.log(`API server started on port ${port}`);
+    debugMain(`API server started on port ${port}`);
 
     // Set environment variable for SPA
     process.env.API_ENDPOINT = `http://localhost:${port}/api`;
@@ -302,7 +308,7 @@ app.whenReady().then(async () => {
       app.dock.hide();
     }
   } catch (error) {
-    console.error("Failed to start server:", error);
+    debugMain("Failed to start server:", error);
     app.quit();
   }
 
@@ -357,7 +363,7 @@ app.whenReady().then(async () => {
 app.on("window-all-closed", () => {
   // Keep the app running in the tray - don't quit
   // The server will continue running in the background
-  console.log("All windows closed, app continues running in tray");
+  debugMain("All windows closed, app continues running in tray");
 });
 
 // Handle app quit - only when explicitly quitting (e.g., from tray menu)
@@ -366,14 +372,14 @@ app.on("before-quit", async (event: any) => {
     event.preventDefault();
     isQuiting = true;
     try {
-      console.log("Closing server before quit...");
+      debugMain("Closing server before quit...");
       await server.close();
       server = null;
-      console.log("Server closed, quitting app...");
+      debugMain("Server closed, quitting app...");
       disposeContextMenu();
       app.quit();
     } catch (error) {
-      console.error("Error closing server:", error);
+      debugMain("Error closing server:", error);
       app.quit();
     }
   }

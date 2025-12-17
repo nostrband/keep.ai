@@ -10,25 +10,20 @@ contextBridge.exposeInMainWorld('env', {
   NODE_ENV: process.env.NODE_ENV,
 });
 
+// Expose the openExternal API for proper URL handling
+contextBridge.exposeInMainWorld('appApi', {
+  openExternal: (url: string) => ipcRenderer.invoke('open-external', url),
+});
+
 // Expose protected methods that allow the renderer process to use
 // the ipcRenderer without exposing the entire object
 contextBridge.exposeInMainWorld('electronAPI', {
-  // Example API methods
-  openPath: (path: string) => ipcRenderer.invoke('dialog:openPath', path),
-  
+
   // Get app version
   getVersion: () => ipcRenderer.invoke('app:getVersion'),
   
   // Platform information
   getPlatform: () => process.platform,
-  
-  // Example of sending messages to main process
-  sendMessage: (message: string) => ipcRenderer.invoke('app:sendMessage', message),
-  
-  // Example of listening to messages from main process
-  onMessage: (callback: (message: string) => void) => {
-    ipcRenderer.on('app:message', (event: any, message: any) => callback(message));
-  },
   
   // Remove listeners
   removeAllListeners: (channel: string) => {

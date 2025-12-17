@@ -4,22 +4,26 @@
     "build": {
       "cache": false,
       "dependsOn": ["^build"],
-      "outputs": ["dist/**", "public/**", "build/**"]
+      "outputs": ["dist/**", "public/**", "build/**"],
+      "env": ["BUILD_GMAIL_SECRET"]
     },
     "build:serverless": {
       "cache": false,
       "dependsOn": ["^build"],
-      "outputs": ["dist/**", "public/**", "build/**"]
+      "outputs": ["dist/**", "public/**", "build/**"],
+      "env": ["BUILD_GMAIL_SECRET"]
     },
     "build:electron": {
       "cache": false,
       "dependsOn": ["^build"],
-      "outputs": ["dist/**", "public/**", "build/**"]
+      "outputs": ["dist/**", "public/**", "build/**"],
+      "env": ["BUILD_GMAIL_SECRET"]
     },
     "build:frontend": {
       "cache": false,
       "dependsOn": ["^build"],
-      "outputs": ["dist/**", "public/**", "build/**"]
+      "outputs": ["dist/**", "public/**", "build/**"],
+      "env": ["BUILD_GMAIL_SECRET"]
     },
     "dev": {
       "cache": false,

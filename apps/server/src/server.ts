@@ -970,12 +970,15 @@ export async function createServer(config: ServerConfig = {}) {
   app.post("/api/gmail/connect", async (request, reply) => {
     try {
       if (!GMAIL_CLIENT_SECRET) {
+        debugServer("Gmail client secret not configured");
         return reply.status(500).send({
           error: "Gmail client secret not configured"
         });
       }
 
+      debugServer("gmail connect request url", request.url);
       const redirectUri = `${request.protocol}://${request.hostname}${request.hostname === 'localhost' ? `:${process.env.PORT || 3000}` : ''}/api/gmail/callback`;
+      debugServer("redirectUri", redirectUri)
       
       const oAuth2Client = new google.auth.OAuth2(
         GMAIL_CLIENT_ID,

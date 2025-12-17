@@ -3,6 +3,7 @@ import { API_ENDPOINT } from "../const";
 import SharedHeader from "./SharedHeader";
 import { Button } from "../ui";
 import { SUPPORTED_LANGUAGES, getBrowserLanguage, getLanguageDisplayName } from "../lib/language-utils";
+import { openUrl } from "../lib/url-utils";
 // import { DEFAULT_AGENT_MODEL } from "@app/agent";
 
 interface OpenRouterModel {
@@ -221,7 +222,7 @@ export default function SettingsPage() {
 
       const data = await response.json();
       // Open auth URL in new window/tab
-      window.open(data.authUrl, '_blank', 'width=500,height=600');
+      openUrl(data.authUrl);
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Failed to connect Gmail"
