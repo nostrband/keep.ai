@@ -17,6 +17,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       NODE_OPTIONS: --max_old_space_size=4096   # 4GB, tune as needed
+      BUILD_GMAIL_SECRET: ${{ secrets.BUILD_GMAIL_SECRET }}
     strategy:
       matrix:
         include:
