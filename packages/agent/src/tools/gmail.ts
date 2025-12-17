@@ -71,7 +71,9 @@ export function makeGmailTool(getContext: () => EvalContext, gmailOAuth2Client?:
             throw new Error(`Method ${method} not implemented`);
         }
         
-        await getContext().createEvent("gmail_api_call", { method, params: processedParams });
+        // Don't spam events with 'get' methods which usually happen in batches
+        if (method.includes("list"))
+          await getContext().createEvent("gmail_api_call", { method, params: processedParams });
         
         debugGmail("Gmail API call completed", { method, success: true });
         

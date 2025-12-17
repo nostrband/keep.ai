@@ -253,7 +253,31 @@ export class TaskWorker {
       // Set agent status in db
       statusUpdaterInterval = await this.startStatusUpdater(taskType);
 
-      // New thread for each attempt
+      // Run reason
+      let reason: "start" | "input" | "timer" = "start";
+      if (task.state !== "") reason = inbox.length > 0 ? "input" : "timer";
+
+      // We restore existing session on 'input' reason for worker,
+      // bcs that generally means user is supplying 
+      // a followup message/question to latest worker reply
+      let history: AssistantUIMessage[] = [];
+      if (taskType === "worker" && reason === "input") {
+        // Load existing history 
+        // NOTE: we start a new thread but copy history from
+        // old thread, to make sure our observability traces
+        // have separate threads for users to analize
+        history = await this.loadHistory(task.thread_id);
+        this.debug(
+          "Restoring task",
+          task.id,
+          "from thread",
+          task.thread_id,
+          "history",
+          history.length
+        );
+      }
+
+      // New thread for each new 'start' reason
       task.thread_id = generateId();
       // Placeholder, FIXME add title?
       await this.ensureThread(task.thread_id, taskType);
@@ -269,10 +293,6 @@ export class TaskWorker {
           ...state,
         },
       };
-
-      // Run reason
-      let reason: "start" | "input" | "timer" = "start";
-      if (task.state !== "") reason = inbox.length > 0 ? "input" : "timer";
 
       // Model for agent
       const modelName = getModelName();
@@ -295,6 +315,9 @@ export class TaskWorker {
       // Init agent
       const model = getOpenRouter()(modelName);
       const agent = new ReplAgent(model, env, sandbox, agentTask);
+
+      // Copy restored history
+      agent.history.push(...history);
 
       try {
         // Helper
@@ -715,6 +738,13 @@ export class TaskWorker {
       };
       await this.api.memoryStore.saveThread(thread);
     }
+  }
+
+  private async loadHistory(threadId: string) {
+    return await this.api.memoryStore.getMessages({
+      threadId,
+      limit: 100,
+    });
   }
 
   private async saveHistory(history: AssistantUIMessage[], threadId: string) {

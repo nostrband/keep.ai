@@ -205,7 +205,9 @@ export default function ChatInterface({
     if (hasNewMessage) {
       // NOTE: if were down - scroll to show it,
       // otherwise don't touch scrollTop to keep position
-      if (wasAtBottomRef.current) scrollToBottom("smooth");
+      // FIXME this seems to break mobile scroll when last assistant
+      // message is bigger than screen
+      // if (wasAtBottomRef.current) scrollToBottom("smooth");
     } else if (currentScrollFromBottom.current) {
       const { clientHeight: newClientHeight, scrollHeight: newScrollHeight } =
         document.documentElement;
