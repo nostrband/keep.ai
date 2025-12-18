@@ -1,5 +1,11 @@
 import fs from "fs";
 import path from "path";
+import { createHash } from "crypto";
+import debug from "debug";
+import { detectBufferMime, detectFilenameMime, mimeToExt } from "./mimeUtils";
+import type { FileStore, File } from "@app/db";
+
+const debugFileUtils = debug("fileUtils");
 
 export interface FileStats {
   size: number;
@@ -59,3 +65,95 @@ export const fileUtils = {
   
   allocBuffer: (size: number) => new Uint8Array(size),
 };
+
+// Store file data to disk and database (moved from apps/server)
+export async function storeFileData(
+  fileBuffer: Buffer,
+  filename: string,
+  userPath: string,
+  fileStore: FileStore,
+  providedMimeType?: string,
+  providedSummary?: string
+): Promise<File> {
+  debugFileUtils("Processing file data", filename, "size:", fileBuffer.length);
+
+  // Calculate SHA256 hash as ID
+  const hash = createHash("sha256");
+  hash.update(fileBuffer);
+  const fileId = hash.digest("hex");
+  debugFileUtils("File hash", fileId);
+
+  // Check if file already exists
+  const existingFile = await fileStore.getFile(fileId);
+  debugFileUtils("Existing file", existingFile);
+  if (existingFile) {
+    return existingFile;
+  }
+
+  let mediaType: string = providedMimeType || "";
+  
+  // Only auto-detect if no mime type was provided
+  if (!mediaType) {
+    try {
+      // Detect media type using file-type
+      mediaType = await detectBufferMime(fileBuffer);
+      debugFileUtils("Mime buffer", mediaType);
+    } catch (e) {
+      console.error("Error in detectBufferMime", e);
+    }
+
+    // Refine using filename if result is generic
+    if (!mediaType && filename && filename !== "unknown") {
+      try {
+        mediaType = detectFilenameMime(filename, mediaType);
+      } catch (e) {
+        console.error("Error in detectFilenameMime", e);
+      }
+      debugFileUtils("Mime filename", mediaType);
+    }
+  }
+
+  // Get file extension from filename, or take from media-type
+  const extensionMatch = filename.match(/\.([^.]+)$/);
+  const extension = extensionMatch ? extensionMatch[1] : mimeToExt(mediaType);
+  debugFileUtils(
+    "Filename",
+    filename,
+    "extension",
+    extension,
+    "media type",
+    mediaType
+  );
+
+  // Format file path: <userPath>/files/<id>.<extension>
+  const filesDir = path.join(userPath, "files");
+  debugFileUtils("Files dir", filesDir);
+  if (!fs.existsSync(filesDir)) {
+    fs.mkdirSync(filesDir, { recursive: true });
+    debugFileUtils("Files dir created");
+  }
+
+  const fileNameLocal = `${fileId}${extension ? `.${extension}` : ""}`;
+  const filePathLocal = path.join(filesDir, fileNameLocal);
+
+  // Write file to local path
+  debugFileUtils("Writing to", filePathLocal);
+  fs.writeFileSync(filePathLocal, fileBuffer);
+  debugFileUtils("Finished writing to", filePathLocal);
+
+  // Create file record
+  const fileRecord: File = {
+    id: fileId,
+    name: filename,
+    path: fileNameLocal,
+    size: fileBuffer.length,
+    summary: providedSummary || "", // Use provided summary or empty string
+    upload_time: new Date().toISOString(),
+    media_type: mediaType || "",
+  };
+
+  // Insert file to database
+  await fileStore.insertFile(fileRecord);
+
+  return fileRecord;
+}

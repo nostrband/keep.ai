@@ -18,6 +18,7 @@ import {
   makePostponeInboxItemTool,
   makeListEventsTool,
   makeReadFileTool,
+  makeSaveFileTool,
   makeListFilesTool,
   makeSearchFilesTool,
   makeImagesGenerateTool,
@@ -283,6 +284,12 @@ Example: await ${ns}.${name}(<input>)
           "Files",
           "read",
           makeReadFileTool(this.api.fileStore, this.userPath)
+        );
+        addTool(
+          global,
+          "Files",
+          "save",
+          makeSaveFileTool(this.api.fileStore, this.userPath)
         );
       }
       addTool(global, "Files", "list", makeListFilesTool(this.api.fileStore));

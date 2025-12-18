@@ -7,6 +7,7 @@ import {
   getDBPath,
   getUserPath,
   getDefaultCompression,
+  storeFileData,
 } from "@app/node";
 import {
   DBInterface,
@@ -547,91 +548,6 @@ export async function createServer(config: ServerConfig = {}) {
     }
   };
 
-  // Helper function to store file data (common logic for all upload methods)
-  async function storeFileData(
-    fileBuffer: Buffer,
-    filename: string,
-    userPath: string,
-    fileStore: FileStore
-  ): Promise<File> {
-    debugServer("Processing file data", filename, "size:", fileBuffer.length);
-
-    // Calculate SHA256 hash as ID
-    const hash = createHash("sha256");
-    hash.update(fileBuffer);
-    const fileId = hash.digest("hex");
-    debugServer("File hash", fileId);
-
-    // Check if file already exists
-    const existingFile = await fileStore.getFile(fileId);
-    debugServer("Existing file", existingFile);
-    if (existingFile) {
-      return existingFile;
-    }
-
-    let mediaType: string = "";
-    try {
-      // Detect media type using file-type
-      mediaType = await detectBufferMime(fileBuffer);
-      debugServer("Mime buffer", mediaType);
-    } catch (e) {
-      console.error("Error in detectBufferMime", e);
-    }
-
-    // Refine using filename if result is generic
-    if (!mediaType && filename && filename !== "unknown") {
-      try {
-        mediaType = detectFilenameMime(filename, mediaType);
-      } catch (e) {
-        console.error("Error in detectFilenameMime", e);
-      }
-      debugServer("Mime filename", mediaType);
-    }
-
-    // Get file extension from filename, or take from media-type
-    const extensionMatch = filename.match(/\.([^.]+)$/);
-    const extension = extensionMatch ? extensionMatch[1] : mimeToExt(mediaType);
-    debugServer(
-      "Filename",
-      filename,
-      "extension",
-      extension,
-      "media type",
-      mediaType
-    );
-
-    // Format file path: <userPath>/files/<id>.<extension>
-    const filesDir = path.join(userPath, "files");
-    debugServer("Files dir", filesDir);
-    if (!fs.existsSync(filesDir)) {
-      fs.mkdirSync(filesDir, { recursive: true });
-      debugServer("Files dir created");
-    }
-
-    const fileNameLocal = `${fileId}${extension ? `.${extension}` : ""}`;
-    const filePathLocal = path.join(filesDir, fileNameLocal);
-
-    // Write file to local path
-    debugServer("Writing to", filePathLocal);
-    fs.writeFileSync(filePathLocal, fileBuffer);
-    debugServer("Finished writing to", filePathLocal);
-
-    // Create file record
-    const fileRecord: File = {
-      id: fileId,
-      name: filename,
-      path: fileNameLocal,
-      size: fileBuffer.length,
-      summary: "", // Empty summary initially
-      upload_time: new Date().toISOString(),
-      media_type: mediaType || "",
-    };
-
-    // Insert file to database
-    await fileStore.insertFile(fileRecord);
-
-    return fileRecord;
-  }
 
   // Helper function to handle file uploads from peers
   const handleUpload = async (
@@ -1519,9 +1435,12 @@ export async function createServer(config: ServerConfig = {}) {
       // Set appropriate headers
       reply.header("Content-Type", fileRecord.media_type);
       reply.header("Content-Length", fileRecord.size);
+      // Properly encode the filename for Content-Disposition header to handle non-ASCII characters
+      const encodedFilename = encodeURIComponent(fileRecord.name);
+      const asciiFilename = fileRecord.name.replace(/[^\x20-\x7e]/g, '_'); // Replace non-ASCII with underscore for fallback
       reply.header(
         "Content-Disposition",
-        `inline; filename="${fileRecord.name}"`
+        `inline; filename="${asciiFilename}"; filename*=UTF-8''${encodedFilename}`
       );
 
       // Stream the file
