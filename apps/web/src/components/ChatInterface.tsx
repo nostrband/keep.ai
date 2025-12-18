@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback, useMemo } from "react";
+import { useEffect, useRef, useMemo, useCallback } from "react";
 import { useChatRows } from "../hooks/useChatRows";
 import { useAddMessage, useReadChat } from "../hooks/dbWrites";
 import { MessageItem } from "../ui/components/ai-elements/message-item";
@@ -166,20 +166,26 @@ export default function ChatInterface({
       behavior,
     });
 
-    const int = setInterval(() => {
-      if (
-        document.documentElement.scrollTop +
-          document.documentElement.clientHeight <
-        document.documentElement.scrollHeight
-      ) {
-        window.scrollTo({
-          top: document.documentElement.scrollHeight,
-          behavior,
-        });
-      } else {
-        clearInterval(int);
-      }
-    }, 50);
+    // const int = setInterval(() => {
+    //   if (
+    //     document.documentElement.scrollTop +
+    //       document.documentElement.clientHeight <
+    //     document.documentElement.scrollHeight - 10
+    //   ) {
+    //     console.log(
+    //       "interval scroll",
+    //       document.documentElement.scrollTop,
+    //       document.documentElement.clientHeight,
+    //       document.documentElement.scrollHeight
+    //     );
+    //     window.scrollTo({
+    //       top: document.documentElement.scrollHeight,
+    //       behavior,
+    //     });
+    //   } else {
+    //     clearInterval(int);
+    //   }
+    // }, 200);
   }, []);
 
   // Smart scroll logic - handles first load and new messages
@@ -191,7 +197,7 @@ export default function ChatInterface({
     if (isFirstLoadRef.current && rows.length > 0) {
       isFirstLoadRef.current = false;
       lastTimestampRef.current = lastMessageTimestamp;
-      // scrollToBottom("auto");
+      scrollToBottom("auto");
       return;
     }
 
@@ -205,9 +211,7 @@ export default function ChatInterface({
     if (hasNewMessage) {
       // NOTE: if were down - scroll to show it,
       // otherwise don't touch scrollTop to keep position
-      // FIXME this seems to break mobile scroll when last assistant
-      // message is bigger than screen
-      // if (wasAtBottomRef.current) scrollToBottom("smooth");
+      if (wasAtBottomRef.current) scrollToBottom("smooth");
     } else if (currentScrollFromBottom.current) {
       const { clientHeight: newClientHeight, scrollHeight: newScrollHeight } =
         document.documentElement;
@@ -220,7 +224,8 @@ export default function ChatInterface({
     if (lastMessageTimestamp) {
       lastTimestampRef.current = lastMessageTimestamp;
     }
-  }, [hasData, lastMessageTimestamp, rows.length, isFetching, scrollToBottom]);
+    // scrollToBottom dependency
+  }, [hasData, lastMessageTimestamp, rows.length, isFetching]);
 
   // Reset first load flag when chatId changes
   useEffect(() => {

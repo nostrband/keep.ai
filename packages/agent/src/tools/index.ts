@@ -25,3 +25,4 @@ export { makeImagesTransformTool } from "./images-transform";
 export { makePdfExplainTool } from "./pdf-explain";
 export { makeAudioExplainTool } from "./audio-explain";
 export { makeGmailTool } from "./gmail";
+export { makeAtobTool } from "./atob";

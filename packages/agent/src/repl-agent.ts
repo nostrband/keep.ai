@@ -61,6 +61,7 @@ export class ReplAgent {
     opts?: {
       history?: AssistantUIMessage[];
       inbox?: string[];
+      jsState?: any;
       onStep?: (
         step: number,
         input: StepInput,
@@ -76,7 +77,7 @@ export class ReplAgent {
     // Step state
     let stepReason: StepReason = reason || "start";
     let stepResult: EvalResult | undefined;
-    let jsState: any | undefined;
+    let jsState: any | undefined = opts?.jsState;
 
     // Loop over steps
     for (let step = 0; step < MAX_STEPS; step++) {

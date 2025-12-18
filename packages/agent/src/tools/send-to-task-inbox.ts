@@ -30,7 +30,7 @@ export function makeSendToTaskInboxTool(
         target_id: opts.id,
         timestamp: new Date().toISOString(),
         content: JSON.stringify({
-          role: "assistant",
+          role: context.type === "router" ? "user" : "assistant",
           content: opts.message,
           timestamp: new Date().toISOString(),
           sourceTaskType: context.type,
@@ -45,12 +45,14 @@ export function makeSendToTaskInboxTool(
         target_task_title: task.title 
       })
 
-      // Return void - message sent successfully
+      // Message sent successfully
+      return true;
     },
     description: "Send a message to task inbox",
     inputSchema: z.object({
       id: z.string().describe("Task id"),
       message: z.string().describe("Message for the task handler"),
     }),
+    outputSchema: z.boolean().describe("True if sent")
   };
 }

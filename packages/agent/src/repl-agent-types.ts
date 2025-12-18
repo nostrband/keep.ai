@@ -38,11 +38,6 @@ export type StepInput = {
     result?: any;
     error?: string;
   };
-  attachments?: [
-    {
-
-    }
-  ]
 };
 
 export type StepOutput = { steps: number; reasoning?: string } & (

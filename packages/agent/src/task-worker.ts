@@ -28,6 +28,7 @@ import { randomBytes } from "@noble/ciphers/crypto";
 import { ReplEnv } from "./repl-env";
 import { isValidEnv } from "./env";
 import { Cron } from "croner";
+import { fileUtils } from "@app/node";
 
 export interface TaskWorkerConfig {
   api: KeepDbApi;
@@ -329,12 +330,25 @@ export class TaskWorker {
           newMessages.forEach((m) => savedIds.add(m.id));
         };
 
+        // Load JS state if reason is "input" or "timer"
+        let jsState: any = undefined;
+        if (reason === "input" || reason === "timer") {
+          jsState = await this.loadJsState(task.id);
+        }
+
         // Use task.task as input message to the agent
         const result = await agent.loop(reason, {
           // Pass the input text to agent
           inbox,
-          onStep: async (step) => {
+          jsState,
+          onStep: async (step, input, output, result) => {
             await saveNewMessages();
+            
+            // Save JS state if available
+            if (result?.ok && result.state) {
+              await this.saveJsState(task.id, result.state);
+            }
+            
             return { proceed: step < this.stepLimit };
           },
         });
@@ -482,6 +496,43 @@ export class TaskWorker {
     }
   }
 
+  private async saveJsState(taskId: string, state: any): Promise<void> {
+    if (!this.userPath) return;
+    
+    try {
+      const stateDir = fileUtils.join(this.userPath, 'state');
+      if (!fileUtils.existsSync(stateDir)) {
+        fileUtils.mkdirSync(stateDir, { recursive: true });
+      }
+      
+      const stateFile = fileUtils.join(stateDir, `${taskId}.json`);
+      fileUtils.writeFileSync(stateFile, JSON.stringify(state), 'utf8');
+      this.debug(`Saved JS state for task ${taskId} to ${stateFile}`);
+    } catch (error) {
+      this.debug(`Failed to save JS state for task ${taskId}:`, error);
+    }
+  }
+
+  private async loadJsState(taskId: string): Promise<any | undefined> {
+    if (!this.userPath) return undefined;
+    
+    try {
+      const stateFile = fileUtils.join(this.userPath, 'state', `${taskId}.json`);
+      if (!fileUtils.existsSync(stateFile)) {
+        this.debug(`No JS state file found for task ${taskId}`);
+        return undefined;
+      }
+      
+      const stateContent = fileUtils.readFileSync(stateFile, 'utf8') as string;
+      const state = JSON.parse(stateContent);
+      this.debug(`Loaded JS state for task ${taskId} from ${stateFile}`);
+      return state;
+    } catch (error) {
+      this.debug(`Failed to load JS state for task ${taskId}:`, error);
+      return undefined;
+    }
+  }
+
   private async handleReply(
     taskType: TaskType,
     task: Task,
@@ -492,7 +543,8 @@ export class TaskWorker {
     if (result.kind === "code") throw new Error("Can't handle 'code' reply");
     // Send reply after all done
     if (result.reply) {
-      if (taskType === "replier" || taskType === "router") {
+      // DEBUG: allow worker to reply directly to user for testing 
+      if (taskType === "worker" || taskType === "replier" || taskType === "router") {
         await this.sendToUser(result.reply);
       } else {
         await this.sendToReplier({
@@ -592,7 +644,7 @@ export class TaskWorker {
     const env = new ReplEnv(
       this.api,
       taskType,
-      task.cron,
+      task,
       () => sandbox.context!,
       this.userPath,
       this.gmailOAuth2Client

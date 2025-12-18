@@ -38,6 +38,22 @@ export const fileUtils = {
     return fs.readSync(fd, buffer, offset, length, position);
   },
   
+  writeSync: (fd: number, buffer: Uint8Array, offset: number, length: number, position?: number): number => {
+    return fs.writeSync(fd, buffer, offset, length, position);
+  },
+
+  writeFileSync: (filePath: string, data: string | Uint8Array, encoding?: BufferEncoding) => {
+    fs.writeFileSync(filePath, data, encoding);
+  },
+
+  mkdirSync: (dirPath: string, options?: fs.MakeDirectoryOptions) => {
+    fs.mkdirSync(dirPath, options);
+  },
+
+  readFileSync: (filePath: string, encoding?: BufferEncoding): string | Buffer => {
+    return fs.readFileSync(filePath, encoding);
+  },
+
   // Buffer/encoding utilities
   bufferToBase64: (buffer: Uint8Array) => Buffer.from(buffer).toString('base64'),
   
