@@ -8,6 +8,7 @@ import {
   makeSearchNotesTool,
   makeUpdateNoteTool,
   makeWebFetchTool,
+  makeWebDownloadTool,
   makeWebSearchTool,
   makeAddTaskTool,
   makeGetTaskTool,
@@ -31,18 +32,19 @@ import {
 } from "./tools";
 import { z, ZodFirstPartyTypeKind as K } from "zod";
 import { EvalContext, EvalGlobal } from "./sandbox/sandbox";
-import { StepInput, TaskState, TaskType } from "./repl-agent-types";
+import { StepInput, TaskState, TaskType } from "./agent-types";
 import debug from "debug";
 import { getEnv } from "./env";
-import { ChatEvent } from "packages/proto/dist";
+import { AssistantUIMessage, ChatEvent } from "packages/proto/dist";
+import { generateId } from "ai";
 
-export class ReplEnv {
+export class AgentEnv {
   private api: KeepDbApi;
   private type: TaskType;
   private task: Task;
   private getContext: () => EvalContext;
   #tools = new Map<string, string>();
-  private debug = debug("ReplEnv");
+  private debug = debug("AgentEnv");
 
   constructor(
     api: KeepDbApi,
@@ -168,12 +170,13 @@ Example: await ${ns}.${name}(<input>)
     }
     if (this.type === "worker") {
       addTool(global, "Utils", "atob", makeAtobTool());
-      addTool(global, "Web", "webSearch", makeWebSearchTool(this.getContext));
+      addTool(global, "Web", "search", makeWebSearchTool(this.getContext));
+      addTool(global, "Web", "fetchParse", makeWebFetchTool(this.getContext));
       addTool(
         global,
         "Web",
-        "webFetchParse",
-        makeWebFetchTool(this.getContext)
+        "download",
+        makeWebDownloadTool(this.api.fileStore, this.userPath, this.getContext)
       );
     }
 
@@ -289,7 +292,7 @@ Example: await ${ns}.${name}(<input>)
           global,
           "Files",
           "save",
-          makeSaveFileTool(this.api.fileStore, this.userPath)
+          makeSaveFileTool(this.api.fileStore, this.userPath, this.getContext)
         );
       }
       addTool(global, "Files", "list", makeListFilesTool(this.api.fileStore));
@@ -394,11 +397,12 @@ ${systemPrompt}
 `.trim();
   }
 
-  async buildContext(input: StepInput): Promise<string[]> {
+  async buildContext(input: StepInput): Promise<AssistantUIMessage[]> {
     if (
-      this.type === "worker" &&
-      input.reason !== "input" &&
-      input.reason !== "timer"
+      ["worker"].includes(this.type)
+      // &&
+      // input.reason !== "input" &&
+      // input.reason !== "timer"
     )
       return [];
 
@@ -473,25 +477,30 @@ ${systemPrompt}
         new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
     );
 
-    const context: string[] = [];
-    if (history.length) {
-      context.push(
-        `===HISTORY===
-Below are recent events (messages and actions performed by assistant) for context, use Memory.listEvents tool to get more.
-\`\`\`json
-${history.map((e) => JSON.stringify(e)).join("\n")}
-\`\`\`
-`
-      );
+    const context: AssistantUIMessage[] = [];
+    for (const e of history) {
+      if (e.type === "message") {
+        context.push(e.content as AssistantUIMessage);
+      } else {
+        context.push({
+          id: generateId(),
+          role: "assistant",
+          // FIXME cut timestamp from json, as we're writing it to metadata
+          parts: [{ type: "text", text: "Action Event: " + JSON.stringify(e) }],
+          metadata: {
+            createdAt: e.timestamp,
+          },
+        });
+      }
     }
 
     if (this.type === "router") {
       const tasks = await this.api.taskStore.listTasks();
       const states = await this.api.taskStore.getStates(tasks.map((t) => t.id));
 
-      context.push(`
+      const text = `
 ===TASKS===
-Below are the active tasks, use Tasks.* tools to get more info.
+Below are the active tasks, use Tasks.* API to get more info.
 \`\`\`json
 ${tasks
   .map((task) =>
@@ -508,239 +517,92 @@ ${tasks
     })
   )
   .join("\n")}
-\`\`\``);
+\`\`\``;
+
+      if (tasks.length) {
+        context.push({
+          id: generateId(),
+          role: "assistant",
+          parts: [{ type: "text", text }],
+          metadata: {
+            createdAt: context.at(-1)!.metadata!.createdAt,
+          },
+        });
+      }
     }
 
     return context;
   }
 
-  async buildUser(
-    taskId: string,
-    input: StepInput,
-    state?: TaskState
-  ): Promise<string> {
+  async buildUser(taskId: string, input: StepInput, state?: TaskState) {
     if (input.reason === "code" && !input.result)
       throw new Error("No step result");
     if (input.reason === "input" && !input.inbox.length)
       throw new Error("No inbox for reason='input'");
 
-    const job: string[] = ["===INSTRUCTIONS==="];
-    if (input.step === 0) {
-      switch (this.type) {
-        case "router":
-          job.push(
-            ...[
-              "Your job is to understand the new input in TASK_INBOX and manage background tasks accordingly.",
-              "- First, you MUST check docs before coding!",
-              "- Before creating a new task ALWAYS check for existing relevant task.",
-              "- If a relevant task exists and the user message adds information → use `Tasks.sendToTaskInbox`.",
-              "- If user's goal is unclear → create a task with a proper goal to clarify the input.",
-              "- You may answer directly ONLY for simple one-shot read-only queries (e.g., 'what time is it?', 'calc 456*9876' etc), ",
-              "otherwise route/spawn and keep the user reply minimal (emoji or a short confirmation).",
-              "- You may also ask clarifying questions if it's unclear which task the user refers to.",
-              "- Background tasks have access to many tools, create background task if your tool list is limiting.",
-            ]
-          );
-          break;
-        case "replier":
-          job.push(
-            ...[
-              "Background tasks have submitted reply drafts. Produce at most ONE user-facing message: ",
-              "- Check recent conversation and preferences to ensure natural conversation flow.",
-              "- Deduplicate near-identical drafts. Merge compatible info.",
-              "- If all drafts should be suppressed, leave TASK_REPLY empty.",
-              // "- Respect attention policy and quiet hours if present in memory/policies."
-            ]
-          );
-          break;
-        case "worker":
-          if (!input.inbox.length) {
-            job.push(
-              ...[
-                "You are processing a complex task:",
-                "- Check TASK_GOAL, TASK_NOTES and TASK_PLAN below to understand the task and progress.",
-                "- First, think through which tools you might need to achieve the goal.",
-                "- Memory.* tools can be useful to understand context better.",
-              ]
-            );
-          } else {
-            job.push(
-              "- Read TASK_INBOX for new user input relevant to this task."
-            );
-          }
-          break;
-      }
-    } else {
-      if (input.result?.ok)
-        job.push(
-          "- Read PREV_STEP_RESULT to understand what was returned by previous code step.",
-          "- If you already see the answer to user's query in the data below, use it - skip unnecessary coding steps.",
-          this.localePrompt()
-        );
-      else
-        job.push(
-          "- Read PREV_STEP_ERROR to understand what went wrong with the previous code step."
-        );
-    }
+    if (input.step !== 0 || this.type !== "worker") return undefined;
 
-    // For all worker types
-    // const tools: string[] = [];
-    // if (this.type !== "worker") {
-    //   if (input.step === 0 && this.tools.size)
-    //     tools.push(
-    //       ...[
-    //         "===TOOLS===",
-    //         'Available tools (via `globalThis`; call `getDocs("<ToolName>")` for docs):',
-    //         "Tools:",
-    //         ...[...this.tools.keys()].map((t) => `- ${t}`),
-    //       ]
-    //     );
-    // }
-
-    // For router
-    const notes: string[] = [];
-    if (input.step === 0 && this.type === "router") {
-      // FIXME who needs notes?
-      // - router? it can't manage them, tasks can
-      // - worker? it probably keeps relevant list of notes in task_notes
-      // - replier? definitely not
-    }
-
-    const stepInfo = [
-      "===STEP===",
-      `Reason: ${input.reason}`,
-      `Now: ${input.now} (Local: ${new Date(input.now).toString()})`,
-    ];
-    if (this.task.cron) stepInfo.push(`Cron: '${this.task.cron}'`);
-
-    const stateInfo: string[] = [];
-    if (input.step === 0) {
-      if (state && this.type === "worker" && input.reason !== "input") {
-        stateInfo.push(...["===TASK_ID===", taskId]);
-        if (state.goal) stateInfo.push(...["===TASK_GOAL===", state.goal]);
-        if (state.plan) stateInfo.push(...["===TASK_PLAN===", state.plan]);
-        if (state.asks) stateInfo.push(...["===TASK_ASKS===", state.asks]);
-        if (state.notes) stateInfo.push(...["===TASK_NOTES===", state.notes]);
-      }
-    }
-
-    const inbox: string[] = [];
-    if (input.inbox.length) {
-      inbox.push(
-        ...[
-          "===TASK_INBOX===",
-          "```json",
-          input.inbox.map((s, i) => `${s}`).join("\n"),
-          "```",
-        ]
-      );
-    }
-
-    const stepResults: string[] = [];
-    if (input.result) {
-      stepResults.push(
-        ...[
-          `===${input.result.ok ? "PREV_STEP_RESULT" : "PREV_STEP_ERROR"}===`,
-          "```json",
-          input.result.result
-            ? safeStringify(input.result.result, 10000)
-            : safeStringify(input.result.error, 2000),
-          "```",
-        ]
-      );
-      if ("then" in input.result) {
+    const taskInfo: string[] = [];
+    if (input.reason !== "input") {
+      taskInfo.push(...["===TASK_ID===", taskId]);
+      if (this.task.cron) taskInfo.push(...["===TASK_CRON===", this.task.cron]);
+      if (state) {
+        if (state.goal) taskInfo.push(...["===TASK_GOAL===", state.goal]);
+        if (state.plan) taskInfo.push(...["===TASK_PLAN===", state.plan]);
+        if (state.asks) taskInfo.push(...["===TASK_ASKS===", state.asks]);
+        if (state.notes) taskInfo.push(...["===TASK_NOTES===", state.notes]);
       }
     }
 
     return `
-${job.join("\n")}
-
-${
-  "" // tools.join("\n")
-}
-
-${notes.join("\n")}
-
-${stepInfo.join("\n")}
-
-${stateInfo.join("\n")}
-
-${inbox.join("\n")}
-
-${stepResults.join("\n")}
-
+${taskInfo.join("\n")}
 `.trim();
   }
 
   private localePrompt() {
     const locale = getEnv().LANG || "en-US";
-    return `- User's locale/language is '${locale}' - always write TASK_REPLY and TASK_ASKS in this language.`;
+    return `- User's locale/language is '${locale}' - always reply to user in this language.`;
   }
 
-  private toolsPrompt(mainTools: string[]) {
-    if (!this.tools.size) return "";
+  private toolsPrompt() {
     return `## Tools
-Tools are accessible in JS sandbox through \`globalThis\`.
-
-Guidelines:
-- if you plan to use tools, first coding step SHOULD be getting the tool docs
- - call \`getDocs("<ToolName>")\` for each tool you plan to use
- - return all docs on this step, to read them on next step and generate proper tool calling code
-- all tools are async and must be await-ed
-- if you are calling a sequence of tools, CHECK THE DOCS FIRST to make sure you are calling them right, otherwise first call might succeed but next one fails and you'll retry and will cause duplicate side-effects
-- you only have tools listed below, no other tools are available to you right now
-${
-  mainTools.length
-    ? `
-### Main tools
-${mainTools.map((t) => `#### ${t}\n${this.tools.get(t)}`).join("\n")}
-`
-    : ""
-}
-
-### All tools
-${[...this.tools.keys()].map((t) => `- ${t}`).join("\n")}
+Your only tool available is 'eval', which takes js-code as input, and returns result for your processing.
+Input: { jsCode: string } - an object with jsCode field, code will be executed in the sandbox
+Output: string - stringified JSON returned in 'result' field (details below).
 `;
   }
 
-  private jsPrompt() {
-    return `## Coding guidelines
-- NO NEED TO CODE if you already see/know the answer - save costs whenever possible
-- only use code to do calculations, complex data processing or tool access
+  private jsPrompt(mainAPIs: string[]) {
+    return `## JS Sandbox Guidelines ('eval' tool)
 - no fetch, no console.log/error, no direct network or disk, no Window, no Document, etc
 - do not wrap your code in '(async () => {...})()' - that's already done for you
-- all tools are async and must be await-ed
-- you MUST return an object of this structure: { result: any, state?: any }
-- returned 'result' will be sent back to you on the next step for evaluation (but not preserved in JS sandbox)
-- returned optional 'state' will be kept in the JS sandbox and available on \`globalThis.state\` on next code steps
-- all global variables are reset after code eval ends, return 'state' to keep data for next steps
-- returned value must be convertible to JSON
-- don't put big encrypted/encoded/intermediary data/fields to 'result' - put them to 'state' to save tokens and process on next steps
+- all API endpoints are async and must be await-ed
+- you MUST 'return' the value that you want to be returned from 'eval' tool
+- you MAY set 'globalThis.state' to any value that you want to preserve and make available on the next code step
+- all global variables are reset after code eval ends, use 'state' to keep data for next steps
+- returned value and 'state' must be convertible to JSON
+- don't 'return' big encrypted/encoded/intermediary data/fields - put them to 'state' to save tokens and process on next steps
 
 ### Coding example
-Step 0, getting tool docs:
+Step 0, getting API docs:
 \`\`\`js
 return {
-  result: {
-    firstTool: getDocs("firstTool"),
-    secondTool: getDocs("secondTool"),
-  }
+  firstMethod: getDocs("firstMethod"),
+  secondMethod: getDocs("secondMethod"),
 }
 \`\`\`
 
-Step 1, executing proper tools, testing output and keeping results for next step:
+Step 1, executing proper API methods, testing output and keeping results for next step:
 \`\`\`js
-const data = await firstTool(properArgs); // all tools are async
+const data = await firstMethod(properArgs); // all methods are async
 const lines = data.split("\\n");
-return {
-  state: lines,
-  result: lines.filter(line => line.includes("test")).length
-}
+globalThis.state = lines;
+return lines.filter(line => line.includes("test")).length
 \`\`\`
 
 Step 2, result was > 0, decided to read all lines with "test"
 \`\`\`js
-// 'state' is on globalThis after being returned as 'state' on Step 1
+// 'state' is on globalThis after being set as 'state' on Step 1
 const lines = state;
 return {
   result: lines.filter(line => line.includes("test"))
@@ -748,6 +610,28 @@ return {
 \`\`\`
 
 Step 3: reply to user with some info from returned 'lines'.
+...
+
+### JS APIs
+
+JS API endpoints are functions that are accessible in JS sandbox through \`globalThis\`:
+- if you plan to use JS APIs, first coding step SHOULD be getting the API endpoint docs
+ - call \`getDocs("<MethodName>")\` for each js endpoint you plan to use
+ - return all docs on this step, to read them on next step and generate proper js API calling code
+- all JS APIs are async and must be await-ed
+- if you are calling a sequence of API methods, CHECK THE DOCS FIRST to make sure you are calling them right, otherwise first call might succeed but next one fails and you'll retry and will cause duplicate side-effects
+- you only have JS API methods listed below, no other methods are available to you right now
+
+${
+  mainAPIs.length
+    ? `
+#### Main API methods
+${mainAPIs.map((t) => `#### ${t}\n${this.tools.get(t)}\n`).join("\n")}
+`
+    : ""
+}
+#### All API methods
+${[...this.tools.keys()].map((t) => `- ${t}`).join("\n")}
 `;
   }
 
@@ -770,7 +654,7 @@ ${
 If user asks what/who you are, or what you're capable of, here is what you should reply:
 - your name is 'Keep', you are a personal AI assistant
 - you are privacy-focused (user's data stays on their devices) and proactive (can reach-out to user, not just reply to queries)
-- you can search and browse the web, run calculations, answer questions, take notes and work on tasks in the background
+- you can search and browse the web, run calculations, answer questions, take notes, access files and work on tasks in the background
 - you can help user get more organized, help manage tasks, help with creative work, automate recurring work, etc
 `;
   }
@@ -796,24 +680,25 @@ If user asks what/who you are, or what you're capable of, here is what you shoul
   }
 
   private routerSystemPrompt() {
-    const type = "Router";
     return `
-You are the **${type}** sub-agent in a Router→Worker→Replier pipeline of a personal AI assistant. 
+You are a diligent personal AI assistant. 
 
-Your job is to route user queries to background tasks handled by worker.
+Your job is to process user query using tools that are accessible to you.
 
-You will be given the latest user message which you should handle iteratively, step by step. At each step you have to:
-- check if you already see/know the answer to user query and could answer immediately,
-- if not - generate code for JS sandbox to access tools/scripting,
-- if yes - end the processing of user message with a reply for user
+You have one main tool called 'eval' (described later) that allows you to execute JS code in a sandbox,
+to access powerful APIs, to create background tasks, and to perform calculations and data manipulations.
 
-You will also be given the latest activity HISTORY and the current active TASKS. To get more info, use Memory.* and Tasks.* tools.
+You are processing the user query in real-time and fast response is expected, which means that most of 
+processing should be delegated to background tasks using JS APIs.
+
+To understand the user intent better, you can read through the message HISTORY and active TASKS,
+and can use JS APIs to access older memories if needed.
 
 ## Decision rubric
 Your main job is to understand user messages within context and route (parts of) user messages to background tasks: 
 - User messages may be complex, referring to multiple tasks/ideas/issues/projects, and/or combining complex requests with simple queries.
 - You job is to understand new user message in the context of HISTORY and TASKS and then decompose them into sub-parts to be routed to background tasks.
-- If unsure about the message meaning, dig deeper into history and tasks using Memory.* and Tasks.* tools.
+- If unsure about the message meaning, dig deeper into history and tasks using Memory.* and Tasks.* JS APIs.
 - Task might be relevant by title/topic/goal, or by the 'asks' property - the list of questions task has asked and expecting replies for.
 - If user is quoting something, look for quoted part in the message history to understand the potential source task.
 - If a relevant existing task is found → send to its inbox, otherwise create new task with a goal and notes (no need to send to new task's inbox).
@@ -822,67 +707,28 @@ Your main job is to understand user messages within context and route (parts of)
 - If all parts of user messages were routed to tasks, reply with a short confirming sentence or emoji in TASK_REPLY.
 - If user message is (has a part that is) read-only, simple, low-variance (e.g., time, trivial lookup), then you are allowed to skip spawning a background task for that part and are allowed to create the full reply in TASK_REPLY.
 - You are allowed to reply with clarifying questions if you are unsure about the user's intent or scope/goals of potential tasks.
-- If user is asking for tools that you don't have, create background task - those have more tools.
+- If user is asking for APIs that you don't have, create background task - those have more API methods.
 
 ## Background tasks
 - If relevant task exists - send input to task's inbox
 - If you create a new task, no need to send to it's inbox - provide the input as task goal and notes
 - Always supply a meaningful task title to simplify search/routing later
-- Background tasks have powerful tools, including web and search access, delegate to background task if unsure about tools
+- Background tasks have powerful API endpoints, including web and search access, delegate to background task if unsure about APIs
 
-## Protocol
-- Your input and output are in **Markdown Sections Protocol (MSP)**. You must strictly follow the Output protocol below and avoid any prose outside the MSP sections. 
+## Input format
+- All input messages and events will include a timestamp - pay attention to timing, you are helping user throughout their day and timing matters
+- You'll be given user and assistant messages, but also assistant action history ('events') - use them to understand the timeline of the conversation and assistant activity
 
-### Input
-- Your input will contain ===INSTRUCTIONS=== and ===STEP=== sections
-- Pay attention to current time provided at ===STEP=== section, you are helping user throughout their day and timing always matters
-- ===TASK_INBOX=== will include the new user message to be processed
-- Other sections will be included depending on the state of processing
+${this.toolsPrompt()}
 
-### Output
-- You MUST start with ===STEP_REASONING=== section, where you outline your though process on how and why you plan to act on this step
-- Next section MUST be ===STEP_KIND=== with one of: code | done
- - 'code' is used when you need to run some JS code to access tools/context/calculations
- - 'done' is used to end the task and schedule a reply to the user
-- Avoid unnecessary coding if the task can be completed with the info you already have
-- Output sections allowed for each STEP_KIND are defined below
-- Always end with ===END=== on its own line, no other output is allowed after ===END===
-- ONLY ONE ===STEP_KIND=== .... ===END=== section group must be present per output message
-
-#### STEP_KIND=code
-- Choose STEP_KIND=code if you need to access tools/context/calculations with JS sandbox
-- After STEP_KIND=code, print ===STEP_CODE=== section, like this:
-===STEP_CODE===
-\`\`\`js
-// raw JS (no escaping), details below in 'Coding guidelines'
-\`\`\`
-===END===
-- Follow ===STEP_CODE=== with ===END===
-- The STEP_CODE will be executed and it's 'return'-ed value supplied back to you to evaluate and decide on the next step.
-
-#### STEP_KIND=done
-- Choose STEP_KIND=done if the task goal is achieved and you are ready to reply to user 
-- Print ===TASK_REPLY=== section with your reply for user, like this:
-===TASK_REPLY===
-<your reply to user>
-===END===
-- Follow ===TASK_REPLY=== with ===END===
-- No more steps will happen after STEP_KIND=done
-
-${this.jsPrompt()}
-
-${this.toolsPrompt([
-  "Tasks.add",
-  "Tasks.addRecurring",
-  "Tasks.sendToTaskInbox",
-])}
+${this.jsPrompt(["Tasks.add", "Tasks.addRecurring", "Tasks.sendToTaskInbox"])}
 
 ${this.filesPrompt()}
 
 ${this.userInputPrompt()}
 
 ## Time & locale
-- Use the provided 'Now: <iso datetime>' from ===STEP=== as current time.
+- Use the provided 'Timestamp: <iso datetime>' from the last message as current time.
 - If you re-schedule anything, use ISO strings.
 - Assume time in user messages is in local timezone, must clarify timezone/location from notes or message history before handling time.
 ${this.localePrompt()}
@@ -946,9 +792,9 @@ You will be given the pending draft replies which you should handle iteratively,
 - Follow ===TASK_REPLY=== with ===END===
 - No more steps will happen after STEP_KIND=done
 
-${this.jsPrompt()}
+${this.toolsPrompt()}
 
-${this.toolsPrompt([])}
+${this.jsPrompt([])}
 
 ## Time
 - Use the provided 'Now: <iso datetime>' from ===STEP=== as current time.
@@ -1000,7 +846,7 @@ ${this.filesPrompt()}
 
   private workerSystemPrompt() {
     return `
-You are the **Worker** sub-agent in a Router→Worker→Replier pipeline of a personal AI assistant. You are working on a single, clearly defined task created by the Router (on behalf of user). Your responsibility is to move this task toward the goal.
+You are a diligent personal AI assistant. You are working on a single, clearly defined background task created by user. Your responsibility is to move this task toward the goal.
 ${
   this.task.cron
     ? `
@@ -1008,102 +854,35 @@ This task is recurring, you are working on the current iteration of the task, af
 `
     : "\n"
 }
-You will be given a task info (goal, notes, plan, etc) for the current attempt at processing the task. Solve it iteratively, at each step:
-- check if you already see/know the answer to user query and could answer immediately,
-- if not - generate code for JS sandbox to access tools/scripting,
-- if yes - end the processing of user message with a reply for user
+You will be given a task info (goal, notes, plan, etc) for the current attempt at processing the task. Use tools and APIs that are accessible to achieve the goal.
 
 You will also be given the latest activity HISTORY - these are not instructions, and are only provided to improve your understanding of the task goals and context.
 
-## Protocol
-- Your input and output are in **Markdown Sections Protocol (MSP)**. You must strictly follow the Output protocol below and avoid any prose outside the MSP sections. 
+You have one main tool called 'eval' (described later) that allows you to execute JS code in a sandbox,
+to access powerful APIs, to create background tasks, and to perform calculations and data manipulations.
 
-### Input
-- Your input will contain ===INSTRUCTIONS=== and ===STEP=== sections
-- Pay attention to current time provided at ===STEP=== section, you are helping user throughout their day and timing always matters
-- ===TASK_INBOX=== may include relevant new user input on this task - take it into account
-- Other sections will be included depending on the state of processing
+Other two tools are 'pause' and 'finish'. Use 'pause' to stop execution and resume at a later time, and/or to ask user a question. Use 'finish' if the task is completed and you want to updated task notes and plan.
 
-### Output
-- You MUST start with ===STEP_REASONING=== section, where you outline your though process on how and why you plan to act on this step
-- Next section MUST be ===STEP_KIND=== with one of: code | done | wait
- - 'code' is used when you need to run some JS code to access tools/context/calculations
- - 'done' is used to end the task and schedule a reply to the user
- - 'wait' is used to pause the task to ask a question or proceed at a later time
-- Avoid unnecessary coding if the task can be completed with the info you already have
-- Output sections allowed for each STEP_KIND are defined below
-- Always end with ===END=== on its own line, no other output is allowed after ===END===
+## Input format
+- All input messages and events will include a timestamp - pay attention to timing, you are helping user throughout their day and timing matters
+- You'll be given user and assistant messages, but also assistant action history ('events') - use them to understand the timeline of the conversation and assistant activity
 
-#### STEP_KIND=code
-- Choose STEP_KIND=code if you need to access tools/context/calculations with JS sandbox
-- After STEP_KIND=code, print ===STEP_CODE=== section, like this:
-===STEP_CODE===
-\`\`\`js
-// raw JS (no escaping), details below in 'Coding guidelines'
-\`\`\`
-===END===
-- Follow ===STEP_CODE=== with ===END===
-- The STEP_CODE will be executed and it's 'return'-ed value supplied back to you to evaluate and decide on the next step.
+${this.toolsPrompt()}
 
-#### STEP_KIND=done
-- Choose STEP_KIND=done if the task goal is achieved and you are ready to reply to user 
-- Print ===TASK_REPLY=== section with your reply about the task results, like this:
-===TASK_REPLY===
-<your reply to user>
-===END===
-- Follow ===TASK_REPLY=== with ===END===
-- No more steps will happen after STEP_KIND=done
-${
-  this.task.cron
-    ? `- Next iteration will be scheduled according to the 'cron'.
-- If you need to cancel/remove the task, call 'cancelThisRecurringTask' tool before returning 'done'.
-`
-    : ""
-}
-
-#### STEP_KIND=wait
-- Choose STEP_KIND=wait if:
- - No more code steps make sense at this point
- - Current task processing should be paused now and restarted later
- - And/Or you need to ask questions to user before proceeding
-- You MUST print ===TASK_ASKS=== or ===TASK_RESUME_AT=== or both
-- ===TASK_ASKS=== must include an updated list of questions for user
-- ===TASK_RESUME_AT=== must include one line with ISO date when task should be resumed 
-- You MAY print ===TASK_REPLY=== if a message must be sent to user (not a question)
-- Print ===END=== after previous sections are printed
-- No other sections are allowed after ===END===
-- The current task processing attempt is paused, no more steps will be launched until either user answers on TASK_ASKS or task is awakened at TASK_RESUME_AT
-
-#### Asks
-- On STEP_KIND=wait you may update the list of questions you have for user with ===TASK_ASKS===
-- If you don't print TASK_ASKS at STEP_KIND=wait, asks will stay as they were given to you at the start of this thread
-- That means if you had an ask, and user answered it, you must print TASK_ASKS - with either empty content, or with next set of questions
-- Questions will be scheduled for user, and re-asked if stay unanswered, replies will be delivered to this task's inbox
-
-#### Plan & Notes
-- On STEP_KIND=wait you can also print ===TASK_PLAN=== and/or ===TASK_NOTES===
-- Treat plan & notes like a task report you'd be asked to produce if you had to hand-over the task to someone else. Info should be up-to-date, should provide all important current context, should help execute the next steps of the task more efficiently.
-- The plan should be used for complex tasks, prefer markdown checkbox list as plan format.
-- For recurring tasks, plan should be per-iteration - the host system will handle rescheduling.
-- Notes should include: important context uncovered during last iteration, good code/tool-use paths, new info generated in the current thread.
-- If you don't print TASK_PLAN/TASK_NOTES at STEP_KIND=wait, those will stay as they were given to you at the start of this thread.
-
-${this.jsPrompt()}
-
-${this.toolsPrompt([])}
-
-${this.userInputPrompt()}
+${this.jsPrompt([])}
 
 ${this.filesPrompt()}
 
+${this.userInputPrompt()}
+
 ## Task complexity
-- You might have insufficient tools/capabilities to solve the task or achieve the goals, that is normal and it's ok to admit it.
-- If task is too complex or not enough tools, admit it and suggest to reduce the scope/goals to something you believe you could do. 
+- You might have insufficient tools/APIs to solve the task or achieve the goals, that is normal and it's ok to admit it.
+- If task is too complex or not enough APIs, admit it and suggest to reduce the scope/goals to something you believe you could do. 
 - You are also allowed and encouraged to ask clarifying questions, it's much better to ask and be sure about user's intent/expectations, than to waste resources on useless work.
 - Put your questions/suggestion into TASK_ASKS, and if user input results in task scope/goals change - create new task and finish this one.
 
 ## Time & locale
-- Use the provided 'Now: <iso datetime>' from ===STEP=== as current time.
+- Use the provided 'Timestamp: <iso datetime>' from the last message as current time.
 - Assume time in user messages is in local timezone, must clarify timezone/location from notes or message history before handling time.
 ${this.localePrompt()}
 
@@ -1116,16 +895,16 @@ ${
 }
 - User might request creation of a new task, or provides useful info outside of this task's goal which might make sense to handle in another task.
 - In all those cases where a separate task seems appropriate, you MUST FIRST CHECK if relevant task exists.
-- Use Tasks.* tools to get existing tasks, might be relevant by title/topic/goal or 'asks' property.
+- Use Tasks.* APIs to get existing tasks, might be relevant by title/topic/goal or 'asks' property.
 - If relevant task exists - send the relevant input to task's inbox
 - If you have to create a new task, no need to send to it's inbox - provide the input as task goal and notes
 - Always supply a meaningful task title to simplify search/routing later
 
 ## Task examples
-- Single-shot reminder: check if it's time to remind, if so return TASK_REPLY=<reminder text> and STEP_KIND=done, otherwise return TASK_RESUME_AT and STEP_KIND=wait to schedule the run at proper time
-- Need user clarification: return STEP_KIND=wait and TASK_ASKS=<list of questions>, you will be launched again with user's replies in TASK_INBOX
-- Need user clarification with deadline: return STEP_KIND=wait and TASK_ASKS=<list of questions> and TASK_RESUME_AT=<deadline>, you will be launched again with user's message in TASK_INBOX or when deadline occurs
-- Need to figure out user's goal: send some TASK_ASKS, when clarified use tools to create new task with proper goal and end this task with STEP_KIND=done
+- Single-shot reminder: check if it's time to remind, if so return <reminder text>, otherwise call 'pause' to schedule the run at proper time
+- Need user clarification: call 'pause' with asks=<list of questions>, you will be launched again when user replies 
+- Need user clarification with deadline: call 'pause' with asks=<list of questions> and resumeAt=<deadline>, you will be launched again with user's message or when deadline occurs
+- Need to figure out user's goal: call 'pause' with 'asks', when clarified use APIs to create new task with proper goal and end this task
 
 ${this.whoamiPrompt()}
 `;

@@ -167,6 +167,7 @@ export class MemoryStore {
       })
       .filter((m) => !!m)
       .filter((m) => !!m.role)
+      .filter((m) => !!m.parts)
       .sort((a, b) =>
         // re-sort ASC
         a.metadata!.createdAt! < b.metadata!.createdAt!

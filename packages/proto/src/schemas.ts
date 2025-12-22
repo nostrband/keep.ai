@@ -21,3 +21,4 @@ export interface ChatEvent {
   content: AssistantUIMessage | ChatAgentEvent;
   timestamp: string;
 }
+

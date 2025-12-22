@@ -8,7 +8,7 @@ const debugGetWeather = debug("agent:get-weather");
 export function makeGetWeatherTool(getContext: () => EvalContext) {
   return tool({
     description:
-      "Get weather forecast for a specified location for up to 16 days. If location not found, try higher-level location name.",
+      "Get weather forecast for a specified location for up to 16 days. If location not found, try higher-level location name. If user didn't specify location, try to get user's location from Notes or message history (Memory.* APIs).",
     inputSchema: z.union([
       z
         .string()

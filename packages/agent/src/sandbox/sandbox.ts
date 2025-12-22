@@ -6,7 +6,7 @@ import {
   QuickJSWASMModule,
   shouldInterruptAfterDeadline,
 } from "quickjs-emscripten";
-import { TaskType } from "../repl-agent-types";
+import { TaskType } from "../agent-types";
 import { DBInterface } from "packages/db/dist";
 
 export interface EvalGlobal {
@@ -164,12 +164,14 @@ export class Sandbox {
       });
       try {
         const valueHandle = this.#ctx.unwrapResult(evaluation);
-        const result = (await this.#resolveHandle(valueHandle, deadline)) as {
-          result: any,
-          state?: any
-        };
+        const result = await this.#resolveHandle(valueHandle, deadline);
+
+        const stateHandle = this.#ctx.getProp(this.#ctx.global, "state");
+        const state = await this.#resolveHandle(stateHandle, deadline);
+
         console.log("result", result);
-        return { ok: true, result: result.result, state: result.state };
+        console.log("state", state);
+        return { ok: true, result, state: state };
       } catch (error) {
         return { ok: false, error: this.#formatError(error) };
       } finally {

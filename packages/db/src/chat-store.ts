@@ -200,6 +200,7 @@ export class ChatStore {
       })
       .filter((m) => !!m)
       .filter((m) => !!m.role)
+      .filter((m) => !!m.parts)
       .sort((a, b) =>
         // re-sort ASC
         a.metadata!.createdAt! < b.metadata!.createdAt!
@@ -262,7 +263,8 @@ export class ChatStore {
           return undefined;
         }
       })
-      .filter((event) => !!event);
+      .filter((event) => !!event)
+      .filter((m) => m.type !== 'message' || !!m.content.parts);
       // Don't sort here - keep the DESC order from database
   }
 

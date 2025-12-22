@@ -133,6 +133,8 @@ export const MessageItem = React.memo(function MessageItem({
                 // Handle tool parts - only show when full=true
                 if (full && part.type.startsWith("tool-")) {
                   const toolPart = part as ToolUIPart;
+                  // Extract tool name from type (e.g., "tool-eval" -> "eval")
+                  const toolName = toolPart.type.split("-").slice(1).join("-");
                   return (
                     <Tool
                       key={`${message.id}-${partIndex}`}
@@ -140,10 +142,11 @@ export const MessageItem = React.memo(function MessageItem({
                     >
                       <ToolHeader type={toolPart.type} state={toolPart.state} />
                       <ToolContent>
-                        <ToolInput input={toolPart.input} />
+                        <ToolInput input={toolPart.input} toolType={toolName} />
                         <ToolOutput
                           output={toolPart.output}
                           errorText={toolPart.errorText}
+                          toolType={toolName}
                         />
                       </ToolContent>
                     </Tool>
@@ -185,7 +188,7 @@ export const MessageItem = React.memo(function MessageItem({
 
           {/* Timestamp */}
           <div className="text-[10px] text-gray-400">
-            {message.metadata?.createdAt.toLocaleString() || ""}
+            {message.metadata?.createdAt?.toLocaleString() || ""}
           </div>
         </MessageContent>
       </Message>

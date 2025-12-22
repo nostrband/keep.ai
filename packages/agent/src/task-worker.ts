@@ -17,15 +17,10 @@ import {
   Task,
   TaskState,
 } from "@app/db";
-import {
-  AgentTask,
-  StepOutput,
-  StepReason,
-  TaskType,
-} from "./repl-agent-types";
+import { AgentTask, StepOutput, StepReason, TaskType } from "./agent-types";
 import { bytesToHex } from "@noble/ciphers/utils";
 import { randomBytes } from "@noble/ciphers/crypto";
-import { ReplEnv } from "./repl-env";
+import { AgentEnv } from "./agent-env";
 import { isValidEnv } from "./env";
 import { Cron } from "croner";
 import { fileUtils } from "@app/node";
@@ -259,11 +254,11 @@ export class TaskWorker {
       if (task.state !== "") reason = inbox.length > 0 ? "input" : "timer";
 
       // We restore existing session on 'input' reason for worker,
-      // bcs that generally means user is supplying 
+      // bcs that generally means user is supplying
       // a followup message/question to latest worker reply
       let history: AssistantUIMessage[] = [];
-      if (taskType === "worker" && reason === "input") {
-        // Load existing history 
+      if (taskType === "worker" && reason === "input" && task.thread_id) {
+        // Load existing history
         // NOTE: we start a new thread but copy history from
         // old thread, to make sure our observability traces
         // have separate threads for users to analize
@@ -324,7 +319,9 @@ export class TaskWorker {
         // Helper
         const savedIds = new Set<string>();
         const saveNewMessages = async () => {
-          const newMessages = agent.history.filter((m) => !savedIds.has(m.id));
+          const newMessages = agent.history.filter(
+            (m) => !!m.parts && !savedIds.has(m.id)
+          );
           this.debug("Save new messages", newMessages);
           await this.saveHistory(newMessages, task.thread_id);
           newMessages.forEach((m) => savedIds.add(m.id));
@@ -343,12 +340,12 @@ export class TaskWorker {
           jsState,
           onStep: async (step, input, output, result) => {
             await saveNewMessages();
-            
+
             // Save JS state if available
             if (result?.ok && result.state) {
               await this.saveJsState(task.id, result.state);
             }
-            
+
             return { proceed: step < this.stepLimit };
           },
         });
@@ -483,11 +480,9 @@ export class TaskWorker {
 
         // Schedule retry for this task
         await this.retry(task, errorMessage, task.thread_id);
-
-        throw error; // Re-throw to be caught by caller
       }
     } catch (error) {
-      this.debug("Task processing error:", error);
+      this.debug("Task handling error:", error);
       throw error;
     } finally {
       if (statusUpdaterInterval) clearInterval(statusUpdaterInterval);
@@ -498,15 +493,15 @@ export class TaskWorker {
 
   private async saveJsState(taskId: string, state: any): Promise<void> {
     if (!this.userPath) return;
-    
+
     try {
-      const stateDir = fileUtils.join(this.userPath, 'state');
+      const stateDir = fileUtils.join(this.userPath, "state");
       if (!fileUtils.existsSync(stateDir)) {
         fileUtils.mkdirSync(stateDir, { recursive: true });
       }
-      
+
       const stateFile = fileUtils.join(stateDir, `${taskId}.json`);
-      fileUtils.writeFileSync(stateFile, JSON.stringify(state), 'utf8');
+      fileUtils.writeFileSync(stateFile, JSON.stringify(state), "utf8");
       this.debug(`Saved JS state for task ${taskId} to ${stateFile}`);
     } catch (error) {
       this.debug(`Failed to save JS state for task ${taskId}:`, error);
@@ -515,15 +510,19 @@ export class TaskWorker {
 
   private async loadJsState(taskId: string): Promise<any | undefined> {
     if (!this.userPath) return undefined;
-    
+
     try {
-      const stateFile = fileUtils.join(this.userPath, 'state', `${taskId}.json`);
+      const stateFile = fileUtils.join(
+        this.userPath,
+        "state",
+        `${taskId}.json`
+      );
       if (!fileUtils.existsSync(stateFile)) {
         this.debug(`No JS state file found for task ${taskId}`);
         return undefined;
       }
-      
-      const stateContent = fileUtils.readFileSync(stateFile, 'utf8') as string;
+
+      const stateContent = fileUtils.readFileSync(stateFile, "utf8") as string;
       const state = JSON.parse(stateContent);
       this.debug(`Loaded JS state for task ${taskId} from ${stateFile}`);
       return state;
@@ -543,8 +542,12 @@ export class TaskWorker {
     if (result.kind === "code") throw new Error("Can't handle 'code' reply");
     // Send reply after all done
     if (result.reply) {
-      // DEBUG: allow worker to reply directly to user for testing 
-      if (taskType === "worker" || taskType === "replier" || taskType === "router") {
+      // DEBUG: allow worker to reply directly to user for testing
+      if (
+        taskType === "worker" ||
+        taskType === "replier" ||
+        taskType === "router"
+      ) {
         await this.sendToUser(result.reply);
       } else {
         await this.sendToReplier({
@@ -641,7 +644,7 @@ export class TaskWorker {
   }
 
   private async createEnv(taskType: TaskType, task: Task, sandbox: Sandbox) {
-    const env = new ReplEnv(
+    const env = new AgentEnv(
       this.api,
       taskType,
       task,
@@ -888,8 +891,15 @@ ${result.reply || ""}
       timestamp: new Date().toISOString(),
       content: JSON.stringify({
         role: "assistant",
-        content: opts.content,
-        timestamp: new Date().toISOString(),
+        parts: [
+          {
+            type: "text",
+            text: opts.content,
+          },
+        ],
+        metadata: {
+          createdAt: new Date().toISOString()
+        },
         reasoning: opts.reasoning,
         sourceTaskId: opts.taskId,
         sourceTaskType: opts.taskType,

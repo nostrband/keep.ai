@@ -87,7 +87,19 @@ export async function storeFileData(
   const existingFile = await fileStore.getFile(fileId);
   debugFileUtils("Existing file", existingFile);
   if (existingFile) {
-    return existingFile;
+    // Update file record
+    const fileRecord: File = {
+      ...existingFile,
+      name: filename,
+      summary: providedSummary || existingFile.summary,
+      media_type: providedMimeType || existingFile.media_type,
+    };
+
+    // Insert file to database
+    await fileStore.updateFile(fileRecord);
+
+    // Return updated record
+    return fileRecord;
   }
 
   let mediaType: string = providedMimeType || "";

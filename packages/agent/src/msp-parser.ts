@@ -1,4 +1,4 @@
-import { StepOutput, TaskType } from "./repl-agent-types";
+import { StepOutput, TaskType } from "./agent-types";
 
 export class MspParser {
   private type: TaskType;

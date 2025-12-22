@@ -17,6 +17,8 @@ export const EVENT_TYPES = {
   AUDIO_EXPLAIN: "audio_explain",
   TASK_RUN: "task_run",
   GMAIL_API_CALL: "gmail_api_call",
+  WEB_DOWNLOAD: "web_download",
+  FILE_SAVE: "file_save",
 } as const;
 
 export type EventType = (typeof EVENT_TYPES)[keyof typeof EVENT_TYPES];
@@ -119,6 +121,18 @@ export interface GmailApiCallEventPayload extends BaseEventPayload {
   params: any;
 }
 
+export interface WebDownloadEventPayload extends BaseEventPayload {
+  url: string;
+  filename: string;
+  size: number;
+}
+
+export interface FileSaveEventPayload extends BaseEventPayload {
+  filename: string;
+  size: number;
+  mimeType?: string;
+}
+
 // Union type for all event payloads
 export type EventPayload =
   | CreateNoteEventPayload
@@ -137,7 +151,9 @@ export type EventPayload =
   | PdfExplainEventPayload
   | AudioExplainEventPayload
   | TaskRunEventPayload
-  | GmailApiCallEventPayload;
+  | GmailApiCallEventPayload
+  | WebDownloadEventPayload
+  | FileSaveEventPayload;
 
 // Event interface that matches the database structure
 export interface ChatEvent {
@@ -284,6 +300,24 @@ export const EVENT_CONFIGS: Record<EventType, EventConfig> = {
     title: (payload) => {
       const gmailPayload = payload as GmailApiCallEventPayload;
       return `Gmail: ${gmailPayload.method}`;
+    },
+    hasId: false,
+  },
+  [EVENT_TYPES.WEB_DOWNLOAD]: {
+    emoji: "💾",
+    title: (payload) => {
+      const downloadPayload = payload as WebDownloadEventPayload;
+      const fileSizeKB = Math.round(downloadPayload.size / 1024);
+      return `Downloaded: ${downloadPayload.filename} (${fileSizeKB}KB)`;
+    },
+    hasId: false,
+  },
+  [EVENT_TYPES.FILE_SAVE]: {
+    emoji: "📁",
+    title: (payload) => {
+      const savePayload = payload as FileSaveEventPayload;
+      const fileSizeKB = Math.round(savePayload.size / 1024);
+      return `Saved: ${savePayload.filename} (${fileSizeKB}KB)`;
     },
     hasId: false,
   },

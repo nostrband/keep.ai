@@ -8,6 +8,7 @@ export { makeSearchNotesTool } from "./search-notes";
 export { makeListNotesTool } from "./list-notes";
 export { makeWebSearchTool } from "./web-search";
 export { makeWebFetchTool } from "./web-fetch";
+export { makeWebDownloadTool } from "./web-download";
 export { makeListEventsTool } from "./list-events";
 export { makeAddTaskTool } from "./add-task";
 export { makeAddTaskRecurringTool } from "./add-task-recurring";

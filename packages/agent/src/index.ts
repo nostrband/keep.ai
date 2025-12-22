@@ -24,14 +24,14 @@ export { getWeekDay, createPlannerTaskPrompt, getMessageText } from "./utils";
 // Interfaces
 // export { type Memory } from "./interfaces";
 
-export { ReplAgent } from "./repl-agent";
+export { Agent as ReplAgent } from "./agent";
 
 export {
   type AgentTask as Task,
   type StepInput,
   type StepOutput,
   type TaskState,
-} from "./repl-agent-types";
+} from "./agent-types";
 
 export {
   TaskWorker,
@@ -40,7 +40,7 @@ export {
 
 export { initSandbox } from "./sandbox/sandbox";
 
-export { ReplEnv } from "./repl-env";
+export { AgentEnv as ReplEnv } from "./agent-env";
 
 export type {
   Sandbox,

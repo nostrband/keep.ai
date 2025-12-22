@@ -82,8 +82,10 @@ const DEFAULT_PUSH_SERVER_PUBKEY =
   "e46b5c98fe12661a765ded00ca05866ea0b58bd175454aed703fba2589f6c666";
 
 // Gmail OAuth configuration
-const GMAIL_CLIENT_ID = "642393276548-lfrhhkuf7nfuo6o3542tmibj8306a17m.apps.googleusercontent.com";
-const GMAIL_CLIENT_SECRET = process.env.GMAIL_SECRET || process.env.BUILD_GMAIL_SECRET;
+const GMAIL_CLIENT_ID =
+  "642393276548-lfrhhkuf7nfuo6o3542tmibj8306a17m.apps.googleusercontent.com";
+const GMAIL_CLIENT_SECRET =
+  process.env.GMAIL_SECRET || process.env.BUILD_GMAIL_SECRET;
 
 // Parse NOSTR_RELAYS environment variable
 const getNostrRelays = (): string[] => {
@@ -111,7 +113,7 @@ async function createGmailOAuth2Client(userPath: string) {
     }
 
     const gmailTokenPath = path.join(userPath, "gmail.json");
-    
+
     if (!fs.existsSync(gmailTokenPath)) {
       return null;
     }
@@ -136,7 +138,7 @@ async function createGmailOAuth2Client(userPath: string) {
 
 async function createReplWorker(keepDB: KeepDb, userPath: string) {
   const gmailOAuth2Client = await createGmailOAuth2Client(userPath);
-  
+
   const worker = new TaskWorker({
     api: new KeepDbApi(keepDB),
     stepLimit: 20,
@@ -548,7 +550,6 @@ export async function createServer(config: ServerConfig = {}) {
     }
   };
 
-
   // Helper function to handle file uploads from peers
   const handleUpload = async (
     filename: string,
@@ -852,7 +853,15 @@ export async function createServer(config: ServerConfig = {}) {
             content: JSON.stringify({
               id,
               role: "system",
-              content: `This is user onboarding synthetic instruction-draft for replier: please greet the user, tell them 'who you are' in their preferred language and ask how you could be helpful. We rely on your, Replier's, common sense to prepare the first ever message that user will see from us.`,
+              parts: [
+                {
+                  type: "text",
+                  text: `This is user onboarding synthetic instruction-draft for replier: please greet the user, tell them 'who you are' in their preferred language and ask how you could be helpful. We rely on your, Replier's, common sense to prepare the first ever message that user will see from us.`,
+                },
+              ],
+              metadata: {
+                createdAt: new Date().toISOString()
+              }
             }),
           });
         }
@@ -888,14 +897,16 @@ export async function createServer(config: ServerConfig = {}) {
       if (!GMAIL_CLIENT_SECRET) {
         debugServer("Gmail client secret not configured");
         return reply.status(500).send({
-          error: "Gmail client secret not configured"
+          error: "Gmail client secret not configured",
         });
       }
 
       debugServer("gmail connect request url", request.url);
-      const redirectUri = `${request.protocol}://${request.hostname}${request.hostname === 'localhost' ? `:${process.env.PORT || 3000}` : ''}/api/gmail/callback`;
-      debugServer("redirectUri", redirectUri)
-      
+      const redirectUri = `${request.protocol}://${request.hostname}${
+        request.hostname === "localhost" ? `:${process.env.PORT || 3000}` : ""
+      }/api/gmail/callback`;
+      debugServer("redirectUri", redirectUri);
+
       const oAuth2Client = new google.auth.OAuth2(
         GMAIL_CLIENT_ID,
         GMAIL_CLIENT_SECRET,
@@ -924,7 +935,7 @@ export async function createServer(config: ServerConfig = {}) {
       const { code, error } = query;
 
       if (error) {
-        reply.header('Content-Type', 'text/html');
+        reply.header("Content-Type", "text/html");
         return reply.send(`
           <!DOCTYPE html>
           <html>
@@ -1004,17 +1015,21 @@ export async function createServer(config: ServerConfig = {}) {
       }
 
       if (!code) {
-        return reply.status(400).send({ error: "No authorization code received" });
+        return reply
+          .status(400)
+          .send({ error: "No authorization code received" });
       }
 
       if (!GMAIL_CLIENT_SECRET) {
         return reply.status(500).send({
-          error: "Gmail client secret not configured"
+          error: "Gmail client secret not configured",
         });
       }
 
-      const redirectUri = `${request.protocol}://${request.hostname}${request.hostname === 'localhost' ? `:${process.env.PORT || 3000}` : ''}/api/gmail/callback`;
-      
+      const redirectUri = `${request.protocol}://${request.hostname}${
+        request.hostname === "localhost" ? `:${process.env.PORT || 3000}` : ""
+      }/api/gmail/callback`;
+
       const oAuth2Client = new google.auth.OAuth2(
         GMAIL_CLIENT_ID,
         GMAIL_CLIENT_SECRET,
@@ -1022,11 +1037,15 @@ export async function createServer(config: ServerConfig = {}) {
       );
 
       const { tokens } = await oAuth2Client.getToken(code);
-      
-      const gmailTokenPath = path.join(userPath, "gmail.json");
-      await fsPromises.writeFile(gmailTokenPath, JSON.stringify(tokens, null, 2), { mode: 0o600 });
 
-      reply.header('Content-Type', 'text/html');
+      const gmailTokenPath = path.join(userPath, "gmail.json");
+      await fsPromises.writeFile(
+        gmailTokenPath,
+        JSON.stringify(tokens, null, 2),
+        { mode: 0o600 }
+      );
+
+      reply.header("Content-Type", "text/html");
       return reply.send(`
         <!DOCTYPE html>
         <html>
@@ -1105,7 +1124,7 @@ export async function createServer(config: ServerConfig = {}) {
       `);
     } catch (error) {
       debugServer("Error in /api/gmail/callback:", error);
-      reply.header('Content-Type', 'text/html');
+      reply.header("Content-Type", "text/html");
       return reply.send(`
         <!DOCTYPE html>
         <html>
@@ -1188,18 +1207,18 @@ export async function createServer(config: ServerConfig = {}) {
   app.post("/api/gmail/check", async (request, reply) => {
     try {
       const gmailTokenPath = path.join(userPath, "gmail.json");
-      
+
       if (!fs.existsSync(gmailTokenPath)) {
         return reply.status(400).send({
           success: false,
-          error: "Gmail token not found. Please connect Gmail first."
+          error: "Gmail token not found. Please connect Gmail first.",
         });
       }
 
       if (!GMAIL_CLIENT_SECRET) {
         return reply.status(500).send({
           success: false,
-          error: "Gmail client secret not configured"
+          error: "Gmail client secret not configured",
         });
       }
 
@@ -1219,25 +1238,28 @@ export async function createServer(config: ServerConfig = {}) {
 
       // Make a basic API call to test the connection
       const response = await gmail.users.getProfile({ userId: "me" });
-      
+
       if (response.data && response.data.emailAddress) {
         return reply.send({
           success: true,
           email: response.data.emailAddress,
           messagesTotal: response.data.messagesTotal || 0,
-          threadsTotal: response.data.threadsTotal || 0
+          threadsTotal: response.data.threadsTotal || 0,
         });
       } else {
         return reply.status(500).send({
           success: false,
-          error: "Invalid response from Gmail API"
+          error: "Invalid response from Gmail API",
         });
       }
     } catch (error) {
       debugServer("Error in /api/gmail/check:", error);
       return reply.status(500).send({
         success: false,
-        error: error instanceof Error ? error.message : "Unknown error checking Gmail connection"
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unknown error checking Gmail connection",
       });
     }
   });
@@ -1437,7 +1459,7 @@ export async function createServer(config: ServerConfig = {}) {
       reply.header("Content-Length", fileRecord.size);
       // Properly encode the filename for Content-Disposition header to handle non-ASCII characters
       const encodedFilename = encodeURIComponent(fileRecord.name);
-      const asciiFilename = fileRecord.name.replace(/[^\x20-\x7e]/g, '_'); // Replace non-ASCII with underscore for fallback
+      const asciiFilename = fileRecord.name.replace(/[^\x20-\x7e]/g, "_"); // Replace non-ASCII with underscore for fallback
       reply.header(
         "Content-Disposition",
         `inline; filename="${asciiFilename}"; filename*=UTF-8''${encodedFilename}`

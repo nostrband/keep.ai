@@ -2,8 +2,9 @@ import { z } from "zod";
 import { tool } from "ai";
 import { FileStore } from "@app/db";
 import { storeFileData } from "@app/node";
+import { EvalContext } from "../sandbox/sandbox";
 
-export function makeSaveFileTool(fileStore: FileStore, userPath?: string) {
+export function makeSaveFileTool(fileStore: FileStore, userPath: string | undefined, getContext: () => EvalContext) {
   return tool({
     description: `Save file data to local filesystem and database.
 Accepts either plain text content, raw bytes, or base64-encoded data.
@@ -61,6 +62,13 @@ Returns the created file record with metadata.`,
         input.mimeType,
         input.summary
       );
+
+      // Create event for context tracking
+      await getContext().createEvent("file_save", {
+        filename: input.filename,
+        size: fileBuffer.length,
+        mimeType: input.mimeType || fileRecord.media_type
+      });
 
       return fileRecord;
     },

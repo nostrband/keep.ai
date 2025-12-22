@@ -292,10 +292,12 @@ export class Peer extends EventEmitter<{
       console.error("onReceive wrong transport for peer", peerId);
       throw new Error("Wrong transport for peer");
     }
-    
+
     // Ignore input if recv stream id doesn't match current one
     if (recvStreamId !== peer.recvStreamId) {
-      this.debug(`Ignoring message from peer ${peerId}: stream ID mismatch (expected ${peer.recvStreamId}, got ${recvStreamId})`);
+      this.debug(
+        `Ignoring message from peer ${peerId}: stream ID mismatch (expected ${peer.recvStreamId}, got ${recvStreamId})`
+      );
       return;
     }
     switch (msg.type) {
@@ -471,7 +473,7 @@ export class Peer extends EventEmitter<{
 
       // Initialize our own cursor
       this.cursor = await this.readCursor();
-      this.debug(`Initialized our cursor to ${JSON.stringify(this.cursor)}`);
+      this.debug(`Initialized our cursor to ${JSON.stringify(serializeCursor(this.cursor))}`);
 
       // Db version
       const schemaVersion = await this.db.execO<{ user_version: number }>(
@@ -495,10 +497,20 @@ export class Peer extends EventEmitter<{
       const cursor = new Cursor();
 
       // Use our all_peers table for fast cursor lookup
-      const cursorData = await this.db.execO<{
+      let cursorData = await this.db.execO<{
         site_id: Uint8Array;
         db_version: number;
       }>("SELECT site_id, db_version FROM all_peers");
+
+      // Ensure our own peer is in the cursor, even if no changes yet
+      if (!cursorData || !cursorData.length) {
+        cursorData = await this.db.execO<{
+          site_id: Uint8Array;
+          db_version: number;
+        }>(
+          "SELECT distinct site_id as site_id, max(db_version) as db_version FROM crsql_change_history"
+        );
+      }
 
       if (cursorData) {
         for (const row of cursorData) {
@@ -506,9 +518,6 @@ export class Peer extends EventEmitter<{
           cursor.peers.set(siteIdHex, row.db_version);
         }
       }
-
-      // Ensure our own peer is in the cursor, even if no changes yet
-      if (!cursor.peers.size) cursor.peers.set(this.id, 0);
 
       this.debug(
         `readCursor completed in ${

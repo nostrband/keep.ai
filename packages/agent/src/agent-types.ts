@@ -1,3 +1,5 @@
+import { EvalResult } from "./sandbox/sandbox";
+
 export type TaskType = "router" | "worker" | "replier";
 export type StepReason = "start" | "code" | "input" | "timer";
 export type StepOutputKind = "done" | "code" | "wait";
@@ -33,11 +35,7 @@ export type StepInput = {
   reason: StepReason;
   inbox: string[];
   now: string; // ISO
-  result?: {
-    ok: boolean;
-    result?: any;
-    error?: string;
-  };
+  result?: EvalResult;
 };
 
 export type StepOutput = { steps: number; reasoning?: string } & (

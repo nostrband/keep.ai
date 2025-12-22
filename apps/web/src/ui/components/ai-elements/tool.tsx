@@ -95,28 +95,49 @@ export const ToolContent = ({ className, ...props }: ToolContentProps) => (
 
 export type ToolInputProps = ComponentProps<"div"> & {
   input: ToolUIPart["input"];
+  toolType?: string;
 };
 
-export const ToolInput = ({ className, input, ...props }: ToolInputProps) => (
-  <div className={cn("space-y-2 overflow-hidden p-4", className)} {...props}>
-    <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
-      Parameters
-    </h4>
-    <div className="rounded-md bg-muted/50">
-      <CodeBlock code={JSON.stringify(input, null, 2)} language="json" />
+export const ToolInput = ({ className, input, toolType, ...props }: ToolInputProps) => {
+  // Special handling for eval tool - extract and display only jsCode
+  if (toolType === 'eval' && input && typeof input === 'object' && 'jsCode' in input) {
+    const jsCode = input.jsCode as string;
+    return (
+      <div className={cn("space-y-2 overflow-hidden p-4", className)} {...props}>
+        <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
+          JavaScript Code
+        </h4>
+        <div className="rounded-md bg-muted/50">
+          <CodeBlock code={jsCode} language="javascript" />
+        </div>
+      </div>
+    );
+  }
+
+  // Default behavior for other tools
+  return (
+    <div className={cn("space-y-2 overflow-hidden p-4", className)} {...props}>
+      <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
+        Parameters
+      </h4>
+      <div className="rounded-md bg-muted/50">
+        <CodeBlock code={JSON.stringify(input, null, 2)} language="json" />
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 export type ToolOutputProps = ComponentProps<"div"> & {
   output: ToolUIPart["output"];
   errorText: ToolUIPart["errorText"];
+  toolType?: string;
 };
 
 export const ToolOutput = ({
   className,
   output,
   errorText,
+  toolType,
   ...props
 }: ToolOutputProps) => {
   if (!(output || errorText)) {
@@ -125,7 +146,18 @@ export const ToolOutput = ({
 
   let Output = <div>{output as ReactNode}</div>;
 
-  if (typeof output === "object") {
+  // Special handling for eval tool - JSON parse the string output
+  if (toolType === 'eval' && typeof output === "string" && !errorText) {
+    try {
+      const parsedOutput = JSON.parse(output);
+      Output = (
+        <CodeBlock code={JSON.stringify(parsedOutput, null, 2)} language="json" />
+      );
+    } catch (e) {
+      // If JSON parsing fails, fall back to displaying as string
+      Output = <CodeBlock code={output} language="text" />;
+    }
+  } else if (typeof output === "object") {
     Output = (
       <CodeBlock code={JSON.stringify(output, null, 2)} language="json" />
     );
