@@ -43,6 +43,8 @@ interface PeerInfo {
   syncCancel?: boolean;
   // to cancel and await
   syncPromise?: Promise<void>;
+  // changes that happened while syncPeer was working
+  pendingChanges: PeerChange[];
 }
 
 export class Peer extends EventEmitter<{
@@ -66,10 +68,15 @@ export class Peer extends EventEmitter<{
   private queue: Promise<void> = Promise.resolve();
   #debug?: ReturnType<typeof debug>;
 
+  // Calls to this method are serialized internally
+  // to make sure we're only checking in 1 thread
+  public checkLocalChanges: () => Promise<void>;
+
   constructor(db: DBInterface | (() => DBInterface), transports: Transport[]) {
     super();
     this.#db = db;
     this.transports = transports;
+    this.checkLocalChanges = this.queued(this.checkLocalChangesImpl.bind(this));
   }
 
   get db(): DBInterface {
@@ -122,7 +129,9 @@ export class Peer extends EventEmitter<{
   // If there are local changes:
   // - broadcasts to peers
   // - emits 'changes'
-  async checkLocalChanges(): Promise<void> {
+  // Exposed as checkLocalChanges (see above) 
+  // through serialization with 'queued'
+  private async checkLocalChangesImpl(): Promise<void> {
     await this.broadcastLocalChanges();
   }
 
@@ -152,6 +161,7 @@ export class Peer extends EventEmitter<{
       transport: transport,
       sendStreamId: "",
       recvStreamId: "",
+      pendingChanges: [],
     };
     this.peers.set(peerId, peer);
     this.debug(`Peer '${peerId}' connected`);
@@ -194,9 +204,6 @@ export class Peer extends EventEmitter<{
       peer.syncCancel = true;
       await peer.syncPromise;
     }
-
-    // activate
-    peer.active = true;
 
     // set it's cursor and send stream ID
     peer.cursor = peerCursor;
@@ -722,7 +729,17 @@ export class Peer extends EventEmitter<{
     this.debug("Broadcasting to peers", this.peers.size);
     for (const p of this.peers.values()) {
       this.debug("Broadcasting to peer", p.id, p.active);
-      if (p.id === exceptPeerId || !p.active) continue;
+      if (p.id === exceptPeerId) continue;
+
+      if (!p.active) {
+        p.pendingChanges.push(...changes);
+        continue;
+      }
+
+      if (p.pendingChanges.length) {
+        await this.sendChanges(p, p.pendingChanges);
+        p.pendingChanges.length = 0;
+      }
 
       const newChanges = filterChanges(changes, p.cursor);
       await this.sendChanges(p, newChanges);
@@ -835,6 +852,24 @@ export class Peer extends EventEmitter<{
       } else {
         this.debug(`Sync cancelled to peer '${peer.id}'`);
       }
+
+      // Send pending changes that have been or are being 
+      // added by checkLocalChanges while active=false
+      while (peer.pendingChanges.length) {
+        // Consume
+        const changes = [...peer.pendingChanges];
+        peer.pendingChanges.length = 0;
+
+        // Send to peer
+        await this.sendChanges(peer, changes);
+
+        // Assume peer knows these changes now
+        this.updatePeerCursor(peer.id, changes);
+      }
+
+      // Now checkLocalChanges will send by itself
+      peer.active = true;
+
     } catch (error) {
       this.debug("Error sending changes to", peer, error);
       throw error;
