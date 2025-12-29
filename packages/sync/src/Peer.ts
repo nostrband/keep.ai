@@ -510,6 +510,11 @@ export class Peer extends EventEmitter<{
         }>(
           "SELECT distinct site_id as site_id, max(db_version) as db_version FROM crsql_change_history"
         );
+
+        // distinct return null columns on empty table
+        if (cursorData?.length === 1 && cursorData[0].site_id === null) {
+          cursorData = null;
+        }
       }
 
       if (cursorData) {

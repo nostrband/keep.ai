@@ -31,6 +31,10 @@ export function registerVacuumCommand(program: Command): void {
       "-o, --output <path>",
       'Output database file path (defaults to input + "-vacuumed")'
     )
+    .option(
+      "--clean_errors",
+      "Skip task_runs with errors (skip rows where error field is not empty)"
+    )
     .action(async (options) => {
       await runVacuumCommand(options);
     });
@@ -39,6 +43,7 @@ export function registerVacuumCommand(program: Command): void {
 async function runVacuumCommand(options: {
   input?: string;
   output?: string;
+  clean_errors?: boolean;
 }): Promise<void> {
   let oldDB: DBInterface | null = null;
   let newDB: DBInterface | null = null;
@@ -154,7 +159,8 @@ async function runVacuumCommand(options: {
       await copyAllTableData(
         oldDB,
         newDB,
-        userTables.map((t) => t.name)
+        userTables.map((t) => t.name),
+        options.clean_errors
       );
     } finally {
       // Rollback read transaction on old DB
@@ -321,8 +327,24 @@ async function enableCRSQLiteTracking(
 async function copyAllTableData(
   oldDB: DBInterface,
   newDB: DBInterface,
-  tableNames: string[]
+  tableNames: string[],
+  cleanErrors?: boolean
 ): Promise<void> {
+  let skippedThreadIds: string[] = [];
+  
+  // First, process task_runs if it exists and collect skipped thread_ids
+  if (tableNames.includes("task_runs")) {
+    if (cleanErrors) {
+      console.log(`  📋 Copying data for table: task_runs`);
+      console.log(`    🧹 Cleaning errors: skipping task_runs with errors or incomplete runs`);
+      skippedThreadIds = await copyTaskRunsWithoutErrors(oldDB, newDB);
+    } else {
+      console.log(`  📋 Copying data for table: task_runs`);
+      await copyTableData(oldDB, newDB, "task_runs");
+    }
+  }
+
+  // Process all other tables
   for (const tableName of tableNames) {
     // Drop nostr_peers and nostr_peer_cursors!
     // Otherwise we'll try to sync from them and will re-import all existing changes and
@@ -331,11 +353,23 @@ async function copyAllTableData(
     if (
       tableName.startsWith("nostr_peer") ||
       tableName === "crsql_change_history" ||
-      tableName === "all_peers"
+      tableName === "all_peers" ||
+      tableName === "task_runs" // Already processed above
     )
       continue;
+    
     console.log(`  📋 Copying data for table: ${tableName}`);
-    await copyTableData(oldDB, newDB, tableName);
+    
+    // Handle threads and messages tables specially if cleanErrors is enabled and we have skipped thread_ids
+    if (tableName === "threads" && cleanErrors && skippedThreadIds.length > 0) {
+      console.log(`    🧹 Excluding ${skippedThreadIds.length} problematic thread(s)`);
+      await copyThreadsWithoutSkipped(oldDB, newDB, skippedThreadIds);
+    } else if (tableName === "messages" && cleanErrors && skippedThreadIds.length > 0) {
+      console.log(`    🧹 Excluding messages from ${skippedThreadIds.length} problematic thread(s)`);
+      await copyMessagesWithoutSkipped(oldDB, newDB, skippedThreadIds);
+    } else {
+      await copyTableData(oldDB, newDB, tableName);
+    }
   }
 
   // After copying all regular tables, copy from crsql_changes to crsql_change_history
@@ -468,6 +502,317 @@ async function copyTableData(
 
   console.log(
     `    ✅ Completed copying ${copiedRows} rows for table ${tableName}`
+  );
+}
+
+async function copyTaskRunsWithoutErrors(
+  oldDB: DBInterface,
+  newDB: DBInterface
+): Promise<string[]> {
+  const tableName = "task_runs";
+  
+  // Get total row count for progress tracking (all rows)
+  const totalCountResult = await oldDB.execO<{ count: number }>(
+    `SELECT COUNT(*) as count FROM "${tableName}"`
+  );
+  const totalRows = totalCountResult ? totalCountResult[0].count : 0;
+
+  // First collect thread_ids from problematic task_runs (errors OR incomplete)
+  const skippedThreadsResult = await oldDB.execO<{ thread_id: string }>(
+    `SELECT DISTINCT thread_id FROM "${tableName}"
+     WHERE (error != '' AND error IS NOT NULL)
+        OR (end_timestamp = '' OR end_timestamp IS NULL)`
+  );
+  const skippedThreadIds = skippedThreadsResult ? skippedThreadsResult.map(row => row.thread_id).filter(id => id && id.trim() !== '') : [];
+
+  // Get count of rows that are clean (no errors AND have end_timestamp)
+  const cleanCountResult = await oldDB.execO<{ count: number }>(
+    `SELECT COUNT(*) as count FROM "${tableName}"
+     WHERE (error = '' OR error IS NULL)
+       AND (end_timestamp != '' AND end_timestamp IS NOT NULL)`
+  );
+  const cleanRows = cleanCountResult ? cleanCountResult[0].count : 0;
+
+  const problemRows = totalRows - cleanRows;
+
+  if (totalRows === 0) {
+    console.log(`    ℹ️  Table ${tableName} is empty, skipping data copy`);
+    return [];
+  }
+
+  console.log(`    📊 Table ${tableName} contains ${totalRows} rows total`);
+  console.log(`    🧹 Found ${problemRows} rows with errors or incomplete runs, copying ${cleanRows} clean rows`);
+  if (skippedThreadIds.length > 0) {
+    console.log(`    🧹 Will skip ${skippedThreadIds.length} thread(s) associated with problematic runs`);
+  }
+
+  if (cleanRows === 0) {
+    console.log(`    ℹ️  No clean rows to copy, skipping data copy`);
+    return skippedThreadIds;
+  }
+
+  // Get column names for the table
+  const columns = await oldDB.execO<{ name: string }>(
+    `PRAGMA table_info("${tableName}")`
+  );
+
+  if (!columns || columns.length === 0) {
+    throw new Error(`Could not get column information for table: ${tableName}`);
+  }
+
+  const columnNames = columns.map((col) => `"${col.name}"`).join(", ");
+  const placeholders = columns.map(() => "?").join(", ");
+
+  // Copy data in batches, filtering out rows with errors or incomplete runs
+  let offset = 0;
+  let copiedRows = 0;
+
+  while (offset < cleanRows) {
+    const batchData = await oldDB.execO<any>(
+      `SELECT ${columnNames} FROM "${tableName}"
+       WHERE (error = '' OR error IS NULL)
+         AND (end_timestamp != '' AND end_timestamp IS NOT NULL)
+       LIMIT ${BATCH_SIZE} OFFSET ${offset}`
+    );
+
+    if (!batchData || batchData.length === 0) {
+      break;
+    }
+
+    // Prepare batch insert
+    const insertSQL = `INSERT INTO "${tableName}" (${columnNames}) VALUES (${placeholders})`;
+    const batchArgs = batchData.map((row) => Object.values(row));
+
+    // Insert batch into new database
+    await newDB.execManyArgs(insertSQL, batchArgs);
+
+    copiedRows += batchData.length;
+    offset += BATCH_SIZE;
+
+    console.log(
+      `    📋 Copied ${copiedRows}/${cleanRows} clean rows (${Math.round(
+        (copiedRows / cleanRows) * 100
+      )}%)`
+    );
+    debugVacuum(
+      `Copied batch of ${batchData.length} clean rows for table ${tableName}`
+    );
+  }
+
+  console.log(
+    `    ✅ Completed copying ${copiedRows} clean rows for table ${tableName} (skipped ${problemRows} problematic rows)`
+  );
+  
+  return skippedThreadIds;
+}
+
+async function copyThreadsWithoutSkipped(
+  oldDB: DBInterface,
+  newDB: DBInterface,
+  skippedThreadIds: string[]
+): Promise<void> {
+  const tableName = "threads";
+  
+  // Get total row count for progress tracking
+  const totalCountResult = await oldDB.execO<{ count: number }>(
+    `SELECT COUNT(*) as count FROM "${tableName}"`
+  );
+  const totalRows = totalCountResult ? totalCountResult[0].count : 0;
+
+  if (totalRows === 0) {
+    console.log(`    ℹ️  Table ${tableName} is empty, skipping data copy`);
+    return;
+  }
+
+  // Create temporary table for skipped thread_ids to avoid SQLite variable limit
+  await oldDB.exec(`CREATE TEMP TABLE temp_skipped_threads (id TEXT PRIMARY KEY)`);
+  
+  // Insert skipped thread_ids in batches to avoid variable limit
+  const batchSize = 500; // Well under SQLite's 999 variable limit
+  for (let i = 0; i < skippedThreadIds.length; i += batchSize) {
+    const batch = skippedThreadIds.slice(i, i + batchSize);
+    const placeholders = batch.map(() => '?').join(', ');
+    await oldDB.exec(
+      `INSERT INTO temp_skipped_threads (id) VALUES ${batch.map(() => '(?)').join(', ')}`,
+      batch
+    );
+  }
+
+  // Get count of rows to copy (exclude skipped thread_ids)
+  const cleanCountResult = await oldDB.execO<{ count: number }>(
+    `SELECT COUNT(*) as count FROM "${tableName}" t
+     WHERE NOT EXISTS (SELECT 1 FROM temp_skipped_threads s WHERE s.id = t.id)`
+  );
+  const cleanRows = cleanCountResult ? cleanCountResult[0].count : 0;
+  const skippedRows = totalRows - cleanRows;
+
+  console.log(`    📊 Table ${tableName} contains ${totalRows} rows total`);
+  console.log(`    🧹 Skipping ${skippedRows} rows from problematic threads, copying ${cleanRows} clean rows`);
+
+  if (cleanRows === 0) {
+    console.log(`    ℹ️  No clean rows to copy, skipping data copy`);
+    // Clean up temp table
+    await oldDB.exec(`DROP TABLE temp_skipped_threads`);
+    return;
+  }
+
+  // Get column names for the table
+  const columns = await oldDB.execO<{ name: string }>(
+    `PRAGMA table_info("${tableName}")`
+  );
+
+  if (!columns || columns.length === 0) {
+    throw new Error(`Could not get column information for table: ${tableName}`);
+  }
+
+  const columnNames = columns.map((col) => `"${col.name}"`).join(", ");
+  const placeholdersInsert = columns.map(() => "?").join(", ");
+
+  // Copy data in batches, excluding skipped thread_ids
+  let offset = 0;
+  let copiedRows = 0;
+
+  while (offset < cleanRows) {
+    const batchData = await oldDB.execO<any>(
+      `SELECT ${columnNames} FROM "${tableName}" t
+       WHERE NOT EXISTS (SELECT 1 FROM temp_skipped_threads s WHERE s.id = t.id)
+       LIMIT ${BATCH_SIZE} OFFSET ${offset}`
+    );
+
+    if (!batchData || batchData.length === 0) {
+      break;
+    }
+
+    // Prepare batch insert
+    const insertSQL = `INSERT INTO "${tableName}" (${columnNames}) VALUES (${placeholdersInsert})`;
+    const batchArgs = batchData.map((row) => Object.values(row));
+
+    // Insert batch into new database
+    await newDB.execManyArgs(insertSQL, batchArgs);
+
+    copiedRows += batchData.length;
+    offset += BATCH_SIZE;
+
+    console.log(
+      `    📋 Copied ${copiedRows}/${cleanRows} clean rows (${Math.round(
+        (copiedRows / cleanRows) * 100
+      )}%)`
+    );
+    debugVacuum(
+      `Copied batch of ${batchData.length} clean rows for table ${tableName}`
+    );
+  }
+
+  // Clean up temp table
+  await oldDB.exec(`DROP TABLE temp_skipped_threads`);
+
+  console.log(
+    `    ✅ Completed copying ${copiedRows} clean rows for table ${tableName} (skipped ${skippedRows} problematic rows)`
+  );
+}
+
+async function copyMessagesWithoutSkipped(
+  oldDB: DBInterface,
+  newDB: DBInterface,
+  skippedThreadIds: string[]
+): Promise<void> {
+  const tableName = "messages";
+  
+  // Get total row count for progress tracking
+  const totalCountResult = await oldDB.execO<{ count: number }>(
+    `SELECT COUNT(*) as count FROM "${tableName}"`
+  );
+  const totalRows = totalCountResult ? totalCountResult[0].count : 0;
+
+  if (totalRows === 0) {
+    console.log(`    ℹ️  Table ${tableName} is empty, skipping data copy`);
+    return;
+  }
+
+  // Create temporary table for skipped thread_ids to avoid SQLite variable limit
+  await oldDB.exec(`CREATE TEMP TABLE temp_skipped_message_threads (id TEXT PRIMARY KEY)`);
+  
+  // Insert skipped thread_ids in batches to avoid variable limit
+  const batchSize = 500; // Well under SQLite's 999 variable limit
+  for (let i = 0; i < skippedThreadIds.length; i += batchSize) {
+    const batch = skippedThreadIds.slice(i, i + batchSize);
+    const placeholders = batch.map(() => '?').join(', ');
+    await oldDB.exec(
+      `INSERT INTO temp_skipped_message_threads (id) VALUES ${batch.map(() => '(?)').join(', ')}`,
+      batch
+    );
+  }
+
+  // Get count of rows to copy (exclude messages from skipped thread_ids)
+  const cleanCountResult = await oldDB.execO<{ count: number }>(
+    `SELECT COUNT(*) as count FROM "${tableName}" m
+     WHERE NOT EXISTS (SELECT 1 FROM temp_skipped_message_threads s WHERE s.id = m.thread_id)`
+  );
+  const cleanRows = cleanCountResult ? cleanCountResult[0].count : 0;
+  const skippedRows = totalRows - cleanRows;
+
+  console.log(`    📊 Table ${tableName} contains ${totalRows} rows total`);
+  console.log(`    🧹 Skipping ${skippedRows} rows from problematic threads, copying ${cleanRows} clean rows`);
+
+  if (cleanRows === 0) {
+    console.log(`    ℹ️  No clean rows to copy, skipping data copy`);
+    // Clean up temp table
+    await oldDB.exec(`DROP TABLE temp_skipped_message_threads`);
+    return;
+  }
+
+  // Get column names for the table
+  const columns = await oldDB.execO<{ name: string }>(
+    `PRAGMA table_info("${tableName}")`
+  );
+
+  if (!columns || columns.length === 0) {
+    throw new Error(`Could not get column information for table: ${tableName}`);
+  }
+
+  const columnNames = columns.map((col) => `"${col.name}"`).join(", ");
+  const placeholdersInsert = columns.map(() => "?").join(", ");
+
+  // Copy data in batches, excluding messages from skipped thread_ids
+  let offset = 0;
+  let copiedRows = 0;
+
+  while (offset < cleanRows) {
+    const batchData = await oldDB.execO<any>(
+      `SELECT ${columnNames} FROM "${tableName}" m
+       WHERE NOT EXISTS (SELECT 1 FROM temp_skipped_message_threads s WHERE s.id = m.thread_id)
+       LIMIT ${BATCH_SIZE} OFFSET ${offset}`
+    );
+
+    if (!batchData || batchData.length === 0) {
+      break;
+    }
+
+    // Prepare batch insert
+    const insertSQL = `INSERT INTO "${tableName}" (${columnNames}) VALUES (${placeholdersInsert})`;
+    const batchArgs = batchData.map((row) => Object.values(row));
+
+    // Insert batch into new database
+    await newDB.execManyArgs(insertSQL, batchArgs);
+
+    copiedRows += batchData.length;
+    offset += BATCH_SIZE;
+
+    console.log(
+      `    📋 Copied ${copiedRows}/${cleanRows} clean rows (${Math.round(
+        (copiedRows / cleanRows) * 100
+      )}%)`
+    );
+    debugVacuum(
+      `Copied batch of ${batchData.length} clean rows for table ${tableName}`
+    );
+  }
+
+  // Clean up temp table
+  await oldDB.exec(`DROP TABLE temp_skipped_message_threads`);
+
+  console.log(
+    `    ✅ Completed copying ${copiedRows} clean rows for table ${tableName} (skipped ${skippedRows} problematic rows)`
   );
 }
 
