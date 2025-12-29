@@ -12,7 +12,7 @@ import {
 import { AssistantUIMessage } from "@app/proto";
 import debug from "debug";
 import { AgentEnv } from "./agent-env";
-import { LanguageModelV2Usage } from "@ai-sdk/provider";
+import { APICallError, LanguageModelV2Usage } from "@ai-sdk/provider";
 import { makeEvalTool } from "./ai-tools/eval";
 import { makeFinishTool } from "./ai-tools/finish";
 import { makePauseTool } from "./ai-tools/pause";
@@ -150,170 +150,184 @@ export class Agent {
       activeTools.push("pause");
     }
 
-    // Call LLM
-    const result = streamText({
-      model: this.model,
-      temperature: this.env.temperature,
-      messages,
-      providerOptions: {
-        openrouter: {
-          // reasoning: {
-          //   max_tokens: 500,
-          // },
+    try {
+      // Call LLM
+      const result = streamText({
+        model: this.model,
+        temperature: this.env.temperature,
+        messages,
+        providerOptions: {
+          openrouter: {
+            // reasoning: {
+            //   max_tokens: 500,
+            // },
+          },
         },
-      },
-      activeTools,
-      tools: {
-        eval: makeEvalTool({
-          sandbox: this.sandbox,
-          type: this.task.type,
-          getState: () => jsState,
-          setResult: (result, code) => {
-            // Store
-            input.result = result;
-            lastCode = code;
+        activeTools,
+        tools: {
+          eval: makeEvalTool({
+            sandbox: this.sandbox,
+            type: this.task.type,
+            getState: () => jsState,
+            setResult: (result, code) => {
+              // Store
+              input.result = result;
+              lastCode = code;
 
-            // Next step reason
-            input.reason = "code";
+              // Next step reason
+              input.reason = "code";
 
-            // Update state
-            if (result.ok && result.state) jsState = result.state;
-          },
-        }),
-        finish: makeFinishTool({
-          onFinish: (info) => {
-            // Stop the loop
-            stopped = true;
+              // Update state
+              if (result.ok && result.state) jsState = result.state;
+            },
+          }),
+          finish: makeFinishTool({
+            onFinish: (info) => {
+              // Stop the loop
+              stopped = true;
 
-            // 'done' output
-            output = {
-              kind: "done",
-              reply: info.reply || "",
-              steps: input.step + 1,
-            };
-            if (info.notes || info.plan) {
-              output.patch = {
-                notes: info.notes,
-                plan: info.plan,
+              // 'done' output
+              output = {
+                kind: "done",
+                reply: info.reply || "",
+                steps: input.step + 1,
               };
-            }
-          },
-        }),
-        pause: makePauseTool({
-          onPause: (info) => {
-            // Stop the loop
-            stopped = true;
+              if (info.notes || info.plan) {
+                output.patch = {
+                  notes: info.notes,
+                  plan: info.plan,
+                };
+              }
+            },
+          }),
+          pause: makePauseTool({
+            onPause: (info) => {
+              // Stop the loop
+              stopped = true;
 
-            // 'wait' output
-            output = {
-              kind: "wait",
-              steps: input.step + 1,
-            };
-            if (info.notes || info.plan) {
-              output.patch = {
-                notes: info.notes,
-                plan: info.plan,
+              // 'wait' output
+              output = {
+                kind: "wait",
+                steps: input.step + 1,
               };
-            }
-          },
-        }),
-      },
-      stopWhen: () => stopped,
-      prepareStep: (opts) => {
-        // Update input
-        input.step = opts.stepNumber;
-        input.now = new Date().toISOString();
+              if (info.notes || info.plan) {
+                output.patch = {
+                  notes: info.notes,
+                  plan: info.plan,
+                };
+              }
+            },
+          }),
+        },
+        stopWhen: () => stopped,
+        prepareStep: (opts) => {
+          // Update input
+          input.step = opts.stepNumber;
+          input.now = new Date().toISOString();
 
-        // Reset
-        output = undefined;
+          // Reset
+          output = undefined;
 
-        // Update context
-        if (this.sandbox.context) {
-          this.sandbox.context = {
-            ...this.sandbox.context,
-            step: input.step,
-          };
-        }
-        this.debug("step", input.step, "input", input);
-
-        // NOTE: can change model, tools, system prompt and all input messages
-        return undefined;
-      },
-      onStepFinish: async (stepResult) => {
-        // Consumed
-        input.inbox.length = 0;
-
-        console.log("step", input.step, "request", stepResult.request.body);
-        console.log("stepResult.finishReason", stepResult.finishReason);
-        // console.log("response", stepResult.response.messages);
-
-        if (stepResult.finishReason === "stop") {
-          // If task doesn't call 'pause' or 'finish' then
-          // the default reply is 'done'
-          if (!output) {
-            output = {
-              steps: input.step + 1,
-              kind: "done",
-              reply: stepResult.text,
+          // Update context
+          if (this.sandbox.context) {
+            this.sandbox.context = {
+              ...this.sandbox.context,
+              step: input.step,
             };
           }
+          this.debug("step", input.step, "input", input);
+
+          // NOTE: can change model, tools, system prompt and all input messages
+          return undefined;
+        },
+        onStepFinish: async (stepResult) => {
+          // Consumed
+          input.inbox.length = 0;
+
+          console.log("step", input.step, "request", stepResult.request.body);
+          console.log("stepResult.finishReason", stepResult.finishReason);
+          // console.log("response", stepResult.response.messages);
+
+          if (stepResult.finishReason === "stop") {
+            // If task doesn't call 'pause' or 'finish' then
+            // the default reply is 'done'
+            if (!output) {
+              output = {
+                steps: input.step + 1,
+                kind: "done",
+                reply: stepResult.text,
+              };
+            }
+          } else {
+            if (!output) {
+              output = {
+                kind: "code",
+                steps: input.step + 1,
+                code: lastCode,
+              };
+            }
+          }
+
+          // Save reasoning
+          output.reasoning = stepResult.reasoningText;
+
+          this.debug("step", input.step, "output", output);
+
+          // onStep handler
+          if (opts?.onStep) {
+            const info = await opts.onStep(
+              input.step,
+              input,
+              output,
+              input.result
+            );
+
+            // Stop if client says so
+            if (!info.proceed) stopped = true;
+
+            // New stuff in the inbox
+            if (info.inbox) input.inbox = [...info.inbox];
+          }
+        },
+      });
+
+      // Read reply into UIMessage
+      let newMessage: UIMessage | undefined;
+      for await (const uiMessage of readUIMessageStream({
+        stream: result.toUIMessageStream(),
+      })) {
+        // @ts-ignore
+        newMessage = uiMessage;
+      }
+      if (!newMessage) {
+        this.debug("No streamed reply", await result.content);
+        throw new Error("Failed to get streamed reply");
+      }
+
+      this.debug("llm finish message:", JSON.stringify(newMessage, null, 2));
+
+      if (!output) throw new Error("LLM failed to generate output");
+
+      // Put reply to history
+      this.history.push({
+        ...newMessage,
+        id: generateId(),
+        metadata: {
+          createdAt: new Date().toISOString(),
+        },
+      });
+
+      this.updateUsage(await result.usage);
+    } catch (error) {
+      if (APICallError.isInstance(error)) {
+        this.debug("LLM call error", error);
+        if ((error as APICallError).statusCode === 402) {
+          throw new Error("PAYMENT_REQUIRED");
         } else {
-          if (!output) {
-            output = {
-              kind: "code",
-              steps: input.step + 1,
-              code: lastCode,
-            };
-          }
+          throw error;
         }
-
-        // Save reasoning
-        output.reasoning = stepResult.reasoningText;
-
-        this.debug("step", input.step, "output", output);
-
-        // onStep handler
-        if (opts?.onStep) {
-          const info = await opts.onStep(
-            input.step,
-            input,
-            output,
-            input.result
-          );
-
-          // Stop if client says so
-          if (!info.proceed) stopped = true;
-
-          // New stuff in the inbox
-          if (info.inbox) input.inbox = [...info.inbox];
-        }
-      },
-    });
-
-    // Read reply into UIMessage
-    let newMessage: UIMessage | undefined;
-    for await (const uiMessage of readUIMessageStream({
-      stream: result.toUIMessageStream(),
-    })) {
-      // @ts-ignore
-      newMessage = uiMessage;
+      }
     }
-    if (!newMessage) throw new Error("Failed to get streamed reply");
-
-    this.debug("llm finish message:", JSON.stringify(newMessage, null, 2));
-
-    if (!output) throw new Error("LLM failed to generate output");
-
-    // Put reply to history
-    this.history.push({
-      ...newMessage,
-      id: generateId(),
-      metadata: {
-        createdAt: new Date().toISOString(),
-      },
-    });
-
-    this.updateUsage(await result.usage);
 
     if (!output) throw new Error("Failed to request llm");
 

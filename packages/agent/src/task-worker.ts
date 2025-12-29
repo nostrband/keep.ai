@@ -32,6 +32,11 @@ export interface TaskWorkerConfig {
   gmailOAuth2Client?: any; // Gmail OAuth2 client
 }
 
+interface TaskRetryState {
+  nextStart: number; // timestamp in milliseconds when task can be retried
+  retryCount: number; // number of retry attempts
+}
+
 export class TaskWorker {
   private api: KeepDbApi;
   private stepLimit: number;
@@ -41,6 +46,12 @@ export class TaskWorker {
   private isRunning: boolean = false;
   private isShuttingDown: boolean = false;
   private interval?: ReturnType<typeof setInterval>;
+
+  // Task state map for retry backoff (reset on program restart)
+  private taskRetryState: Map<string, TaskRetryState> = new Map();
+  
+  // Global pause for PAYMENT_REQUIRED errors
+  private globalPauseUntil: number = 0;
 
   private debug = debug("agent:TaskWorker");
 
@@ -133,16 +144,25 @@ export class TaskWorker {
     try {
       this.debug(`checking @ ${new Date().toISOString()}`);
 
+      // Check global pause for PAYMENT_REQUIRED errors
+      if (this.globalPauseUntil > Date.now()) {
+        this.debug(`Global pause active until ${new Date(this.globalPauseUntil).toISOString()}`);
+        return false;
+      }
+
       // Get tasks with expired timers and with non-empty inboxes
       const todoTasks = await this.api.taskStore.getTodoTasks();
       if (inboxItems.find((i) => i.target === "router"))
         todoTasks.push(
           ...(await this.api.taskStore.listTasks(false, "router"))
         );
-      if (inboxItems.find((i) => i.target === "replier"))
-        todoTasks.push(
-          ...(await this.api.taskStore.listTasks(false, "replier"))
-        );
+
+        // Turn off the replier
+      // if (inboxItems.find((i) => i.target === "replier"))
+      //   todoTasks.push(
+      //     ...(await this.api.taskStore.listTasks(false, "replier"))
+      //   );
+
       const receiverIds = inboxItems
         .map((i) => i.target_id)
         .filter((id) => !!id);
@@ -150,13 +170,25 @@ export class TaskWorker {
         receiverIds.length > 0
           ? await this.api.taskStore.getTasks(receiverIds)
           : [];
+
       // Dedup tasks
       const taskMap = new Map<string, Task>();
       todoTasks.map((t) => taskMap.set(t.id, t));
       receiverTasks.map((t) => taskMap.set(t.id, t));
 
+      // Filter out tasks that are in retry backoff
+      const currentTime = Date.now();
+      const availableTasks = [...taskMap.values()].filter((t) => {
+        const retryState = this.taskRetryState.get(t.id);
+        if (retryState && retryState.nextStart > currentTime) {
+          this.debug(`Skipping task ${t.id} in backoff until ${new Date(retryState.nextStart).toISOString()}`);
+          return false;
+        }
+        return true;
+      });
+
       // Uniq tasks array, sorted by timestamp asc
-      const tasks = [...taskMap.values()].sort(
+      const tasks = availableTasks.sort(
         (a, b) => a.timestamp - b.timestamp
       );
       this.debug("Pending tasks", tasks);
@@ -464,6 +496,9 @@ export class TaskWorker {
 
         // Send reply/asks to recipient (replier inbox or user)
         await this.handleReply(taskType, task, state, result, taskRunId);
+
+        // Reset retry state on successful completion
+        this.taskRetryState.delete(task.id);
       } catch (error) {
         this.debug("Task processing error:", error);
 
@@ -480,6 +515,18 @@ export class TaskWorker {
 
         // Schedule retry for this task
         await this.retry(task, errorMessage, task.thread_id);
+
+        // FIXME if task was triggered by inbox item, it will
+        // still be restarted immediately even with task's timestamp
+        // shifted into the future, we need an in-RAM map of 'task_id':'timestamp"
+        // which should be checked and should override db values and pending inbox
+
+        // Provider low balance
+        if (error === "PAYMENT_REQUIRED") {
+          // Pause ALL task processing for 10 minutes
+          this.globalPauseUntil = Date.now() + (10 * 60 * 1000); // 10 minutes from now
+          this.debug(`PAYMENT_REQUIRED: Pausing all task processing until ${new Date(this.globalPauseUntil).toISOString()}`);
+        }
       }
     } catch (error) {
       this.debug("Task handling error:", error);
@@ -818,10 +865,26 @@ export class TaskWorker {
   }
 
   private async retry(task: Task, error: string, thread_id: string) {
-    // Re-schedule the same task with different retry intervals based on type,
-    // message: 10 sec,
-    // task: 60 sec,
-    // planner: 600 sec
+    // Get current retry state or create new one
+    const currentRetryState = this.taskRetryState.get(task.id) || {
+      retryCount: 0,
+      nextStart: 0,
+    };
+
+    // Increment retry count
+    currentRetryState.retryCount += 1;
+
+    // Calculate exponential backoff: 10s * 2^(retryCount-1), max 10 minutes (600s)
+    const baseDelayMs = 10 * 1000; // 10 seconds in milliseconds
+    const exponentialDelayMs = baseDelayMs * Math.pow(2, currentRetryState.retryCount - 1);
+    const maxDelayMs = 10 * 60 * 1000; // 10 minutes in milliseconds
+    const actualDelayMs = Math.min(exponentialDelayMs, maxDelayMs);
+
+    // Set next start time in retry state map
+    currentRetryState.nextStart = Date.now() + actualDelayMs;
+    this.taskRetryState.set(task.id, currentRetryState);
+
+    // Write default retry delays to database as originally designed
     const retryDelaySeconds =
       task.type === "message" ? 10 : task.type ? 60 : 600;
     const retryTimestamp = Math.floor(Date.now() / 1000) + retryDelaySeconds;
@@ -842,7 +905,7 @@ export class TaskWorker {
     this.debug(
       `Updated ${task.type || ""} task ${
         task.id
-      } for retry at timestamp ${retryTimestamp} (retry in ${retryDelaySeconds} seconds) with error: ${error}`
+      } for retry: DB timestamp ${retryTimestamp} (${retryDelaySeconds}s), actual retry in ${actualDelayMs}ms (${Math.round(actualDelayMs/1000)}s), attempt ${currentRetryState.retryCount}, error: ${error}`
     );
   }
 
