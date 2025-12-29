@@ -41,7 +41,7 @@ export class TaskWorker {
   private api: KeepDbApi;
   private stepLimit: number;
   private userPath?: string;
-  private gmailOAuth2Client?: any;
+  public readonly gmailOAuth2Client?: any;
 
   private isRunning: boolean = false;
   private isShuttingDown: boolean = false;

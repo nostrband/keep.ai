@@ -129,6 +129,46 @@ async function createGmailOAuth2Client(userPath: string) {
     );
     oAuth2Client.setCredentials(tokens);
 
+    // Listen for token refresh events and save new tokens
+    oAuth2Client.on('tokens', async (newTokens) => {
+      try {
+        debugServer("Gmail OAuth2 tokens refreshed, saving to file");
+        
+        // Read current tokens from file
+        let currentTokens = tokens;
+        try {
+          const currentTokenData = await fsPromises.readFile(gmailTokenPath, "utf8");
+          currentTokens = JSON.parse(currentTokenData);
+        } catch (readError) {
+          debugServer("Could not read current tokens, using initial tokens:", readError);
+        }
+
+        // Update tokens
+        if (newTokens.refresh_token) {
+          debugServer("Saving new refresh token");
+          currentTokens.refresh_token = newTokens.refresh_token;
+        }
+        if (newTokens.access_token) {
+          debugServer("Saving new access token + expiry_date");
+          currentTokens.access_token = newTokens.access_token;
+          if (newTokens.expiry_date) {
+            currentTokens.expiry_date = newTokens.expiry_date;
+          }
+        }
+
+        // Save updated tokens back to file
+        await fsPromises.writeFile(
+          gmailTokenPath,
+          JSON.stringify(currentTokens, null, 2),
+          { mode: 0o600 }
+        );
+
+        debugServer("Gmail tokens successfully saved to file");
+      } catch (saveError) {
+        debugServer("Failed to save refreshed Gmail tokens:", saveError);
+      }
+    });
+
     return oAuth2Client;
   } catch (error) {
     debugServer("Failed to create Gmail OAuth2 client:", error);
@@ -1037,6 +1077,8 @@ export async function createServer(config: ServerConfig = {}) {
       );
 
       const { tokens } = await oAuth2Client.getToken(code);
+
+      worker.gmailOAuth2Client?.setCredentials(tokens);
 
       const gmailTokenPath = path.join(userPath, "gmail.json");
       await fsPromises.writeFile(

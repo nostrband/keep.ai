@@ -246,11 +246,15 @@ export default function SettingsPage() {
         setGmailCheckResult(`✅ Connected to ${data.email} (${data.messagesTotal} messages, ${data.threadsTotal} threads)`);
       } else {
         setGmailCheckResult(`❌ ${data.error}`);
+        // Set gmailConnected to false so UI shows "Connect" button instead of "Check"
+        setGmailConnected(false);
       }
     } catch (err) {
       setGmailCheckResult(
         `❌ ${err instanceof Error ? err.message : "Failed to check Gmail connection"}`
       );
+      // Set gmailConnected to false so UI shows "Connect" button instead of "Check"
+      setGmailConnected(false);
     } finally {
       setGmailChecking(false);
     }
