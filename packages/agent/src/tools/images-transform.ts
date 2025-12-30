@@ -17,15 +17,16 @@ export function makeImagesTransformTool(
   getContext: () => EvalContext
 ) {
   return tool({
-    description: `Transform/modify images using AI image generation model based on an input image.
-Takes an existing image file and a textual prompt describing the desired transformation, then generates new images based on the input.
+    description: `Transform/modify images using AI image generation model based on one or more input images.
+Takes existing image files (up to 5) and a textual prompt describing the desired transformation, then generates new images based on the inputs.
 Supports png, jpeg, webp and gif input formats. Returns information about the generated image files.`,
     inputSchema: z.object({
-      file_path: z
-        .string()
+      file_paths: z
+        .array(z.string().min(1))
         .min(1)
+        .max(5)
         .describe(
-          "File path of the input image to transform - filename (without extension) will be used as ID to look up in database"
+          "Array of file paths of the input images to transform (1-5 images) - filename (without extension) will be used as ID to look up in database"
         ),
       prompt: z
         .string()
@@ -63,19 +64,21 @@ Supports png, jpeg, webp and gif input formats. Returns information about the ge
           })
         )
         .describe("Array of generated image file records"),
-      source_file: z
-        .object({
-          id: z.string().describe("Source file ID"),
-          name: z.string().describe("Source filename"),
-          media_type: z.string().describe("Source MIME type"),
-          size: z.number().describe("Source file size in bytes"),
-        })
-        .describe("Information about the source image file"),
+      source_files: z
+        .array(
+          z.object({
+            id: z.string().describe("Source file ID"),
+            name: z.string().describe("Source filename"),
+            media_type: z.string().describe("Source MIME type"),
+            size: z.number().describe("Source file size in bytes"),
+          })
+        )
+        .describe("Information about the source image files"),
       reasoning: z.string().describe("Image model's reasoning"),
     }),
     execute: async (input) => {
       const {
-        file_path: file,
+        file_paths: filePaths,
         prompt,
         file_prefix,
         aspect_ratio = "1:1",
@@ -93,16 +96,6 @@ Supports png, jpeg, webp and gif input formats. Returns information about the ge
 
       const imageModel = env.IMAGE_MODEL || "google/gemini-3-pro-image-preview";
 
-      // Extract filename without extension to use as ID
-      const filename = fileUtils.basename(file, fileUtils.extname(file));
-
-      // Get file record from database
-      const fileRecord = await fileStore.getFile(filename);
-      if (!fileRecord) {
-        throw new Error(`File not found with ID: ${filename}`);
-      }
-
-      // Validate that it's a supported image format
       const supportedTypes = [
         "image/png",
         "image/jpeg",
@@ -110,26 +103,37 @@ Supports png, jpeg, webp and gif input formats. Returns information about the ge
         "image/webp",
         "image/gif",
       ];
-      if (!supportedTypes.includes(fileRecord.media_type)) {
-        throw new Error(
-          `Unsupported image format: ${
-            fileRecord.media_type
-          }. Supported formats: ${supportedTypes.join(", ")}`
-        );
-      }
 
-      // Construct full path to actual file
-      const fullPath = fileUtils.join(userPath, "files", fileRecord.path);
+      // Process all source images
+      const sourceFileRecords: File[] = [];
+      const base64Images: string[] = [];
 
-      // Check if file exists
-      if (!fileUtils.existsSync(fullPath)) {
-        throw new Error(`Source image file not found on disk: ${fullPath}`);
-      }
+      for (const file of filePaths) {
+        // Extract filename without extension to use as ID
+        const filename = fileUtils.basename(file, fileUtils.extname(file));
 
-      try {
-        debugImgTransform(
-          `Transforming image ${fileRecord.name} with aspect ratio ${aspect_ratio}, prompt: ${prompt}`
-        );
+        // Get file record from database
+        const fileRecord = await fileStore.getFile(filename);
+        if (!fileRecord) {
+          throw new Error(`File not found with ID: ${filename}`);
+        }
+
+        // Validate that it's a supported image format
+        if (!supportedTypes.includes(fileRecord.media_type)) {
+          throw new Error(
+            `Unsupported image format for ${fileRecord.name}: ${
+              fileRecord.media_type
+            }. Supported formats: ${supportedTypes.join(", ")}`
+          );
+        }
+
+        // Construct full path to actual file
+        const fullPath = fileUtils.join(userPath, "files", fileRecord.path);
+
+        // Check if file exists
+        if (!fileUtils.existsSync(fullPath)) {
+          throw new Error(`Source image file not found on disk: ${fullPath}`);
+        }
 
         // Read the source image file and convert to base64
         const fd = fileUtils.openSync(fullPath, "r");
@@ -147,6 +151,33 @@ Supports png, jpeg, webp and gif input formats. Returns information about the ge
           fileRecord.media_type
         };base64,${fileUtils.bufferToBase64(imageBuffer)}`;
 
+        sourceFileRecords.push(fileRecord);
+        base64Images.push(base64Image);
+      }
+
+      try {
+        debugImgTransform(
+          `Transforming ${sourceFileRecords.length} image(s) with aspect ratio ${aspect_ratio}, prompt: ${prompt}`
+        );
+
+        // Build content array with text prompt and all images
+        const contentArray: any[] = [
+          {
+            type: "text",
+            text: prompt,
+          },
+        ];
+
+        // Add all source images to the content
+        for (const base64Image of base64Images) {
+          contentArray.push({
+            type: "image_url",
+            image_url: {
+              url: base64Image,
+            },
+          });
+        }
+
         // Call OpenRouter API for image transformation/generation
         const response = await fetch(
           "https://openrouter.ai/api/v1/chat/completions",
@@ -161,18 +192,7 @@ Supports png, jpeg, webp and gif input formats. Returns information about the ge
               messages: [
                 {
                   role: "user",
-                  content: [
-                    {
-                      type: "text",
-                      text: prompt,
-                    },
-                    {
-                      type: "image_url",
-                      image_url: {
-                        url: base64Image,
-                      },
-                    },
-                  ],
+                  content: contentArray,
                 },
               ],
               modalities: ["image", "text"],
@@ -266,7 +286,8 @@ Supports png, jpeg, webp and gif input formats. Returns information about the ge
           fs.writeFileSync(filePathLocal, generatedImageBuffer);
 
           // Create summary with prompt and source info
-          const summary = `Transformed from ${fileRecord.name}, prompt: ${prompt}`;
+          const sourceNames = sourceFileRecords.map((f) => f.name).join(", ");
+          const summary = `Transformed from ${sourceNames}, prompt: ${prompt}`;
 
           // Create file record
           const generatedFileRecord: File = {
@@ -286,7 +307,7 @@ Supports png, jpeg, webp and gif input formats. Returns information about the ge
 
         // Create event for tracking
         await getContext().createEvent("images_transform", {
-          source_file: fileRecord.name,
+          source_files: sourceFileRecords.map((f) => f.name),
           prompt,
           aspect_ratio,
           count: generatedFiles.length,
@@ -295,12 +316,12 @@ Supports png, jpeg, webp and gif input formats. Returns information about the ge
 
         return {
           images: generatedFiles,
-          source_file: {
-            id: fileRecord.id,
-            name: fileRecord.name,
-            media_type: fileRecord.media_type,
-            size: fileRecord.size,
-          },
+          source_files: sourceFileRecords.map((f) => ({
+            id: f.id,
+            name: f.name,
+            media_type: f.media_type,
+            size: f.size,
+          })),
           reasoning,
         };
       } catch (error) {

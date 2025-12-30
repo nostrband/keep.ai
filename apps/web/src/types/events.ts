@@ -93,7 +93,8 @@ export interface ImagesExplainEventPayload extends BaseEventPayload {
 }
 
 export interface ImagesTransformEventPayload extends BaseEventPayload {
-  source_file: string;
+  source_file?: string; // Deprecated: single source file (for backward compatibility)
+  source_files?: string[]; // New: array of source files
   prompt: string;
   aspect_ratio: string;
   count: number;
@@ -270,7 +271,22 @@ export const EVENT_CONFIGS: Record<EventType, EventConfig> = {
     title: (payload) => {
       const transformPayload = payload as ImagesTransformEventPayload;
       const imageCount = transformPayload.count || transformPayload.files?.length || 1;
-      return `Transformed ${transformPayload.source_file} → ${imageCount} image${imageCount > 1 ? "s" : ""}`;
+      
+      // Support both new source_files (array) and old source_file (string) for backward compatibility
+      let sourceText: string;
+      if (transformPayload.source_files && transformPayload.source_files.length > 0) {
+        const sourceCount = transformPayload.source_files.length;
+        sourceText = sourceCount === 1
+          ? transformPayload.source_files[0]
+          : `${sourceCount} images`;
+      } else if (transformPayload.source_file) {
+        // Backward compatibility with old format
+        sourceText = transformPayload.source_file;
+      } else {
+        sourceText = "image";
+      }
+      
+      return `Transformed ${sourceText} → ${imageCount} image${imageCount > 1 ? "s" : ""}`;
     },
     hasId: false,
   },
