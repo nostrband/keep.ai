@@ -397,6 +397,27 @@ ${systemPrompt}
 `.trim();
   }
 
+  prepareUserMessage(msg: AssistantUIMessage): AssistantUIMessage {
+    // FIXME this is ugly hack, we don't want to send
+    // file/image parts bcs provider expects base64 body,
+    // but we only provide file metadata for agent to use
+    // tools to handle them
+    return {
+      id: msg.id,
+      role: msg.role,
+      parts: msg.parts.map((p) => {
+        if (p.type === "file") {
+          p = {
+            type: "text",
+            text: "Attached file: " + JSON.stringify(p),
+          };
+        }
+        return p;
+      }),
+      metadata: msg.metadata,
+    };
+  }
+
   async buildContext(input: StepInput): Promise<AssistantUIMessage[]> {
     if (
       ["worker"].includes(this.type)
@@ -480,7 +501,7 @@ ${systemPrompt}
     const context: AssistantUIMessage[] = [];
     for (const e of history) {
       if (e.type === "message") {
-        context.push(e.content as AssistantUIMessage);
+        context.push(this.prepareUserMessage(e.content as AssistantUIMessage));
       } else {
         context.push({
           id: generateId(),

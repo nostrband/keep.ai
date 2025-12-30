@@ -24,6 +24,7 @@ import { AgentEnv } from "./agent-env";
 import { isValidEnv } from "./env";
 import { Cron } from "croner";
 import { fileUtils } from "@app/node";
+import { ERROR_BAD_REQUEST, ERROR_PAYMENT_REQUIRED } from "./agent";
 
 export interface TaskWorkerConfig {
   api: KeepDbApi;
@@ -405,13 +406,7 @@ export class TaskWorker {
         }
 
         // Mark inbox items as finished
-        const now = new Date().toISOString();
-        for (const item of inboxItems)
-          await this.api.inboxStore.handleInboxItem(
-            item.id,
-            now,
-            task.thread_id
-          );
+        await this.handleInboxItems(task, inboxItems);
 
         // Reply for replier & task run info
         const taskReply = this.formatTaskReply(result);
@@ -513,16 +508,26 @@ export class TaskWorker {
           errorMessage
         );
 
-        // Schedule retry for this task
-        await this.retry(task, errorMessage, task.thread_id);
+        // Not permanent error?
+        if (error !== ERROR_BAD_REQUEST) {
+          // Schedule retry for this task
+          await this.retry(task, errorMessage, task.thread_id);
+        } else {
+          this.debug("BAD_REQUEST: will not retry the task", task.id);
 
-        // FIXME if task was triggered by inbox item, it will
-        // still be restarted immediately even with task's timestamp
-        // shifted into the future, we need an in-RAM map of 'task_id':'timestamp"
-        // which should be checked and should override db values and pending inbox
+          // Make sure this inbox item is cleared
+          // so that task isn't retried
+          await this.handleInboxItems(task, inboxItems);
+
+          // Set error on current task
+          await this.finishTask(task, "Failed to process, bad request.", "Bad LLM request");
+
+          // Reset retry state on failed task
+          this.taskRetryState.delete(task.id);
+        }
 
         // Provider low balance
-        if (error === "PAYMENT_REQUIRED") {
+        if (error === ERROR_PAYMENT_REQUIRED) {
           // Pause ALL task processing for 10 minutes
           this.globalPauseUntil = Date.now() + (10 * 60 * 1000); // 10 minutes from now
           this.debug(`PAYMENT_REQUIRED: Pausing all task processing until ${new Date(this.globalPauseUntil).toISOString()}`);
@@ -659,6 +664,16 @@ export class TaskWorker {
       taskRunId,
       runStartTime,
     };
+  }
+
+  private async handleInboxItems(task: Task, inboxItems: InboxItem[]) {
+    const now = new Date().toISOString();
+    for (const item of inboxItems)
+      await this.api.inboxStore.handleInboxItem(
+        item.id,
+        now,
+        task.thread_id
+      );
   }
 
   private async finishTaskRun(

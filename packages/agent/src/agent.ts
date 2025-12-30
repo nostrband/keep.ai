@@ -3,6 +3,7 @@ import { StepInput, StepOutput, AgentTask, TaskState } from "./agent-types";
 import {
   convertToModelMessages,
   generateId,
+  generateText,
   LanguageModel,
   ModelMessage,
   readUIMessageStream,
@@ -16,6 +17,9 @@ import { APICallError, LanguageModelV2Usage } from "@ai-sdk/provider";
 import { makeEvalTool } from "./ai-tools/eval";
 import { makeFinishTool } from "./ai-tools/finish";
 import { makePauseTool } from "./ai-tools/pause";
+
+export const ERROR_BAD_REQUEST = "BAD_REQUEST";
+export const ERROR_PAYMENT_REQUIRED = "PAYMENT_REQUIRED";
 
 // Hard limit
 const MAX_STEPS = 100;
@@ -84,8 +88,9 @@ export class Agent {
     }
 
     // New user messages
-    for (const msg of input.inbox) {
-      this.history.push(JSON.parse(msg));
+    for (const s of input.inbox) {
+      const msg = JSON.parse(s) as AssistantUIMessage;
+      this.history.push(this.env.prepareUserMessage(msg));
     }
 
     // Custom user message (worker)
@@ -142,6 +147,7 @@ export class Agent {
     let jsState = opts?.jsState;
     let lastCode: string = "";
     let output: StepOutput | undefined;
+    let error: any;
     let stopped = false;
 
     const activeTools: ("eval" | "finish" | "pause")[] = ["eval"];
@@ -289,6 +295,10 @@ export class Agent {
             if (info.inbox) input.inbox = [...info.inbox];
           }
         },
+        onError: (event) => {
+          error = event.error;
+          this.debug("onError", event.error);
+        },
       });
 
       // Read reply into UIMessage
@@ -318,13 +328,17 @@ export class Agent {
       });
 
       this.updateUsage(await result.usage);
-    } catch (error) {
-      if (APICallError.isInstance(error)) {
-        this.debug("LLM call error", error);
-        if ((error as APICallError).statusCode === 402) {
-          throw new Error("PAYMENT_REQUIRED");
+    } catch (err) {
+      if (error) err = error;
+
+      this.debug("Error", err);
+      if (APICallError.isInstance(err)) {
+        if ((err as APICallError).statusCode === 402) {
+          throw ERROR_PAYMENT_REQUIRED;
+        } else if ((err as APICallError).statusCode === 400) {
+          throw ERROR_BAD_REQUEST;
         } else {
-          throw error;
+          throw err;
         }
       }
     }
