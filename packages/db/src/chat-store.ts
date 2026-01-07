@@ -314,4 +314,17 @@ export class ChatStore {
       ]
     );
   }
+
+  async countMessages(chatId?: string): Promise<number> {
+    let sql = `SELECT COUNT(*) as count FROM chat_events WHERE type = 'message'`;
+    const args: string[] = [];
+
+    if (chatId) {
+      sql += ` AND chat_id = ?`;
+      args.push(chatId);
+    }
+
+    const results = await this.db.db.execO<{ count: number }>(sql, args);
+    return results?.[0]?.count || 0;
+  }
 }

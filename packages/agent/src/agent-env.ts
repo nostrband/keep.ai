@@ -515,6 +515,8 @@ ${systemPrompt}
       }
     }
 
+    let currentState = "";
+
     if (this.type === "router") {
       const tasks = await this.api.taskStore.listTasks();
       const states = await this.api.taskStore.getStates(tasks.map((t) => t.id));
@@ -540,16 +542,30 @@ ${tasks
   .join("\n")}
 \`\`\``;
 
-      if (tasks.length) {
-        context.push({
-          id: generateId(),
-          role: "assistant",
-          parts: [{ type: "text", text }],
-          metadata: {
-            createdAt: context.at(-1)!.metadata!.createdAt,
-          },
-        });
-      }
+      // Append tasks
+      if (tasks.length) currentState += text;
+
+      // Stats
+      currentState += `
+===STATS===
+- Current ISO time: ${new Date().toISOString()}
+- Current local time: ${new Date().toString()}
+- Messages: ${await this.api.chatStore.countMessages("main")}
+- Notes: ${await this.api.noteStore.countNotes()}
+- Files: ${await this.api.fileStore.countFiles()}
+`;
+    }
+
+    if (currentState) {
+      context.push({
+        id: generateId(),
+        role: "assistant",
+        parts: [{ type: "text", text: currentState }],
+        metadata: {
+          createdAt: new Date().toISOString(),
+          volatile: true
+        },
+      });
     }
 
     return context;

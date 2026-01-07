@@ -333,4 +333,11 @@ export class NoteStore {
     // We'll assume the operation succeeded if no error was thrown
     return true;
   }
+
+  async countNotes(): Promise<number> {
+    const results = await this.db.db.execO<{ count: number }>(
+      "SELECT COUNT(*) as count FROM notes"
+    );
+    return results?.[0]?.count || 0;
+  }
 }

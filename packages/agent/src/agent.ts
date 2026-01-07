@@ -103,6 +103,7 @@ export class Agent {
         parts: [{ type: "text", text: user }],
         metadata: {
           createdAt: new Date().toISOString(),
+          volatile: true,
         },
       };
 
@@ -115,27 +116,39 @@ export class Agent {
       { role: "system", content: system },
       ...convertToModelMessages(
         this.history
-          .map((m) => {
-            const tm = {
-              ...m,
-            };
-            if (m.metadata) {
-              tm.parts.push({
-                type: "text",
-                text: `Timestamp: ${m.metadata.createdAt} (Local: ${new Date(
-                  m.metadata.createdAt
-                ).toString()})`,
-              });
-            }
-            return tm;
-          })
+          // NOTE: we're adding current timestamp to
+          // ===STATS=== section and hoping that's enough
+          // .map((m) => {
+          //   const tm = {
+          //     ...m,
+          //   };
+          //   if (
+          //     m.metadata &&
+          //     m.metadata.createdAt &&
+          //     // Might already have the timestamp if ... FIXME if what?
+          //     !m.parts.find(
+          //       (p) => p.type === "text" && p.text.startsWith("Timestamp: ")
+          //     )
+          //   ) {
+          //     tm.parts.push({
+          //       type: "text",
+          //       text: `Timestamp: ${m.metadata.createdAt} (Local: ${new Date(
+          //         m.metadata.createdAt
+          //       ).toString()})`,
+          //     });
+          //   }
+          //   return tm;
+          // })
           .filter((m) => !!m.parts)
       ),
     ];
 
+    const volatileIndex = this.history.findIndex((m) => m.metadata?.volatile);
+    // Add +1 to volatileIndex due to preprended system message
+    const cachedIndex = volatileIndex >= 0 ? volatileIndex : -1;
+
     // Set caching marker for anthropic at pre-last message
-    // FIXME doesn't seem to work, why?
-    messages.at(-2)!.providerOptions = {
+    messages.at(cachedIndex)!.providerOptions = {
       openrouter: {
         cacheControl: { type: "ephemeral" },
       },

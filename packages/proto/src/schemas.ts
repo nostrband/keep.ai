@@ -4,6 +4,7 @@ import { UIMessage } from "ai";
 const metadataSchema = z.object({
   createdAt: z.string().datetime(),
   threadId: z.string().optional(),
+  volatile: z.boolean().optional(),
 });
 export type MessageMetadata = z.infer<typeof metadataSchema>;
 
@@ -21,4 +22,3 @@ export interface ChatEvent {
   content: AssistantUIMessage | ChatAgentEvent;
   timestamp: string;
 }
-
