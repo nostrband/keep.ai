@@ -19,7 +19,7 @@ export function makeSendToTaskInboxTool(
 
       const context = getContext();
       if (!context) throw new Error("No eval context");
-      if (context.type === "replier")
+      if (context.type === "replier" || context.type === "planner")
         throw new Error("Replier can't send to inbox");
 
       const id = `${context.taskThreadId}.${context.step}.${generateId()}`;

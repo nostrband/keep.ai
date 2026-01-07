@@ -11,6 +11,7 @@ export class MspParser {
     const kind = getSection(text, "STEP_KIND")?.trim();
     switch (this.type) {
       case "replier":
+      case "planner":
       case "router": {
         if (kind !== "done" && kind !== "code")
           throw new Error("STEP_KIND must be 'code' or 'done'");

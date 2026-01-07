@@ -1,6 +1,6 @@
 import { EvalResult } from "./sandbox/sandbox";
 
-export type TaskType = "router" | "worker" | "replier";
+export type TaskType = "router" | "worker" | "planner" | "replier";
 export type StepReason = "start" | "code" | "input" | "timer";
 export type StepOutputKind = "done" | "code" | "wait";
 

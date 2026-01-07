@@ -595,34 +595,35 @@ export class TaskWorker {
     // Send reply after all done
     if (result.reply) {
       // DEBUG: allow worker to reply directly to user for testing
-      if (
-        taskType === "worker" ||
-        taskType === "replier" ||
-        taskType === "router"
-      ) {
-        await this.sendToUser(result.reply);
-      } else {
-        await this.sendToReplier({
-          taskType,
-          taskRunId,
-          taskId: task.id,
-          content: result.reply,
-          reasoning: result.reasoning || "",
-        });
-      }
+      // if (
+      //   taskType === "worker" ||
+      //   taskType === "replier" ||
+      //   taskType === "router"
+      // ) {
+      await this.sendToUser(result.reply);
+      // } else {
+      //   await this.sendToReplier({
+      //     taskType,
+      //     taskRunId,
+      //     taskId: task.id,
+      //     content: result.reply,
+      //     reasoning: result.reasoning || "",
+      //   });
+      // }
     }
 
     // We ran an iteraction and still have asks in state?
     // Send to replier
     if (result.kind === "wait" && taskType === "worker") {
       if (state.asks) {
-        await this.sendToReplier({
-          taskType,
-          taskRunId,
-          taskId: task.id,
-          content: state.asks,
-          reasoning: result.reasoning || "",
-        });
+        await this.sendToUser(state.asks);
+        // await this.sendToReplier({
+        //   taskType,
+        //   taskRunId,
+        //   taskId: task.id,
+        //   content: state.asks,
+        //   reasoning: result.reasoning || "",
+        // });
       }
     }
   }

@@ -28,3 +28,7 @@ export { makePdfExplainTool } from "./pdf-explain";
 export { makeAudioExplainTool } from "./audio-explain";
 export { makeGmailTool } from "./gmail";
 export { makeAtobTool } from "./atob";
+export { makeTextExtractTool } from "./text-extract";
+export { makeTextRouteTool } from "./text-route";
+export { makeTextSummarizeTool } from "./text-summarize";
+export { makeTextGenerateTool } from "./text-generate";

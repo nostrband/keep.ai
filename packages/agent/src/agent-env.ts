@@ -29,6 +29,10 @@ import {
   makeAudioExplainTool,
   makeGmailTool,
   makeAtobTool,
+  makeTextExtractTool,
+  makeTextRouteTool,
+  makeTextSummarizeTool,
+  makeTextGenerateTool,
 } from "./tools";
 import { z, ZodFirstPartyTypeKind as K } from "zod";
 import { EvalContext, EvalGlobal } from "./sandbox/sandbox";
@@ -70,6 +74,7 @@ export class AgentEnv {
     switch (this.type) {
       case "router":
       case "worker":
+      case "planner":
         return 0.1;
       case "replier":
         return 0.2;
@@ -164,11 +169,13 @@ Example: await ${ns}.${name}(<input>)
       throw new Error("Not found " + name);
     };
 
+    const isWorker = this.type === "worker" || this.type === "planner";
+
     // Tools
     if (this.type !== "replier") {
       addTool(global, "Utils", "weather", makeGetWeatherTool(this.getContext));
     }
-    if (this.type === "worker") {
+    if (isWorker) {
       addTool(global, "Utils", "atob", makeAtobTool());
       addTool(global, "Web", "search", makeWebSearchTool(this.getContext));
       addTool(global, "Web", "fetchParse", makeWebFetchTool(this.getContext));
@@ -181,7 +188,6 @@ Example: await ${ns}.${name}(<input>)
     }
 
     // Memory
-
     if (this.type !== "replier") {
       // Notes
       addTool(global, "Memory", "getNote", makeGetNoteTool(this.api.noteStore));
@@ -232,7 +238,7 @@ Example: await ${ns}.${name}(<input>)
     // Tasks
 
     // Router or Worker
-    if (this.type !== "replier") {
+    if (this.type !== "replier" && this.type !== "planner") {
       addTool(
         global,
         "Tasks",
@@ -280,8 +286,8 @@ Example: await ${ns}.${name}(<input>)
     }
 
     // File tools for router and worker
-    if (this.type === "router" || this.type === "worker") {
-      if (this.type === "worker") {
+    if (this.type === "router" || isWorker) {
+      if (isWorker) {
         addTool(
           global,
           "Files",
@@ -305,7 +311,7 @@ Example: await ${ns}.${name}(<input>)
     }
 
     // Image tools for worker only
-    if (this.type === "worker") {
+    if (isWorker) {
       addTool(
         global,
         "Images",
@@ -339,7 +345,7 @@ Example: await ${ns}.${name}(<input>)
     }
 
     // PDF tools for worker only
-    if (this.type === "worker") {
+    if (isWorker) {
       addTool(
         global,
         "PDF",
@@ -349,12 +355,40 @@ Example: await ${ns}.${name}(<input>)
     }
 
     // Audio tools for worker only
-    if (this.type === "worker") {
+    if (isWorker) {
       addTool(
         global,
         "Audio",
         "explain",
         makeAudioExplainTool(this.api.fileStore, this.userPath, this.getContext)
+      );
+    }
+
+    // Text tools for worker only
+    if (isWorker) {
+      addTool(
+        global,
+        "Text",
+        "extract",
+        makeTextExtractTool(this.getContext)
+      );
+      addTool(
+        global,
+        "Text",
+        "route",
+        makeTextRouteTool(this.getContext)
+      );
+      addTool(
+        global,
+        "Text",
+        "summarize",
+        makeTextSummarizeTool(this.getContext)
+      );
+      addTool(
+        global,
+        "Text",
+        "generate",
+        makeTextGenerateTool(this.getContext)
       );
     }
 
@@ -387,6 +421,10 @@ Example: await ${ns}.${name}(<input>)
       }
       case "replier": {
         systemPrompt = this.replierSystemPrompt();
+        break;
+      }
+      case "planner": {
+        systemPrompt = this.plannerSystemPrompt();
         break;
       }
     }
@@ -602,11 +640,12 @@ ${taskInfo.join("\n")}
   }
 
   private toolsPrompt() {
-    return `## Tools
-Your only tool available is 'eval', which takes js-code as input, and returns result for your processing.
-Input: { jsCode: string } - an object with jsCode field, code will be executed in the sandbox
-Output: string - stringified JSON returned in 'result' field (details below).
-`;
+    return "";
+//     return `## Tools
+// Your only tool available is 'eval', which takes js-code as input, and returns result for your processing.
+// Input: { jsCode: string } - an object with jsCode field, code will be executed in the sandbox
+// Output: string - stringified JSON returned in 'result' field (details below).
+// `;
   }
 
   private jsPrompt(mainAPIs: string[]) {
@@ -753,7 +792,6 @@ Your main job is to understand user messages within context and route (parts of)
 - Background tasks have powerful API endpoints, including web and search access, delegate to background task if unsure about APIs
 
 ## Input format
-- All input messages and events will include a timestamp - pay attention to timing, you are helping user throughout their day and timing matters
 - You'll be given user and assistant messages, but also assistant action history ('events') - use them to understand the timeline of the conversation and assistant activity
 
 ${this.toolsPrompt()}
@@ -779,106 +817,107 @@ ${this.extraSystemPrompt()}
 `;
   }
 
-  private replierSystemPrompt() {
-    const type = "Replier";
-    return `
-You are the **${type}** sub-agent in a Router→Worker→Replier pipeline of a personal AI assistant. 
+  private replierSystemPrompt(): string {
+    throw new Error("No longer supported");
+//     const type = "Replier";
+//     return `
+// You are the **${type}** sub-agent in a Router→Worker→Replier pipeline of a personal AI assistant. 
 
-Your job is to convert reply drafts submitted by workers to context-aware human-like replies for the user.
+// Your job is to convert reply drafts submitted by workers to context-aware human-like replies for the user.
 
-You will be given the pending draft replies which you should handle iteratively, step by step. At each step:
-- check if you have all the necessary info and performed all the necessary checks to reply to user
-- if not - generate code for JS sandbox to access tools/scripting
-- if yes - end the processing of draft replies with a final reply for user
+// You will be given the pending draft replies which you should handle iteratively, step by step. At each step:
+// - check if you have all the necessary info and performed all the necessary checks to reply to user
+// - if not - generate code for JS sandbox to access tools/scripting
+// - if yes - end the processing of draft replies with a final reply for user
 
-## Protocol
-- Your input and output are in **Markdown Sections Protocol (MSP)**. You must strictly follow the Output protocol below and avoid any prose outside the MSP sections. 
+// ## Protocol
+// - Your input and output are in **Markdown Sections Protocol (MSP)**. You must strictly follow the Output protocol below and avoid any prose outside the MSP sections. 
 
-### Input
-- Your input will contain ===INSTRUCTIONS=== and ===STEP=== sections
-- Pay attention to current time provided at ===STEP=== section, you are helping user throughout their day and timing always matters
-- ===TASK_INBOX=== will include the new draft replies to be processed
-- Other sections will be included depending on the state of processing
+// ### Input
+// - Your input will contain ===INSTRUCTIONS=== and ===STEP=== sections
+// - Pay attention to current time provided at ===STEP=== section, you are helping user throughout their day and timing always matters
+// - ===TASK_INBOX=== will include the new draft replies to be processed
+// - Other sections will be included depending on the state of processing
 
-### Output
-- You MUST start with ===STEP_REASONING=== section, where you outline your though process on how and why you plan to act on this step
-- Next section MUST be ===STEP_KIND=== with one of: code | done
- - 'code' is used when you need to run some JS code to access tools/context/calculations
- - 'done' is used to end the task and schedule a reply to the user
-- Avoid unnecessary coding if the task can be completed with the info you already have
-- Output sections allowed for each STEP_KIND are defined below
-- Always end with ===END=== on its own line, no other output is allowed after ===END===
+// ### Output
+// - You MUST start with ===STEP_REASONING=== section, where you outline your though process on how and why you plan to act on this step
+// - Next section MUST be ===STEP_KIND=== with one of: code | done
+//  - 'code' is used when you need to run some JS code to access tools/context/calculations
+//  - 'done' is used to end the task and schedule a reply to the user
+// - Avoid unnecessary coding if the task can be completed with the info you already have
+// - Output sections allowed for each STEP_KIND are defined below
+// - Always end with ===END=== on its own line, no other output is allowed after ===END===
 
-#### STEP_KIND=code
-- Choose STEP_KIND=code if you need to access tools/context/calculations with JS sandbox
-- After STEP_KIND=code, print ===STEP_CODE=== section, like this:
-===STEP_CODE===
-\`\`\`js
-// raw JS (no escaping), details below in 'Coding guidelines'
-\`\`\`
-===END===
-- Follow ===STEP_CODE=== with ===END===
-- The STEP_CODE will be executed and it's 'return'-ed value supplied back to you to evaluate and decide on the next step.
+// #### STEP_KIND=code
+// - Choose STEP_KIND=code if you need to access tools/context/calculations with JS sandbox
+// - After STEP_KIND=code, print ===STEP_CODE=== section, like this:
+// ===STEP_CODE===
+// \`\`\`js
+// // raw JS (no escaping), details below in 'Coding guidelines'
+// \`\`\`
+// ===END===
+// - Follow ===STEP_CODE=== with ===END===
+// - The STEP_CODE will be executed and it's 'return'-ed value supplied back to you to evaluate and decide on the next step.
 
-#### STEP_KIND=done
-- Choose STEP_KIND=done if the task goal is achieved and you are ready to reply to user 
-- Print ===TASK_REPLY=== section with your final reply for user, like this:
-===TASK_REPLY===
-<your reply to user>
-===END===
-- Follow ===TASK_REPLY=== with ===END===
-- No more steps will happen after STEP_KIND=done
+// #### STEP_KIND=done
+// - Choose STEP_KIND=done if the task goal is achieved and you are ready to reply to user 
+// - Print ===TASK_REPLY=== section with your final reply for user, like this:
+// ===TASK_REPLY===
+// <your reply to user>
+// ===END===
+// - Follow ===TASK_REPLY=== with ===END===
+// - No more steps will happen after STEP_KIND=done
 
-${this.toolsPrompt()}
+// ${this.toolsPrompt()}
 
-${this.jsPrompt([])}
+// ${this.jsPrompt([])}
 
-## Time
-- Use the provided 'Now: <iso datetime>' from ===STEP=== as current time.
+// ## Time
+// - Use the provided 'Now: <iso datetime>' from ===STEP=== as current time.
 
-## Draft simplification
-- Drafts may include internal implementation details ("background tasks", "routed to task", "task inbox", etc), produced by Router/Worker sub-agents.
-- Your job is to check if user explicitly asked to provide those details, and if not - adjust/simplify the drafts.
-- Your adjustments should make the replies simpler and feel more 'human', not produced by a pipeline of sub-agents with custom terminology and infrastructure.
-- I.e. "created background task" => "working on it", "sent to task inbox" => "noted!", "task has pending asks" => "need your input there", etc.
-- When making adjustments, assume you're a professional assistant human talking to a busy client, and transform your complex internal technical monologue into simple/concise replies.
-- If old important draft wasn't sent on time (current time vs draft timestamp), apologize for the delay and send immediately, i.e. "Btw, sorry forgot to tell you, ...".
+// ## Draft simplification
+// - Drafts may include internal implementation details ("background tasks", "routed to task", "task inbox", etc), produced by Router/Worker sub-agents.
+// - Your job is to check if user explicitly asked to provide those details, and if not - adjust/simplify the drafts.
+// - Your adjustments should make the replies simpler and feel more 'human', not produced by a pipeline of sub-agents with custom terminology and infrastructure.
+// - I.e. "created background task" => "working on it", "sent to task inbox" => "noted!", "task has pending asks" => "need your input there", etc.
+// - When making adjustments, assume you're a professional assistant human talking to a busy client, and transform your complex internal technical monologue into simple/concise replies.
+// - If old important draft wasn't sent on time (current time vs draft timestamp), apologize for the delay and send immediately, i.e. "Btw, sorry forgot to tell you, ...".
 
-## Draft anchoring to context
-${
-  "" /*- If draft's 'sourceTaskType' is NOT 'router', the draft is coming from a background task.*/
-}
-- Drafts may come in the middle of another ongoing conversation, and may need adjustments to fit naturally.
-- Check recent message HISTORY (and/or Memory.* tools) and get task by 'sourceTaskId' of the draft to understand whether anchoring is needed.
-- Assume you're a human assistant who just remembered that draft they needed to communicate, and are trying to make it natural, i.e. "Btw, on that issue X - ...", "Also, to proceed with X, I need ...", etc.
-- Check current time vs last messages in history, if last messages were long ago then it's ok to skip anchoring.
+// ## Draft anchoring to context
+// ${
+//   "" /*- If draft's 'sourceTaskType' is NOT 'router', the draft is coming from a background task.*/
+// }
+// - Drafts may come in the middle of another ongoing conversation, and may need adjustments to fit naturally.
+// - Check recent message HISTORY (and/or Memory.* tools) and get task by 'sourceTaskId' of the draft to understand whether anchoring is needed.
+// - Assume you're a human assistant who just remembered that draft they needed to communicate, and are trying to make it natural, i.e. "Btw, on that issue X - ...", "Also, to proceed with X, I need ...", etc.
+// - Check current time vs last messages in history, if last messages were long ago then it's ok to skip anchoring.
 
-## Deduping 
-${
-  "" /*- If draft's 'sourceTaskType' is NOT 'router', the draft is coming from a background task and needs the checks below (router's drafts should never be suppressed).*/
-}
-- Check draft's reasoning, recent message HISTORY (and/or Memory.* tools), task info by 'sourceTaskId' of the draft.
-- Prefer the newest draft for the same topic; drop older near-duplicates. 
-- EXCEPTIONS: 
- - user explicitly re-asked, asked to retry, etc (check HISTORY)
- - source task's purpose/reasoning is to re-send the same info
-- If all drafts were suppressed, include TASK_REPLY but keep it's content empty.
+// ## Deduping 
+// ${
+//   "" /*- If draft's 'sourceTaskType' is NOT 'router', the draft is coming from a background task and needs the checks below (router's drafts should never be suppressed).*/
+// }
+// - Check draft's reasoning, recent message HISTORY (and/or Memory.* tools), task info by 'sourceTaskId' of the draft.
+// - Prefer the newest draft for the same topic; drop older near-duplicates. 
+// - EXCEPTIONS: 
+//  - user explicitly re-asked, asked to retry, etc (check HISTORY)
+//  - source task's purpose/reasoning is to re-send the same info
+// - If all drafts were suppressed, include TASK_REPLY but keep it's content empty.
 
-## Rescheduling
-- If draft arrives at an inappropriate time (late at night, early in the morning, low-priority stuff during high-priority talk, etc), it can be rescheduled
-- use 'postponeInboxItem' tool with inbox item id and new timestamp to schedule the draft for consideration at a later time
+// ## Rescheduling
+// - If draft arrives at an inappropriate time (late at night, early in the morning, low-priority stuff during high-priority talk, etc), it can be rescheduled
+// - use 'postponeInboxItem' tool with inbox item id and new timestamp to schedule the draft for consideration at a later time
 
-## Restrictions
-- NEVER CHANGE OR JUDGE THE SUBSTANCE of the drafts, don't make decisions, don't answer user queries, don't rewrite/suppress based on what you think should be replied, your jobs are ONLY: simplification, anchoring, deduping.
-- Assistant messages in history have all gone through a complex Router->Worker?->Replier pipeline, don't treat those past interactions as example/empowerment - your capabilities are limited and you have specific job defined above, stick with it.
+// ## Restrictions
+// - NEVER CHANGE OR JUDGE THE SUBSTANCE of the drafts, don't make decisions, don't answer user queries, don't rewrite/suppress based on what you think should be replied, your jobs are ONLY: simplification, anchoring, deduping.
+// - Assistant messages in history have all gone through a complex Router->Worker?->Replier pipeline, don't treat those past interactions as example/empowerment - your capabilities are limited and you have specific job defined above, stick with it.
 
-## Content policy
-- Postpone non-urgent drafts at night time (check user's schedule)
-${this.localePrompt()}
+// ## Content policy
+// - Postpone non-urgent drafts at night time (check user's schedule)
+// ${this.localePrompt()}
 
-${this.filesPrompt()}
+// ${this.filesPrompt()}
 
-`;
+// `;
   }
 
   private workerSystemPrompt() {
@@ -901,7 +940,6 @@ to access powerful APIs, to create background tasks, and to perform calculations
 Other two tools are 'pause' and 'finish'. Use 'pause' to stop execution and resume at a later time, and/or to ask user a question. Use 'finish' if the task is completed and you want to updated task notes and plan.
 
 ## Input format
-- All input messages and events will include a timestamp - pay attention to timing, you are helping user throughout their day and timing matters
 - You'll be given user and assistant messages, but also assistant action history ('events') - use them to understand the timeline of the conversation and assistant activity
 
 ${this.toolsPrompt()}
@@ -916,7 +954,7 @@ ${this.userInputPrompt()}
 - You might have insufficient tools/APIs to solve the task or achieve the goals, that is normal and it's ok to admit it.
 - If task is too complex or not enough APIs, admit it and suggest to reduce the scope/goals to something you believe you could do. 
 - You are also allowed and encouraged to ask clarifying questions, it's much better to ask and be sure about user's intent/expectations, than to waste resources on useless work.
-- Put your questions/suggestion into TASK_ASKS, and if user input results in task scope/goals change - create new task and finish this one.
+- Use 'pause' tool to send your questions/suggestion to the user, and if user input results in task scope/goals change - create new task and finish this one.
 
 ## Time & locale
 - Use the provided 'Timestamp: <iso datetime>' from the last message as current time.
@@ -946,7 +984,54 @@ ${
 ${this.whoamiPrompt()}
 `;
   }
+
+  private plannerSystemPrompt() {
+    return `
+You are an experienced javascript software engineer helping develop automation scripts for the user. 
+
+You will be given a task info (goal, notes, plan, etc) as input from the user. You job is to use tools and call APIs to figure out the end-to-end js script code to reliably achieve the task goal, and later maintain and fix the code when needed. 
+
+${
+  this.task.cron
+    ? `
+The task is recurring, the script will be launched according to the 'cron' instructions.
+`
+    : "\n"
 }
+
+
+You have one main tool called 'eval' (described later) that allows you to execute any JS code in a sandbox to access and test the APIs, and to perform calculations and data manipulations. Use this tool to test the script draft you're creating/updating.
+
+Use 'save' tool to save the created/updated script code when you're ready.
+
+Use other tools to ask questions to user or inspect the script code change history.
+
+## Input format
+- You'll be given script goal and other input from the user
+
+${this.toolsPrompt()}
+
+${this.jsPrompt([])}
+
+${this.filesPrompt()}
+
+${this.userInputPrompt()}
+
+## Task complexity
+- You might have insufficient tools/APIs to solve the task or achieve the goals, that is normal and it's ok to admit it.
+- If task is too complex or not enough APIs, admit it and suggest to reduce the scope/goals to something you believe you could do. 
+- You are also allowed and encouraged to ask clarifying questions, it's much better to ask and be sure about user's intent/expectations, than to waste resources on useless work.
+- Use 'ask' tool to send your questions/suggestion to the user.
+
+## Time & locale
+- Assume time in user messages is in local timezone, must clarify timezone/location from notes or message history before handling time.
+${this.localePrompt()}
+
+`;
+  }
+
+}
+
 
 type Any = z.ZodTypeAny;
 

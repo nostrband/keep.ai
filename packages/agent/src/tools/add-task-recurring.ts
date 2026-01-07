@@ -26,7 +26,7 @@ export function makeAddTaskRecurringTool(
         id,
         timestamp,
         "",
-        "worker",
+        "planner",
         "",
         opts.title,
         opts.cron
@@ -60,7 +60,7 @@ export function makeAddTaskRecurringTool(
         .string()
         .optional()
         .nullable()
-        .describe("Task notes for worker agent"),
+        .describe("Task notes for planner agent"),
       cron: z
         .string()
         .describe(

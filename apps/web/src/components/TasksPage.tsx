@@ -49,7 +49,7 @@ export default function TasksPage() {
                   <div className="flex-1">
                     <div className="flex items-center gap-2 mb-2">
                       <h3 className="font-medium text-gray-900">
-                        {task.title || (task.type === 'router' ? 'Router' : task.type === 'replier' ? 'Replier' : `Task ${task.id.slice(0, 8)}`)}
+                        {task.title || (task.type === 'router' ? 'Router' : task.type === 'replier' ? 'Replier' : task.type === 'planner' ? 'Planner' : `Task ${task.id.slice(0, 8)}`)}
                       </h3>
                       {getStatusBadge(task)}
                     </div>

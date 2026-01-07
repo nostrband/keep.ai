@@ -2,7 +2,7 @@ import { CRSqliteDB } from "./database";
 import { DBInterface } from "./interfaces";
 
 export type InboxItemSource = "user" | "router" | "worker";
-export type InboxItemTarget = "router" | "worker" | "replier";
+export type InboxItemTarget = "router" | "worker" | "planner" | "replier";
 
 export interface InboxItem {
   id: string; // idempotency key

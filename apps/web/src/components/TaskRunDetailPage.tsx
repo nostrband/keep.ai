@@ -41,6 +41,8 @@ export default function TaskRunDetailPage() {
                 ? "Router"
                 : task.type === "replier"
                 ? "Replier"
+                : task.type === "planner"
+                ? "Planner"
                 : `Task ${task.id.slice(0, 8)}`)
             : "Loading..."
         } - Run ${runId.slice(0, 8)}`}
@@ -71,6 +73,8 @@ export default function TaskRunDetailPage() {
                         ? "Router"
                         : task.type === "replier"
                         ? "Replier"
+                        : task.type === "planner"
+                        ? "Planner"
                         : `Task ${task.id.slice(0, 8)}`)}
                   </Link>
                   <p className="text-sm text-gray-600 mt-1">

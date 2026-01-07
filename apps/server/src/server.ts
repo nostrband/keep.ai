@@ -883,20 +883,20 @@ export async function createServer(config: ServerConfig = {}) {
           const id = bytesToHex(randomBytes(16));
           await api.inboxStore.saveInbox({
             id,
-            source: "worker",
+            source: "router",
             source_id: "",
-            target: "replier",
+            target: "worker",
             target_id: "",
             timestamp: "",
             handler_thread_id: "",
             handler_timestamp: "",
             content: JSON.stringify({
               id,
-              role: "system",
+              role: "user",
               parts: [
                 {
                   type: "text",
-                  text: `This is user onboarding synthetic instruction-draft for replier: please greet the user, tell them 'who you are' in their preferred language and ask how you could be helpful. We rely on your, Replier's, common sense to prepare the first ever message that user will see from us.`,
+                  text: `User has just started using the AI assistant and need onboarding: greet the user, tell them 'who you are' in their preferred language and ask how you could be helpful. Rely on your common sense to prepare the first ever message that user will see from the AI assistant.`,
                 },
               ],
               metadata: {

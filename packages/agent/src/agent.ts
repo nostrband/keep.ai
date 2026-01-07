@@ -17,6 +17,7 @@ import { APICallError, LanguageModelV2Usage } from "@ai-sdk/provider";
 import { makeEvalTool } from "./ai-tools/eval";
 import { makeFinishTool } from "./ai-tools/finish";
 import { makePauseTool } from "./ai-tools/pause";
+import { makeAskTool } from "./ai-tools/ask";
 
 export const ERROR_BAD_REQUEST = "BAD_REQUEST";
 export const ERROR_PAYMENT_REQUIRED = "PAYMENT_REQUIRED";
@@ -163,10 +164,82 @@ export class Agent {
     let error: any;
     let stopped = false;
 
-    const activeTools: ("eval" | "finish" | "pause")[] = ["eval"];
+    const tools: any = {
+      eval: makeEvalTool({
+        sandbox: this.sandbox,
+        type: this.task.type,
+        getState: () => jsState,
+        setResult: (result, code) => {
+          // Store
+          input.result = result;
+          lastCode = code;
+
+          // Next step reason
+          input.reason = "code";
+
+          // Update state
+          if (result.ok && result.state) jsState = result.state;
+        },
+      }),
+    };
+
     if (this.task.type === "worker") {
-      activeTools.push("finish");
-      activeTools.push("pause");
+      tools.finish = makeFinishTool({
+        onFinish: (info) => {
+          // Stop the loop
+          stopped = true;
+
+          // 'done' output
+          output = {
+            kind: "done",
+            reply: info.reply || "",
+            steps: input.step + 1,
+          };
+          if (info.notes || info.plan) {
+            output.patch = {
+              notes: info.notes,
+              plan: info.plan,
+            };
+          }
+        },
+      });
+      tools.pause = makePauseTool({
+        onPause: (info) => {
+          // Stop the loop
+          stopped = true;
+
+          // 'wait' output
+          output = {
+            kind: "wait",
+            steps: input.step + 1,
+          };
+          if (info.notes || info.plan || info.asks) {
+            output.patch = {
+              notes: info.notes,
+              plan: info.plan,
+              asks: info.asks
+            };
+          }
+        },
+      });
+    } else if (this.task.type === "planner") {
+      tools.ask = makeAskTool({
+        onAsk: (info) => {
+          // Stop the loop
+          stopped = true;
+
+          // 'wait' output
+          output = {
+            kind: "wait",
+            steps: input.step + 1,
+          };
+          if (info.asks) {
+            output.patch = {
+              asks: info.asks,
+            };
+          }
+        },
+      });
     }
 
     try {
@@ -182,62 +255,7 @@ export class Agent {
             // },
           },
         },
-        activeTools,
-        tools: {
-          eval: makeEvalTool({
-            sandbox: this.sandbox,
-            type: this.task.type,
-            getState: () => jsState,
-            setResult: (result, code) => {
-              // Store
-              input.result = result;
-              lastCode = code;
-
-              // Next step reason
-              input.reason = "code";
-
-              // Update state
-              if (result.ok && result.state) jsState = result.state;
-            },
-          }),
-          finish: makeFinishTool({
-            onFinish: (info) => {
-              // Stop the loop
-              stopped = true;
-
-              // 'done' output
-              output = {
-                kind: "done",
-                reply: info.reply || "",
-                steps: input.step + 1,
-              };
-              if (info.notes || info.plan) {
-                output.patch = {
-                  notes: info.notes,
-                  plan: info.plan,
-                };
-              }
-            },
-          }),
-          pause: makePauseTool({
-            onPause: (info) => {
-              // Stop the loop
-              stopped = true;
-
-              // 'wait' output
-              output = {
-                kind: "wait",
-                steps: input.step + 1,
-              };
-              if (info.notes || info.plan) {
-                output.patch = {
-                  notes: info.notes,
-                  plan: info.plan,
-                };
-              }
-            },
-          }),
-        },
+        tools,
         stopWhen: () => stopped,
         prepareStep: (opts) => {
           // Update input
