@@ -47,7 +47,8 @@ export interface EvalContext {
   step: number;
   type: TaskType;
   taskId: string;
-  taskRunId: string;
+  taskRunId?: string;
+  scriptRunId?: string;
   data?: any;
   createEvent(type: string, content: any, tx?: DBInterface): Promise<void>;
 }

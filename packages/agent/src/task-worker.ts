@@ -14,6 +14,7 @@ import {
   InboxItemTarget,
   KeepDbApi,
   MAX_STATUS_TTL,
+  Script,
   Task,
   TaskState,
 } from "@app/db";
@@ -50,7 +51,7 @@ export class TaskWorker {
 
   // Task state map for retry backoff (reset on program restart)
   private taskRetryState: Map<string, TaskRetryState> = new Map();
-  
+
   // Global pause for PAYMENT_REQUIRED errors
   private globalPauseUntil: number = 0;
 
@@ -147,7 +148,11 @@ export class TaskWorker {
 
       // Check global pause for PAYMENT_REQUIRED errors
       if (this.globalPauseUntil > Date.now()) {
-        this.debug(`Global pause active until ${new Date(this.globalPauseUntil).toISOString()}`);
+        this.debug(
+          `Global pause active until ${new Date(
+            this.globalPauseUntil
+          ).toISOString()}`
+        );
         return false;
       }
 
@@ -158,7 +163,7 @@ export class TaskWorker {
           ...(await this.api.taskStore.listTasks(false, "router"))
         );
 
-        // Turn off the replier
+      // Turn off the replier
       // if (inboxItems.find((i) => i.target === "replier"))
       //   todoTasks.push(
       //     ...(await this.api.taskStore.listTasks(false, "replier"))
@@ -182,16 +187,18 @@ export class TaskWorker {
       const availableTasks = [...taskMap.values()].filter((t) => {
         const retryState = this.taskRetryState.get(t.id);
         if (retryState && retryState.nextStart > currentTime) {
-          this.debug(`Skipping task ${t.id} in backoff until ${new Date(retryState.nextStart).toISOString()}`);
+          this.debug(
+            `Skipping task ${t.id} in backoff until ${new Date(
+              retryState.nextStart
+            ).toISOString()}`
+          );
           return false;
         }
         return true;
       });
 
       // Uniq tasks array, sorted by timestamp asc
-      const tasks = availableTasks.sort(
-        (a, b) => a.timestamp - b.timestamp
-      );
+      const tasks = availableTasks.sort((a, b) => a.timestamp - b.timestamp);
       this.debug("Pending tasks", tasks);
 
       // Find highest-priority task:
@@ -206,6 +213,8 @@ export class TaskWorker {
               (i) => i.source === "router" && i.target === "replier"
             )
         );
+      // - planner
+      if (!task) task = tasks.find((t) => t.type === "planner");
       // - worker
       if (!task) task = tasks.find((t) => t.type === "worker");
       // - replier after worker
@@ -255,6 +264,7 @@ export class TaskWorker {
       // Type check to cast to TaskType safely
       if (
         task.type !== "worker" &&
+        task.type !== "planner" &&
         task.type !== "router" &&
         task.type !== "replier"
       ) {
@@ -264,7 +274,7 @@ export class TaskWorker {
       const taskType: TaskType = task.type;
 
       const { inboxItems, inbox } = await this.getInboxItems(taskType, task.id);
-      if (taskType !== "worker" && !inbox.length) {
+      if (taskType !== "worker" && taskType !== "planner" && !inbox.length) {
         this.debug("Empty task inbox", task.type, task.id);
         return this.finishTask(task, "Empty inbox", "Empty inbox");
       }
@@ -273,6 +283,16 @@ export class TaskWorker {
         if (task.state === "finished" || task.state === "error") {
           this.debug("Task already processed with state:", task.state);
           return;
+        }
+      }
+
+      // Running a script?
+      if (taskType === "planner" && !inbox.length) {
+        const script = await this.api.scriptStore.getLatestScriptByTaskId(
+          task.id
+        );
+        if (script) {
+          return await this.processTaskScript(task, taskType, script);
         }
       }
 
@@ -290,11 +310,15 @@ export class TaskWorker {
       // bcs that generally means user is supplying
       // a followup message/question to latest worker reply
       let history: AssistantUIMessage[] = [];
-      if (taskType === "worker" && reason === "input" && task.thread_id) {
+      if (
+        (taskType === "worker" || taskType === "planner") &&
+        reason === "input" &&
+        task.thread_id
+      ) {
         // Load existing history
         // NOTE: we start a new thread but copy history from
         // old thread, to make sure our observability traces
-        // have separate threads for users to analize
+        // have separate threads for users to analyze
         history = await this.loadHistory(task.thread_id);
         this.debug(
           "Restoring task",
@@ -520,7 +544,11 @@ export class TaskWorker {
           await this.handleInboxItems(task, inboxItems);
 
           // Set error on current task
-          await this.finishTask(task, "Failed to process, bad request.", "Bad LLM request");
+          await this.finishTask(
+            task,
+            "Failed to process, bad request.",
+            "Bad LLM request"
+          );
 
           // Reset retry state on failed task
           this.taskRetryState.delete(task.id);
@@ -529,8 +557,12 @@ export class TaskWorker {
         // Provider low balance
         if (error === ERROR_PAYMENT_REQUIRED) {
           // Pause ALL task processing for 10 minutes
-          this.globalPauseUntil = Date.now() + (10 * 60 * 1000); // 10 minutes from now
-          this.debug(`PAYMENT_REQUIRED: Pausing all task processing until ${new Date(this.globalPauseUntil).toISOString()}`);
+          this.globalPauseUntil = Date.now() + 10 * 60 * 1000; // 10 minutes from now
+          this.debug(
+            `PAYMENT_REQUIRED: Pausing all task processing until ${new Date(
+              this.globalPauseUntil
+            ).toISOString()}`
+          );
         }
       }
     } catch (error) {
@@ -540,6 +572,91 @@ export class TaskWorker {
       if (statusUpdaterInterval) clearInterval(statusUpdaterInterval);
       this.debug(`Clear agent status`);
       await this.api.setAgentStatus("");
+    }
+  }
+
+  private async processTaskScript(
+    task: Task,
+    taskType: TaskType,
+    script: Script
+  ) {
+    const scriptRunId = generateId();
+    this.debug(
+      "Running script run",
+      scriptRunId,
+      "script",
+      script.id,
+      "task",
+      task.id
+    );
+
+    await this.api.scriptStore.startScriptRun(
+      scriptRunId,
+      script.id,
+      new Date().toISOString()
+    );
+
+    try {
+      const sandbox = await this.createSandbox(
+        taskType,
+        task,
+        undefined,
+        scriptRunId
+      );
+
+      const result = await sandbox.eval(script.code, {
+        timeoutMs: 300000,
+      });
+
+      if (result.ok) {
+        this.debug("Script result", result.result);
+      } else {
+        this.debug("Script error", result.error);
+        throw result.error;
+      }
+
+      // Task finished ok
+      await this.api.scriptStore.finishScriptRun(
+        scriptRunId,
+        new Date().toISOString(),
+        ""
+      );
+
+      if (task.cron) {
+        const timestamp = Math.floor(
+          new Cron(task.cron).nextRun()!.getTime() / 1000
+        );
+
+        this.debug(
+          `Updating ${task.type || ""} task ${task.id} cron '${
+            task.cron
+          }' timestamp ${timestamp}`
+        );
+
+        await this.api.taskStore.updateTask({
+          ...task,
+          timestamp,
+          reply: JSON.stringify(result.result) || "",
+          state: "wait",
+          error: "",
+          thread_id: task.thread_id,
+        });
+      } else {
+        // FIXME for event handlers, what do we do?
+      }
+    } catch (error: any) {
+      const errorMessage =
+        error instanceof Error ? error.message : "Unknown error occurred";
+      await this.api.scriptStore.finishScriptRun(
+        scriptRunId,
+        new Date().toISOString(),
+        errorMessage
+      );
+
+      // FIXME handle BAD_REQUEST and PAYMENT_REQUIRED from LLM tool calls
+
+      // Retry it
+      await this.retry(task, errorMessage, task.thread_id);
     }
   }
 
@@ -670,11 +787,7 @@ export class TaskWorker {
   private async handleInboxItems(task: Task, inboxItems: InboxItem[]) {
     const now = new Date().toISOString();
     for (const item of inboxItems)
-      await this.api.inboxStore.handleInboxItem(
-        item.id,
-        now,
-        task.thread_id
-      );
+      await this.api.inboxStore.handleInboxItem(item.id, now, task.thread_id);
   }
 
   private async finishTaskRun(
@@ -723,7 +836,8 @@ export class TaskWorker {
   private async createSandbox(
     taskType: TaskType,
     task: Task,
-    taskRunId: string
+    taskRunId?: string,
+    scriptRunId?: string
   ) {
     // Sandbox
     const sandbox = await initSandbox();
@@ -733,6 +847,7 @@ export class TaskWorker {
       step: 0,
       taskId: task.id,
       taskRunId,
+      scriptRunId,
       type: taskType,
       taskThreadId: task.thread_id,
       createEvent: async (type: string, content: any, tx?: DBInterface) => {
@@ -805,7 +920,7 @@ export class TaskWorker {
     await this.api.taskStore.finishTask(task.id, task.thread_id, reply, error);
   }
 
-  private async startStatusUpdater(type: TaskType) {
+  private async startStatusUpdater(type: TaskType | "script") {
     // Set agent status in db
     let status = "";
     switch (type) {
@@ -814,6 +929,12 @@ export class TaskWorker {
         break;
       case "router":
         status = "Thinking...";
+        break;
+      case "planner":
+        status = "Planning...";
+        break;
+      case "script":
+        status = "Executing...";
         break;
       default:
         status = "Working...";
@@ -892,7 +1013,8 @@ export class TaskWorker {
 
     // Calculate exponential backoff: 10s * 2^(retryCount-1), max 10 minutes (600s)
     const baseDelayMs = 10 * 1000; // 10 seconds in milliseconds
-    const exponentialDelayMs = baseDelayMs * Math.pow(2, currentRetryState.retryCount - 1);
+    const exponentialDelayMs =
+      baseDelayMs * Math.pow(2, currentRetryState.retryCount - 1);
     const maxDelayMs = 10 * 60 * 1000; // 10 minutes in milliseconds
     const actualDelayMs = Math.min(exponentialDelayMs, maxDelayMs);
 
@@ -921,7 +1043,9 @@ export class TaskWorker {
     this.debug(
       `Updated ${task.type || ""} task ${
         task.id
-      } for retry: DB timestamp ${retryTimestamp} (${retryDelaySeconds}s), actual retry in ${actualDelayMs}ms (${Math.round(actualDelayMs/1000)}s), attempt ${currentRetryState.retryCount}, error: ${error}`
+      } for retry: DB timestamp ${retryTimestamp} (${retryDelaySeconds}s), actual retry in ${actualDelayMs}ms (${Math.round(
+        actualDelayMs / 1000
+      )}s), attempt ${currentRetryState.retryCount}, error: ${error}`
     );
   }
 
@@ -977,7 +1101,7 @@ ${result.reply || ""}
           },
         ],
         metadata: {
-          createdAt: new Date().toISOString()
+          createdAt: new Date().toISOString(),
         },
         reasoning: opts.reasoning,
         sourceTaskId: opts.taskId,

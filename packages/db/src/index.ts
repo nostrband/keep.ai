@@ -35,5 +35,9 @@ export type { InboxItem, InboxItemSource, InboxItemTarget } from "./inbox-store"
 export { FileStore } from "./file-store";
 export type { File } from "./file-store";
 
+// Script store
+export { ScriptStore } from "./script-store";
+export type { Script, ScriptRun } from "./script-store";
+
 // Api
 export * from "./api";

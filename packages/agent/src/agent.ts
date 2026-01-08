@@ -18,6 +18,7 @@ import { makeEvalTool } from "./ai-tools/eval";
 import { makeFinishTool } from "./ai-tools/finish";
 import { makePauseTool } from "./ai-tools/pause";
 import { makeAskTool } from "./ai-tools/ask";
+import { makeSaveTool } from "./ai-tools/save";
 
 export const ERROR_BAD_REQUEST = "BAD_REQUEST";
 export const ERROR_PAYMENT_REQUIRED = "PAYMENT_REQUIRED";
@@ -217,7 +218,7 @@ export class Agent {
             output.patch = {
               notes: info.notes,
               plan: info.plan,
-              asks: info.asks
+              asks: info.asks,
             };
           }
         },
@@ -239,6 +240,10 @@ export class Agent {
             };
           }
         },
+      });
+      tools.save = makeSaveTool({
+        taskId: this.task.id,
+        scriptStore: this.env.api.scriptStore,
       });
     }
 

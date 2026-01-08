@@ -79,10 +79,11 @@ export function useUpdateTask() {
       // Get the current task first
       const task = await api.taskStore.getTask(input.taskId);
 
-      // Update the task with new timestamp
+      // Update the task with new timestamp and reset state
       await api.taskStore.updateTask({
         ...task,
         timestamp: input.timestamp,
+        state: ''
       });
 
       return task;

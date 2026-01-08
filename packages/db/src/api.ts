@@ -9,6 +9,7 @@ import { randomBytes } from "@noble/ciphers/crypto";
 import { NostrPeerStore } from "./nostr-peer-store";
 import { InboxItem, InboxStore } from "./inbox-store";
 import { File, FileStore } from "./file-store";
+import { ScriptStore } from "./script-store";
 
 export const MAX_STATUS_TTL = 60 * 1000; // 1 minute in milliseconds
 
@@ -21,6 +22,7 @@ export class KeepDbApi {
   public readonly nostrPeerStore: NostrPeerStore;
   public readonly inboxStore: InboxStore;
   public readonly fileStore: FileStore;
+  public readonly scriptStore: ScriptStore;
 
   constructor(db: KeepDb) {
     this.db = db;
@@ -31,6 +33,7 @@ export class KeepDbApi {
     this.nostrPeerStore = new NostrPeerStore(db);
     this.inboxStore = new InboxStore(db);
     this.fileStore = new FileStore(db);
+    this.scriptStore = new ScriptStore(db);
   }
 
   async addMessage(input: {

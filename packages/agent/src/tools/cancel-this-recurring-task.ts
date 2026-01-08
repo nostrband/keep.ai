@@ -8,8 +8,9 @@ export function makeCancelThisRecurringTaskTool(
     execute: async () => {
       const context = getContext();
       if (!context) throw new Error("No eval context");
-      if (context.type !== "worker") 
-        throw new Error("Only worker tasks can cancel themselves");
+      // FIXME remove worker
+      if (context.type !== "worker" && context.type !== "planner") 
+        throw new Error("Only planner/worker tasks can cancel themselves");
 
       if (!context.data) context.data = {};
       context.data.cancelled = true;

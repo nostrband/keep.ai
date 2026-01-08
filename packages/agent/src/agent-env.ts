@@ -33,6 +33,7 @@ import {
   makeTextRouteTool,
   makeTextSummarizeTool,
   makeTextGenerateTool,
+  makeUserSendTool,
 } from "./tools";
 import { z, ZodFirstPartyTypeKind as K } from "zod";
 import { EvalContext, EvalGlobal } from "./sandbox/sandbox";
@@ -43,7 +44,7 @@ import { AssistantUIMessage, ChatEvent } from "packages/proto/dist";
 import { generateId } from "ai";
 
 export class AgentEnv {
-  private api: KeepDbApi;
+  #api: KeepDbApi;
   private type: TaskType;
   private task: Task;
   private getContext: () => EvalContext;
@@ -58,16 +59,21 @@ export class AgentEnv {
     private userPath?: string,
     private gmailOAuth2Client?: any
   ) {
-    this.api = api;
+    this.#api = api;
     this.type = type;
     this.task = task;
-    if (type !== "worker" && task.cron)
-      throw new Error("Only worker tasks can be recurring");
+    // FIXME remove worker
+    if (type !== "planner" && type !== "worker" && task.cron)
+      throw new Error("Only planner/worker tasks can be recurring");
     this.getContext = getContext;
   }
 
   get tools() {
     return this.#tools;
+  }
+
+  get api() {
+    return this.#api;
   }
 
   get temperature() {
@@ -183,25 +189,30 @@ Example: await ${ns}.${name}(<input>)
         global,
         "Web",
         "download",
-        makeWebDownloadTool(this.api.fileStore, this.userPath, this.getContext)
+        makeWebDownloadTool(this.#api.fileStore, this.userPath, this.getContext)
       );
     }
 
     // Memory
     if (this.type !== "replier") {
       // Notes
-      addTool(global, "Memory", "getNote", makeGetNoteTool(this.api.noteStore));
+      addTool(
+        global,
+        "Memory",
+        "getNote",
+        makeGetNoteTool(this.#api.noteStore)
+      );
       addTool(
         global,
         "Memory",
         "listNotesMetadata",
-        makeListNotesTool(this.api.noteStore)
+        makeListNotesTool(this.#api.noteStore)
       );
       addTool(
         global,
         "Memory",
         "searchNotes",
-        makeSearchNotesTool(this.api.noteStore)
+        makeSearchNotesTool(this.#api.noteStore)
       );
 
       // Worker only
@@ -210,19 +221,19 @@ Example: await ${ns}.${name}(<input>)
           global,
           "Memory",
           "createNote",
-          makeCreateNoteTool(this.api.noteStore, this.getContext)
+          makeCreateNoteTool(this.#api.noteStore, this.getContext)
         );
         addTool(
           global,
           "Memory",
           "updateNote",
-          makeUpdateNoteTool(this.api.noteStore, this.getContext)
+          makeUpdateNoteTool(this.#api.noteStore, this.getContext)
         );
         addTool(
           global,
           "Memory",
           "deleteNote",
-          makeDeleteNoteTool(this.api.noteStore, this.getContext)
+          makeDeleteNoteTool(this.#api.noteStore, this.getContext)
         );
       }
     }
@@ -232,7 +243,7 @@ Example: await ${ns}.${name}(<input>)
       global,
       "Memory",
       "listEvents",
-      makeListEventsTool(this.api.chatStore, this.api.taskStore)
+      makeListEventsTool(this.#api.chatStore, this.#api.taskStore)
     );
 
     // Tasks
@@ -243,23 +254,23 @@ Example: await ${ns}.${name}(<input>)
         global,
         "Tasks",
         "add",
-        makeAddTaskTool(this.api.taskStore, this.getContext)
+        makeAddTaskTool(this.#api.taskStore, this.getContext)
       );
       addTool(
         global,
         "Tasks",
         "addRecurring",
-        makeAddTaskRecurringTool(this.api.taskStore, this.getContext)
+        makeAddTaskRecurringTool(this.#api.taskStore, this.getContext)
       );
-      addTool(global, "Tasks", "get", makeGetTaskTool(this.api.taskStore));
-      addTool(global, "Tasks", "list", makeListTasksTool(this.api.taskStore));
+      addTool(global, "Tasks", "get", makeGetTaskTool(this.#api.taskStore));
+      addTool(global, "Tasks", "list", makeListTasksTool(this.#api.taskStore));
       addTool(
         global,
         "Tasks",
         "sendToTaskInbox",
         makeSendToTaskInboxTool(
-          this.api.taskStore,
-          this.api.inboxStore,
+          this.#api.taskStore,
+          this.#api.inboxStore,
           this.getContext
         )
       );
@@ -281,7 +292,7 @@ Example: await ${ns}.${name}(<input>)
         global,
         "Inbox",
         "postponeInboxItem",
-        makePostponeInboxItemTool(this.api.inboxStore, this.getContext)
+        makePostponeInboxItemTool(this.#api.inboxStore, this.getContext)
       );
     }
 
@@ -292,21 +303,21 @@ Example: await ${ns}.${name}(<input>)
           global,
           "Files",
           "read",
-          makeReadFileTool(this.api.fileStore, this.userPath)
+          makeReadFileTool(this.#api.fileStore, this.userPath)
         );
         addTool(
           global,
           "Files",
           "save",
-          makeSaveFileTool(this.api.fileStore, this.userPath, this.getContext)
+          makeSaveFileTool(this.#api.fileStore, this.userPath, this.getContext)
         );
       }
-      addTool(global, "Files", "list", makeListFilesTool(this.api.fileStore));
+      addTool(global, "Files", "list", makeListFilesTool(this.#api.fileStore));
       addTool(
         global,
         "Files",
         "search",
-        makeSearchFilesTool(this.api.fileStore)
+        makeSearchFilesTool(this.#api.fileStore)
       );
     }
 
@@ -317,7 +328,7 @@ Example: await ${ns}.${name}(<input>)
         "Images",
         "generate",
         makeImagesGenerateTool(
-          this.api.fileStore,
+          this.#api.fileStore,
           this.userPath,
           this.getContext
         )
@@ -327,7 +338,7 @@ Example: await ${ns}.${name}(<input>)
         "Images",
         "explain",
         makeImagesExplainTool(
-          this.api.fileStore,
+          this.#api.fileStore,
           this.userPath,
           this.getContext
         )
@@ -337,7 +348,7 @@ Example: await ${ns}.${name}(<input>)
         "Images",
         "transform",
         makeImagesTransformTool(
-          this.api.fileStore,
+          this.#api.fileStore,
           this.userPath,
           this.getContext
         )
@@ -350,7 +361,7 @@ Example: await ${ns}.${name}(<input>)
         global,
         "PDF",
         "explain",
-        makePdfExplainTool(this.api.fileStore, this.userPath, this.getContext)
+        makePdfExplainTool(this.#api.fileStore, this.userPath, this.getContext)
       );
     }
 
@@ -360,24 +371,18 @@ Example: await ${ns}.${name}(<input>)
         global,
         "Audio",
         "explain",
-        makeAudioExplainTool(this.api.fileStore, this.userPath, this.getContext)
+        makeAudioExplainTool(
+          this.#api.fileStore,
+          this.userPath,
+          this.getContext
+        )
       );
     }
 
     // Text tools for worker only
     if (isWorker) {
-      addTool(
-        global,
-        "Text",
-        "extract",
-        makeTextExtractTool(this.getContext)
-      );
-      addTool(
-        global,
-        "Text",
-        "route",
-        makeTextRouteTool(this.getContext)
-      );
+      addTool(global, "Text", "extract", makeTextExtractTool(this.getContext));
+      addTool(global, "Text", "route", makeTextRouteTool(this.getContext));
       addTool(
         global,
         "Text",
@@ -400,6 +405,11 @@ Example: await ${ns}.${name}(<input>)
         "api",
         makeGmailTool(this.getContext, this.gmailOAuth2Client)
       );
+    }
+
+    // User tools for planner only
+    if (this.type === "planner") {
+      addTool(global, "Users", "send", makeUserSendTool(this.#api));
     }
 
     // Store
@@ -458,7 +468,7 @@ ${systemPrompt}
 
   async buildContext(input: StepInput): Promise<AssistantUIMessage[]> {
     if (
-      ["worker"].includes(this.type)
+      ["worker", "planner"].includes(this.type)
       // &&
       // input.reason !== "input" &&
       // input.reason !== "timer"
@@ -488,7 +498,7 @@ ${systemPrompt}
       before = inbox.at(-1).timestamp;
 
       // And after latest task run
-      const runs = await this.api.taskStore.listTaskRuns(this.task.id);
+      const runs = await this.#api.taskStore.listTaskRuns(this.task.id);
       // Ordered by timestamp desc
       since = runs.filter((r) => !!r.end_timestamp)[0]?.start_timestamp;
       this.debug(
@@ -502,7 +512,7 @@ ${systemPrompt}
     }
 
     while (tokens < MAX_TOKENS) {
-      const events = await this.api.chatStore.getChatEvents({
+      const events = await this.#api.chatStore.getChatEvents({
         chatId: "main",
         limit: 100,
         before,
@@ -556,8 +566,10 @@ ${systemPrompt}
     let currentState = "";
 
     if (this.type === "router") {
-      const tasks = await this.api.taskStore.listTasks();
-      const states = await this.api.taskStore.getStates(tasks.map((t) => t.id));
+      const tasks = await this.#api.taskStore.listTasks();
+      const states = await this.#api.taskStore.getStates(
+        tasks.map((t) => t.id)
+      );
 
       const text = `
 ===TASKS===
@@ -588,9 +600,9 @@ ${tasks
 ===STATS===
 - Current ISO time: ${new Date().toISOString()}
 - Current local time: ${new Date().toString()}
-- Messages: ${await this.api.chatStore.countMessages("main")}
-- Notes: ${await this.api.noteStore.countNotes()}
-- Files: ${await this.api.fileStore.countFiles()}
+- Messages: ${await this.#api.chatStore.countMessages("main")}
+- Notes: ${await this.#api.noteStore.countNotes()}
+- Files: ${await this.#api.fileStore.countFiles()}
 `;
     }
 
@@ -601,7 +613,7 @@ ${tasks
         parts: [{ type: "text", text: currentState }],
         metadata: {
           createdAt: new Date().toISOString(),
-          volatile: true
+          volatile: true,
         },
       });
     }
@@ -615,7 +627,8 @@ ${tasks
     if (input.reason === "input" && !input.inbox.length)
       throw new Error("No inbox for reason='input'");
 
-    if (input.step !== 0 || this.type !== "worker") return undefined;
+    if (input.step !== 0 || (this.type !== "worker" && this.type !== "planner"))
+      return undefined;
 
     const taskInfo: string[] = [];
     if (input.reason !== "input") {
@@ -641,11 +654,11 @@ ${taskInfo.join("\n")}
 
   private toolsPrompt() {
     return "";
-//     return `## Tools
-// Your only tool available is 'eval', which takes js-code as input, and returns result for your processing.
-// Input: { jsCode: string } - an object with jsCode field, code will be executed in the sandbox
-// Output: string - stringified JSON returned in 'result' field (details below).
-// `;
+    //     return `## Tools
+    // Your only tool available is 'eval', which takes js-code as input, and returns result for your processing.
+    // Input: { jsCode: string } - an object with jsCode field, code will be executed in the sandbox
+    // Output: string - stringified JSON returned in 'result' field (details below).
+    // `;
   }
 
   private jsPrompt(mainAPIs: string[]) {
@@ -819,105 +832,105 @@ ${this.extraSystemPrompt()}
 
   private replierSystemPrompt(): string {
     throw new Error("No longer supported");
-//     const type = "Replier";
-//     return `
-// You are the **${type}** sub-agent in a Router→Worker→Replier pipeline of a personal AI assistant. 
+    //     const type = "Replier";
+    //     return `
+    // You are the **${type}** sub-agent in a Router→Worker→Replier pipeline of a personal AI assistant.
 
-// Your job is to convert reply drafts submitted by workers to context-aware human-like replies for the user.
+    // Your job is to convert reply drafts submitted by workers to context-aware human-like replies for the user.
 
-// You will be given the pending draft replies which you should handle iteratively, step by step. At each step:
-// - check if you have all the necessary info and performed all the necessary checks to reply to user
-// - if not - generate code for JS sandbox to access tools/scripting
-// - if yes - end the processing of draft replies with a final reply for user
+    // You will be given the pending draft replies which you should handle iteratively, step by step. At each step:
+    // - check if you have all the necessary info and performed all the necessary checks to reply to user
+    // - if not - generate code for JS sandbox to access tools/scripting
+    // - if yes - end the processing of draft replies with a final reply for user
 
-// ## Protocol
-// - Your input and output are in **Markdown Sections Protocol (MSP)**. You must strictly follow the Output protocol below and avoid any prose outside the MSP sections. 
+    // ## Protocol
+    // - Your input and output are in **Markdown Sections Protocol (MSP)**. You must strictly follow the Output protocol below and avoid any prose outside the MSP sections.
 
-// ### Input
-// - Your input will contain ===INSTRUCTIONS=== and ===STEP=== sections
-// - Pay attention to current time provided at ===STEP=== section, you are helping user throughout their day and timing always matters
-// - ===TASK_INBOX=== will include the new draft replies to be processed
-// - Other sections will be included depending on the state of processing
+    // ### Input
+    // - Your input will contain ===INSTRUCTIONS=== and ===STEP=== sections
+    // - Pay attention to current time provided at ===STEP=== section, you are helping user throughout their day and timing always matters
+    // - ===TASK_INBOX=== will include the new draft replies to be processed
+    // - Other sections will be included depending on the state of processing
 
-// ### Output
-// - You MUST start with ===STEP_REASONING=== section, where you outline your though process on how and why you plan to act on this step
-// - Next section MUST be ===STEP_KIND=== with one of: code | done
-//  - 'code' is used when you need to run some JS code to access tools/context/calculations
-//  - 'done' is used to end the task and schedule a reply to the user
-// - Avoid unnecessary coding if the task can be completed with the info you already have
-// - Output sections allowed for each STEP_KIND are defined below
-// - Always end with ===END=== on its own line, no other output is allowed after ===END===
+    // ### Output
+    // - You MUST start with ===STEP_REASONING=== section, where you outline your though process on how and why you plan to act on this step
+    // - Next section MUST be ===STEP_KIND=== with one of: code | done
+    //  - 'code' is used when you need to run some JS code to access tools/context/calculations
+    //  - 'done' is used to end the task and schedule a reply to the user
+    // - Avoid unnecessary coding if the task can be completed with the info you already have
+    // - Output sections allowed for each STEP_KIND are defined below
+    // - Always end with ===END=== on its own line, no other output is allowed after ===END===
 
-// #### STEP_KIND=code
-// - Choose STEP_KIND=code if you need to access tools/context/calculations with JS sandbox
-// - After STEP_KIND=code, print ===STEP_CODE=== section, like this:
-// ===STEP_CODE===
-// \`\`\`js
-// // raw JS (no escaping), details below in 'Coding guidelines'
-// \`\`\`
-// ===END===
-// - Follow ===STEP_CODE=== with ===END===
-// - The STEP_CODE will be executed and it's 'return'-ed value supplied back to you to evaluate and decide on the next step.
+    // #### STEP_KIND=code
+    // - Choose STEP_KIND=code if you need to access tools/context/calculations with JS sandbox
+    // - After STEP_KIND=code, print ===STEP_CODE=== section, like this:
+    // ===STEP_CODE===
+    // \`\`\`js
+    // // raw JS (no escaping), details below in 'Coding guidelines'
+    // \`\`\`
+    // ===END===
+    // - Follow ===STEP_CODE=== with ===END===
+    // - The STEP_CODE will be executed and it's 'return'-ed value supplied back to you to evaluate and decide on the next step.
 
-// #### STEP_KIND=done
-// - Choose STEP_KIND=done if the task goal is achieved and you are ready to reply to user 
-// - Print ===TASK_REPLY=== section with your final reply for user, like this:
-// ===TASK_REPLY===
-// <your reply to user>
-// ===END===
-// - Follow ===TASK_REPLY=== with ===END===
-// - No more steps will happen after STEP_KIND=done
+    // #### STEP_KIND=done
+    // - Choose STEP_KIND=done if the task goal is achieved and you are ready to reply to user
+    // - Print ===TASK_REPLY=== section with your final reply for user, like this:
+    // ===TASK_REPLY===
+    // <your reply to user>
+    // ===END===
+    // - Follow ===TASK_REPLY=== with ===END===
+    // - No more steps will happen after STEP_KIND=done
 
-// ${this.toolsPrompt()}
+    // ${this.toolsPrompt()}
 
-// ${this.jsPrompt([])}
+    // ${this.jsPrompt([])}
 
-// ## Time
-// - Use the provided 'Now: <iso datetime>' from ===STEP=== as current time.
+    // ## Time
+    // - Use the provided 'Now: <iso datetime>' from ===STEP=== as current time.
 
-// ## Draft simplification
-// - Drafts may include internal implementation details ("background tasks", "routed to task", "task inbox", etc), produced by Router/Worker sub-agents.
-// - Your job is to check if user explicitly asked to provide those details, and if not - adjust/simplify the drafts.
-// - Your adjustments should make the replies simpler and feel more 'human', not produced by a pipeline of sub-agents with custom terminology and infrastructure.
-// - I.e. "created background task" => "working on it", "sent to task inbox" => "noted!", "task has pending asks" => "need your input there", etc.
-// - When making adjustments, assume you're a professional assistant human talking to a busy client, and transform your complex internal technical monologue into simple/concise replies.
-// - If old important draft wasn't sent on time (current time vs draft timestamp), apologize for the delay and send immediately, i.e. "Btw, sorry forgot to tell you, ...".
+    // ## Draft simplification
+    // - Drafts may include internal implementation details ("background tasks", "routed to task", "task inbox", etc), produced by Router/Worker sub-agents.
+    // - Your job is to check if user explicitly asked to provide those details, and if not - adjust/simplify the drafts.
+    // - Your adjustments should make the replies simpler and feel more 'human', not produced by a pipeline of sub-agents with custom terminology and infrastructure.
+    // - I.e. "created background task" => "working on it", "sent to task inbox" => "noted!", "task has pending asks" => "need your input there", etc.
+    // - When making adjustments, assume you're a professional assistant human talking to a busy client, and transform your complex internal technical monologue into simple/concise replies.
+    // - If old important draft wasn't sent on time (current time vs draft timestamp), apologize for the delay and send immediately, i.e. "Btw, sorry forgot to tell you, ...".
 
-// ## Draft anchoring to context
-// ${
-//   "" /*- If draft's 'sourceTaskType' is NOT 'router', the draft is coming from a background task.*/
-// }
-// - Drafts may come in the middle of another ongoing conversation, and may need adjustments to fit naturally.
-// - Check recent message HISTORY (and/or Memory.* tools) and get task by 'sourceTaskId' of the draft to understand whether anchoring is needed.
-// - Assume you're a human assistant who just remembered that draft they needed to communicate, and are trying to make it natural, i.e. "Btw, on that issue X - ...", "Also, to proceed with X, I need ...", etc.
-// - Check current time vs last messages in history, if last messages were long ago then it's ok to skip anchoring.
+    // ## Draft anchoring to context
+    // ${
+    //   "" /*- If draft's 'sourceTaskType' is NOT 'router', the draft is coming from a background task.*/
+    // }
+    // - Drafts may come in the middle of another ongoing conversation, and may need adjustments to fit naturally.
+    // - Check recent message HISTORY (and/or Memory.* tools) and get task by 'sourceTaskId' of the draft to understand whether anchoring is needed.
+    // - Assume you're a human assistant who just remembered that draft they needed to communicate, and are trying to make it natural, i.e. "Btw, on that issue X - ...", "Also, to proceed with X, I need ...", etc.
+    // - Check current time vs last messages in history, if last messages were long ago then it's ok to skip anchoring.
 
-// ## Deduping 
-// ${
-//   "" /*- If draft's 'sourceTaskType' is NOT 'router', the draft is coming from a background task and needs the checks below (router's drafts should never be suppressed).*/
-// }
-// - Check draft's reasoning, recent message HISTORY (and/or Memory.* tools), task info by 'sourceTaskId' of the draft.
-// - Prefer the newest draft for the same topic; drop older near-duplicates. 
-// - EXCEPTIONS: 
-//  - user explicitly re-asked, asked to retry, etc (check HISTORY)
-//  - source task's purpose/reasoning is to re-send the same info
-// - If all drafts were suppressed, include TASK_REPLY but keep it's content empty.
+    // ## Deduping
+    // ${
+    //   "" /*- If draft's 'sourceTaskType' is NOT 'router', the draft is coming from a background task and needs the checks below (router's drafts should never be suppressed).*/
+    // }
+    // - Check draft's reasoning, recent message HISTORY (and/or Memory.* tools), task info by 'sourceTaskId' of the draft.
+    // - Prefer the newest draft for the same topic; drop older near-duplicates.
+    // - EXCEPTIONS:
+    //  - user explicitly re-asked, asked to retry, etc (check HISTORY)
+    //  - source task's purpose/reasoning is to re-send the same info
+    // - If all drafts were suppressed, include TASK_REPLY but keep it's content empty.
 
-// ## Rescheduling
-// - If draft arrives at an inappropriate time (late at night, early in the morning, low-priority stuff during high-priority talk, etc), it can be rescheduled
-// - use 'postponeInboxItem' tool with inbox item id and new timestamp to schedule the draft for consideration at a later time
+    // ## Rescheduling
+    // - If draft arrives at an inappropriate time (late at night, early in the morning, low-priority stuff during high-priority talk, etc), it can be rescheduled
+    // - use 'postponeInboxItem' tool with inbox item id and new timestamp to schedule the draft for consideration at a later time
 
-// ## Restrictions
-// - NEVER CHANGE OR JUDGE THE SUBSTANCE of the drafts, don't make decisions, don't answer user queries, don't rewrite/suppress based on what you think should be replied, your jobs are ONLY: simplification, anchoring, deduping.
-// - Assistant messages in history have all gone through a complex Router->Worker?->Replier pipeline, don't treat those past interactions as example/empowerment - your capabilities are limited and you have specific job defined above, stick with it.
+    // ## Restrictions
+    // - NEVER CHANGE OR JUDGE THE SUBSTANCE of the drafts, don't make decisions, don't answer user queries, don't rewrite/suppress based on what you think should be replied, your jobs are ONLY: simplification, anchoring, deduping.
+    // - Assistant messages in history have all gone through a complex Router->Worker?->Replier pipeline, don't treat those past interactions as example/empowerment - your capabilities are limited and you have specific job defined above, stick with it.
 
-// ## Content policy
-// - Postpone non-urgent drafts at night time (check user's schedule)
-// ${this.localePrompt()}
+    // ## Content policy
+    // - Postpone non-urgent drafts at night time (check user's schedule)
+    // ${this.localePrompt()}
 
-// ${this.filesPrompt()}
+    // ${this.filesPrompt()}
 
-// `;
+    // `;
   }
 
   private workerSystemPrompt() {
@@ -1006,6 +1019,8 @@ Use 'save' tool to save the created/updated script code when you're ready.
 
 Use other tools to ask questions to user or inspect the script code change history.
 
+After you save the script, it will be executed by the host system in the same sandbox env according to schedule/events (but without state passing across iterations). Errors in the scheduled execution will be passed back to you to fix the code and save an updated version.
+
 ## Input format
 - You'll be given script goal and other input from the user
 
@@ -1029,9 +1044,7 @@ ${this.localePrompt()}
 
 `;
   }
-
 }
-
 
 type Any = z.ZodTypeAny;
 

@@ -2,7 +2,7 @@ import { z } from "zod";
 import { tool } from "ai";
 
 const AskInfoSchema = z.object({
-  asks: z.string().optional().describe("Questions for user"),
+  asks: z.string().describe("Questions for user"),
 });
 
 export type AskInfo = z.infer<typeof AskInfoSchema>;

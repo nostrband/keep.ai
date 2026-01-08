@@ -32,3 +32,4 @@ export { makeTextExtractTool } from "./text-extract";
 export { makeTextRouteTool } from "./text-route";
 export { makeTextSummarizeTool } from "./text-summarize";
 export { makeTextGenerateTool } from "./text-generate";
+export { makeUserSendTool } from "./user-send";

@@ -18,13 +18,15 @@ export function makeAddTaskRecurringTool(
       if (!opts.title) throw new Error("Required 'title'");
       if (!opts.cron) throw new Error("Required 'cron'");
 
-      const nextRunDate = new Cron(opts.cron).nextRun();
-      if (!nextRunDate) throw new Error("Invalid cron schedule");
-      const timestamp = Math.floor(nextRunDate.getTime() / 1000);
+      // const nextRunDate = new Cron(opts.cron).nextRun();
+      // if (!nextRunDate) throw new Error("Invalid cron schedule");
+      // const timestamp = Math.floor(nextRunDate.getTime() / 1000);
       const id = generateId();
       await taskStore.addTask(
         id,
-        timestamp,
+        // Run planner immediately, next run will be scheduled
+        // after planner finishes
+        Math.floor(Date.now() / 1000),
         "",
         "planner",
         "",
