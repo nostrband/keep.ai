@@ -18,23 +18,26 @@ export function makePdfExplainTool(
 Takes a PDF file path/ID and a question about the document, uploads the PDF to an AI model and returns the textual explanation.
 `,
     inputSchema: z.object({
-      file_path: z
-        .string()
-        .min(1)
-        .describe("File path of the PDF to analyze"),
+      file_path: z.string().min(1).describe("File path of the PDF to analyze"),
       prompt: z
         .string()
         .min(1)
         .max(2000)
-        .describe("Question or prompt about the PDF - what you want to know or understand about the document"),
+        .describe(
+          "Question or prompt about the PDF - what you want to know or understand about the document"
+        ),
     }),
     outputSchema: z.object({
-      explanation: z.string().describe("AI-generated textual explanation or analysis of the PDF"),
-      file_info: z.object({
-        id: z.string().describe("File ID"),
-        name: z.string().describe("Original filename"),
-        size: z.number().describe("File size in bytes"),
-      }).describe("Information about the analyzed PDF file"),
+      explanation: z
+        .string()
+        .describe("AI-generated textual explanation or analysis of the PDF"),
+      file_info: z
+        .object({
+          id: z.string().describe("File ID"),
+          name: z.string().describe("Original filename"),
+          size: z.number().describe("File size in bytes"),
+        })
+        .describe("Information about the analyzed PDF file"),
     }),
     execute: async (input) => {
       const { file_path: file, prompt } = input;
@@ -53,7 +56,7 @@ Takes a PDF file path/ID and a question about the document, uploads the PDF to a
 
       // Extract filename without extension to use as ID
       const filename = fileUtils.basename(file, fileUtils.extname(file));
-      
+
       // Get file record from database
       const fileRecord = await fileStore.getFile(filename);
       if (!fileRecord) {
@@ -61,14 +64,18 @@ Takes a PDF file path/ID and a question about the document, uploads the PDF to a
       }
 
       // Validate that it's a PDF format
-      const supportedTypes = ['application/pdf'];
+      const supportedTypes = ["application/pdf"];
       if (!supportedTypes.includes(fileRecord.media_type)) {
-        throw new Error(`Unsupported file format: ${fileRecord.media_type}. Supported formats: ${supportedTypes.join(', ')}`);
+        throw new Error(
+          `Unsupported file format: ${
+            fileRecord.media_type
+          }. Supported formats: ${supportedTypes.join(", ")}`
+        );
       }
 
       // Construct full path to actual file
       const fullPath = fileUtils.join(userPath, "files", fileRecord.path);
-      
+
       // Check if file exists
       if (!fileUtils.existsSync(fullPath)) {
         throw new Error(`PDF file not found on disk: ${fullPath}`);
@@ -78,59 +85,73 @@ Takes a PDF file path/ID and a question about the document, uploads the PDF to a
         debugPdfExplain(`Analyzing PDF ${fileRecord.name}, prompt: ${prompt}`);
 
         // Read the PDF file and convert to base64
-        const fd = fileUtils.openSync(fullPath, 'r');
+        const fd = fileUtils.openSync(fullPath, "r");
         let pdfBuffer: Uint8Array;
         try {
           const stats = fileUtils.fstatSync(fd);
           const fileSize = stats.size;
-          
+
           // Check file size limit (10MB)
           const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
           if (fileSize > MAX_FILE_SIZE) {
-            throw new Error(`PDF file too large: ${Math.round(fileSize / 1024 / 1024 * 100) / 100}MB. Maximum allowed: 10MB`);
+            throw new Error(
+              `PDF file too large: ${
+                Math.round((fileSize / 1024 / 1024) * 100) / 100
+              }MB. Maximum allowed: 10MB`
+            );
           }
-          
+
           pdfBuffer = fileUtils.allocBuffer(fileSize);
           fileUtils.readSync(fd, pdfBuffer, 0, fileSize, 0);
         } finally {
           fileUtils.closeSync(fd);
         }
-        
-        const base64PDF = `data:application/pdf;base64,${fileUtils.bufferToBase64(pdfBuffer)}`;
+
+        const base64PDF = `data:application/pdf;base64,${fileUtils.bufferToBase64(
+          pdfBuffer
+        )}`;
 
         // Call OpenRouter API for PDF analysis
-        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            model: pdfModel,
-            messages: [
-              {
-                role: 'user',
-                content: [
-                  {
-                    type: 'text',
-                    text: prompt,
-                  },
-                  {
-                    type: 'file',
-                    file: {
-                      filename: fileRecord.name,
-                      file_data: base64PDF,
+        const response = await fetch(
+          "https://openrouter.ai/api/v1/chat/completions",
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              model: pdfModel,
+              messages: [
+                {
+                  role: "user",
+                  content: [
+                    {
+                      type: "text",
+                      text: prompt,
                     },
-                  },
-                ],
+                    {
+                      type: "file",
+                      file: {
+                        filename: fileRecord.name,
+                        file_data: base64PDF,
+                      },
+                    },
+                  ],
+                },
+              ],
+              usage: {
+                include: true,
               },
-            ],
-          }),
-        });
+            }),
+          }
+        );
 
         if (!response.ok) {
           const errorText = await response.text();
-          throw new Error(`OpenRouter API error: ${response.status} - ${errorText}`);
+          throw new Error(
+            `OpenRouter API error: ${response.status} - ${errorText}`
+          );
         }
 
         const result = await response.json();
@@ -139,6 +160,7 @@ Takes a PDF file path/ID and a question about the document, uploads the PDF to a
           throw new Error("No response generated by the model");
         }
 
+        const usage = result.usage || {};
         const message = result.choices[0].message;
         if (!message.content) {
           throw new Error("No content found in the response");
@@ -146,25 +168,33 @@ Takes a PDF file path/ID and a question about the document, uploads the PDF to a
 
         // Extract text content from the response
         let explanation = "";
-        if (typeof message.content === 'string') {
+        if (typeof message.content === "string") {
           explanation = message.content;
         } else if (Array.isArray(message.content)) {
           // Concatenate text parts
           explanation = message.content
-            .filter((part: any) => part.type === 'text')
+            .filter((part: any) => part.type === "text")
             .map((part: any) => part.text)
-            .join('');
+            .join("");
         } else {
           throw new Error("Unexpected content format in response");
         }
 
-        debugPdfExplain("PDF analysis completed", { explanation: explanation.substring(0, 100) + '...' });
+        debugPdfExplain(
+          "PDF analysis completed",
+          { explanation: explanation.substring(0, 100) + "..." },
+          "usage",
+          usage
+        );
 
         // Create event for tracking
         await getContext().createEvent("pdf_explain", {
           file: fileRecord.name,
           prompt,
-          explanation: explanation.substring(0, 200) + (explanation.length > 200 ? '...' : '')
+          explanation:
+            explanation.substring(0, 200) +
+            (explanation.length > 200 ? "..." : ""),
+          usage: { cost: usage.cost },
         });
 
         return {
@@ -175,9 +205,12 @@ Takes a PDF file path/ID and a question about the document, uploads the PDF to a
             size: fileRecord.size,
           },
         };
-
       } catch (error) {
-        throw new Error(`PDF analysis failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        throw new Error(
+          `PDF analysis failed: ${
+            error instanceof Error ? error.message : "Unknown error"
+          }`
+        );
       }
     },
   });

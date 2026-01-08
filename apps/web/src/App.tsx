@@ -12,6 +12,9 @@ import ThreadDetailPage from "./components/ThreadDetailPage";
 import TasksPage from "./components/TasksPage";
 import TaskDetailPage from "./components/TaskDetailPage";
 import TaskRunDetailPage from "./components/TaskRunDetailPage";
+import ScriptsPage from "./components/ScriptsPage";
+import ScriptDetailPage from "./components/ScriptDetailPage";
+import ScriptRunDetailPage from "./components/ScriptRunDetailPage";
 import NotesPage from "./components/NotesPage";
 import NoteDetailPage from "./components/NoteDetailPage";
 import FilesPage from "./components/FilesPage";
@@ -205,6 +208,9 @@ function App() {
         <Route path="/tasks" element={<TasksPage />} />
         <Route path="/tasks/:id" element={<TaskDetailPage />} />
         <Route path="/tasks/:id/run/:runId" element={<TaskRunDetailPage />} />
+        <Route path="/scripts" element={<ScriptsPage />} />
+        <Route path="/scripts/:id" element={<ScriptDetailPage />} />
+        <Route path="/scripts/:id/runs/:runId" element={<ScriptRunDetailPage />} />
         <Route path="/notes" element={<NotesPage />} />
         <Route path="/notes/:id" element={<NoteDetailPage />} />
         <Route path="/files" element={<FilesPage />} />

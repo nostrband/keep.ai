@@ -249,31 +249,38 @@ Example: await ${ns}.${name}(<input>)
     // Tasks
 
     // Router or Worker
-    if (this.type !== "replier" && this.type !== "planner") {
-      addTool(
-        global,
-        "Tasks",
-        "add",
-        makeAddTaskTool(this.#api.taskStore, this.getContext)
-      );
-      addTool(
-        global,
-        "Tasks",
-        "addRecurring",
-        makeAddTaskRecurringTool(this.#api.taskStore, this.getContext)
-      );
-      addTool(global, "Tasks", "get", makeGetTaskTool(this.#api.taskStore));
-      addTool(global, "Tasks", "list", makeListTasksTool(this.#api.taskStore));
-      addTool(
-        global,
-        "Tasks",
-        "sendToTaskInbox",
-        makeSendToTaskInboxTool(
-          this.#api.taskStore,
-          this.#api.inboxStore,
-          this.getContext
-        )
-      );
+    if (this.type !== "replier") {
+      if (this.type !== "planner") {
+        addTool(
+          global,
+          "Tasks",
+          "add",
+          makeAddTaskTool(this.#api.taskStore, this.getContext)
+        );
+        addTool(
+          global,
+          "Tasks",
+          "addRecurring",
+          makeAddTaskRecurringTool(this.#api.taskStore, this.getContext)
+        );
+        addTool(global, "Tasks", "get", makeGetTaskTool(this.#api.taskStore));
+        addTool(
+          global,
+          "Tasks",
+          "list",
+          makeListTasksTool(this.#api.taskStore)
+        );
+        addTool(
+          global,
+          "Tasks",
+          "sendToTaskInbox",
+          makeSendToTaskInboxTool(
+            this.#api.taskStore,
+            this.#api.inboxStore,
+            this.getContext
+          )
+        );
+      }
 
       // Only add cancel tool for recurring tasks
       if (this.task.cron) {
@@ -663,7 +670,7 @@ ${taskInfo.join("\n")}
 
   private jsPrompt(mainAPIs: string[]) {
     return `## JS Sandbox Guidelines ('eval' tool)
-- no fetch, no console.log/error, no direct network or disk, no Window, no Document, etc
+- no fetch, no console.log/error, no direct network or disk, no Window, no Document, no Buffer, no nodejs APIs, etc
 - do not wrap your code in '(async () => {...})()' - that's already done for you
 - all API endpoints are async and must be await-ed
 - you MUST 'return' the value that you want to be returned from 'eval' tool
@@ -939,7 +946,7 @@ You are a diligent personal AI assistant. You are working on a single, clearly d
 ${
   this.task.cron
     ? `
-This task is recurring, you are working on the current iteration of the task, after you finish processing this task, next iteration will be scheduled according to the 'cron' instructions.
+This task is recurring, you are working on the current iteration of the task, after you finish processing this task, next iteration will be scheduled according to the 'cron' instructions. To stop/cancel this recurring task, check Tasks.* API.
 `
     : "\n"
 }
@@ -952,7 +959,7 @@ to access powerful APIs, to create background tasks, and to perform calculations
 
 Other two tools are 'pause' and 'finish'. Use 'pause' to stop execution and resume at a later time, and/or to ask user a question. Use 'finish' if the task is completed and you want to updated task notes and plan.
 
-## Input format
+## User Input
 - You'll be given user and assistant messages, but also assistant action history ('events') - use them to understand the timeline of the conversation and assistant activity
 
 ${this.toolsPrompt()}
@@ -1007,7 +1014,7 @@ You will be given a task info (goal, notes, plan, etc) as input from the user. Y
 ${
   this.task.cron
     ? `
-The task is recurring, the script will be launched according to the 'cron' instructions.
+The task is recurring, the script will be launched according to the 'cron' instructions. To stop/cancel this recurring task, check Tasks.* API.
 `
     : "\n"
 }

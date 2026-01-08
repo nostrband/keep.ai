@@ -14,8 +14,8 @@ export function makeSendToTaskInboxTool(
         throw new Error("Input must be { id, message }");
       const task = await taskStore.getTask(opts.id);
       if (!task) throw new Error("Task not found");
-      if (task.type !== "worker")
-        throw new Error("Can only send to worker tasks");
+      if (task.type !== "worker" && task.type !== "planner")
+        throw new Error("Can only send to planner/worker tasks");
 
       const context = getContext();
       if (!context) throw new Error("No eval context");
@@ -56,7 +56,8 @@ export function makeSendToTaskInboxTool(
       // Message sent successfully
       return true;
     },
-    description: "Send a message to task inbox. Make sure to include proper context and details in your message, so that task worker wouldn't have to dig into message history to understand the user intent.",
+    description:
+      "Send a message to task inbox. Make sure to include proper context and details in your message, so that task worker wouldn't have to dig into message history to understand the user intent.",
     inputSchema: z.object({
       id: z.string().describe("Task id"),
       message: z.string().describe("Message for the task handler"),

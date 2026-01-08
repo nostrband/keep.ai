@@ -35,10 +35,12 @@ export class Agent {
     cachedInputTokens: 0,
     reasoningTokens: 0,
   };
+  public openRouterUsage = { cost: 0 };
   private model: LanguageModel;
   private env: AgentEnv;
   private sandbox: Sandbox;
   private readonly task: AgentTask;
+  private readonly taskRunId: string;
   private state?: TaskState;
   private debug = debug("agent:Agent");
 
@@ -46,12 +48,14 @@ export class Agent {
     model: LanguageModel,
     env: AgentEnv,
     sandbox: Sandbox,
-    task: AgentTask
+    task: AgentTask,
+    taskRunId: string
   ) {
     this.model = model;
     this.sandbox = sandbox;
     this.env = env;
     this.task = task;
+    this.taskRunId = taskRunId;
     if (task.state) this.state = { ...task.state };
   }
 
@@ -116,33 +120,7 @@ export class Agent {
     // Convert messages to LLM format
     const messages: ModelMessage[] = [
       { role: "system", content: system },
-      ...convertToModelMessages(
-        this.history
-          // NOTE: we're adding current timestamp to
-          // ===STATS=== section and hoping that's enough
-          // .map((m) => {
-          //   const tm = {
-          //     ...m,
-          //   };
-          //   if (
-          //     m.metadata &&
-          //     m.metadata.createdAt &&
-          //     // Might already have the timestamp if ... FIXME if what?
-          //     !m.parts.find(
-          //       (p) => p.type === "text" && p.text.startsWith("Timestamp: ")
-          //     )
-          //   ) {
-          //     tm.parts.push({
-          //       type: "text",
-          //       text: `Timestamp: ${m.metadata.createdAt} (Local: ${new Date(
-          //         m.metadata.createdAt
-          //       ).toString()})`,
-          //     });
-          //   }
-          //   return tm;
-          // })
-          .filter((m) => !!m.parts)
-      ),
+      ...convertToModelMessages(this.history.filter((m) => !!m.parts)),
     ];
 
     const volatileIndex = this.history.findIndex((m) => m.metadata?.volatile);
@@ -243,7 +221,9 @@ export class Agent {
       });
       tools.save = makeSaveTool({
         taskId: this.task.id,
+        taskRunId: this.taskRunId,
         scriptStore: this.env.api.scriptStore,
+        chatStore: this.env.api.chatStore,
       });
     }
 
@@ -283,11 +263,17 @@ export class Agent {
           return undefined;
         },
         onStepFinish: async (stepResult) => {
+
           // Consumed
           input.inbox.length = 0;
 
-          console.log("step", input.step, "request", stepResult.request.body);
-          console.log("stepResult.finishReason", stepResult.finishReason);
+          // console.log("step", input.step, "request", stepResult.request.body);
+
+          if (stepResult.providerMetadata?.openrouter) {
+            this.debug("step", input.step, "openrouter usage", stepResult.providerMetadata?.openrouter?.usage);
+            // @ts-ignore
+            this.openRouterUsage.cost += stepResult.providerMetadata?.openrouter?.usage?.cost || 0;
+          }
           // console.log("response", stepResult.response.messages);
 
           if (stepResult.finishReason === "stop") {
@@ -364,6 +350,9 @@ export class Agent {
       });
 
       this.updateUsage(await result.usage);
+
+      // @ts-ignore
+      this.debug("openRouterUsage", this.openRouterUsage);
     } catch (err) {
       if (error) err = error;
 

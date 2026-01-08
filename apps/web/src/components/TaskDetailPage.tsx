@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useTask, useTaskState, useTaskRuns } from "../hooks/dbTaskReads";
+import { useLatestScriptByTaskId } from "../hooks/dbScriptReads";
 import { useUpdateTask } from "../hooks/dbWrites";
 import SharedHeader from "./SharedHeader";
 import {
@@ -28,6 +29,7 @@ export default function TaskDetailPage() {
   const { data: task, isLoading } = useTask(id!);
   const { data: taskState, isLoading: isLoadingState } = useTaskState(id!);
   const { data: taskRuns = [], isLoading: isLoadingRuns } = useTaskRuns(id!);
+  const { data: latestScript } = useLatestScriptByTaskId(id!);
   const [warning, setWarning] = useState<string>("");
   const [successMessage, setSuccessMessage] = useState<string>("");
   
@@ -206,6 +208,34 @@ export default function TaskDetailPage() {
                     </div>
                   )}
                 </div>
+              </div>
+            )}
+
+            {/* Script Section for Planner Tasks */}
+            {task.type === 'planner' && latestScript && (
+              <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
+                <h2 className="text-lg font-semibold text-gray-900 mb-4">Script</h2>
+                <Link
+                  to={`/scripts/${latestScript.id}`}
+                  className="block p-4 border border-gray-200 rounded-lg hover:border-gray-300 hover:shadow-sm transition-all"
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="font-medium text-gray-900">Script {latestScript.id.slice(0, 8)}</span>
+                        <Badge variant="outline">v{latestScript.version}</Badge>
+                      </div>
+                      {latestScript.change_comment && (
+                        <p className="text-sm text-gray-600 mb-2 line-clamp-2">
+                          {latestScript.change_comment}
+                        </p>
+                      )}
+                      <div className="text-xs text-gray-500">
+                        Updated: {new Date(latestScript.timestamp).toLocaleString()}
+                      </div>
+                    </div>
+                  </div>
+                </Link>
               </div>
             )}
 

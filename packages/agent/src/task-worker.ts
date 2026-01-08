@@ -366,8 +366,8 @@ export class TaskWorker {
       const env = await this.createEnv(taskType, task, sandbox);
 
       // Init agent
-      const model = getOpenRouter()(modelName);
-      const agent = new ReplAgent(model, env, sandbox, agentTask);
+      const model = getOpenRouter()(modelName, { usage: { include: true } });
+      const agent = new ReplAgent(model, env, sandbox, agentTask, taskRunId);
 
       // Copy restored history
       agent.history.push(...history);
@@ -523,7 +523,7 @@ export class TaskWorker {
 
         // On exception, update the task with error and retry timestamp instead of finish+add
         const errorMessage =
-          error instanceof Error ? error.message : "Unknown error occurred";
+          error instanceof Error ? error.message : (error as string);
 
         // Finish run with error
         await this.api.taskStore.errorTaskRun(
@@ -597,6 +597,7 @@ export class TaskWorker {
     );
 
     try {
+      // Js sandbox with proper 'context' object
       const sandbox = await this.createSandbox(
         taskType,
         task,
@@ -604,6 +605,10 @@ export class TaskWorker {
         scriptRunId
       );
 
+      // Inits js API in the sandbox
+      await this.createEnv(taskType, task, sandbox);
+
+      // Run the code
       const result = await sandbox.eval(script.code, {
         timeoutMs: 300000,
       });
@@ -619,6 +624,7 @@ export class TaskWorker {
       await this.api.scriptStore.finishScriptRun(
         scriptRunId,
         new Date().toISOString(),
+        JSON.stringify(result.result) || "",
         ""
       );
 
@@ -646,12 +652,18 @@ export class TaskWorker {
       }
     } catch (error: any) {
       const errorMessage =
-        error instanceof Error ? error.message : "Unknown error occurred";
-      await this.api.scriptStore.finishScriptRun(
-        scriptRunId,
-        new Date().toISOString(),
-        errorMessage
-      );
+        error instanceof Error ? error.message : (error as string);
+
+      try {
+        await this.api.scriptStore.finishScriptRun(
+          scriptRunId,
+          new Date().toISOString(),
+          "",
+          errorMessage
+        );
+      } catch (e) {
+        this.debug("finishScriptRun error", e);
+      }
 
       // FIXME handle BAD_REQUEST and PAYMENT_REQUIRED from LLM tool calls
 
@@ -769,14 +781,10 @@ export class TaskWorker {
       input_notes: agentTask.state?.notes || "",
     });
 
-    // Worker is background so we should notify about it even if
-    // it doesn't produce side effects
-    if (agentTask.type === "worker") {
-      await this.api.chatStore.saveChatEvent(taskRunId, "main", "task_run", {
-        task_id: agentTask.id,
-        task_run_id: taskRunId,
-      });
-    }
+    await this.api.chatStore.saveChatEvent(taskRunId, "main", "task_run", {
+      task_id: agentTask.id,
+      task_run_id: taskRunId,
+    });
 
     return {
       taskRunId,
@@ -816,6 +824,14 @@ export class TaskWorker {
       cached_tokens: agent.usage.cachedInputTokens || 0,
       output_tokens:
         (agent.usage.outputTokens || 0) + (agent.usage.reasoningTokens || 0),
+      cost: Math.ceil((agent.openRouterUsage.cost || 0) * 1000000),
+    });
+
+    // Write usage stats
+    await this.api.chatStore.saveChatEvent(taskRunId, "main", "task_run_end", {
+      task_id: state.id,
+      task_run_id: taskRunId,
+      usage: agent.openRouterUsage,
     });
   }
 
@@ -1031,14 +1047,18 @@ export class TaskWorker {
     // in onFinish which means only if everything goes well, so on failure the thread will still be empty
 
     // Update the current task instead of finishing and adding a new one
-    await this.api.taskStore.updateTask({
-      ...task,
-      timestamp: retryTimestamp,
-      reply: "",
-      state: "", // Keep state empty so it can be retried
-      error, // Set the error message
-      thread_id, // Update thread_id if it was generated
-    });
+    try {
+      await this.api.taskStore.updateTask({
+        ...task,
+        timestamp: retryTimestamp,
+        reply: "",
+        state: "", // Keep state empty so it can be retried
+        error, // Set the error message
+        thread_id, // Update thread_id if it was generated
+      });
+    } catch (e) {
+      this.debug("updateTask error", e);
+    }
 
     this.debug(
       `Updated ${task.type || ""} task ${

@@ -19,6 +19,7 @@ export const EVENT_TYPES = {
   GMAIL_API_CALL: "gmail_api_call",
   WEB_DOWNLOAD: "web_download",
   FILE_SAVE: "file_save",
+  ADD_SCRIPT: "add_script",
 } as const;
 
 export type EventType = (typeof EVENT_TYPES)[keyof typeof EVENT_TYPES];
@@ -134,6 +135,11 @@ export interface FileSaveEventPayload extends BaseEventPayload {
   mimeType?: string;
 }
 
+export interface AddScriptEventPayload extends BaseEventPayload {
+  script_id: string;
+  version: number;
+}
+
 // Union type for all event payloads
 export type EventPayload =
   | CreateNoteEventPayload
@@ -154,7 +160,8 @@ export type EventPayload =
   | TaskRunEventPayload
   | GmailApiCallEventPayload
   | WebDownloadEventPayload
-  | FileSaveEventPayload;
+  | FileSaveEventPayload
+  | AddScriptEventPayload;
 
 // Event interface that matches the database structure
 export interface ChatEvent {
@@ -336,5 +343,15 @@ export const EVENT_CONFIGS: Record<EventType, EventConfig> = {
       return `Saved: ${savePayload.filename} (${fileSizeKB}KB)`;
     },
     hasId: false,
+  },
+  [EVENT_TYPES.ADD_SCRIPT]: {
+    emoji: "📜",
+    title: (payload) => {
+      const scriptPayload = payload as AddScriptEventPayload;
+      return scriptPayload.version === 1 ? "Create script" : "Update script";
+    },
+    hasId: true,
+    getEntityPath: (payload) =>
+      `/scripts/${(payload as AddScriptEventPayload).script_id}`,
   },
 };

@@ -42,4 +42,12 @@ export const qk = {
   file: (fileId: string) => [{ scope: "file", fileId }] as const,
   searchFiles: (query: string) => [{ scope: "searchFiles", query }] as const,
   filesByMediaType: (mediaType: string) => [{ scope: "filesByMediaType", mediaType }] as const,
+  
+  // Script-related queries
+  allScripts: () => [{ scope: "allScripts" }] as const,
+  script: (scriptId: string) => [{ scope: "script", scriptId }] as const,
+  scriptVersions: (taskId: string) => [{ scope: "scriptVersions", taskId }] as const,
+  latestScript: (taskId: string) => [{ scope: "latestScript", taskId }] as const,
+  scriptRuns: (scriptId: string) => [{ scope: "scriptRuns", scriptId }] as const,
+  scriptRun: (runId: string) => [{ scope: "scriptRun", runId }] as const,
 };
