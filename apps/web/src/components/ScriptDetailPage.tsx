@@ -23,14 +23,11 @@ export default function ScriptDetailPage() {
   const handleRunNow = async () => {
     if (!script) return;
     
-    // Check if the latest run was created less than 5 minutes ago
+    // Check if the latest run is active
     if (taskRuns.length > 0) {
-      const latestRun = taskRuns[0]; // taskRuns are ordered by start_timestamp DESC
-      const latestRunTime = new Date(latestRun.start_timestamp).getTime();
-      const fiveMinutesAgo = Date.now() - (5 * 60 * 1000);
-      
-      if (latestRunTime > fiveMinutesAgo) {
-        setWarning("Can't restart too often");
+      const latestRun = taskRuns[0]; // taskRuns are ordered by start_timestamp DESC      
+      if (!latestRun.end_timestamp) {
+        setWarning("Already working");
         setSuccessMessage("");
         setTimeout(() => setWarning(""), 3000); // Clear warning after 3 seconds
         return;

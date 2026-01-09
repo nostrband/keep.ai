@@ -48,6 +48,7 @@ export interface TaskRun {
   output_tokens: number;
   cached_tokens: number;
   cost: number;
+  logs: string;
 }
 
 export interface TaskRunStart {
@@ -80,6 +81,7 @@ export interface TaskRunEnd {
   output_tokens: number;
   cached_tokens: number;
   cost: number;
+  logs: string;
 }
 
 export class TaskStore {
@@ -424,8 +426,8 @@ export class TaskStore {
         input_goal, input_notes, input_plan, input_asks,
         output_goal, output_notes, output_plan, output_asks,
         end_timestamp, state, reply, error, steps, run_sec,
-        input_tokens, output_tokens, cached_tokens, cost
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', '', '', '', '', '', '', 0, 0, 0, 0, 0, 0)`,
+        input_tokens, output_tokens, cached_tokens, cost, logs
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', '', '', '', '', '', '', 0, 0, 0, 0, 0, 0, '')`,
       [
         runStart.id,
         runStart.task_id,
@@ -459,7 +461,8 @@ export class TaskStore {
         input_tokens = ?,
         output_tokens = ?,
         cached_tokens = ?,
-        cost = ?
+        cost = ?,
+        logs = ?
       WHERE id = ?`,
       [
         runEnd.end_timestamp,
@@ -475,6 +478,7 @@ export class TaskStore {
         runEnd.output_tokens,
         runEnd.cached_tokens,
         runEnd.cost,
+        runEnd.logs,
         runEnd.id,
       ]
     );
@@ -506,7 +510,7 @@ export class TaskStore {
         input_goal, input_notes, input_plan, input_asks,
         output_goal, output_notes, output_plan, output_asks,
         end_timestamp, state, reply, error, steps, run_sec,
-        input_tokens, output_tokens, cached_tokens, cost
+        input_tokens, output_tokens, cached_tokens, cost, logs
       FROM task_runs
       WHERE task_id = ?
       ORDER BY start_timestamp DESC`,
@@ -542,6 +546,7 @@ export class TaskStore {
       output_tokens: row.output_tokens as number,
       cached_tokens: row.cached_tokens as number,
       cost: row.cost as number,
+      logs: row.logs as string,
     }));
   }
 
@@ -553,7 +558,7 @@ export class TaskStore {
         input_goal, input_notes, input_plan, input_asks,
         output_goal, output_notes, output_plan, output_asks,
         end_timestamp, state, reply, error, steps, run_sec,
-        input_tokens, output_tokens, cached_tokens, cost
+        input_tokens, output_tokens, cached_tokens, cost, logs
       FROM task_runs
       WHERE id = ?`,
       [runId]
@@ -591,6 +596,7 @@ export class TaskStore {
       output_tokens: row.output_tokens as number,
       cached_tokens: row.cached_tokens as number,
       cost: row.cost as number,
+      logs: row.logs as string,
     };
   }
 }

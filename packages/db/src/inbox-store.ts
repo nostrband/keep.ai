@@ -1,7 +1,7 @@
 import { CRSqliteDB } from "./database";
 import { DBInterface } from "./interfaces";
 
-export type InboxItemSource = "user" | "router" | "worker";
+export type InboxItemSource = "user" | "router" | "worker" | "script";
 export type InboxItemTarget = "router" | "worker" | "planner" | "replier";
 
 export interface InboxItem {

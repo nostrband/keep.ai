@@ -8,25 +8,52 @@ export function makeEvalTool(opts: {
   type: TaskType;
   getState: () => any | undefined;
   setResult: (result: EvalResult, code: string) => void;
+  getLogs: () => string;
 }) {
   return tool({
-    execute: async ({ jsCode }: { jsCode: string }): Promise<string> => {
+    execute: async ({
+      jsCode,
+    }: {
+      jsCode: string;
+    }): Promise<{ result: string; logs: string }> => {
       if (!jsCode) throw new Error("Required 'jsCode' param");
 
-      // Eval
-      const result = await opts.sandbox.eval(jsCode, {
-        // worker can run for long time,
-        // calls to Images.transform etc are very slow
-        timeoutMs: opts.type === "worker" ? 300000 : 5000,
-        state: opts.getState(),
-      });
+      try {
+        // Eval
+        const result = await opts.sandbox.eval(jsCode, {
+          // worker can run for long time,
+          // calls to Images.transform etc are very slow
+          timeoutMs:
+            opts.type === "worker" || opts.type === "planner" ? 300000 : 5000,
+          state: opts.getState(),
+        });
 
-      opts.setResult(result, jsCode);
+        // Execution logs
+        const logs = opts.getLogs();
 
-      // Return result
-      if (result.ok) return JSON.stringify(result.result);
+        // Set results & state
+        opts.setResult(result, jsCode);
 
-      throw new Error(result.error);
+        // Return result
+        if (result.ok)
+          return {
+            result: JSON.stringify(result.result),
+            logs: opts.getLogs(),
+          };
+
+        const error = `
+Logs: ${logs}
+Error: ${result.error}
+`;
+        throw error;
+      } catch (e) {
+        const logs = opts.getLogs();
+        const error = `
+Logs: ${logs}
+Error: ${e}
+`;
+        throw error;
+      }
     },
     description: `Execute JS code in a sandbox to access APIs and process data.
 
@@ -43,6 +70,9 @@ Guidelines:
     inputSchema: z.object({
       jsCode: z.string().describe("JS code"),
     }),
-    outputSchema: z.string().describe("JSON value of returned 'result' field"),
+    outputSchema: z.object({
+      result: z.string().describe("JSON value of returned 'result' field"),
+      logs: z.string().describe("Execution logs"),
+    }),
   });
 }

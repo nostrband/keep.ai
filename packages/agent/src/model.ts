@@ -7,6 +7,7 @@ import { getEnv } from "./env";
 let openRouter: OpenRouterProvider | undefined;
 
 export const DEFAULT_AGENT_MODEL = "anthropic/claude-sonnet-4";
+export const DEFAULT_TEXT_MODEL = "google/gemini-2.5-flash-lite";
 
 export function getOpenRouter() {
   if (!openRouter)
@@ -19,4 +20,8 @@ export function getOpenRouter() {
 
 export function getModelName() {
   return getEnv().AGENT_MODEL || DEFAULT_AGENT_MODEL;
+}
+
+export function getTextModelName() {
+  return getEnv().TEXT_MODEL || DEFAULT_TEXT_MODEL;
 }

@@ -5,31 +5,35 @@ import { getEnv } from "../env";
 import { getTextModelName } from "../model";
 import debug from "debug";
 
-const debugTextSummarize = debug("TextSummarize");
+const debugTextClassify = debug("TextClassify");
 
-export function makeTextSummarizeTool(getContext: () => EvalContext) {
+export function makeTextClassifyTool(getContext: () => EvalContext) {
   return tool({
-    description: `Summarize text to a specified maximum length using AI.
-Takes input text and optional maximum character count, returns a concise summary.
-Uses temperature 0 and no reasoning for straightforward summarization.`,
+    description: `Classify text into one of several classes based on its content using AI.
+Takes input text and a list of possible classes (each with id and description), and returns the most appropriate class id.
+Uses temperature 0 and light reasoning for consistent classification decisions.`,
     inputSchema: z.object({
-      text: z.string().min(1).describe("Input text to summarize"),
-      prompt: z.string().optional().describe("Additional prompt on how to perform the summarization, preferred output format, etc"),
-      max_chars: z
-        .number()
-        .min(100)
-        .max(10000)
-        .default(1500)
-        .optional()
-        .describe(
-          "Maximum number of characters in the summary (default: 1500)"
-        ),
+      text: z
+        .string()
+        .min(1)
+        .describe("Input text to analyze for classification"),
+      classes: z
+        .array(
+          z.object({
+            id: z.string().describe("Class identifier"),
+            description: z
+              .string()
+              .describe("Description of when this class should be selected"),
+          })
+        )
+        .min(1)
+        .describe("List of possible classes to choose from"),
     }),
     outputSchema: z.object({
-      summary: z.string().describe("Summarized text"),
+      class_id: z.string().describe("ID of the selected class"),
     }),
     execute: async (input) => {
-      const { text, prompt: userPrompt = '', max_chars = 1500 } = input;
+      const { text, classes } = input;
 
       const env = getEnv();
       if (!env.OPENROUTER_API_KEY?.trim()) {
@@ -39,17 +43,25 @@ Uses temperature 0 and no reasoning for straightforward summarization.`,
       const model = getTextModelName();
       const baseURL = env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1";
 
-      debugTextSummarize(
-        `Summarizing text (${text.length} chars) to max ${max_chars} chars`
+      debugTextClassify(
+        `Classifying text (${text.length} chars) with ${classes.length} options`
       );
 
-      const prompt = `Summarize the following text in approximately ${max_chars} characters or less. Provide a clear, concise summary that captures the key points.
-${userPrompt ? userPrompt : ''}
+      const classesList = classes
+        .map((c) => `- ${c.id}: ${c.description}`)
+        .join("\n");
 
-If the input text is malformed, empty, or you cannot perform the summarization for any reason, provide brief reasoning and then output <ERROR>Short-error-text</ERROR> where Short-error-text explains the issue.
+      const prompt = `You are a text classifier. Based on the input text, select the most appropriate class from the options below.
 
-Text to summarize:
-${text}`;
+Available classes:
+${classesList}
+
+Input text:
+${text}
+
+If the input is malformed, doesn't make sense, or you cannot determine an appropriate class, provide brief reasoning and then output <ERROR>Short-error-text</ERROR> where Short-error-text explains the issue.
+
+Otherwise, return ONLY the class id, nothing else.`;
 
       try {
         const response = await fetch(`${baseURL}/chat/completions`, {
@@ -67,7 +79,7 @@ ${text}`;
               },
             ],
             temperature: 0,
-            max_tokens: Math.ceil(max_chars / 2), // Rough estimate: ~2 chars per token
+            // not 'none', otherwise it won't classify properly
             reasoning_effort: text.length > 10000 ? "medium" : "low",
             usage: {
               include: true,
@@ -101,27 +113,24 @@ ${text}`;
           throw new Error(errorMessage || "LLM reported an error");
         }
 
-        debugTextSummarize(
-          "Summarization completed",
-          {
-            inputLength: text.length,
-            summaryLength: content.length,
-          },
+        debugTextClassify(
+          "Classification completed",
+          { selectedClass: content },
           "usage",
           usage
         );
 
-        await getContext().createEvent("text_summarize", {
-          inputLength: text.length,
-          summaryLength: content.length,
-          maxChars: max_chars,
+        await getContext().createEvent("text_classify", {
+          textLength: text.length,
+          classCount: classes.length,
+          selectedClass: content,
           usage: { cost: usage.cost },
         });
 
-        return { summary: content };
+        return { class_id: content };
       } catch (error) {
         throw new Error(
-          `Text summarization failed: ${
+          `Text classification failed: ${
             error instanceof Error ? error.message : "Unknown error"
           }`
         );

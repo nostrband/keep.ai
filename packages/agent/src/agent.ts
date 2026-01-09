@@ -65,6 +65,7 @@ export class Agent {
       history?: AssistantUIMessage[];
       inbox?: string[];
       jsState?: any;
+      getLogs?: () => string;
       onStep?: (
         step: number,
         input: StepInput,
@@ -159,6 +160,7 @@ export class Agent {
           // Update state
           if (result.ok && result.state) jsState = result.state;
         },
+        getLogs: opts?.getLogs || (() => ""),
       }),
     };
 
@@ -263,16 +265,22 @@ export class Agent {
           return undefined;
         },
         onStepFinish: async (stepResult) => {
-
           // Consumed
           input.inbox.length = 0;
 
           // console.log("step", input.step, "request", stepResult.request.body);
 
           if (stepResult.providerMetadata?.openrouter) {
-            this.debug("step", input.step, "openrouter usage", stepResult.providerMetadata?.openrouter?.usage);
-            // @ts-ignore
-            this.openRouterUsage.cost += stepResult.providerMetadata?.openrouter?.usage?.cost || 0;
+            this.debug(
+              "step",
+              input.step,
+              "openrouter usage",
+              stepResult.providerMetadata?.openrouter?.usage
+            );
+
+            this.openRouterUsage.cost +=
+              // @ts-ignore
+              stepResult.providerMetadata?.openrouter?.usage?.cost || 0;
           }
           // console.log("response", stepResult.response.messages);
 
@@ -316,6 +324,9 @@ export class Agent {
             // New stuff in the inbox
             if (info.inbox) input.inbox = [...info.inbox];
           }
+
+          // Enforce hard limit
+          if (input.step >= MAX_STEPS) stopped = true;
         },
         onError: (event) => {
           error = event.error;

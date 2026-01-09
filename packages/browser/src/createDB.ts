@@ -9,6 +9,8 @@ let sqlite: SQLite3 | null = null;
 
 // Wrapper class to adapt cr-sqlite DB to our DBInterface
 class CRSqliteDBWrapper implements DBInterface {
+  private txQueue: Promise<any> = Promise.resolve();
+  
   constructor(private db: DB, private isTx: boolean) {}
 
   async exec(sql: string, args?: any[]): Promise<any> {
@@ -41,15 +43,26 @@ class CRSqliteDBWrapper implements DBInterface {
   }
 
   async tx<T>(fn: (tx: DBInterface) => Promise<T>): Promise<T> {
+    if (this.isTx) throw new Error("Cannot start tx within a tx");
+    // Queue transactions to prevent "cannot start a transaction within a transaction" errors
     return new Promise<T>((resolve, reject) => {
-      this.db
-        .tx(async (tx: any) => {
-          const wrappedTx = new CRSqliteDBWrapper(tx, true);
-          const result = await fn(wrappedTx);
-          resolve(result);
+      // Chain this transaction after the previous one completes
+      this.txQueue = this.txQueue
+        .then(async () => {
+          return this.db
+            .tx(async (tx: any) => {
+              const wrappedTx = new CRSqliteDBWrapper(tx, true);
+              const result = await fn(wrappedTx);
+              resolve(result);
+            })
+            // tx will rollback and forward the error here
+            .catch(reject);
         })
-        // tx will rollback and forward the error here
-        .catch(reject);
+        .catch((error) => {
+          // If the queue itself has an error from a previous transaction,
+          // we still need to continue processing this transaction
+          debugBrowser("txQueue error (continuing)", error);
+        });
     });
   }
 

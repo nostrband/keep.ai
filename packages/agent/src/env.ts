@@ -2,6 +2,7 @@ export interface Env {
   OPENROUTER_API_KEY?: string;
   OPENROUTER_BASE_URL?: string;
   AGENT_MODEL?: string;
+  TEXT_MODEL?: string;
   IMAGE_MODEL?: string;
   PDF_MODEL?: string;
   AUDIO_MODEL?: string;

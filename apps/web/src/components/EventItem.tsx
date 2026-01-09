@@ -6,9 +6,10 @@ interface EventItemProps {
   type: EventType;
   content: EventPayload;
   timestamp: string;
+  usage?: { cost?: number };
 }
 
-export function EventItem({ type, content, timestamp }: EventItemProps) {
+export function EventItem({ type, content, timestamp, usage }: EventItemProps) {
   const navigate = useNavigate();
   const config = EVENT_CONFIGS[type];
 
@@ -33,9 +34,9 @@ export function EventItem({ type, content, timestamp }: EventItemProps) {
   };
 
   return (
-    <div 
+    <div
       className={`
-        flex items-center justify-between px-2 py-1 my-1 
+        flex items-center justify-between px-2 py-1 my-1
         border border-gray-100 rounded-full bg-gray-50
         text-gray-500 text-sm
         ${hasNavigation ? 'cursor-pointer hover:bg-gray-100' : ''}
@@ -43,11 +44,11 @@ export function EventItem({ type, content, timestamp }: EventItemProps) {
       `}
       onClick={handleEventClick}
     >
-      <div className="flex items-center flex-1 min-w-0">
+      <div className="flex items-center flex-1 min-w-0 gap-2">
         <span className="text-base mr-2 flex-shrink-0" aria-label={`${type} event`}>
           {config.emoji}
         </span>
-        <span 
+        <span
           className={`
             truncate
             ${/* Mobile: allow 2 lines, desktop: 1 line */ ''}
@@ -57,6 +58,13 @@ export function EventItem({ type, content, timestamp }: EventItemProps) {
         >
           {title}
         </span>
+        {/* Show cost if available */}
+        {usage?.cost != null && usage.cost > 0 && (
+          <span className="flex items-center gap-1 text-xs text-gray-400 flex-shrink-0">
+            <span>💵</span>
+            <span>{usage.cost.toFixed(2)}</span>
+          </span>
+        )}
       </div>
       
       <button

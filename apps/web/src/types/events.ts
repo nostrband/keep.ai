@@ -16,10 +16,15 @@ export const EVENT_TYPES = {
   PDF_EXPLAIN: "pdf_explain",
   AUDIO_EXPLAIN: "audio_explain",
   TASK_RUN: "task_run",
+  TASK_RUN_END: "task_run_end",
   GMAIL_API_CALL: "gmail_api_call",
   WEB_DOWNLOAD: "web_download",
   FILE_SAVE: "file_save",
   ADD_SCRIPT: "add_script",
+  TEXT_EXTRACT: "text_extract",
+  TEXT_CLASSIFY: "text_classify",
+  TEXT_SUMMARIZE: "text_summarize",
+  TEXT_GENERATE: "text_generate",
 } as const;
 
 export type EventType = (typeof EVENT_TYPES)[keyof typeof EVENT_TYPES];
@@ -118,6 +123,46 @@ export interface TaskRunEventPayload extends BaseEventPayload {
   // task_run events are invisible markers for grouping
 }
 
+export interface TaskRunEndEventPayload extends BaseEventPayload {
+  // task_run_end events are invisible markers for grouping
+  usage?: {
+    cost?: number;
+  };
+}
+
+export interface TextExtractEventPayload extends BaseEventPayload {
+  output: any;
+  inputLength: number;
+}
+
+export interface TextClassifyEventPayload extends BaseEventPayload {
+  textLength: number;
+  classCount: number;
+  selectedClass: string;
+  usage?: {
+    cost?: number;
+  };
+}
+
+export interface TextSummarizeEventPayload extends BaseEventPayload {
+  inputLength: number;
+  summaryLength: number;
+  maxChars: number;
+  usage?: {
+    cost?: number;
+  };
+}
+
+export interface TextGenerateEventPayload extends BaseEventPayload {
+  promptLength: number;
+  generatedLength: number;
+  temperature: number;
+  maxChars: number;
+  usage?: {
+    cost?: number;
+  };
+}
+
 export interface GmailApiCallEventPayload extends BaseEventPayload {
   method: string;
   params: any;
@@ -158,6 +203,11 @@ export type EventPayload =
   | PdfExplainEventPayload
   | AudioExplainEventPayload
   | TaskRunEventPayload
+  | TaskRunEndEventPayload
+  | TextExtractEventPayload
+  | TextClassifyEventPayload
+  | TextSummarizeEventPayload
+  | TextGenerateEventPayload
   | GmailApiCallEventPayload
   | WebDownloadEventPayload
   | FileSaveEventPayload
@@ -316,6 +366,43 @@ export const EVENT_CONFIGS: Record<EventType, EventConfig> = {
   [EVENT_TYPES.TASK_RUN]: {
     emoji: "⚙️",
     title: () => "Task Run",
+    hasId: false,
+  },
+  [EVENT_TYPES.TASK_RUN_END]: {
+    emoji: "✅",
+    title: () => "Task Run End",
+    hasId: false,
+  },
+  [EVENT_TYPES.TEXT_EXTRACT]: {
+    emoji: "📝",
+    title: (payload) => {
+      const extractPayload = payload as TextExtractEventPayload;
+      return `Extracted data of ${JSON.stringify(extractPayload?.output || {}).length} chars from ${extractPayload?.inputLength || 0} chars text`;
+    },
+    hasId: false,
+  },
+  [EVENT_TYPES.TEXT_CLASSIFY]: {
+    emoji: "🏷️",
+    title: (payload) => {
+      const classifyPayload = payload as TextClassifyEventPayload;
+      return `Classified ${classifyPayload.textLength} chars text → ${classifyPayload.selectedClass}`;
+    },
+    hasId: false,
+  },
+  [EVENT_TYPES.TEXT_SUMMARIZE]: {
+    emoji: "📋",
+    title: (payload) => {
+      const summarizePayload = payload as TextSummarizeEventPayload;
+      return `Summarized ${summarizePayload.inputLength} chars → ${summarizePayload.summaryLength} chars`;
+    },
+    hasId: false,
+  },
+  [EVENT_TYPES.TEXT_GENERATE]: {
+    emoji: "✍️",
+    title: (payload) => {
+      const generatePayload = payload as TextGenerateEventPayload;
+      return `Generated ${generatePayload.generatedLength} chars text (temp: ${generatePayload.temperature})`;
+    },
     hasId: false,
   },
   [EVENT_TYPES.GMAIL_API_CALL]: {

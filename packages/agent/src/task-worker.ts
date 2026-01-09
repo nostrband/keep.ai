@@ -299,6 +299,10 @@ export class TaskWorker {
       // =============================
       // Valid task, can start working
 
+      // Initialize logs array for this task run
+      const logs: string[] = [];
+      const lastStepLogs: string[] = [];
+
       // Set agent status in db
       statusUpdaterInterval = await this.startStatusUpdater(taskType);
 
@@ -360,7 +364,7 @@ export class TaskWorker {
       );
 
       // Sandbox
-      const sandbox = await this.createSandbox(taskType, task, taskRunId);
+      const sandbox = await this.createSandbox(taskType, task, taskRunId, undefined, lastStepLogs);
 
       // Env
       const env = await this.createEnv(taskType, task, sandbox);
@@ -395,8 +399,13 @@ export class TaskWorker {
           // Pass the input text to agent
           inbox,
           jsState,
+          getLogs: () => lastStepLogs.join('\n'),
           onStep: async (step, input, output, result) => {
             await saveNewMessages();
+
+            // Move the logs
+            logs.push(...lastStepLogs);
+            lastStepLogs.length = 0;
 
             // Save JS state if available
             if (result?.ok && result.state) {
@@ -442,7 +451,8 @@ export class TaskWorker {
           result,
           state,
           taskReply,
-          agent
+          agent,
+          logs
         );
 
         // Recurring task cancelled?
@@ -596,13 +606,17 @@ export class TaskWorker {
       new Date().toISOString()
     );
 
+    // Initialize logs array for this script run
+    const logs: string[] = [];
+
     try {
       // Js sandbox with proper 'context' object
       const sandbox = await this.createSandbox(
         taskType,
         task,
         undefined,
-        scriptRunId
+        scriptRunId,
+        logs
       );
 
       // Inits js API in the sandbox
@@ -625,7 +639,8 @@ export class TaskWorker {
         scriptRunId,
         new Date().toISOString(),
         JSON.stringify(result.result) || "",
-        ""
+        "",
+        logs.join('\n')
       );
 
       if (task.cron) {
@@ -659,7 +674,8 @@ export class TaskWorker {
           scriptRunId,
           new Date().toISOString(),
           "",
-          errorMessage
+          errorMessage,
+          logs.join('\n')
         );
       } catch (e) {
         this.debug("finishScriptRun error", e);
@@ -667,7 +683,36 @@ export class TaskWorker {
 
       // FIXME handle BAD_REQUEST and PAYMENT_REQUIRED from LLM tool calls
 
-      // Retry it
+      this.debug("Send script error to planner", task.id);
+
+      // Send error to parent task
+      await this.api.inboxStore.saveInbox({
+        id: scriptRunId,
+        source: "script",
+        source_id: scriptRunId,
+        target: "planner",
+        target_id: task.id,
+        timestamp: new Date().toISOString(),
+        content: JSON.stringify({
+          role: "assistant",
+          parts: [
+            {
+              type: "text",
+              text: "Last script launch resulted in error:\n" + errorMessage,
+            },
+          ],
+          metadata: {
+            createdAt: new Date().toISOString(),
+          },
+          reasoning: '',
+          sourceTaskId: task.id,
+          sourceTaskType: taskType,
+        }),
+        handler_thread_id: "",
+        handler_timestamp: "",
+      });
+
+      // Schedule a retry
       await this.retry(task, errorMessage, task.thread_id);
     }
   }
@@ -804,7 +849,8 @@ export class TaskWorker {
     result: StepOutput,
     state: TaskState,
     taskReply: string,
-    agent: ReplAgent
+    agent: ReplAgent,
+    logs: string[]
   ) {
     const runEndTime = new Date();
     await this.api.taskStore.finishTaskRun({
@@ -825,6 +871,7 @@ export class TaskWorker {
       output_tokens:
         (agent.usage.outputTokens || 0) + (agent.usage.reasoningTokens || 0),
       cost: Math.ceil((agent.openRouterUsage.cost || 0) * 1000000),
+      logs: logs.join('\n'),
     });
 
     // Write usage stats
@@ -853,7 +900,8 @@ export class TaskWorker {
     taskType: TaskType,
     task: Task,
     taskRunId?: string,
-    scriptRunId?: string
+    scriptRunId?: string,
+    logs?: string[]
   ) {
     // Sandbox
     const sandbox = await initSandbox();
@@ -870,6 +918,7 @@ export class TaskWorker {
         // set task fields
         content.task_id = task.id;
         content.task_run_id = taskRunId;
+        content.script_run_id = scriptRunId;
         await this.api.chatStore.saveChatEvent(
           generateId(),
           "main",
@@ -877,6 +926,11 @@ export class TaskWorker {
           content,
           tx
         );
+      },
+      onLog: async (line: string) => {
+        if (logs) {
+          logs.push(line);
+        }
       },
     };
 

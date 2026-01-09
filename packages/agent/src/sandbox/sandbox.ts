@@ -51,6 +51,7 @@ export interface EvalContext {
   scriptRunId?: string;
   data?: any;
   createEvent(type: string, content: any, tx?: DBInterface): Promise<void>;
+  onLog(line: string): Promise<void>;
 }
 
 export class Sandbox {

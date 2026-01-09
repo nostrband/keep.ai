@@ -117,6 +117,15 @@ export default function ScriptRunDetailPage() {
                   </pre>
                 </div>
               )}
+
+              {run.logs && (
+                <div>
+                  <h3 className="text-sm font-medium text-gray-700 mb-2">Logs</h3>
+                  <pre className="text-gray-900 whitespace-pre-wrap bg-gray-50 p-3 rounded border border-gray-200 text-sm font-mono overflow-x-auto">
+                    {run.logs}
+                  </pre>
+                </div>
+              )}
             </div>
           </div>
         )}

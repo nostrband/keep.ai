@@ -16,6 +16,7 @@ export interface ScriptRun {
   end_timestamp: string;
   error: string;
   result: string;
+  logs: string;
 }
 
 export class ScriptStore {
@@ -173,26 +174,26 @@ export class ScriptStore {
   // Create a new script run
   async startScriptRun(id: string, script_id: string, start_timestamp: string): Promise<void> {
     await this.db.db.exec(
-      `INSERT INTO script_runs (id, script_id, start_timestamp, end_timestamp, error, result)
-       VALUES (?, ?, ?, '', '', '')`,
+      `INSERT INTO script_runs (id, script_id, start_timestamp, end_timestamp, error, result, logs)
+       VALUES (?, ?, ?, '', '', '', '')`,
       [id, script_id, start_timestamp]
     );
   }
 
-  // Update a script run with end_timestamp, optional error, and result
-  async finishScriptRun(id: string, end_timestamp: string, result: string, error: string = ''): Promise<void> {
+  // Update a script run with end_timestamp, optional error, result, and logs
+  async finishScriptRun(id: string, end_timestamp: string, result: string, error: string = '', logs: string = ''): Promise<void> {
     await this.db.db.exec(
       `UPDATE script_runs
-       SET end_timestamp = ?, result = ?, error = ?
+       SET end_timestamp = ?, result = ?, error = ?, logs = ?
        WHERE id = ?`,
-      [end_timestamp, result, error, id]
+      [end_timestamp, result, error, logs, id]
     );
   }
 
   // Get a script run by ID
   async getScriptRun(id: string): Promise<ScriptRun | null> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, script_id, start_timestamp, end_timestamp, error, result
+      `SELECT id, script_id, start_timestamp, end_timestamp, error, result, logs
        FROM script_runs
        WHERE id = ?`,
       [id]
@@ -210,6 +211,7 @@ export class ScriptStore {
       end_timestamp: row.end_timestamp as string,
       error: row.error as string,
       result: row.result as string,
+      logs: row.logs as string,
     };
   }
 
@@ -219,7 +221,7 @@ export class ScriptStore {
     limit: number = 100,
     offset: number = 0
   ): Promise<ScriptRun[]> {
-    let sql = `SELECT id, script_id, start_timestamp, end_timestamp, error, result
+    let sql = `SELECT id, script_id, start_timestamp, end_timestamp, error, result, logs
                FROM script_runs`;
     const args: (string | number)[] = [];
 
@@ -244,13 +246,14 @@ export class ScriptStore {
       end_timestamp: row.end_timestamp as string,
       error: row.error as string,
       result: row.result as string,
+      logs: row.logs as string,
     }));
   }
 
   // Get script runs by script_id
   async getScriptRunsByScriptId(script_id: string): Promise<ScriptRun[]> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, script_id, start_timestamp, end_timestamp, error, result
+      `SELECT id, script_id, start_timestamp, end_timestamp, error, result, logs
        FROM script_runs
        WHERE script_id = ?
        ORDER BY start_timestamp DESC`,
@@ -266,13 +269,14 @@ export class ScriptStore {
       end_timestamp: row.end_timestamp as string,
       error: row.error as string,
       result: row.result as string,
+      logs: row.logs as string,
     }));
   }
 
   // Get script runs by task_id (through scripts table)
   async getScriptRunsByTaskId(task_id: string): Promise<ScriptRun[]> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT sr.id, sr.script_id, sr.start_timestamp, sr.end_timestamp, sr.error, sr.result
+      `SELECT sr.id, sr.script_id, sr.start_timestamp, sr.end_timestamp, sr.error, sr.result, sr.logs
        FROM script_runs sr
        INNER JOIN scripts s ON sr.script_id = s.id
        WHERE s.task_id = ?
@@ -289,6 +293,7 @@ export class ScriptStore {
       end_timestamp: row.end_timestamp as string,
       error: row.error as string,
       result: row.result as string,
+      logs: row.logs as string,
     }));
   }
 }

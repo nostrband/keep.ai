@@ -2,7 +2,7 @@ import { z } from "zod";
 import { tool } from "ai";
 import { EvalContext } from "../sandbox/sandbox";
 import { getEnv } from "../env";
-import { getModelName } from "../model";
+import { getTextModelName } from "../model";
 import debug from "debug";
 
 const debugTextExtract = debug("TextExtract");
@@ -36,7 +36,7 @@ Uses temperature 0 and light reasoning for reliable parsing.`,
         throw new Error("OpenRouter API key not configured");
       }
 
-      const model = getModelName();
+      const model = getTextModelName();
       const baseURL = env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1";
 
       debugTextExtract(
@@ -69,7 +69,7 @@ Output only valid JSON matching the schema, no additional text or markdown forma
               },
             ],
             temperature: 0,
-            reasoning_effort: "low",
+            reasoning_effort: text.length > 10000 ? "medium" : "low",
             response_format: { type: "json_schema", json_schema },
             usage: {
               include: true,
@@ -111,7 +111,7 @@ Output only valid JSON matching the schema, no additional text or markdown forma
           await getContext().createEvent("text_extract", {
             inputLength: text.length,
             output: data,
-            usage: { cost: usage.cost }
+            usage: { cost: usage.cost },
           });
 
           return { result: data };

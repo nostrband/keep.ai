@@ -30,10 +30,14 @@ import {
   makeGmailTool,
   makeAtobTool,
   makeTextExtractTool,
-  makeTextRouteTool,
+  makeTextClassifyTool,
   makeTextSummarizeTool,
   makeTextGenerateTool,
   makeUserSendTool,
+  makeGetScriptTool,
+  makeListScriptsTool,
+  makeScriptHistoryTool,
+  makeConsoleLogTool,
 } from "./tools";
 import { z, ZodFirstPartyTypeKind as K } from "zod";
 import { EvalContext, EvalGlobal } from "./sandbox/sandbox";
@@ -177,6 +181,9 @@ Example: await ${ns}.${name}(<input>)
 
     const isWorker = this.type === "worker" || this.type === "planner";
 
+    // Console logging for all task types
+    addTool(global, "Console", "log", makeConsoleLogTool(this.getContext));
+
     // Tools
     if (this.type !== "replier") {
       addTool(global, "Utils", "weather", makeGetWeatherTool(this.getContext));
@@ -216,7 +223,7 @@ Example: await ${ns}.${name}(<input>)
       );
 
       // Worker only
-      if (this.type === "worker") {
+      if (isWorker) {
         addTool(
           global,
           "Memory",
@@ -389,7 +396,7 @@ Example: await ${ns}.${name}(<input>)
     // Text tools for worker only
     if (isWorker) {
       addTool(global, "Text", "extract", makeTextExtractTool(this.getContext));
-      addTool(global, "Text", "route", makeTextRouteTool(this.getContext));
+      addTool(global, "Text", "classify", makeTextClassifyTool(this.getContext));
       addTool(
         global,
         "Text",
@@ -417,6 +424,28 @@ Example: await ${ns}.${name}(<input>)
     // User tools for planner only
     if (this.type === "planner") {
       addTool(global, "Users", "send", makeUserSendTool(this.#api));
+    }
+
+    // Script tools for worker only
+    if (isWorker) {
+      addTool(
+        global,
+        "Scripts",
+        "get",
+        makeGetScriptTool(this.#api.scriptStore, this.getContext)
+      );
+      addTool(
+        global,
+        "Scripts",
+        "list",
+        makeListScriptsTool(this.#api.scriptStore)
+      );
+      addTool(
+        global,
+        "Scripts",
+        "history",
+        makeScriptHistoryTool(this.#api.scriptStore)
+      );
     }
 
     // Store
@@ -779,7 +808,11 @@ If user asks what/who you are, or what you're capable of, here is what you shoul
     return `
 You are a diligent personal AI assistant. 
 
-Your job is to process user query using tools that are accessible to you.
+Your job is to process user query using tools that are accessible to you and to route user's input to background tasks.
+
+Your default assumption is that user is talking to/about new/existing tasks, 
+only choose to solve the query yourself in case it's very simple and 
+you have all APIs available and it isn't related to a existing tasks.
 
 You have one main tool called 'eval' (described later) that allows you to execute JS code in a sandbox,
 to access powerful APIs, to create background tasks, and to perform calculations and data manipulations.
@@ -1009,7 +1042,9 @@ ${this.whoamiPrompt()}
     return `
 You are an experienced javascript software engineer helping develop automation scripts for the user. 
 
-You will be given a task info (goal, notes, plan, etc) as input from the user. You job is to use tools and call APIs to figure out the end-to-end js script code to reliably achieve the task goal, and later maintain and fix the code when needed. 
+You will be given a task info (goal, notes, plan, etc) as input from the user. 
+You job is to use tools and call APIs to figure out the end-to-end js script code to reliably achieve the task goal, 
+and later maintain and fix the code when needed. 
 
 ${
   this.task.cron
@@ -1020,13 +1055,28 @@ The task is recurring, the script will be launched according to the 'cron' instr
 }
 
 
-You have one main tool called 'eval' (described later) that allows you to execute any JS code in a sandbox to access and test the APIs, and to perform calculations and data manipulations. Use this tool to test the script draft you're creating/updating.
+You have one main tool called 'eval' (described later) that allows 
+you to execute any JS code in a sandbox to access and test the APIs, 
+and to perform calculations and data manipulations. Use this tool 
+to test the script draft you're creating/updating.
 
 Use 'save' tool to save the created/updated script code when you're ready.
 
-Use other tools to ask questions to user or inspect the script code change history.
+Use other tools to ask questions to user or inspect the script code 
+change history.
 
-After you save the script, it will be executed by the host system in the same sandbox env according to schedule/events (but without state passing across iterations). Errors in the scheduled execution will be passed back to you to fix the code and save an updated version.
+After you save the script, it will be executed by the host system in 
+the same sandbox env according to schedule/events (but without state 
+passing across iterations). Errors in the scheduled execution will be 
+passed back to you to fix the code and save an updated version.
+
+There is no standard console.* API in the sandbox, use custom 
+Console.* to properly log the main script execution stages for you 
+and the user to evaluate later.
+
+Do not use heuristics to interpret or extract data from free-form text,
+use Text.* tools for that. Use regexp for these cases only if 100% sure 
+that input format will stay consistent.
 
 ## Input format
 - You'll be given script goal and other input from the user
@@ -1058,79 +1108,116 @@ type Any = z.ZodTypeAny;
 export const printSchema = (schema: Any): string => {
   const t = schema._def.typeName as K;
 
-  if (schema.description) return "<" + schema.description + ">";
+  // For primitive types, return description if available
+  const isPrimitive = [
+    K.ZodString,
+    K.ZodNumber,
+    K.ZodBoolean,
+    K.ZodBigInt,
+    K.ZodDate,
+    K.ZodUndefined,
+    K.ZodNull,
+    K.ZodLiteral,
+    K.ZodEnum,
+    K.ZodNativeEnum,
+  ].includes(t);
+
+  if (schema.description && isPrimitive) {
+    return "<" + schema.description + ">";
+  }
+
+  let result: string;
 
   switch (t) {
     case K.ZodString:
-      return "string";
+      result = "string";
+      break;
     case K.ZodNumber:
-      return "number";
+      result = "number";
+      break;
     case K.ZodBoolean:
-      return "boolean";
+      result = "boolean";
+      break;
     case K.ZodBigInt:
-      return "bigint";
+      result = "bigint";
+      break;
     case K.ZodDate:
-      return "date";
+      result = "date";
+      break;
     case K.ZodUndefined:
-      return "undefined";
+      result = "undefined";
+      break;
     case K.ZodNull:
-      return "null";
+      result = "null";
+      break;
 
     case K.ZodLiteral:
-      return JSON.stringify((schema as z.ZodLiteral<any>)._def.value);
+      result = JSON.stringify((schema as z.ZodLiteral<any>)._def.value);
+      break;
 
     case K.ZodEnum:
-      return `enum(${(
+      result = `enum(${(
         schema as z.ZodEnum<[string, ...string[]]>
       )._def.values.join(", ")})`;
+      break;
 
     case K.ZodNativeEnum:
-      return `enum(${Object.values(
+      result = `enum(${Object.values(
         (schema as z.ZodNativeEnum<any>)._def.values
       ).join(", ")})`;
+      break;
 
     case K.ZodArray: {
       const inner = (schema as z.ZodArray<Any>)._def.type;
-      return `array<${printSchema(inner)}>`;
+      result = `[${printSchema(inner)}]`;
+      break;
     }
 
     case K.ZodOptional:
-      return `${printSchema((schema as z.ZodOptional<Any>)._def.innerType)}?`;
+      result = `${printSchema((schema as z.ZodOptional<Any>)._def.innerType)}?`;
+      break;
 
     case K.ZodNullable:
-      return `${printSchema(
+      result = `${printSchema(
         (schema as z.ZodNullable<Any>)._def.innerType
       )} | null`;
+      break;
 
     case K.ZodDefault:
-      return `${printSchema(
+      result = `${printSchema(
         (schema as z.ZodDefault<Any>)._def.innerType
       )} (default)`;
+      break;
 
     case K.ZodPromise:
-      return `Promise<${printSchema((schema as z.ZodPromise<Any>)._def.type)}>`;
+      result = `Promise<${printSchema((schema as z.ZodPromise<Any>)._def.type)}>`;
+      break;
 
     case K.ZodUnion:
-      return (schema as z.ZodUnion<[Any, ...Any[]]>)._def.options
+      result = (schema as z.ZodUnion<[Any, ...Any[]]>)._def.options
         .map(printSchema)
         .join(" | ");
+      break;
 
     case K.ZodIntersection: {
       const s = schema as z.ZodIntersection<Any, Any>;
-      return `${printSchema(s._def.left)} & ${printSchema(s._def.right)}`;
+      result = `${printSchema(s._def.left)} & ${printSchema(s._def.right)}`;
+      break;
     }
 
     case K.ZodRecord: {
       const s = schema as z.ZodRecord<Any, Any>;
-      return `{ [key: ${printSchema(s._def.keyType)}]: ${printSchema(
+      result = `{ [key: ${printSchema(s._def.keyType)}]: ${printSchema(
         s._def.valueType
       )} }`;
+      break;
     }
 
     case K.ZodTuple:
-      return `[${(schema as z.ZodTuple)._def.items
+      result = `[${(schema as z.ZodTuple)._def.items
         .map(printSchema)
         .join(", ")}]`;
+      break;
 
     case K.ZodObject: {
       const obj = schema as z.ZodObject<any>;
@@ -1139,31 +1226,42 @@ export const printSchema = (schema: Any): string => {
       const body = Object.entries(shape)
         .map(([k, v]) => `${k}: ${printSchema(v as Any)}`)
         .join("; ");
-      return `{ ${body} }`;
+      result = `{ ${body} }`;
+      break;
     }
 
     case K.ZodDiscriminatedUnion: {
       const du = schema as z.ZodDiscriminatedUnion<string, any>;
       // options is a Map in Zod; get its values:
       const options: any[] = Array.from(du._def.options.values());
-      return options.map(printSchema).join(" | ");
+      result = options.map(printSchema).join(" | ");
+      break;
     }
 
     case K.ZodEffects: {
       // If you want to "ignore" refinements/transforms for printing:
       const inner = (schema as z.ZodEffects<Any>)._def.schema;
-      return printSchema(inner);
+      result = printSchema(inner);
+      break;
     }
 
     case K.ZodBranded: {
       const inner = (schema as z.ZodBranded<Any, any>)._def.type;
-      return `${printSchema(inner)} /* branded */`;
+      result = `${printSchema(inner)} /* branded */`;
+      break;
     }
 
     default:
       // Fallback: show the Zod kind
-      return t.replace("Zod", "").toLowerCase();
+      result = t.replace("Zod", "").toLowerCase();
   }
+
+  // Add description as a comment for complex types
+  if (schema.description && !isPrimitive) {
+    result = `${result} /* ${schema.description} */`;
+  }
+
+  return result;
 };
 
 function safeStringify(obj: any, cap: number): string {

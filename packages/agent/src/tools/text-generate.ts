@@ -48,6 +48,10 @@ Temperature controls randomness (0=deterministic, 1=very random), default 0.3.`,
 
       debugTextGenerate(`Generating text with temperature ${temperature}, max ${max_chars} chars`);
 
+      const systemPrompt = `You are a text generation assistant. Generate text based on the user's prompt.
+
+If the prompt is malformed, unclear, inappropriate, or you cannot fulfill the request for any reason, provide brief reasoning and then output <ERROR>Short-error-text</ERROR> where Short-error-text explains the issue.`;
+
       try {
         const response = await fetch(`${baseURL}/chat/completions`, {
           method: "POST",
@@ -58,6 +62,10 @@ Temperature controls randomness (0=deterministic, 1=very random), default 0.3.`,
           body: JSON.stringify({
             model,
             messages: [
+              {
+                role: "system",
+                content: systemPrompt,
+              },
               {
                 role: "user",
                 content: prompt,
@@ -86,6 +94,13 @@ Temperature controls randomness (0=deterministic, 1=very random), default 0.3.`,
         const content = result.choices[0].message?.content?.trim();
         if (!content) {
           throw new Error("No content found in the response");
+        }
+
+        // Check for error pattern
+        const errorMatch = content.match(/<ERROR>(.*?)<\/ERROR>/s);
+        if (errorMatch) {
+          const errorMessage = errorMatch[1].trim();
+          throw new Error(errorMessage || "LLM reported an error");
         }
 
         debugTextGenerate("Generation completed", {

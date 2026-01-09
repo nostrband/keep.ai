@@ -8,7 +8,9 @@ const debugNode = debug("node:index");
 
 // Wrapper class to adapt sqlite3 + cr-sqlite to our DBInterface
 class Sqlite3DBWrapper implements DBInterface {
-  constructor(private db: sqlite3.Database) {}
+  private txQueue: Promise<any> = Promise.resolve();
+  
+  constructor(private db: sqlite3.Database, private isTx: boolean) {}
 
   async exec(sql: string, args?: any[]): Promise<any> {
     return new Promise((resolve, reject) => {
@@ -86,25 +88,36 @@ class Sqlite3DBWrapper implements DBInterface {
   }
 
   async tx<T>(fn: (tx: DBInterface) => Promise<T>): Promise<T> {
-    return new Promise<T>(async (resolve, reject) => {
-      try {
-        await this.exec("BEGIN TRANSACTION");
-        
-        try {
-          // Create a transaction wrapper that uses the same database instance
-          const txWrapper = new Sqlite3DBWrapper(this.db);
-          const result = await fn(txWrapper);
-          
-          await this.exec("COMMIT");
-          resolve(result);
-        } catch (error) {
-          debugNode("tx error", error);
-          await this.exec("ROLLBACK");
-          reject(error);
-        }
-      } catch (error) {
-        reject(error);
-      }
+    if (this.isTx) throw new Error("Cannot start tx within a tx");
+    // Queue transactions to prevent "cannot start a transaction within a transaction" errors
+    return new Promise<T>((resolve, reject) => {
+      // Chain this transaction after the previous one completes
+      this.txQueue = this.txQueue
+        .then(async () => {
+          try {
+            await this.exec("BEGIN TRANSACTION");
+            
+            try {
+              // Create a transaction wrapper that uses the same database instance
+              const txWrapper = new Sqlite3DBWrapper(this.db, true);
+              const result = await fn(txWrapper);
+              
+              await this.exec("COMMIT");
+              resolve(result);
+            } catch (error) {
+              debugNode("tx error", error);
+              await this.exec("ROLLBACK");
+              reject(error);
+            }
+          } catch (error) {
+            reject(error);
+          }
+        })
+        .catch((error) => {
+          // If the queue itself has an error from a previous transaction,
+          // we still need to continue processing this transaction
+          debugNode("txQueue error (continuing)", error);
+        });
     });
   }
 
@@ -175,7 +188,7 @@ export async function createDBNode(file: string): Promise<DBInterface> {
             }
             
             // Wrap the DB instance
-            const wrappedDB = new Sqlite3DBWrapper(db);
+            const wrappedDB = new Sqlite3DBWrapper(db, false);
             
             debugNode("Node.js database created and initialized successfully");
             resolve(wrappedDB);
