@@ -36,4 +36,6 @@ export { makeUserSendTool } from "./user-send";
 export { makeGetScriptTool } from "./get-script";
 export { makeListScriptsTool } from "./list-scripts";
 export { makeScriptHistoryTool } from "./script-history";
+export { makeListScriptRunsTool } from "./list-script-runs";
+export { makeGetScriptRunTool } from "./get-script-run";
 export { makeConsoleLogTool } from "./console-log";

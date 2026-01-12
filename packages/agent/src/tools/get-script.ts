@@ -49,7 +49,7 @@ export function makeGetScriptTool(
     inputSchema: z
       .string()
       .optional()
-      .describe("Script ID (optional, defaults to latest script for current task)"),
+      .describe("Script ID (optional, defaults to latest script version for current task)"),
     outputSchema: z
       .object({
         id: z.string(),

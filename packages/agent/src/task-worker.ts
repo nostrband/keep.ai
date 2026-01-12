@@ -308,7 +308,8 @@ export class TaskWorker {
 
       // Run reason
       let reason: "start" | "input" | "timer" = "start";
-      if (task.state !== "") reason = inbox.length > 0 ? "input" : "timer";
+      if (inbox.length > 0) reason = "input";
+      else if (task.state !== "") reason = "timer";
 
       // We restore existing session on 'input' reason for worker,
       // bcs that generally means user is supplying
@@ -334,8 +335,8 @@ export class TaskWorker {
         );
       }
 
-      // New thread for each new 'start' reason
-      task.thread_id = generateId();
+      // Reuse existing thread
+      task.thread_id = task.thread_id || generateId();
       // Placeholder, FIXME add title?
       await this.ensureThread(task.thread_id, taskType);
 
@@ -364,7 +365,13 @@ export class TaskWorker {
       );
 
       // Sandbox
-      const sandbox = await this.createSandbox(taskType, task, taskRunId, undefined, lastStepLogs);
+      const sandbox = await this.createSandbox(
+        taskType,
+        task,
+        taskRunId,
+        undefined,
+        lastStepLogs
+      );
 
       // Env
       const env = await this.createEnv(taskType, task, sandbox);
@@ -399,7 +406,7 @@ export class TaskWorker {
           // Pass the input text to agent
           inbox,
           jsState,
-          getLogs: () => lastStepLogs.join('\n'),
+          getLogs: () => lastStepLogs.join("\n"),
           onStep: async (step, input, output, result) => {
             await saveNewMessages();
 
@@ -640,7 +647,7 @@ export class TaskWorker {
         new Date().toISOString(),
         JSON.stringify(result.result) || "",
         "",
-        logs.join('\n')
+        logs.join("\n")
       );
 
       if (task.cron) {
@@ -675,7 +682,7 @@ export class TaskWorker {
           new Date().toISOString(),
           "",
           errorMessage,
-          logs.join('\n')
+          logs.join("\n")
         );
       } catch (e) {
         this.debug("finishScriptRun error", e);
@@ -704,7 +711,7 @@ export class TaskWorker {
           metadata: {
             createdAt: new Date().toISOString(),
           },
-          reasoning: '',
+          reasoning: "",
           sourceTaskId: task.id,
           sourceTaskType: taskType,
         }),
@@ -766,38 +773,20 @@ export class TaskWorker {
     taskRunId: string
   ) {
     if (result.kind === "code") throw new Error("Can't handle 'code' reply");
+
     // Send reply after all done
     if (result.reply) {
-      // DEBUG: allow worker to reply directly to user for testing
-      // if (
-      //   taskType === "worker" ||
-      //   taskType === "replier" ||
-      //   taskType === "router"
-      // ) {
       await this.sendToUser(result.reply);
-      // } else {
-      //   await this.sendToReplier({
-      //     taskType,
-      //     taskRunId,
-      //     taskId: task.id,
-      //     content: result.reply,
-      //     reasoning: result.reasoning || "",
-      //   });
-      // }
     }
 
     // We ran an iteraction and still have asks in state?
     // Send to replier
-    if (result.kind === "wait" && taskType === "worker") {
+    if (
+      result.kind === "wait" &&
+      (taskType === "worker" || taskType === "planner")
+    ) {
       if (state.asks) {
         await this.sendToUser(state.asks);
-        // await this.sendToReplier({
-        //   taskType,
-        //   taskRunId,
-        //   taskId: task.id,
-        //   content: state.asks,
-        //   reasoning: result.reasoning || "",
-        // });
       }
     }
   }
@@ -871,7 +860,7 @@ export class TaskWorker {
       output_tokens:
         (agent.usage.outputTokens || 0) + (agent.usage.reasoningTokens || 0),
       cost: Math.ceil((agent.openRouterUsage.cost || 0) * 1000000),
-      logs: logs.join('\n'),
+      logs: logs.join("\n"),
     });
 
     // Write usage stats

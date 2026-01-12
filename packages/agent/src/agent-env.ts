@@ -37,6 +37,8 @@ import {
   makeGetScriptTool,
   makeListScriptsTool,
   makeScriptHistoryTool,
+  makeListScriptRunsTool,
+  makeGetScriptRunTool,
   makeConsoleLogTool,
 } from "./tools";
 import { z, ZodFirstPartyTypeKind as K } from "zod";
@@ -445,6 +447,18 @@ Example: await ${ns}.${name}(<input>)
         "Scripts",
         "history",
         makeScriptHistoryTool(this.#api.scriptStore)
+      );
+      addTool(
+        global,
+        "Scripts",
+        "listScriptRuns",
+        makeListScriptRunsTool(this.#api.scriptStore, this.getContext)
+      );
+      addTool(
+        global,
+        "Scripts",
+        "getScriptRun",
+        makeGetScriptRunTool(this.#api.scriptStore)
       );
     }
 
