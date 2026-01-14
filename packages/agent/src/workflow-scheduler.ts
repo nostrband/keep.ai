@@ -151,63 +151,33 @@ export class WorkflowScheduler {
       // Get all workflows
       const allWorkflows = await this.api.scriptStore.listWorkflows(1000, 0);
       
-      // Filter workflows that have cron expressions and are not disabled
+      // Filter active workflows (not disabled or error)
       const activeWorkflows = allWorkflows.filter(
-        (w) => w.cron && w.cron.trim() !== '' && w.status !== 'disabled' && w.status !== 'error'
+        (w) => w.status !== 'disabled' && w.status !== 'error'
       );
 
-      this.debug(`Found ${activeWorkflows.length} active workflows with cron expressions`);
+      this.debug(`Found ${activeWorkflows.length} active workflows`);
 
-      // Check which workflows should run based on cron schedule
+      // Check which workflows should run based on next_run_timestamp
       const currentTime = Date.now();
+      const currentTimeISO = new Date(currentTime).toISOString();
       const dueWorkflows = [];
 
       for (const workflow of activeWorkflows) {
-        try {
-          // Parse cron expression
-          const cronJob = new Cron(workflow.cron);
-          const nextRun = cronJob.nextRun();
-
-          if (!nextRun) {
-            this.debug(`Workflow ${workflow.id} has invalid cron expression: ${workflow.cron}`);
-            continue;
-          }
-
-          // Check if workflow is due (nextRun in the past or very near future)
-          // We use a small buffer to account for timing variations
-          const nextRunTime = nextRun.getTime();
-          const isOverdue = nextRunTime <= currentTime + 1000; // 1 second buffer
-
-          if (isOverdue) {
-            // Also check last run time to avoid running too frequently
-            const lastRunTime = workflow.timestamp ? new Date(workflow.timestamp).getTime() : 0;
+        // Check if next_run_timestamp is set and is in the past
+        if (workflow.next_run_timestamp && workflow.next_run_timestamp.trim() !== '') {
+          try {
+            const nextRunTime = new Date(workflow.next_run_timestamp).getTime();
             
-            // Get the previous scheduled time from cron to ensure we don't run more than once per schedule
-            const prevRun = cronJob.previousRun();
-            const prevRunTime = prevRun ? prevRun.getTime() : 0;
-
-            // Only run if last execution was before the previous scheduled time
-            if (lastRunTime < prevRunTime) {
+            // Check if workflow is due (next_run_timestamp <= current time)
+            if (nextRunTime <= currentTime) {
               dueWorkflows.push(workflow);
               this.debug(
-                `Workflow ${workflow.id} (${workflow.title}) is due: nextRun=${nextRun.toISOString()}, lastRun=${workflow.timestamp || 'never'}`
-              );
-            } else {
-              this.debug(
-                `Workflow ${workflow.id} already ran for this schedule: lastRun=${workflow.timestamp}`
+                `Workflow ${workflow.id} (${workflow.title}) is due: nextRun=${workflow.next_run_timestamp}`
               );
             }
-          }
-        } catch (error) {
-          this.debug(`Error parsing cron for workflow ${workflow.id}:`, error);
-          // Mark workflow as error
-          try {
-            await this.api.scriptStore.updateWorkflow({
-              ...workflow,
-              status: 'error'
-            });
-          } catch (e) {
-            this.debug("updateWorkflow error", e);
+          } catch (error) {
+            this.debug(`Invalid next_run_timestamp for workflow ${workflow.id}:`, error);
           }
         }
       }
@@ -237,6 +207,48 @@ export class WorkflowScheduler {
 
         try {
           await this.worker.executeWorkflow(workflow);
+          
+          // After execution, calculate and update next_run_timestamp from cron if available
+          if (workflow.cron && workflow.cron.trim() !== '') {
+            try {
+              const cronJob = new Cron(workflow.cron);
+              const nextRun = cronJob.nextRun();
+              
+              if (nextRun) {
+                await this.api.scriptStore.updateWorkflow({
+                  ...workflow,
+                  next_run_timestamp: nextRun.toISOString(),
+                  timestamp: currentTimeISO, // Update last run timestamp
+                });
+                this.debug(
+                  `Updated workflow ${workflow.id} next_run_timestamp to ${nextRun.toISOString()}`
+                );
+              } else {
+                // Clear next_run_timestamp if cron has no next run
+                await this.api.scriptStore.updateWorkflow({
+                  ...workflow,
+                  next_run_timestamp: '',
+                  timestamp: currentTimeISO,
+                });
+              }
+            } catch (error) {
+              this.debug(`Error calculating next run for workflow ${workflow.id}:`, error);
+              // Mark workflow as error
+              await this.api.scriptStore.updateWorkflow({
+                ...workflow,
+                status: 'error',
+                next_run_timestamp: '',
+                timestamp: currentTimeISO,
+              });
+            }
+          } else {
+            // No cron expression, clear next_run_timestamp
+            await this.api.scriptStore.updateWorkflow({
+              ...workflow,
+              next_run_timestamp: '',
+              timestamp: currentTimeISO,
+            });
+          }
         } catch (error) {
           this.debug("failed to process workflow:", error);
         }

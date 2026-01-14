@@ -7,6 +7,7 @@ export const EVENT_TYPES = {
   ADD_TASK_CRON: "add_task_cron",
   CANCEL_THIS_TASK_CRON: "cancel_this_task_cron",
   SEND_TO_TASK_INBOX: "send_to_task_inbox",
+  TASK_UPDATE: "task_update",
   WEB_SEARCH: "web_search",
   WEB_FETCH: "web_fetch",
   GET_WEATHER: "get_weather",
@@ -69,6 +70,11 @@ export interface CancelThisTaskCronEventPayload extends BaseEventPayload {
 export interface SendToTaskInboxEventPayload extends BaseEventPayload {
   target_task_id: string;
   target_task_title: string;
+}
+
+export interface TaskUpdateEventPayload extends BaseEventPayload {
+  task_id: string;
+  title: string;
 }
 
 export interface WebSearchEventPayload extends BaseEventPayload {
@@ -193,6 +199,7 @@ export type EventPayload =
   | AddTaskCronEventPayload
   | CancelThisTaskCronEventPayload
   | SendToTaskInboxEventPayload
+  | TaskUpdateEventPayload
   | WebSearchEventPayload
   | WebFetchEventPayload
   | GetWeatherEventPayload
@@ -286,6 +293,14 @@ export const EVENT_CONFIGS: Record<EventType, EventConfig> = {
         // deprecated
         (payload as any).id
       }`,
+  },
+  [EVENT_TYPES.TASK_UPDATE]: {
+    emoji: "✏️",
+    title: (payload) =>
+      `Updated Task Title: ${(payload as TaskUpdateEventPayload).title}`,
+    hasId: true,
+    getEntityPath: (payload) =>
+      `/tasks/${(payload as TaskUpdateEventPayload).task_id}`,
   },
   [EVENT_TYPES.WEB_SEARCH]: {
     emoji: "🔍",

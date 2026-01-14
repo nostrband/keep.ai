@@ -1,11 +1,12 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { 
-  useWorkflow, 
-  useLatestScriptByWorkflowId, 
-  useScriptRunsByWorkflowId 
+import {
+  useWorkflow,
+  useLatestScriptByWorkflowId,
+  useScriptRunsByWorkflowId
 } from "../hooks/dbScriptReads";
 import { useTask } from "../hooks/dbTaskReads";
+import { useChat } from "../hooks/dbChatReads";
 import { useUpdateWorkflow } from "../hooks/dbWrites";
 import SharedHeader from "./SharedHeader";
 import { Badge, Button } from "../ui";
@@ -25,11 +26,26 @@ export default function WorkflowDetailPage() {
   const navigate = useNavigate();
   const { data: workflow, isLoading } = useWorkflow(id!);
   const { data: task } = useTask(workflow?.task_id || "");
+  const { data: chat } = useChat(task?.chat_id || "");
   const { data: latestScript } = useLatestScriptByWorkflowId(id!);
   const { data: scriptRuns = [], isLoading: isLoadingRuns } = useScriptRunsByWorkflowId(id!);
   const [successMessage, setSuccessMessage] = useState<string>("");
   
   const updateWorkflowMutation = useUpdateWorkflow();
+
+  // Get next run time from workflow.next_run_timestamp
+  const nextRunTime = useMemo(() => {
+    if (!workflow?.next_run_timestamp || workflow.status === 'disabled' || workflow.status === 'error') {
+      return null;
+    }
+    
+    try {
+      return new Date(workflow.next_run_timestamp);
+    } catch (error) {
+      console.error('Invalid next_run_timestamp:', error);
+      return null;
+    }
+  }, [workflow?.next_run_timestamp, workflow?.status]);
 
   const handleDisable = async () => {
     if (!workflow) return;
@@ -48,9 +64,20 @@ export default function WorkflowDetailPage() {
   };
 
   const handleRunNow = () => {
-    // TODO: Implement run now functionality
-    setSuccessMessage("Run now feature coming soon");
-    setTimeout(() => setSuccessMessage(""), 3000);
+    if (!workflow) return;
+    
+    // Set next_run_timestamp to current time to trigger immediate execution
+    const now = new Date().toISOString();
+    
+    updateWorkflowMutation.mutate({
+      workflowId: workflow.id,
+      next_run_timestamp: now,
+    }, {
+      onSuccess: () => {
+        setSuccessMessage("Workflow scheduled to run now");
+        setTimeout(() => setSuccessMessage(""), 3000);
+      },
+    });
   };
 
   const handleChat = () => {
@@ -147,6 +174,11 @@ export default function WorkflowDetailPage() {
                     <div>
                       <h3 className="text-sm font-medium text-gray-700 mb-2">Schedule</h3>
                       <p className="text-gray-900">{workflow.cron}</p>
+                      {nextRunTime && (
+                        <p className="text-sm text-gray-600 mt-1">
+                          Next run at: {nextRunTime.toLocaleString()}
+                        </p>
+                      )}
                     </div>
                   )}
 
@@ -160,27 +192,26 @@ export default function WorkflowDetailPage() {
               </div>
             </div>
 
-            {/* Latest Script Section */}
-            {latestScript && (
+            {/* Chat Section */}
+            {chat && (
               <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
-                <h2 className="text-lg font-semibold text-gray-900 mb-4">Latest Script</h2>
+                <h2 className="text-lg font-semibold text-gray-900 mb-4">Chat</h2>
                 <Link
-                  to={`/scripts/${latestScript.id}`}
+                  to={`/chats/${chat.id}`}
                   className="block p-4 border border-gray-200 rounded-lg hover:border-gray-300 hover:shadow-sm transition-all"
                 >
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-2">
-                        <span className="font-medium text-gray-900">Script {latestScript.id.slice(0, 8)}</span>
-                        <Badge variant="outline">v{latestScript.version}</Badge>
+                        <span className="font-medium text-gray-900">Chat {chat.id.slice(0, 8)}</span>
                       </div>
-                      {latestScript.change_comment && (
+                      {chat.first_message && (
                         <p className="text-sm text-gray-600 mb-2 line-clamp-2">
-                          {latestScript.change_comment}
+                          {chat.first_message}
                         </p>
                       )}
                       <div className="text-xs text-gray-500">
-                        Updated: {new Date(latestScript.timestamp).toLocaleString()}
+                        Last updated: {new Date(chat.updated_at).toLocaleString()}
                       </div>
                     </div>
                   </div>
@@ -205,6 +236,34 @@ export default function WorkflowDetailPage() {
                       </div>
                       <div className="text-xs text-gray-500">
                         Task ID: {task.id}
+                      </div>
+                    </div>
+                  </div>
+                </Link>
+              </div>
+            )}
+
+            {/* Script Section */}
+            {latestScript && (
+              <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
+                <h2 className="text-lg font-semibold text-gray-900 mb-4">Script</h2>
+                <Link
+                  to={`/scripts/${latestScript.id}`}
+                  className="block p-4 border border-gray-200 rounded-lg hover:border-gray-300 hover:shadow-sm transition-all"
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="font-medium text-gray-900">Script {latestScript.id.slice(0, 8)}</span>
+                        <Badge variant="outline">v{latestScript.version}</Badge>
+                      </div>
+                      {latestScript.change_comment && (
+                        <p className="text-sm text-gray-600 mb-2 line-clamp-2">
+                          {latestScript.change_comment}
+                        </p>
+                      )}
+                      <div className="text-xs text-gray-500">
+                        Updated: {new Date(latestScript.timestamp).toLocaleString()}
                       </div>
                     </div>
                   </div>

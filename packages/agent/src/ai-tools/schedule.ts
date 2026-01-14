@@ -15,9 +15,14 @@ export function makeScheduleTool(opts: {
 }) {
   return tool({
     execute: async (info: ScheduleInfo): Promise<{ cron: string }> => {
-      // Validate cron expression
+      // Validate cron expression and calculate next run time
+      let nextRunTimestamp = '';
       try {
-        new Cron(info.cron);
+        const cronJob = new Cron(info.cron);
+        const nextRun = cronJob.nextRun();
+        if (nextRun) {
+          nextRunTimestamp = nextRun.toISOString();
+        }
       } catch (error) {
         throw new Error(`Invalid cron expression '${info.cron}': ${error}`);
       }
@@ -28,10 +33,11 @@ export function makeScheduleTool(opts: {
         throw new Error(`Workflow not found for task ${opts.taskId}`);
       }
 
-      // Update workflow cron field
+      // Update workflow cron field and next_run_timestamp
       const updatedWorkflow: Workflow = {
         ...workflow,
         cron: info.cron,
+        next_run_timestamp: nextRunTimestamp,
       };
       await opts.scriptStore.updateWorkflow(updatedWorkflow);
 

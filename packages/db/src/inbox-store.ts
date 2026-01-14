@@ -107,9 +107,11 @@ export class InboxStore {
     const args: (string | number)[] = [];
     const conditions: string[] = [];
 
+    // since we no longer allow postponing inbox items,
+    // we no longer need timestamp filter
     // 'expired' items that should be consumed now
-    conditions.push("timestamp <= ?");
-    args.push(new Date().toISOString());
+    // conditions.push("timestamp <= ?");
+    // args.push(new Date().toISOString());
 
     if (options?.source) {
       conditions.push("source = ?");

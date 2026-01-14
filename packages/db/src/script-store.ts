@@ -32,6 +32,7 @@ export interface Workflow {
   cron: string;
   events: string;
   status: string;
+  next_run_timestamp: string;
 }
 
 export class ScriptStore {
@@ -414,9 +415,9 @@ export class ScriptStore {
   async addWorkflow(workflow: Workflow, tx?: DBInterface): Promise<void> {
     const db = tx || this.db.db;
     await db.exec(
-      `INSERT INTO workflows (id, title, task_id, timestamp, cron, events, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [workflow.id, workflow.title, workflow.task_id, workflow.timestamp, workflow.cron, workflow.events, workflow.status]
+      `INSERT INTO workflows (id, title, task_id, timestamp, cron, events, status, next_run_timestamp)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [workflow.id, workflow.title, workflow.task_id, workflow.timestamp, workflow.cron, workflow.events, workflow.status, workflow.next_run_timestamp]
     );
   }
 
@@ -425,16 +426,16 @@ export class ScriptStore {
     const db = tx || this.db.db;
     await db.exec(
       `UPDATE workflows
-       SET title = ?, task_id = ?, timestamp = ?, cron = ?, events = ?, status = ?
+       SET title = ?, task_id = ?, timestamp = ?, cron = ?, events = ?, status = ?, next_run_timestamp = ?
        WHERE id = ?`,
-      [workflow.title, workflow.task_id, workflow.timestamp, workflow.cron, workflow.events, workflow.status, workflow.id]
+      [workflow.title, workflow.task_id, workflow.timestamp, workflow.cron, workflow.events, workflow.status, workflow.next_run_timestamp, workflow.id]
     );
   }
 
   // Get a workflow by ID
   async getWorkflow(id: string): Promise<Workflow | null> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, title, task_id, timestamp, cron, events, status
+      `SELECT id, title, task_id, timestamp, cron, events, status, next_run_timestamp
        FROM workflows
        WHERE id = ?`,
       [id]
@@ -453,13 +454,14 @@ export class ScriptStore {
       cron: row.cron as string,
       events: row.events as string,
       status: row.status as string,
+      next_run_timestamp: row.next_run_timestamp as string,
     };
   }
 
   // Get workflow by task_id
   async getWorkflowByTaskId(task_id: string): Promise<Workflow | null> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, title, task_id, timestamp, cron, events, status
+      `SELECT id, title, task_id, timestamp, cron, events, status, next_run_timestamp
        FROM workflows
        WHERE task_id = ?
        LIMIT 1`,
@@ -479,6 +481,7 @@ export class ScriptStore {
       cron: row.cron as string,
       events: row.events as string,
       status: row.status as string,
+      next_run_timestamp: row.next_run_timestamp as string,
     };
   }
 
@@ -488,7 +491,7 @@ export class ScriptStore {
     offset: number = 0
   ): Promise<Workflow[]> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, title, task_id, timestamp, cron, events, status
+      `SELECT id, title, task_id, timestamp, cron, events, status, next_run_timestamp
        FROM workflows
        ORDER BY timestamp DESC
        LIMIT ? OFFSET ?`,
@@ -505,6 +508,7 @@ export class ScriptStore {
       cron: row.cron as string,
       events: row.events as string,
       status: row.status as string,
+      next_run_timestamp: row.next_run_timestamp as string,
     }));
   }
 }

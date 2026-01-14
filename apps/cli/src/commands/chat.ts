@@ -104,7 +104,7 @@ async function runChatCommand(): Promise<void> {
           
           // Create user message
           const userMessage = await api.addMessage({
-            threadId: 'main',
+            chatId: 'main',
             content: userInput
           })
 

@@ -250,8 +250,9 @@ export class TaskStore {
 
 
   // Get task by chat_id
-  async getTaskByChatId(chatId: string): Promise<Task | null> {
-    const results = await this.db.db.execO<Record<string, unknown>>(
+  async getTaskByChatId(chatId: string, tx?: DBInterface): Promise<Task | null> {
+    const db = tx || this.db.db;
+    const results = await db.execO<Record<string, unknown>>(
       `SELECT id, timestamp, reply, state, thread_id, error, type, title, chat_id
           FROM tasks
           WHERE chat_id = ? AND (deleted IS NULL OR deleted = FALSE)`,
@@ -337,9 +338,10 @@ export class TaskStore {
   }
 
   // Update task - updates all fields of an existing task
-  async updateTask(task: Task): Promise<void> {
+  async updateTask(task: Task, tx?: DBInterface): Promise<void> {
     // Update the task with all provided values
-    await this.db.db.exec(
+    const db = tx || this.db.db;
+    await db.exec(
       `UPDATE tasks
           SET timestamp = ?, reply = ?, state = ?, thread_id = ?, error = ?, type = ?, title = ?, chat_id = ?
           WHERE id = ? AND (deleted IS NULL OR deleted = FALSE)`,

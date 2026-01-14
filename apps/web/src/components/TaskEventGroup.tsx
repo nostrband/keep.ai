@@ -13,13 +13,13 @@ import {
 // Transform Gmail API method names to simpler, user-friendly names
 function transformGmailMethod(method: string): string {
   const methodMap: Record<string, string> = {
-    "users.messages.list": "messages",
-    "users.messages.get": "messages",
-    "users.messages.attachments.get": "attachments",
-    "users.history.list": "history",
-    "users.threads.get": "threads",
-    "users.threads.list": "threads",
-    "users.getProfile": "profile",
+    "users.messages.list": "read messages",
+    "users.messages.get": "read messages",
+    "users.messages.attachments.get": "read attachments",
+    "users.history.list": "read history",
+    "users.threads.get": "read threads",
+    "users.threads.list": "read threads",
+    "users.getProfile": "read profile",
   };
 
   return methodMap[method] || method.split(".").pop() || method;
@@ -83,7 +83,7 @@ export function TaskEventGroup({ taskId, events }: TaskEventGroupProps) {
     console.log("Task menu clicked for task:", taskId);
   };
 
-  const taskTitle = task?.title || "Unknown Task";
+  const taskTitle = task?.title || `Task ${taskId.slice(0, 8)}`;
 
   // Use script run or task run data
   const run = scriptRun || taskRun;
@@ -183,7 +183,7 @@ export function TaskEventGroup({ taskId, events }: TaskEventGroupProps) {
             <span className="text-sm text-gray-600">
               {task?.type === "worker" || task?.type === "planner" ? (
                 <>
-                  ⚙ {task?.type === "worker" ? "Working" : scriptRunId ? "Executing" : "Planning"}:{" "}
+                  ⚙ {task?.type === "worker" ? "Working" : "Planning"}:{" "}
                   <span className="text-gray-600">{taskTitle}</span>
                 </>
               ) : (
@@ -231,7 +231,7 @@ export function TaskEventGroup({ taskId, events }: TaskEventGroupProps) {
             <span className="text-sm text-gray-600">
               {task?.type === "worker" || task?.type === "planner" ? (
                 <>
-                  ⚙ {task?.type === "worker" ? "Working" : "Executing"}:{" "}
+                  ⚙ {task?.type === "worker" ? "Working" : "Planning"}:{" "}
                   <span className="text-gray-600">{taskTitle}</span>
                 </>
               ) : (

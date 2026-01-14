@@ -13,6 +13,7 @@ import {
   makeGetTaskTool,
   makeListTasksTool,
   makeSendToTaskInboxTool,
+  makeTaskUpdateTool,
   makeListEventsTool,
   makeReadFileTool,
   makeSaveFileTool,
@@ -237,6 +238,12 @@ Example: await ${ns}.${name}(<input>)
         this.api.inboxStore,
         this.getContext
       )
+    );
+    addTool(
+      global,
+      "Tasks",
+      "update",
+      makeTaskUpdateTool(this.api, this.getContext)
     );
 
     // File tools for router and worker

@@ -73,7 +73,7 @@ export default function ChatDetailPage() {
 
     // Send the message with file paths array
     addMessage.mutate({
-      threadId: chatId, // threadId === chatId
+      chatId, // threadId === chatId
       role: "user",
       content: messageContent,
       files: attachedFiles,

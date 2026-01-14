@@ -3,6 +3,7 @@ import { useChatRows } from "../hooks/useChatRows";
 import { useAddMessage, useReadChat } from "../hooks/dbWrites";
 import { MessageItem } from "../ui/components/ai-elements/message-item";
 import { TaskEventGroup } from "./TaskEventGroup";
+import { WorkflowEventGroup } from "./WorkflowEventGroup";
 import type { UseMutationResult } from "@tanstack/react-query";
 import React from "react";
 
@@ -265,7 +266,7 @@ export default function ChatInterface({
                 full={false}
               />
             );
-          } else {
+          } else if (row.type === "task_group") {
             return (
               <TaskEventGroup
                 key={row.id}
@@ -273,7 +274,18 @@ export default function ChatInterface({
                 events={row.data.events}
               />
             );
+          } else if (row.type === "workflow_group") {
+            return (
+              <WorkflowEventGroup
+                key={row.id}
+                workflowId={row.data.workflowId}
+                scriptId={row.data.scriptId}
+                scriptRunId={row.data.scriptRunId}
+                events={row.data.events}
+              />
+            );
           }
+          return null;
         })}
         {rows.length === 0 && hasData && (
           <div className="py-4 text-center text-gray-500">

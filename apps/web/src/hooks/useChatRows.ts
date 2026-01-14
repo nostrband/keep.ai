@@ -3,7 +3,7 @@ import { useChatEvents } from "./dbChatReads";
 import { AssistantUIMessage, ChatAgentEvent } from "@app/proto";
 
 export interface ChatRow {
-  type: "message" | "task_group";
+  type: "message" | "task_group" | "workflow_group";
   data: any;
   timestamp: string;
   key: string;
@@ -32,28 +32,49 @@ export function useChatRows(chatId: string) {
     const items: ChatRow[] = [];
 
     let currentTaskGroup: typeof events = [];
-    let currentTaskId: string | null = null;
+    let currentTaskRunId: string | null = null;
+    let currentWorkflowGroup: typeof events = [];
+    let currentScriptRunId: string | null = null;
     let groupCounter = 0;
 
-    const flushCurrentGroup = () => {
-      if (currentTaskGroup.length > 0 && currentTaskId) {
-        const groupId = `task-group-${currentTaskId}-${groupCounter++}`;
+    const flushCurrentTaskGroup = () => {
+      if (currentTaskGroup.length > 0 && currentTaskRunId) {
+        const taskId = (currentTaskGroup[0].content as ChatAgentEvent).task_id;
+        const groupId = `task-group-${currentTaskRunId}-${groupCounter++}`;
         items.push({
           type: "task_group",
-          data: { taskId: currentTaskId, events: currentTaskGroup },
+          data: { taskId, events: currentTaskGroup },
           timestamp: currentTaskGroup[0].timestamp,
           key: groupId,
           id: groupId,
         });
         currentTaskGroup = [];
-        currentTaskId = null;
+        currentTaskRunId = null;
+      }
+    };
+
+    const flushCurrentWorkflowGroup = () => {
+      if (currentWorkflowGroup.length > 0 && currentScriptRunId) {
+        const workflowId = (currentWorkflowGroup[0].content as ChatAgentEvent).workflow_id;
+        const scriptId = (currentWorkflowGroup[0].content as ChatAgentEvent).script_id;
+        const groupId = `workflow-group-${currentScriptRunId}-${groupCounter++}`;
+        items.push({
+          type: "workflow_group",
+          data: { workflowId, scriptId, scriptRunId: currentScriptRunId, events: currentWorkflowGroup },
+          timestamp: currentWorkflowGroup[0].timestamp,
+          key: groupId,
+          id: groupId,
+        });
+        currentWorkflowGroup = [];
+        currentScriptRunId = null;
       }
     };
 
     events.forEach((event) => {
       if (event.type === "message") {
-        // Message breaks any current task group
-        flushCurrentGroup();
+        // Message breaks any current groups
+        flushCurrentTaskGroup();
+        flushCurrentWorkflowGroup();
 
         // Add the message
         const message = event.content as AssistantUIMessage;
@@ -66,23 +87,43 @@ export function useChatRows(chatId: string) {
         });
       } else {
         // Non-message event
-        const taskId = (event.content as ChatAgentEvent).task_id;
-        if (!taskId) return; // Skip events without task_id
-
-        if (currentTaskId === taskId) {
-          // Same task, add to current group (including task_run events for grouping)
-          currentTaskGroup.push(event);
-        } else {
-          // Different task, flush current group and start new one
-          flushCurrentGroup();
-          currentTaskId = taskId;
-          currentTaskGroup = [event];
+        const taskRunId = (event.content as ChatAgentEvent).task_run_id;
+        const scriptRunId = (event.content as ChatAgentEvent).script_run_id;
+        
+        if (taskRunId) {
+          // Has task_run_id, group by task run
+          flushCurrentWorkflowGroup(); // Flush any workflow group first
+          
+          if (currentTaskRunId === taskRunId) {
+            // Same task run, add to current group
+            currentTaskGroup.push(event);
+          } else {
+            // Different task run, flush current group and start new one
+            flushCurrentTaskGroup();
+            currentTaskRunId = taskRunId;
+            currentTaskGroup = [event];
+          }
+        } else if (scriptRunId) {
+          // Has script_run_id but no task_run_id, group by script run (workflow)
+          flushCurrentTaskGroup(); // Flush any task group first
+          
+          if (currentScriptRunId === scriptRunId) {
+            // Same script run, add to current group
+            currentWorkflowGroup.push(event);
+          } else {
+            // Different script run, flush current group and start new one
+            flushCurrentWorkflowGroup();
+            currentScriptRunId = scriptRunId;
+            currentWorkflowGroup = [event];
+          }
         }
+        // Skip events without task_run_id or script_run_id
       }
     });
 
-    // Flush any remaining group
-    flushCurrentGroup();
+    // Flush any remaining groups
+    flushCurrentTaskGroup();
+    flushCurrentWorkflowGroup();
 
     // All new items were grouped into the last item?
     // UI won't be able to trigger another load bcs resulting

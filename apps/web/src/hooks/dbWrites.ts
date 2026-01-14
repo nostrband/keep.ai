@@ -12,7 +12,7 @@ export function useAddMessage() {
 
   return useMutation({
     mutationFn: async (input: {
-      threadId: string;
+      chatId: string;
       role: "user" | "assistant";
       content: string;
       files?: File[];
@@ -20,7 +20,7 @@ export function useAddMessage() {
       if (!api) throw new Error("Memory store not available");
 
       const message = await api.addMessage({
-        threadId: input.threadId,
+        chatId: input.chatId,
         role: input.role,
         content: input.content,
         files: input.files,
@@ -140,6 +140,7 @@ export function useUpdateWorkflow() {
       title?: string;
       cron?: string;
       events?: string;
+      next_run_timestamp?: string;
     }) => {
       if (!api) throw new Error("Script store not available");
 
@@ -154,6 +155,7 @@ export function useUpdateWorkflow() {
         ...(input.title !== undefined && { title: input.title }),
         ...(input.cron !== undefined && { cron: input.cron }),
         ...(input.events !== undefined && { events: input.events }),
+        ...(input.next_run_timestamp !== undefined && { next_run_timestamp: input.next_run_timestamp }),
       });
 
       return workflow;

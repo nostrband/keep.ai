@@ -107,7 +107,8 @@ export class WorkflowWorker {
       const sandbox = await this.createSandbox(
         workflow,
         scriptRunId,
-        logs
+        logs,
+        script.id
       );
 
       // Inits JS API in the sandbox
@@ -140,6 +141,9 @@ export class WorkflowWorker {
         timestamp: new Date().toISOString(),
       });
 
+      // Check for warnings or errors in logs and notify
+      await this.checkLogsAndNotify(workflow, scriptRunId, logs);
+
       // Signal success to scheduler
       this.emitSignal({
         type: "done",
@@ -160,6 +164,13 @@ export class WorkflowWorker {
         );
       } catch (e) {
         this.debug("finishScriptRun error", e);
+      }
+
+      // Check for warnings or errors in logs and notify
+      try {
+        await this.checkLogsAndNotify(workflow, scriptRunId, logs);
+      } catch (e) {
+        this.debug("checkLogsAndNotify error", e);
       }
 
       // Handle different error types
@@ -207,6 +218,75 @@ export class WorkflowWorker {
     }
   }
 
+  /**
+   * Check logs for warnings and errors and send notification to task chat
+   */
+  private async checkLogsAndNotify(
+    workflow: Workflow,
+    scriptRunId: string,
+    logs: string[]
+  ): Promise<void> {
+    if (!workflow.task_id) {
+      this.debug("No task_id for workflow, skipping log check notification");
+      return;
+    }
+
+    // Parse logs to find warnings and errors
+    // Log format: [timestamp] PREFIX: 'message'
+    const warnings: string[] = [];
+    const errors: string[] = [];
+
+    for (const logLine of logs) {
+      if (logLine.includes(" WARN: ")) {
+        warnings.push(logLine);
+      } else if (logLine.includes(" ERROR: ")) {
+        errors.push(logLine);
+      }
+    }
+
+    // If no warnings or errors, nothing to notify
+    if (warnings.length === 0 && errors.length === 0) {
+      return;
+    }
+
+    // Get the task to find the chat_id
+    try {
+      const task = await this.api.taskStore.getTask(workflow.task_id);
+      
+      if (!task.chat_id) {
+        this.debug("No chat_id for task, skipping log check notification");
+        return;
+      }
+
+      // Build the notification message
+      let message = `Script run ${scriptRunId} had warnings or errors. Investigate them and make sure such cases are either fixed, or changed 'log'.`;
+      
+      if (warnings.length > 0) {
+        message += `\n\nWarnings:\n${warnings.join("\n")}`;
+      }
+      
+      if (errors.length > 0) {
+        message += `\n\nErrors:\n${errors.join("\n")}`;
+      }
+
+      // Send the notification message to the task's chat
+      await this.api.addMessage({
+        chatId: task.chat_id,
+        content: message,
+        role: "user",
+      });
+
+      this.debug(
+        "Sent log warning/error notification to chat",
+        task.chat_id,
+        "for script run",
+        scriptRunId
+      );
+    } catch (error) {
+      this.debug("Error sending log notification:", error);
+    }
+  }
+
   private async createEnv(workflow: Workflow, sandbox: Sandbox) {
     // Create SandboxAPI directly without needing AgentEnv or dummy task
     const sandboxAPI = new SandboxAPI({
@@ -225,7 +305,8 @@ export class WorkflowWorker {
   private async createSandbox(
     workflow: Workflow,
     scriptRunId: string,
-    logs: string[]
+    logs: string[],
+    scriptId: string
   ) {
     // Sandbox
     const sandbox = await initSandbox();
@@ -242,6 +323,7 @@ export class WorkflowWorker {
         // set workflow fields
         content.workflow_id = workflow.id;
         content.script_run_id = scriptRunId;
+        content.script_id = scriptId;
         // Send to main chat for now
         await this.api.chatStore.saveChatEvent(
           generateId(),

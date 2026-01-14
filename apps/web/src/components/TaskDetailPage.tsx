@@ -1,7 +1,8 @@
 import React, { useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useTask, useTaskState, useTaskRuns } from "../hooks/dbTaskReads";
-import { useLatestScriptByTaskId } from "../hooks/dbScriptReads";
+import { useLatestScriptByTaskId, useWorkflowByTaskId } from "../hooks/dbScriptReads";
+import { useChat } from "../hooks/dbChatReads";
 import { useUpdateTask, usePauseTask } from "../hooks/dbWrites";
 import SharedHeader from "./SharedHeader";
 import {
@@ -30,6 +31,8 @@ export default function TaskDetailPage() {
   const { data: taskState, isLoading: isLoadingState } = useTaskState(id!);
   const { data: taskRuns = [], isLoading: isLoadingRuns } = useTaskRuns(id!);
   const { data: latestScript } = useLatestScriptByTaskId(id!);
+  const { data: workflow } = useWorkflowByTaskId(id!);
+  const { data: chat } = useChat(task?.chat_id || "");
   const [warning, setWarning] = useState<string>("");
   const [successMessage, setSuccessMessage] = useState<string>("");
   
@@ -218,6 +221,35 @@ export default function TaskDetailPage() {
               </div>
             )}
 
+            {/* Workflow Section */}
+            {workflow && (
+              <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
+                <h2 className="text-lg font-semibold text-gray-900 mb-4">Workflow</h2>
+                <Link
+                  to={`/workflows/${workflow.id}`}
+                  className="block p-4 border border-gray-200 rounded-lg hover:border-gray-300 hover:shadow-sm transition-all"
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="font-medium text-gray-900">{workflow.title || `Workflow ${workflow.id.slice(0, 8)}`}</span>
+                        {workflow.status && (
+                          <Badge variant={workflow.status === 'active' ? 'default' : 'secondary'}>
+                            {workflow.status}
+                          </Badge>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-4 text-xs text-gray-500">
+                        {workflow.cron && <span>Cron: {workflow.cron}</span>}
+                        {workflow.events && <span>Events: {workflow.events}</span>}
+                        <span>Created: {new Date(workflow.timestamp).toLocaleString()}</span>
+                      </div>
+                    </div>
+                  </div>
+                </Link>
+              </div>
+            )}
+
             {/* Script Section for Planner Tasks */}
             {task.type === 'planner' && latestScript && (
               <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
@@ -239,6 +271,33 @@ export default function TaskDetailPage() {
                       )}
                       <div className="text-xs text-gray-500">
                         Updated: {new Date(latestScript.timestamp).toLocaleString()}
+                      </div>
+                    </div>
+                  </div>
+                </Link>
+              </div>
+            )}
+
+            {/* Chats Section */}
+            {task.chat_id && chat && (
+              <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
+                <h2 className="text-lg font-semibold text-gray-900 mb-4">Chats</h2>
+                <Link
+                  to={`/chats/${task.chat_id}`}
+                  className="block p-4 border border-gray-200 rounded-lg hover:border-gray-300 hover:shadow-sm transition-all"
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="font-medium text-gray-900">Chat {chat.id.slice(0, 8)}</span>
+                      </div>
+                      {chat.first_message && (
+                        <p className="text-sm text-gray-600 mb-2 line-clamp-2">
+                          {chat.first_message}
+                        </p>
+                      )}
+                      <div className="text-xs text-gray-500">
+                        Last updated: {new Date(chat.updated_at).toLocaleString()}
                       </div>
                     </div>
                   </div>

@@ -245,6 +245,7 @@ export class KeepDbApi {
         task_id: taskId,
         timestamp: now.toISOString(),
         title: task.title,
+        next_run_timestamp: "",
       };
 
       // Create the matching workflow
