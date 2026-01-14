@@ -1,77 +1,28 @@
-import { KeepDbApi, Task } from "@app/db";
-import {
-  makeCreateNoteTool,
-  makeDeleteNoteTool,
-  makeGetNoteTool,
-  makeGetWeatherTool,
-  makeListNotesTool,
-  makeSearchNotesTool,
-  makeUpdateNoteTool,
-  makeWebFetchTool,
-  makeWebDownloadTool,
-  makeWebSearchTool,
-  makeAddTaskTool,
-  makeGetTaskTool,
-  makeListTasksTool,
-  makeSendToTaskInboxTool,
-  makeAddTaskRecurringTool,
-  makeCancelThisRecurringTaskTool,
-  makePostponeInboxItemTool,
-  makeListEventsTool,
-  makeReadFileTool,
-  makeSaveFileTool,
-  makeListFilesTool,
-  makeSearchFilesTool,
-  makeImagesGenerateTool,
-  makeImagesExplainTool,
-  makeImagesTransformTool,
-  makePdfExplainTool,
-  makeAudioExplainTool,
-  makeGmailTool,
-  makeAtobTool,
-  makeTextExtractTool,
-  makeTextClassifyTool,
-  makeTextSummarizeTool,
-  makeTextGenerateTool,
-  makeUserSendTool,
-  makeGetScriptTool,
-  makeListScriptsTool,
-  makeScriptHistoryTool,
-  makeListScriptRunsTool,
-  makeGetScriptRunTool,
-  makeConsoleLogTool,
-} from "./tools";
-import { z, ZodFirstPartyTypeKind as K } from "zod";
-import { EvalContext, EvalGlobal } from "./sandbox/sandbox";
-import { StepInput, TaskState, TaskType } from "./agent-types";
+import { KeepDbApi, Task, TaskType } from "@app/db";
+import { StepInput, TaskState } from "./agent-types";
 import debug from "debug";
 import { getEnv } from "./env";
-import { AssistantUIMessage, ChatEvent } from "packages/proto/dist";
+import { AssistantUIMessage } from "packages/proto/dist";
 import { generateId } from "ai";
 
 export class AgentEnv {
   #api: KeepDbApi;
   private type: TaskType;
   private task: Task;
-  private getContext: () => EvalContext;
-  #tools = new Map<string, string>();
+  #tools: Map<string, string>;
   private debug = debug("AgentEnv");
 
   constructor(
     api: KeepDbApi,
     type: TaskType,
     task: Task,
-    getContext: () => EvalContext,
+    tools: Map<string, string>,
     private userPath?: string,
-    private gmailOAuth2Client?: any
   ) {
     this.#api = api;
     this.type = type;
     this.task = task;
-    // FIXME remove worker
-    if (type !== "planner" && type !== "worker" && task.cron)
-      throw new Error("Only planner/worker tasks can be recurring");
-    this.getContext = getContext;
+    this.#tools = tools;
   }
 
   get tools() {
@@ -84,403 +35,17 @@ export class AgentEnv {
 
   get temperature() {
     switch (this.type) {
-      case "router":
       case "worker":
       case "planner":
         return 0.1;
-      case "replier":
-        return 0.2;
     }
-  }
-
-  async createGlobal(): Promise<EvalGlobal> {
-    const toolDocs: Map<string, string> = new Map();
-    const docs: any = {};
-    const addTool = (global: any, ns: string, name: string, tool: any) => {
-      // Format docs
-      const desc = [
-        "===DESCRIPTION===",
-        tool.description +
-          `
-Example: await ${ns}.${name}(<input>)
-`,
-      ];
-      if (tool.inputSchema)
-        desc.push(...["===INPUT===", printSchema(tool.inputSchema)]);
-      if (tool.outputSchema)
-        desc.push(...["===OUTPUT===", printSchema(tool.outputSchema)]);
-      const doc = desc.join("\n");
-
-      // Init ns
-      if (!(ns in global)) global[ns] = {};
-
-      // Create a wrapper function that validates input and output
-      global[ns][name] = async (input: any) => {
-        // Validate input using inputSchema if present
-        let validatedInput = input;
-        if (tool.inputSchema) {
-          try {
-            validatedInput = tool.inputSchema.parse(input);
-          } catch (error) {
-            this.debug(
-              `Bad input for '${ns}.${name}' input ${JSON.stringify(
-                input
-              )} schema ${tool.inputSchema} error ${error}`
-            );
-
-            // NOTE: do not print zod error codes as those are too verbose, we're
-            // already printing Usage which is more useful.
-            const message = `Invalid input for ${ns}.${name}.\nUsage: ${desc}`;
-            throw new Error(message);
-          }
-        }
-
-        // Execute the tool with validated input
-        try {
-          const result = await tool.execute(validatedInput);
-          this.debug("Tool called", {
-            name,
-            input,
-            context: this.getContext(),
-            result,
-          });
-          return result;
-        } catch (e) {
-          const message = `Failed at ${ns}.${name}: ${e}.\nUsage: ${desc}`;
-          throw new Error(message);
-        }
-
-        // Validate output using outputSchema if present
-        // FIXME not sure if all tools return all declared fields
-        // if (tool.outputSchema) {
-        //   try {
-        //     tool.outputSchema.parse(result);
-        //   } catch (error) {
-        //     throw new Error(`Invalid output from ${ns}.${name}: ${error instanceof Error ? error.message : 'Unknown validation error'}`);
-        //   }
-        // }
-      };
-
-      if (!("docs" in global)) global["docs"] = {};
-      if (!(ns in global["docs"])) global["docs"][ns] = {};
-      docs[ns + "." + name] = doc;
-      toolDocs.set(`${ns}.${name}`, doc);
-    };
-
-    const global: any = {};
-    // Docs function
-    global.getDocs = (name: string) => {
-      if (name in docs) return docs[name];
-      let result = "";
-      for (const key of Object.keys(docs)) {
-        if (key.startsWith(name)) {
-          result += "# " + key + "\n" + docs[key] + "\n\n";
-        }
-      }
-      if (result) return result;
-      throw new Error("Not found " + name);
-    };
-
-    const isWorker = this.type === "worker" || this.type === "planner";
-
-    // Console logging for all task types
-    addTool(global, "Console", "log", makeConsoleLogTool(this.getContext));
-
-    // Tools
-    if (this.type !== "replier") {
-      addTool(global, "Utils", "weather", makeGetWeatherTool(this.getContext));
-    }
-    if (isWorker) {
-      addTool(global, "Utils", "atob", makeAtobTool());
-      addTool(global, "Web", "search", makeWebSearchTool(this.getContext));
-      addTool(global, "Web", "fetchParse", makeWebFetchTool(this.getContext));
-      addTool(
-        global,
-        "Web",
-        "download",
-        makeWebDownloadTool(this.#api.fileStore, this.userPath, this.getContext)
-      );
-    }
-
-    // Memory
-    if (this.type !== "replier") {
-      // Notes
-      addTool(
-        global,
-        "Memory",
-        "getNote",
-        makeGetNoteTool(this.#api.noteStore)
-      );
-      addTool(
-        global,
-        "Memory",
-        "listNotesMetadata",
-        makeListNotesTool(this.#api.noteStore)
-      );
-      addTool(
-        global,
-        "Memory",
-        "searchNotes",
-        makeSearchNotesTool(this.#api.noteStore)
-      );
-
-      // Worker only
-      if (isWorker) {
-        addTool(
-          global,
-          "Memory",
-          "createNote",
-          makeCreateNoteTool(this.#api.noteStore, this.getContext)
-        );
-        addTool(
-          global,
-          "Memory",
-          "updateNote",
-          makeUpdateNoteTool(this.#api.noteStore, this.getContext)
-        );
-        addTool(
-          global,
-          "Memory",
-          "deleteNote",
-          makeDeleteNoteTool(this.#api.noteStore, this.getContext)
-        );
-      }
-    }
-
-    // Event history available for all agent types
-    addTool(
-      global,
-      "Memory",
-      "listEvents",
-      makeListEventsTool(this.#api.chatStore, this.#api.taskStore)
-    );
-
-    // Tasks
-
-    // Router or Worker
-    if (this.type !== "replier") {
-      if (this.type !== "planner") {
-        addTool(
-          global,
-          "Tasks",
-          "add",
-          makeAddTaskTool(this.#api.taskStore, this.getContext)
-        );
-        addTool(
-          global,
-          "Tasks",
-          "addRecurring",
-          makeAddTaskRecurringTool(this.#api.taskStore, this.getContext)
-        );
-        addTool(global, "Tasks", "get", makeGetTaskTool(this.#api.taskStore));
-        addTool(
-          global,
-          "Tasks",
-          "list",
-          makeListTasksTool(this.#api.taskStore)
-        );
-        addTool(
-          global,
-          "Tasks",
-          "sendToTaskInbox",
-          makeSendToTaskInboxTool(
-            this.#api.taskStore,
-            this.#api.inboxStore,
-            this.getContext
-          )
-        );
-      }
-
-      // Only add cancel tool for recurring tasks
-      if (this.task.cron) {
-        addTool(
-          global,
-          "Tasks",
-          "cancelThisRecurringTask",
-          makeCancelThisRecurringTaskTool(this.getContext)
-        );
-      }
-    }
-
-    // Inbox management tools for replier
-    if (this.type === "replier") {
-      addTool(
-        global,
-        "Inbox",
-        "postponeInboxItem",
-        makePostponeInboxItemTool(this.#api.inboxStore, this.getContext)
-      );
-    }
-
-    // File tools for router and worker
-    if (this.type === "router" || isWorker) {
-      if (isWorker) {
-        addTool(
-          global,
-          "Files",
-          "read",
-          makeReadFileTool(this.#api.fileStore, this.userPath)
-        );
-        addTool(
-          global,
-          "Files",
-          "save",
-          makeSaveFileTool(this.#api.fileStore, this.userPath, this.getContext)
-        );
-      }
-      addTool(global, "Files", "list", makeListFilesTool(this.#api.fileStore));
-      addTool(
-        global,
-        "Files",
-        "search",
-        makeSearchFilesTool(this.#api.fileStore)
-      );
-    }
-
-    // Image tools for worker only
-    if (isWorker) {
-      addTool(
-        global,
-        "Images",
-        "generate",
-        makeImagesGenerateTool(
-          this.#api.fileStore,
-          this.userPath,
-          this.getContext
-        )
-      );
-      addTool(
-        global,
-        "Images",
-        "explain",
-        makeImagesExplainTool(
-          this.#api.fileStore,
-          this.userPath,
-          this.getContext
-        )
-      );
-      addTool(
-        global,
-        "Images",
-        "transform",
-        makeImagesTransformTool(
-          this.#api.fileStore,
-          this.userPath,
-          this.getContext
-        )
-      );
-    }
-
-    // PDF tools for worker only
-    if (isWorker) {
-      addTool(
-        global,
-        "PDF",
-        "explain",
-        makePdfExplainTool(this.#api.fileStore, this.userPath, this.getContext)
-      );
-    }
-
-    // Audio tools for worker only
-    if (isWorker) {
-      addTool(
-        global,
-        "Audio",
-        "explain",
-        makeAudioExplainTool(
-          this.#api.fileStore,
-          this.userPath,
-          this.getContext
-        )
-      );
-    }
-
-    // Text tools for worker only
-    if (isWorker) {
-      addTool(global, "Text", "extract", makeTextExtractTool(this.getContext));
-      addTool(global, "Text", "classify", makeTextClassifyTool(this.getContext));
-      addTool(
-        global,
-        "Text",
-        "summarize",
-        makeTextSummarizeTool(this.getContext)
-      );
-      addTool(
-        global,
-        "Text",
-        "generate",
-        makeTextGenerateTool(this.getContext)
-      );
-    }
-
-    // Gmail tools for worker only
-    if (this.type !== "replier" && this.gmailOAuth2Client) {
-      addTool(
-        global,
-        "Gmail",
-        "api",
-        makeGmailTool(this.getContext, this.gmailOAuth2Client)
-      );
-    }
-
-    // User tools for planner only
-    if (this.type === "planner") {
-      addTool(global, "Users", "send", makeUserSendTool(this.#api));
-    }
-
-    // Script tools for worker only
-    if (isWorker) {
-      addTool(
-        global,
-        "Scripts",
-        "get",
-        makeGetScriptTool(this.#api.scriptStore, this.getContext)
-      );
-      addTool(
-        global,
-        "Scripts",
-        "list",
-        makeListScriptsTool(this.#api.scriptStore)
-      );
-      addTool(
-        global,
-        "Scripts",
-        "history",
-        makeScriptHistoryTool(this.#api.scriptStore)
-      );
-      addTool(
-        global,
-        "Scripts",
-        "listScriptRuns",
-        makeListScriptRunsTool(this.#api.scriptStore, this.getContext)
-      );
-      addTool(
-        global,
-        "Scripts",
-        "getScriptRun",
-        makeGetScriptRunTool(this.#api.scriptStore)
-      );
-    }
-
-    // Store
-    this.#tools = toolDocs;
-
-    return global;
   }
 
   async buildSystem(): Promise<string> {
     let systemPrompt = "";
     switch (this.type) {
-      case "router": {
-        systemPrompt = this.routerSystemPrompt();
-        break;
-      }
       case "worker": {
         systemPrompt = this.workerSystemPrompt();
-        break;
-      }
-      case "replier": {
-        systemPrompt = this.replierSystemPrompt();
         break;
       }
       case "planner": {
@@ -517,136 +82,128 @@ ${systemPrompt}
   }
 
   async buildContext(input: StepInput): Promise<AssistantUIMessage[]> {
-    if (
-      ["worker", "planner"].includes(this.type)
-      // &&
-      // input.reason !== "input" &&
-      // input.reason !== "timer"
-    )
-      return [];
+    // FIXME add task info, workflow info, etc
+    return [];
+    // let tokens = 0;
+    // const history: ChatEvent[] = [];
 
-    let tokens = 0;
-    const history: ChatEvent[] = [];
+    // // Parse inbox
+    // const inbox: any[] = input.inbox
+    //   .map((i) => {
+    //     // FIXME this is really ugly!
+    //     try {
+    //       return JSON.parse(i);
+    //     } catch {
+    //       return undefined;
+    //     }
+    //   })
+    //   .filter(Boolean);
 
-    // Parse inbox
-    const inbox: any[] = input.inbox
-      .map((i) => {
-        // FIXME this is really ugly!
-        try {
-          return JSON.parse(i);
-        } catch {
-          return undefined;
-        }
-      })
-      .filter(Boolean);
+    // const MAX_TOKENS = this.type === "worker" ? 1000 : 5000;
+    // let before: string | undefined;
+    // let since: string | undefined;
+    // if (this.type === "worker" && inbox.length) {
+    //   // Gap before last inbox item
+    //   before = inbox.at(-1).timestamp;
 
-    const MAX_TOKENS = this.type === "worker" ? 1000 : 5000;
-    let before: string | undefined;
-    let since: string | undefined;
-    if (this.type === "worker" && inbox.length) {
-      // Gap before last inbox item
-      before = inbox.at(-1).timestamp;
+    //   // And after latest task run
+    //   const runs = await this.#api.taskStore.listTaskRuns(this.task.id);
+    //   // Ordered by timestamp desc
+    //   since = runs.filter((r) => !!r.end_timestamp)[0]?.start_timestamp;
+    //   this.debug(
+    //     "Build context for worker",
+    //     this.task.id,
+    //     "from",
+    //     since,
+    //     "till",
+    //     before
+    //   );
+    // }
 
-      // And after latest task run
-      const runs = await this.#api.taskStore.listTaskRuns(this.task.id);
-      // Ordered by timestamp desc
-      since = runs.filter((r) => !!r.end_timestamp)[0]?.start_timestamp;
-      this.debug(
-        "Build context for worker",
-        this.task.id,
-        "from",
-        since,
-        "till",
-        before
-      );
-    }
+    // while (tokens < MAX_TOKENS) {
+    //   const events = await this.#api.chatStore.getChatEvents({
+    //     chatId: "main",
+    //     limit: 100,
+    //     before,
+    //     since,
+    //   });
 
-    while (tokens < MAX_TOKENS) {
-      const events = await this.#api.chatStore.getChatEvents({
-        chatId: "main",
-        limit: 100,
-        before,
-        since,
-      });
+    //   if (!events.length) break;
 
-      if (!events.length) break;
+    //   before = events.at(-1)!.timestamp;
 
-      before = events.at(-1)!.timestamp;
+    //   for (const e of events) {
+    //     // Skip messages that we're putting to inbox
+    //     if (e.type === "message") {
+    //       const isInInbox = inbox.find((i) => i.id === e.id);
+    //       if (isInInbox) continue;
+    //     }
 
-      for (const e of events) {
-        // Skip messages that we're putting to inbox
-        if (e.type === "message") {
-          const isInInbox = inbox.find((i) => i.id === e.id);
-          if (isInInbox) continue;
-        }
+    //     // rough token estimate
+    //     tokens += Math.ceil(JSON.stringify(e).length / 2);
+    //     history.push(e);
 
-        // rough token estimate
-        tokens += Math.ceil(JSON.stringify(e).length / 2);
-        history.push(e);
+    //     if (tokens >= MAX_TOKENS) break;
+    //   }
 
-        if (tokens >= MAX_TOKENS) break;
-      }
+    //   if (tokens >= MAX_TOKENS) break;
+    // }
 
-      if (tokens >= MAX_TOKENS) break;
-    }
-
-    // Re-sort in ASC order
-    history.sort(
-      (a, b) =>
-        new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-    );
+    // // Re-sort in ASC order
+    // history.sort(
+    //   (a, b) =>
+    //     new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    // );
 
     const context: AssistantUIMessage[] = [];
-    for (const e of history) {
-      if (e.type === "message") {
-        context.push(this.prepareUserMessage(e.content as AssistantUIMessage));
-      } else {
-        context.push({
-          id: generateId(),
-          role: "assistant",
-          // FIXME cut timestamp from json, as we're writing it to metadata
-          parts: [{ type: "text", text: "Action Event: " + JSON.stringify(e) }],
-          metadata: {
-            createdAt: e.timestamp,
-          },
-        });
-      }
-    }
+    // for (const e of history) {
+    //   if (e.type === "message") {
+    //     context.push(this.prepareUserMessage(e.content as AssistantUIMessage));
+    //   } else {
+    //     context.push({
+    //       id: generateId(),
+    //       role: "assistant",
+    //       // FIXME cut timestamp from json, as we're writing it to metadata
+    //       parts: [{ type: "text", text: "Action Event: " + JSON.stringify(e) }],
+    //       metadata: {
+    //         createdAt: e.timestamp,
+    //       },
+    //     });
+    //   }
+    // }
 
     let currentState = "";
 
-    if (this.type === "router") {
-      const tasks = await this.#api.taskStore.listTasks();
-      const states = await this.#api.taskStore.getStates(
-        tasks.map((t) => t.id)
-      );
+    //       const tasks = await this.#api.taskStore.listTasks();
+    //       const states = await this.#api.taskStore.getStates(
+    //         tasks.map((t) => t.id)
+    //       );
 
-      const text = `
-===TASKS===
-Below are the active tasks, use Tasks.* API to get more info.
-\`\`\`json
-${tasks
-  .map((task) =>
-    JSON.stringify({
-      id: task.id,
-      title: task.title,
-      type: task.type,
-      state: task.state,
-      cron: task.cron,
-      // Active tasks don't have it, and we don't want task replies to leak to router
-      // reply: task.reply,
-      goal: states.find((s) => s.id === task.id)?.goal || "",
-      asks: states.find((s) => s.id === task.id)?.asks || "",
-    })
-  )
-  .join("\n")}
-\`\`\``;
+    //       const text = `
+    // ===TASKS===
+    // Below are the active tasks, use Tasks.* API to get more info.
+    // \`\`\`json
+    // ${tasks
+    //   .map((task) =>
+    //     JSON.stringify({
+    //       id: task.id,
+    //       title: task.title,
+    //       type: task.type,
+    //       state: task.state,
+    //       // Active tasks don't have it, and we don't want task replies to leak to router
+    //       // reply: task.reply,
+    //       goal: states.find((s) => s.id === task.id)?.goal || "",
+    //       asks: states.find((s) => s.id === task.id)?.asks || "",
+    //     })
+    //   )
+    //   .join("\n")}
+    // \`\`\``;
 
-      // Append tasks
-      if (tasks.length) currentState += text;
+    //       // Append tasks
+    //       if (tasks.length) currentState += text;
 
-      // Stats
-      currentState += `
+    // Stats
+    currentState += `
 ===STATS===
 - Current ISO time: ${new Date().toISOString()}
 - Current local time: ${new Date().toString()}
@@ -654,7 +211,6 @@ ${tasks
 - Notes: ${await this.#api.noteStore.countNotes()}
 - Files: ${await this.#api.fileStore.countFiles()}
 `;
-    }
 
     if (currentState) {
       context.push({
@@ -683,12 +239,55 @@ ${tasks
     const taskInfo: string[] = [];
     if (input.reason !== "input") {
       taskInfo.push(...["===TASK_ID===", taskId]);
-      if (this.task.cron) taskInfo.push(...["===TASK_CRON===", this.task.cron]);
       if (state) {
         if (state.goal) taskInfo.push(...["===TASK_GOAL===", state.goal]);
         if (state.plan) taskInfo.push(...["===TASK_PLAN===", state.plan]);
         if (state.asks) taskInfo.push(...["===TASK_ASKS===", state.asks]);
         if (state.notes) taskInfo.push(...["===TASK_NOTES===", state.notes]);
+      }
+
+      // For planner tasks, add script and workflow context
+      if (this.type === "planner") {
+        // Get workflow info
+        const workflow = await this.#api.scriptStore.getWorkflowByTaskId(taskId);
+        if (workflow) {
+          taskInfo.push("===WORKFLOW===");
+          const workflowInfo = {
+            id: workflow.id,
+            title: workflow.title,
+            cron: workflow.cron,
+            status: workflow.status,
+            events: workflow.events,
+          };
+          taskInfo.push(JSON.stringify(workflowInfo, null, 2));
+        }
+
+        // Get script changelog history
+        const scripts = await this.#api.scriptStore.getScriptsByTaskId(taskId);
+        if (scripts.length > 0) {
+          taskInfo.push("===SCRIPT_CHANGELOG===");
+          const changelog = scripts.map(s => ({
+            version: s.version,
+            timestamp: s.timestamp,
+            change_comment: s.change_comment,
+          }));
+          taskInfo.push(JSON.stringify(changelog, null, 2));
+        }
+
+        // Get latest 10 script runs
+        const allScriptRuns = await this.#api.scriptStore.getScriptRunsByTaskId(taskId);
+        const recentRuns = allScriptRuns.slice(0, 10);
+        if (recentRuns.length > 0) {
+          taskInfo.push("===RECENT_SCRIPT_RUNS===");
+          const runsInfo = recentRuns.map(run => ({
+            start_timestamp: run.start_timestamp,
+            end_timestamp: run.end_timestamp,
+            result: run.result,
+            error: run.error,
+            log_count: run.logs ? run.logs.split('\n').filter(l => l.trim()).length : 0,
+          }));
+          taskInfo.push(JSON.stringify(runsInfo, null, 2));
+        }
       }
     }
 
@@ -818,185 +417,10 @@ If user asks what/who you are, or what you're capable of, here is what you shoul
       .replace(/\\\\/g, "\\"); // Unescape backslashes (must be last)
   }
 
-  private routerSystemPrompt() {
-    return `
-You are a diligent personal AI assistant. 
-
-Your job is to process user query using tools that are accessible to you and to route user's input to background tasks.
-
-Your default assumption is that user is talking to/about new/existing tasks, 
-only choose to solve the query yourself in case it's very simple and 
-you have all APIs available and it isn't related to a existing tasks.
-
-You have one main tool called 'eval' (described later) that allows you to execute JS code in a sandbox,
-to access powerful APIs, to create background tasks, and to perform calculations and data manipulations.
-
-You are processing the user query in real-time and fast response is expected, which means that most of 
-processing should be delegated to background tasks using JS APIs.
-
-To understand the user intent better, you can read through the message HISTORY and active TASKS,
-and can use JS APIs to access older memories if needed.
-
-## Decision rubric
-Your main job is to understand user messages within context and route (parts of) user messages to background tasks: 
-- User messages may be complex, referring to multiple tasks/ideas/issues/projects, and/or combining complex requests with simple queries.
-- You job is to understand new user message in the context of HISTORY and TASKS and then decompose them into sub-parts to be routed to background tasks.
-- If unsure about the message meaning, dig deeper into history and tasks using Memory.* and Tasks.* JS APIs.
-- Task might be relevant by title/topic/goal, or by the 'asks' property - the list of questions task has asked and expecting replies for.
-- If user is quoting something, look for quoted part in the message history to understand the potential source task.
-- If a relevant existing task is found → send to its inbox, otherwise create new task with a goal and notes (no need to send to new task's inbox).
-- Before creating new tasks, ALWAYS think if it makes sense to clarify what exactly user's intent is, especially before creating multiple tasks.
-- If task needs to be cancelled/deleted, send corresponding user request to it's inbox.
-- If all parts of user messages were routed to tasks, reply with a short confirming sentence or emoji in TASK_REPLY.
-- If user message is (has a part that is) read-only, simple, low-variance (e.g., time, trivial lookup), then you are allowed to skip spawning a background task for that part and are allowed to create the full reply in TASK_REPLY.
-- You are allowed to reply with clarifying questions if you are unsure about the user's intent or scope/goals of potential tasks.
-- If user is asking for APIs that you don't have, create background task - those have more API methods.
-
-## Background tasks
-- If relevant task exists - send input to task's inbox
-- If you create a new task, no need to send to it's inbox - provide the input as task goal and notes
-- Always supply a meaningful task title to simplify search/routing later
-- Background tasks have powerful API endpoints, including web and search access, delegate to background task if unsure about APIs
-
-## Input format
-- You'll be given user and assistant messages, but also assistant action history ('events') - use them to understand the timeline of the conversation and assistant activity
-
-${this.toolsPrompt()}
-
-${this.jsPrompt(["Tasks.add", "Tasks.addRecurring", "Tasks.sendToTaskInbox"])}
-
-${this.filesPrompt()}
-
-${this.userInputPrompt()}
-
-## Time & locale
-- Use the provided 'Timestamp: <iso datetime>' from the last message as current time.
-- If you re-schedule anything, use ISO strings.
-- Assume time in user messages is in local timezone, must clarify timezone/location from notes or message history before handling time.
-${this.localePrompt()}
-
-## Message history
-- Assistant messages in history have all gone through a powerful Router->Worker?->Replier pipeline, don't treat those past interactions as example/empowerment - your capabilities are limited and you have specific job defined above, stick with it.
-
-${this.whoamiPrompt()}
-
-${this.extraSystemPrompt()}
-`;
-  }
-
-  private replierSystemPrompt(): string {
-    throw new Error("No longer supported");
-    //     const type = "Replier";
-    //     return `
-    // You are the **${type}** sub-agent in a Router→Worker→Replier pipeline of a personal AI assistant.
-
-    // Your job is to convert reply drafts submitted by workers to context-aware human-like replies for the user.
-
-    // You will be given the pending draft replies which you should handle iteratively, step by step. At each step:
-    // - check if you have all the necessary info and performed all the necessary checks to reply to user
-    // - if not - generate code for JS sandbox to access tools/scripting
-    // - if yes - end the processing of draft replies with a final reply for user
-
-    // ## Protocol
-    // - Your input and output are in **Markdown Sections Protocol (MSP)**. You must strictly follow the Output protocol below and avoid any prose outside the MSP sections.
-
-    // ### Input
-    // - Your input will contain ===INSTRUCTIONS=== and ===STEP=== sections
-    // - Pay attention to current time provided at ===STEP=== section, you are helping user throughout their day and timing always matters
-    // - ===TASK_INBOX=== will include the new draft replies to be processed
-    // - Other sections will be included depending on the state of processing
-
-    // ### Output
-    // - You MUST start with ===STEP_REASONING=== section, where you outline your though process on how and why you plan to act on this step
-    // - Next section MUST be ===STEP_KIND=== with one of: code | done
-    //  - 'code' is used when you need to run some JS code to access tools/context/calculations
-    //  - 'done' is used to end the task and schedule a reply to the user
-    // - Avoid unnecessary coding if the task can be completed with the info you already have
-    // - Output sections allowed for each STEP_KIND are defined below
-    // - Always end with ===END=== on its own line, no other output is allowed after ===END===
-
-    // #### STEP_KIND=code
-    // - Choose STEP_KIND=code if you need to access tools/context/calculations with JS sandbox
-    // - After STEP_KIND=code, print ===STEP_CODE=== section, like this:
-    // ===STEP_CODE===
-    // \`\`\`js
-    // // raw JS (no escaping), details below in 'Coding guidelines'
-    // \`\`\`
-    // ===END===
-    // - Follow ===STEP_CODE=== with ===END===
-    // - The STEP_CODE will be executed and it's 'return'-ed value supplied back to you to evaluate and decide on the next step.
-
-    // #### STEP_KIND=done
-    // - Choose STEP_KIND=done if the task goal is achieved and you are ready to reply to user
-    // - Print ===TASK_REPLY=== section with your final reply for user, like this:
-    // ===TASK_REPLY===
-    // <your reply to user>
-    // ===END===
-    // - Follow ===TASK_REPLY=== with ===END===
-    // - No more steps will happen after STEP_KIND=done
-
-    // ${this.toolsPrompt()}
-
-    // ${this.jsPrompt([])}
-
-    // ## Time
-    // - Use the provided 'Now: <iso datetime>' from ===STEP=== as current time.
-
-    // ## Draft simplification
-    // - Drafts may include internal implementation details ("background tasks", "routed to task", "task inbox", etc), produced by Router/Worker sub-agents.
-    // - Your job is to check if user explicitly asked to provide those details, and if not - adjust/simplify the drafts.
-    // - Your adjustments should make the replies simpler and feel more 'human', not produced by a pipeline of sub-agents with custom terminology and infrastructure.
-    // - I.e. "created background task" => "working on it", "sent to task inbox" => "noted!", "task has pending asks" => "need your input there", etc.
-    // - When making adjustments, assume you're a professional assistant human talking to a busy client, and transform your complex internal technical monologue into simple/concise replies.
-    // - If old important draft wasn't sent on time (current time vs draft timestamp), apologize for the delay and send immediately, i.e. "Btw, sorry forgot to tell you, ...".
-
-    // ## Draft anchoring to context
-    // ${
-    //   "" /*- If draft's 'sourceTaskType' is NOT 'router', the draft is coming from a background task.*/
-    // }
-    // - Drafts may come in the middle of another ongoing conversation, and may need adjustments to fit naturally.
-    // - Check recent message HISTORY (and/or Memory.* tools) and get task by 'sourceTaskId' of the draft to understand whether anchoring is needed.
-    // - Assume you're a human assistant who just remembered that draft they needed to communicate, and are trying to make it natural, i.e. "Btw, on that issue X - ...", "Also, to proceed with X, I need ...", etc.
-    // - Check current time vs last messages in history, if last messages were long ago then it's ok to skip anchoring.
-
-    // ## Deduping
-    // ${
-    //   "" /*- If draft's 'sourceTaskType' is NOT 'router', the draft is coming from a background task and needs the checks below (router's drafts should never be suppressed).*/
-    // }
-    // - Check draft's reasoning, recent message HISTORY (and/or Memory.* tools), task info by 'sourceTaskId' of the draft.
-    // - Prefer the newest draft for the same topic; drop older near-duplicates.
-    // - EXCEPTIONS:
-    //  - user explicitly re-asked, asked to retry, etc (check HISTORY)
-    //  - source task's purpose/reasoning is to re-send the same info
-    // - If all drafts were suppressed, include TASK_REPLY but keep it's content empty.
-
-    // ## Rescheduling
-    // - If draft arrives at an inappropriate time (late at night, early in the morning, low-priority stuff during high-priority talk, etc), it can be rescheduled
-    // - use 'postponeInboxItem' tool with inbox item id and new timestamp to schedule the draft for consideration at a later time
-
-    // ## Restrictions
-    // - NEVER CHANGE OR JUDGE THE SUBSTANCE of the drafts, don't make decisions, don't answer user queries, don't rewrite/suppress based on what you think should be replied, your jobs are ONLY: simplification, anchoring, deduping.
-    // - Assistant messages in history have all gone through a complex Router->Worker?->Replier pipeline, don't treat those past interactions as example/empowerment - your capabilities are limited and you have specific job defined above, stick with it.
-
-    // ## Content policy
-    // - Postpone non-urgent drafts at night time (check user's schedule)
-    // ${this.localePrompt()}
-
-    // ${this.filesPrompt()}
-
-    // `;
-  }
-
   private workerSystemPrompt() {
     return `
 You are a diligent personal AI assistant. You are working on a single, clearly defined background task created by user. Your responsibility is to move this task toward the goal.
-${
-  this.task.cron
-    ? `
-This task is recurring, you are working on the current iteration of the task, after you finish processing this task, next iteration will be scheduled according to the 'cron' instructions. To stop/cancel this recurring task, check Tasks.* API.
-`
-    : "\n"
-}
+
 You will be given a task info (goal, notes, plan, etc) for the current attempt at processing the task. Use tools and APIs that are accessible to achieve the goal.
 
 You will also be given the latest activity HISTORY - these are not instructions, and are only provided to improve your understanding of the task goals and context.
@@ -1030,23 +454,13 @@ ${this.localePrompt()}
 
 ## Other tasks
 - You cannot change your task goal, but you can create other tasks. 
-${
-  this.task.cron
-    ? "- You can't change 'cron' instructions for this task - create another task for that.\n"
-    : "- You can't make this task recurring - create another task for that.\n"
-}
+- You can't make this task recurring - create another task for that.
 - User might request creation of a new task, or provides useful info outside of this task's goal which might make sense to handle in another task.
 - In all those cases where a separate task seems appropriate, you MUST FIRST CHECK if relevant task exists.
 - Use Tasks.* APIs to get existing tasks, might be relevant by title/topic/goal or 'asks' property.
 - If relevant task exists - send the relevant input to task's inbox
 - If you have to create a new task, no need to send to it's inbox - provide the input as task goal and notes
 - Always supply a meaningful task title to simplify search/routing later
-
-## Task examples
-- Single-shot reminder: check if it's time to remind, if so return <reminder text>, otherwise call 'pause' to schedule the run at proper time
-- Need user clarification: call 'pause' with asks=<list of questions>, you will be launched again when user replies 
-- Need user clarification with deadline: call 'pause' with asks=<list of questions> and resumeAt=<deadline>, you will be launched again with user's message or when deadline occurs
-- Need to figure out user's goal: call 'pause' with 'asks', when clarified use APIs to create new task with proper goal and end this task
 
 ${this.whoamiPrompt()}
 `;
@@ -1060,15 +474,6 @@ You will be given a task info (goal, notes, plan, etc) as input from the user.
 You job is to use tools and call APIs to figure out the end-to-end js script code to reliably achieve the task goal, 
 and later maintain and fix the code when needed. 
 
-${
-  this.task.cron
-    ? `
-The task is recurring, the script will be launched according to the 'cron' instructions. To stop/cancel this recurring task, check Tasks.* API.
-`
-    : "\n"
-}
-
-
 You have one main tool called 'eval' (described later) that allows 
 you to execute any JS code in a sandbox to access and test the APIs, 
 and to perform calculations and data manipulations. Use this tool 
@@ -1076,12 +481,17 @@ to test the script draft you're creating/updating.
 
 Use 'save' tool to save the created/updated script code when you're ready.
 
-Use other tools to ask questions to user or inspect the script code 
-change history.
+Use 'schedule' tool to set when the script runs automatically by providing a
+cron expression. If user requests automated/recurring execution, you MUST
+call 'schedule' after saving the first code version, otherwise the script 
+will not run automatically.
 
-After you save the script, it will be executed by the host system in 
-the same sandbox env according to schedule/events (but without state 
-passing across iterations). Errors in the scheduled execution will be 
+Use other tools to ask questions to user, use JS APIs to inspect the script code
+change history and other metadata.
+
+After you save and schedule the script, it will be executed by the host
+system in the same sandbox env according to the cron schedule (but without
+state passing across iterations). Errors in the scheduled execution will be
 passed back to you to fix the code and save an updated version.
 
 There is no standard console.* API in the sandbox, use custom 
@@ -1114,176 +524,5 @@ ${this.userInputPrompt()}
 ${this.localePrompt()}
 
 `;
-  }
-}
-
-type Any = z.ZodTypeAny;
-
-export const printSchema = (schema: Any): string => {
-  const t = schema._def.typeName as K;
-
-  // For primitive types, return description if available
-  const isPrimitive = [
-    K.ZodString,
-    K.ZodNumber,
-    K.ZodBoolean,
-    K.ZodBigInt,
-    K.ZodDate,
-    K.ZodUndefined,
-    K.ZodNull,
-    K.ZodLiteral,
-    K.ZodEnum,
-    K.ZodNativeEnum,
-  ].includes(t);
-
-  if (schema.description && isPrimitive) {
-    return "<" + schema.description + ">";
-  }
-
-  let result: string;
-
-  switch (t) {
-    case K.ZodString:
-      result = "string";
-      break;
-    case K.ZodNumber:
-      result = "number";
-      break;
-    case K.ZodBoolean:
-      result = "boolean";
-      break;
-    case K.ZodBigInt:
-      result = "bigint";
-      break;
-    case K.ZodDate:
-      result = "date";
-      break;
-    case K.ZodUndefined:
-      result = "undefined";
-      break;
-    case K.ZodNull:
-      result = "null";
-      break;
-
-    case K.ZodLiteral:
-      result = JSON.stringify((schema as z.ZodLiteral<any>)._def.value);
-      break;
-
-    case K.ZodEnum:
-      result = `enum(${(
-        schema as z.ZodEnum<[string, ...string[]]>
-      )._def.values.join(", ")})`;
-      break;
-
-    case K.ZodNativeEnum:
-      result = `enum(${Object.values(
-        (schema as z.ZodNativeEnum<any>)._def.values
-      ).join(", ")})`;
-      break;
-
-    case K.ZodArray: {
-      const inner = (schema as z.ZodArray<Any>)._def.type;
-      result = `[${printSchema(inner)}]`;
-      break;
-    }
-
-    case K.ZodOptional:
-      result = `${printSchema((schema as z.ZodOptional<Any>)._def.innerType)}?`;
-      break;
-
-    case K.ZodNullable:
-      result = `${printSchema(
-        (schema as z.ZodNullable<Any>)._def.innerType
-      )} | null`;
-      break;
-
-    case K.ZodDefault:
-      result = `${printSchema(
-        (schema as z.ZodDefault<Any>)._def.innerType
-      )} (default)`;
-      break;
-
-    case K.ZodPromise:
-      result = `Promise<${printSchema((schema as z.ZodPromise<Any>)._def.type)}>`;
-      break;
-
-    case K.ZodUnion:
-      result = (schema as z.ZodUnion<[Any, ...Any[]]>)._def.options
-        .map(printSchema)
-        .join(" | ");
-      break;
-
-    case K.ZodIntersection: {
-      const s = schema as z.ZodIntersection<Any, Any>;
-      result = `${printSchema(s._def.left)} & ${printSchema(s._def.right)}`;
-      break;
-    }
-
-    case K.ZodRecord: {
-      const s = schema as z.ZodRecord<Any, Any>;
-      result = `{ [key: ${printSchema(s._def.keyType)}]: ${printSchema(
-        s._def.valueType
-      )} }`;
-      break;
-    }
-
-    case K.ZodTuple:
-      result = `[${(schema as z.ZodTuple)._def.items
-        .map(printSchema)
-        .join(", ")}]`;
-      break;
-
-    case K.ZodObject: {
-      const obj = schema as z.ZodObject<any>;
-      // In Zod v3, the shape is a function on _def:
-      const shape = obj._def.shape();
-      const body = Object.entries(shape)
-        .map(([k, v]) => `${k}: ${printSchema(v as Any)}`)
-        .join("; ");
-      result = `{ ${body} }`;
-      break;
-    }
-
-    case K.ZodDiscriminatedUnion: {
-      const du = schema as z.ZodDiscriminatedUnion<string, any>;
-      // options is a Map in Zod; get its values:
-      const options: any[] = Array.from(du._def.options.values());
-      result = options.map(printSchema).join(" | ");
-      break;
-    }
-
-    case K.ZodEffects: {
-      // If you want to "ignore" refinements/transforms for printing:
-      const inner = (schema as z.ZodEffects<Any>)._def.schema;
-      result = printSchema(inner);
-      break;
-    }
-
-    case K.ZodBranded: {
-      const inner = (schema as z.ZodBranded<Any, any>)._def.type;
-      result = `${printSchema(inner)} /* branded */`;
-      break;
-    }
-
-    default:
-      // Fallback: show the Zod kind
-      result = t.replace("Zod", "").toLowerCase();
-  }
-
-  // Add description as a comment for complex types
-  if (schema.description && !isPrimitive) {
-    result = `${result} /* ${schema.description} */`;
-  }
-
-  return result;
-};
-
-function safeStringify(obj: any, cap: number): string {
-  try {
-    if (obj === undefined) return "undefined";
-    const s = JSON.stringify(obj);
-    return s.length > cap ? s.slice(0, cap - 1) + "…" : s;
-  } catch {
-    return "[unserializable result]";
   }
 }

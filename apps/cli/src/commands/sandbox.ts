@@ -8,7 +8,7 @@ import {
 import type { Sandbox } from "@app/agent";
 import * as readline from "readline";
 import debug from "debug";
-import { initSandbox, ReplEnv } from "@app/agent";
+import { initSandbox, SandboxAPI } from "@app/agent";
 import { KeepDb, KeepDbApi } from "@app/db";
 
 const debugSandbox = debug("cli:sandbox");
@@ -16,7 +16,7 @@ const debugSandbox = debug("cli:sandbox");
 export function registerSandboxCommand(program: Command): void {
   program
     .command("sandbox")
-    .argument("<type>", "Task type: router | worker | replier")
+    .argument("<type>", "Task type: worker | planner")
     .description("Evaluate JavaScript code using the embedded sandbox runtime")
     .action(async (type) => {
       await runSandboxCommand(type);
@@ -51,7 +51,7 @@ async function runSandboxCommand(type: string): Promise<void> {
   // Create store instances
   const api = new KeepDbApi(keepDB);
 
-  if (type !== "router" && type !== "worker" && type !== "replier")
+  if (type !== "worker" && type !== "planner")
     throw new Error("Invalid type");
   const taskType = type;
 
@@ -64,14 +64,15 @@ async function runSandboxCommand(type: string): Promise<void> {
       type: taskType,
       taskRunId: "",
       createEvent: async (type, content, tx) => {},
+      onLog: async (line:string) => {},
     };
 
-    const env = new ReplEnv(api, taskType, "", () => sandbox!.context!, userPath);
-    const gl = await env.createGlobal();
+    const sandboxApi = new SandboxAPI({ api, getContext: () => sandbox!.context!, type: taskType });
+    const gl = await sandboxApi.createGlobal();
     console.log("global", gl);
     sandbox.setGlobal(gl);
 
-    debugSandbox("Sandbox initialized, tools: ", env.tools);
+    debugSandbox("Sandbox initialized, tools: ", sandboxApi.tools);
 
     let state: any | undefined;
     for await (const line of rl) {

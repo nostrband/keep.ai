@@ -50,4 +50,12 @@ export const qk = {
   latestScript: (taskId: string) => [{ scope: "latestScript", taskId }] as const,
   scriptRuns: (scriptId: string) => [{ scope: "scriptRuns", scriptId }] as const,
   scriptRun: (runId: string) => [{ scope: "scriptRun", runId }] as const,
+  
+  // Workflow-related queries
+  allWorkflows: () => [{ scope: "allWorkflows" }] as const,
+  workflow: (workflowId: string) => [{ scope: "workflow", workflowId }] as const,
+  workflowByTaskId: (taskId: string) => [{ scope: "workflowByTaskId", taskId }] as const,
+  workflowScripts: (workflowId: string) => [{ scope: "workflowScripts", workflowId }] as const,
+  workflowScriptRuns: (workflowId: string) => [{ scope: "workflowScriptRuns", workflowId }] as const,
+  latestWorkflowScript: (workflowId: string) => [{ scope: "latestWorkflowScript", workflowId }] as const,
 };

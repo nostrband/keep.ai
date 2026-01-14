@@ -1,16 +1,20 @@
 import { CRSqliteDB } from "./database";
+import { DBInterface } from "./interfaces";
+
+export type TaskType = "worker" | "planner";
 
 export interface Task {
   id: string;
   timestamp: number;
-  task: string;
+  // task: string;
   reply: string;
+  error: string;
   state: string;
   thread_id: string;
-  error: string;
   type: string;
   title: string;
-  cron: string;
+  // cron: string;
+  chat_id: string;
 }
 
 export interface TaskState {
@@ -27,7 +31,7 @@ export interface TaskRun {
   type: string;
   start_timestamp: string;
   thread_id: string;
-  reason: string; // start | input | timer
+  reason: string; // "input" only left
   inbox: string;
   model: string;
   input_goal: string;
@@ -92,23 +96,26 @@ export class TaskStore {
   }
 
   // Set a new task - fails if task for this timestamp already exists for this user
-  async addTask(
-    id: string,
-    timestamp: number,
-    task: string,
-    type: string = "",
-    thread_id: string = "",
-    title: string = "",
-    cron: string = ""
-  ): Promise<string> {
+  async addTask(task: Task, tx?: DBInterface): Promise<string> {
     // Insert new task
-    await this.db.db.exec(
-      `INSERT INTO tasks (id, timestamp, task, reply, state, thread_id, error, type, title, cron)
-          VALUES (?, ?, ?, '', '', ?, '', ?, ?, ?)`,
-      [id, timestamp, task, thread_id, type, title, cron]
+    const db = tx || this.db.db;
+    await db.exec(
+      `INSERT INTO tasks (id, timestamp, reply, state, thread_id, error, type, title, chat_id)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        task.id,
+        task.timestamp,
+        task.reply,
+        task.state,
+        task.thread_id,
+        task.error,
+        task.type,
+        task.title,
+        task.chat_id,
+      ]
     );
 
-    return id;
+    return task.id;
   }
 
   // List tasks - returns up to 100 most recent tasks
@@ -117,7 +124,7 @@ export class TaskStore {
     type?: string,
     until?: number
   ): Promise<Task[]> {
-    let sql = `SELECT id, timestamp, task, reply, state, thread_id, error, type, title, cron
+    let sql = `SELECT id, timestamp, reply, state, thread_id, error, type, title, chat_id
                FROM tasks`;
     const args: (string | number)[] = [];
 
@@ -160,14 +167,13 @@ export class TaskStore {
     return results.map((row) => ({
       id: row.id as string,
       timestamp: row.timestamp as number,
-      task: row.task as string,
       reply: row.reply as string,
       state: row.state as string,
       thread_id: row.thread_id as string,
       error: row.error as string,
       type: (row.type as string) || "",
       title: (row.title as string) || "",
-      cron: (row.cron as string) || "",
+      chat_id: (row.chat_id as string) || "",
     }));
   }
 
@@ -183,43 +189,42 @@ export class TaskStore {
     // We'll assume the operation succeeded if no error was thrown
   }
 
-  // Get task with oldest timestamp with reply '' for this user that is ready to trigger (timestamp <= now)
-  // Prioritizes tasks with 'message' type over other types
-  async getTodoTasks(): Promise<Task[]> {
-    const currentTimeSeconds = Math.floor(Date.now() / 1000); // Convert milliseconds to seconds
+  // // Get task with oldest timestamp with reply '' for this user that is ready to trigger (timestamp <= now)
+  // // Prioritizes tasks with 'message' type over other types
+  // async getTodoTasks(): Promise<Task[]> {
+  //   const currentTimeSeconds = Math.floor(Date.now() / 1000); // Convert milliseconds to seconds
 
-    // Fetch all pending tasks (no LIMIT 1)
-    const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, timestamp, task, reply, state, thread_id, error, type, title, cron
-          FROM tasks
-          WHERE (state = '' OR state = 'wait') AND timestamp <= ? AND (deleted IS NULL OR deleted = FALSE)
-          ORDER BY timestamp ASC`,
-      [currentTimeSeconds]
-    );
+  //   // Fetch all pending tasks (no LIMIT 1)
+  //   const results = await this.db.db.execO<Record<string, unknown>>(
+  //     `SELECT id, timestamp, reply, state, thread_id, error, type, title, chat_id
+  //         FROM tasks
+  //         WHERE (state = '' OR state = 'wait') AND timestamp <= ? AND (deleted IS NULL OR deleted = FALSE)
+  //         ORDER BY timestamp ASC`,
+  //     [currentTimeSeconds]
+  //   );
 
-    if (!results) return [];
+  //   if (!results) return [];
 
-    // Convert results to Task objects
-    const tasks: Task[] = results.map((row) => ({
-      id: row.id as string,
-      timestamp: row.timestamp as number,
-      task: row.task as string,
-      reply: row.reply as string,
-      state: row.state as string,
-      thread_id: row.thread_id as string,
-      error: row.error as string,
-      type: (row.type as string) || "",
-      title: (row.title as string) || "",
-      cron: (row.cron as string) || "",
-    }));
+  //   // Convert results to Task objects
+  //   const tasks: Task[] = results.map((row) => ({
+  //     id: row.id as string,
+  //     timestamp: row.timestamp as number,
+  //     reply: row.reply as string,
+  //     state: row.state as string,
+  //     thread_id: row.thread_id as string,
+  //     error: row.error as string,
+  //     type: (row.type as string) || "",
+  //     title: (row.title as string) || "",
+  //     chat_id: (row.chat_id as string) || "",
+  //   }));
 
-    return tasks;
-  }
+  //   return tasks;
+  // }
 
   // Get task by id
   async getTask(id: string): Promise<Task> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, timestamp, task, reply, state, thread_id, error, type, title, cron
+      `SELECT id, timestamp, reply, state, thread_id, error, type, title, chat_id
           FROM tasks
           WHERE id = ? AND (deleted IS NULL OR deleted = FALSE)`,
       [id]
@@ -233,14 +238,41 @@ export class TaskStore {
     return {
       id: row.id as string,
       timestamp: row.timestamp as number,
-      task: row.task as string,
       reply: row.reply as string,
       state: row.state as string,
       thread_id: row.thread_id as string,
       error: row.error as string,
       type: (row.type as string) || "",
       title: (row.title as string) || "",
-      cron: (row.cron as string) || "",
+      chat_id: (row.chat_id as string) || "",
+    };
+  }
+
+
+  // Get task by chat_id
+  async getTaskByChatId(chatId: string): Promise<Task | null> {
+    const results = await this.db.db.execO<Record<string, unknown>>(
+      `SELECT id, timestamp, reply, state, thread_id, error, type, title, chat_id
+          FROM tasks
+          WHERE chat_id = ? AND (deleted IS NULL OR deleted = FALSE)`,
+      [chatId]
+    );
+
+    if (!results || results.length === 0) {
+      return null;
+    }
+
+    const row = results[0];
+    return {
+      id: row.id as string,
+      timestamp: row.timestamp as number,
+      reply: row.reply as string,
+      state: row.state as string,
+      thread_id: row.thread_id as string,
+      error: row.error as string,
+      type: (row.type as string) || "",
+      title: (row.title as string) || "",
+      chat_id: (row.chat_id as string) || "",
     };
   }
 
@@ -251,9 +283,9 @@ export class TaskStore {
     }
 
     // Create placeholders for the IN clause (?, ?, ?, ...)
-    const placeholders = ids.map(() => '?').join(', ');
-    
-    const sql = `SELECT id, timestamp, task, reply, state, thread_id, error, type, title, cron
+    const placeholders = ids.map(() => "?").join(", ");
+
+    const sql = `SELECT id, timestamp, reply, state, thread_id, error, type, title, chat_id
                  FROM tasks
                  WHERE id IN (${placeholders}) AND (deleted IS NULL OR deleted = FALSE)
                  ORDER BY timestamp DESC`;
@@ -265,14 +297,13 @@ export class TaskStore {
     return results.map((row) => ({
       id: row.id as string,
       timestamp: row.timestamp as number,
-      task: row.task as string,
       reply: row.reply as string,
       state: row.state as string,
       thread_id: row.thread_id as string,
       error: row.error as string,
       type: (row.type as string) || "",
       title: (row.title as string) || "",
-      cron: (row.cron as string) || "",
+      chat_id: (row.chat_id as string) || "",
     }));
   }
 
@@ -310,18 +341,17 @@ export class TaskStore {
     // Update the task with all provided values
     await this.db.db.exec(
       `UPDATE tasks
-          SET timestamp = ?, task = ?, reply = ?, state = ?, thread_id = ?, error = ?, type = ?, title = ?, cron = ?
+          SET timestamp = ?, reply = ?, state = ?, thread_id = ?, error = ?, type = ?, title = ?, chat_id = ?
           WHERE id = ? AND (deleted IS NULL OR deleted = FALSE)`,
       [
         task.timestamp,
-        task.task,
         task.reply,
         task.state,
         task.thread_id,
         task.error,
         task.type,
         task.title,
-        task.cron,
+        task.chat_id,
         task.id,
       ]
     );
@@ -330,29 +360,29 @@ export class TaskStore {
     // We'll assume the operation succeeded if no error was thrown
   }
 
-  // Check if there's a cron task of a specific type
-  async hasCronTaskOfType(taskType: string): Promise<boolean> {
-    const results = await this.db.db.execO<{ count: number }>(
-      `SELECT COUNT(*) as count
-          FROM tasks
-          WHERE type = ? AND cron != '' AND (deleted IS NULL OR deleted = FALSE)`,
-      [taskType]
-    );
+  // // Check if there's a cron task of a specific type
+  // async hasCronTaskOfType(taskType: string): Promise<boolean> {
+  //   const results = await this.db.db.execO<{ count: number }>(
+  //     `SELECT COUNT(*) as count
+  //         FROM tasks
+  //         WHERE type = ? AND cron != '' AND (deleted IS NULL OR deleted = FALSE)`,
+  //     [taskType]
+  //   );
 
-    const count = results?.[0]?.count || 0;
-    return count > 0;
-  }
+  //   const count = results?.[0]?.count || 0;
+  //   return count > 0;
+  // }
 
   // Get the next midnight timestamp in local time
   // FIXME: This assumes the server's timezone is the user's local timezone.
   // In a multi-user system, this should be configurable per user or use a specific timezone.
-  getNextMidnightTimestamp(): number {
-    const now = new Date();
-    const tomorrow = new Date(now);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    tomorrow.setHours(0, 1, 0, 0); // 00:01 to make sure "today" means today
-    return Math.floor(tomorrow.getTime() / 1000);
-  }
+  // getNextMidnightTimestamp(): number {
+  //   const now = new Date();
+  //   const tomorrow = new Date(now);
+  //   tomorrow.setDate(tomorrow.getDate() + 1);
+  //   tomorrow.setHours(0, 1, 0, 0); // 00:01 to make sure "today" means today
+  //   return Math.floor(tomorrow.getTime() / 1000);
+  // }
 
   // Save task state - overwrites by id if it exists
   async saveState(taskState: TaskState): Promise<void> {
@@ -399,8 +429,8 @@ export class TaskStore {
     }
 
     // Create placeholders for the IN clause (?, ?, ?, ...)
-    const placeholders = ids.map(() => '?').join(', ');
-    
+    const placeholders = ids.map(() => "?").join(", ");
+
     const sql = `SELECT id, goal, notes, plan, asks
                  FROM task_states
                  WHERE id IN (${placeholders})`;
@@ -484,21 +514,19 @@ export class TaskStore {
     );
   }
 
-
   // Finish a task run by updating it with end data
-  async errorTaskRun(id: string, end_timestamp: string, error: string): Promise<void> {
+  async errorTaskRun(
+    id: string,
+    end_timestamp: string,
+    error: string
+  ): Promise<void> {
     await this.db.db.exec(
       `UPDATE task_runs SET
         end_timestamp = ?,
         state = ?,
         error = ?
       WHERE id = ?`,
-      [
-        end_timestamp,
-        'error',
-        error,
-        id,
-      ]
+      [end_timestamp, "error", error, id]
     );
   }
 

@@ -31,7 +31,6 @@ export function makeListEventsTool(chatStore: ChatStore, taskStore: TaskStore) {
             title: task.title,
             type: task.type,
             state: task.state,
-            cron: task.cron,
             reply: task.reply,
             goal: state?.goal || "",
             asks: state?.asks || "",

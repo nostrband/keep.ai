@@ -3,7 +3,6 @@ import { StepInput, StepOutput, AgentTask, TaskState } from "./agent-types";
 import {
   convertToModelMessages,
   generateId,
-  generateText,
   LanguageModel,
   ModelMessage,
   readUIMessageStream,
@@ -16,9 +15,9 @@ import { AgentEnv } from "./agent-env";
 import { APICallError, LanguageModelV2Usage } from "@ai-sdk/provider";
 import { makeEvalTool } from "./ai-tools/eval";
 import { makeFinishTool } from "./ai-tools/finish";
-import { makePauseTool } from "./ai-tools/pause";
 import { makeAskTool } from "./ai-tools/ask";
 import { makeSaveTool } from "./ai-tools/save";
+import { makeScheduleTool } from "./ai-tools/schedule";
 
 export const ERROR_BAD_REQUEST = "BAD_REQUEST";
 export const ERROR_PAYMENT_REQUIRED = "PAYMENT_REQUIRED";
@@ -60,10 +59,9 @@ export class Agent {
   }
 
   async loop(
-    reason?: "start" | "input" | "timer",
+    inbox: string[],
     opts?: {
       history?: AssistantUIMessage[];
-      inbox?: string[];
       jsState?: any;
       getLogs?: () => string;
       onStep?: (
@@ -74,6 +72,8 @@ export class Agent {
       ) => Promise<{ proceed: boolean; inbox?: string[] }>;
     }
   ) {
+    if (!inbox.length) throw new Error("Empty inbox for agent");
+
     // Prepare context
     if (opts?.history) this.history.push(...opts.history);
 
@@ -83,9 +83,9 @@ export class Agent {
     // Initial input
     const input: StepInput = {
       step: 0,
-      reason: reason || "start",
+      reason: "input",
       now: new Date().toISOString(),
-      inbox: [...(opts?.inbox || [])],
+      inbox: [...inbox],
     };
 
     // Context
@@ -163,71 +163,54 @@ export class Agent {
         getLogs: opts?.getLogs || (() => ""),
       }),
     };
+    tools.finish = makeFinishTool({
+      onFinish: (info) => {
+        // Stop the loop
+        stopped = true;
 
-    if (this.task.type === "worker") {
-      tools.finish = makeFinishTool({
-        onFinish: (info) => {
-          // Stop the loop
-          stopped = true;
-
-          // 'done' output
-          output = {
-            kind: "done",
-            reply: info.reply || "",
-            steps: input.step + 1,
+        // 'done' output
+        output = {
+          kind: "done",
+          reply: info.reply || "",
+          steps: input.step + 1,
+        };
+        if (info.notes || info.plan) {
+          output.patch = {
+            notes: info.notes,
+            plan: info.plan,
           };
-          if (info.notes || info.plan) {
-            output.patch = {
-              notes: info.notes,
-              plan: info.plan,
-            };
-          }
-        },
-      });
-      tools.pause = makePauseTool({
-        onPause: (info) => {
-          // Stop the loop
-          stopped = true;
+        }
+      },
+    });
+    tools.ask = makeAskTool({
+      onAsk: (info) => {
+        if (!info.asks) throw new Error("Asks not provided");
 
-          // 'wait' output
-          output = {
-            kind: "wait",
-            steps: input.step + 1,
-          };
-          if (info.notes || info.plan || info.asks) {
-            output.patch = {
-              notes: info.notes,
-              plan: info.plan,
-              asks: info.asks,
-            };
-          }
-        },
-      });
-    } else if (this.task.type === "planner") {
-      tools.ask = makeAskTool({
-        onAsk: (info) => {
-          // Stop the loop
-          stopped = true;
+        // Stop the loop
+        stopped = true;
 
-          // 'wait' output
-          output = {
-            kind: "wait",
-            steps: input.step + 1,
-          };
-          if (info.asks) {
-            output.patch = {
-              asks: info.asks,
-            };
-          }
-        },
-      });
-      tools.save = makeSaveTool({
-        taskId: this.task.id,
-        taskRunId: this.taskRunId,
-        scriptStore: this.env.api.scriptStore,
-        chatStore: this.env.api.chatStore,
-      });
-    }
+        // 'wait' output
+        output = {
+          kind: "wait",
+          steps: input.step + 1,
+          patch: {
+            notes: info.notes,
+            plan: info.plan,
+            asks: info.asks,
+          },
+        };
+      },
+    });
+    tools.save = makeSaveTool({
+      taskId: this.task.id,
+      taskRunId: this.taskRunId,
+      scriptStore: this.env.api.scriptStore,
+      chatStore: this.env.api.chatStore,
+    });
+    tools.schedule = makeScheduleTool({
+      taskId: this.task.id,
+      scriptStore: this.env.api.scriptStore,
+    });
 
     try {
       // Call LLM

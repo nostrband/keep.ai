@@ -106,3 +106,89 @@ export function useScriptRun(runId: string) {
     enabled: !!api && !!runId,
   });
 }
+
+export function useWorkflows() {
+  const { api } = useDbQuery();
+  return useQuery({
+    queryKey: qk.allWorkflows(),
+    queryFn: async () => {
+      if (!api) return [];
+      const workflows = await api.scriptStore.listWorkflows();
+      return workflows;
+    },
+    meta: { tables: ["workflows"] },
+    enabled: !!api,
+  });
+}
+
+export function useWorkflow(workflowId: string) {
+  const { api } = useDbQuery();
+  return useQuery({
+    queryKey: qk.workflow(workflowId),
+    queryFn: async () => {
+      if (!api) return null;
+      try {
+        const workflow = await api.scriptStore.getWorkflow(workflowId);
+        return workflow;
+      } catch (error) {
+        return null;
+      }
+    },
+    meta: { tables: ["workflows"] },
+    enabled: !!api && !!workflowId,
+  });
+}
+
+export function useWorkflowByTaskId(taskId: string) {
+  const { api } = useDbQuery();
+  return useQuery({
+    queryKey: qk.workflowByTaskId(taskId),
+    queryFn: async () => {
+      if (!api) return null;
+      try {
+        const workflow = await api.scriptStore.getWorkflowByTaskId(taskId);
+        return workflow;
+      } catch (error) {
+        return null;
+      }
+    },
+    meta: { tables: ["workflows"] },
+    enabled: !!api && !!taskId,
+  });
+}
+
+export function useLatestScriptByWorkflowId(workflowId: string) {
+  const { api } = useDbQuery();
+  return useQuery({
+    queryKey: qk.latestWorkflowScript(workflowId),
+    queryFn: async () => {
+      if (!api) return null;
+      try {
+        const script = await api.scriptStore.getLatestScriptByWorkflowId(workflowId);
+        return script;
+      } catch (error) {
+        return null;
+      }
+    },
+    meta: { tables: ["scripts"] },
+    enabled: !!api && !!workflowId,
+  });
+}
+
+export function useScriptRunsByWorkflowId(workflowId: string) {
+  const { api } = useDbQuery();
+  return useQuery({
+    queryKey: qk.workflowScriptRuns(workflowId),
+    queryFn: async () => {
+      if (!api) return [];
+      try {
+        const runs = await api.scriptStore.getScriptRunsByWorkflowId(workflowId);
+        return runs;
+      } catch (error) {
+        return [];
+      }
+    },
+    meta: { tables: ["script_runs"] },
+    enabled: !!api && !!workflowId,
+  });
+}

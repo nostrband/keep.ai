@@ -2,7 +2,7 @@ import { Command } from "commander";
 import { createDBNode, getCurrentUser, getDBPath, getUserPath } from "@app/node";
 import debug from "debug";
 import { KeepDb, KeepDbApi } from "@app/db";
-import { TaskWorker } from "packages/agent/dist";
+import { TaskScheduler, WorkflowScheduler } from "@app/agent";
 
 const debugWorker = debug("cli:worker");
 
@@ -67,28 +67,36 @@ async function runWorkerCommand(): Promise<void> {
     // Create store instances
     const api = new KeepDbApi(keepDB);
 
-    // Create KeepWorker
-    const worker = new TaskWorker({
+    // Create TaskScheduler
+    const scheduler = new TaskScheduler({
       api,
       stepLimit: 20,
       userPath
     });
 
-    // Start worker
-    worker.start();
-    console.log("🤖 Keep AI Worker started successfully!");
-    console.log("Worker is now running and processing tasks...");
-    console.log("Press Ctrl+C to stop the worker.");
-    debugWorker("Worker started");
+    // Create WorkflowScheduler
+    const workflowScheduler = new WorkflowScheduler({
+      api,
+      userPath
+    });
+
+    // Start schedulers
+    scheduler.start();
+    workflowScheduler.start();
+    console.log("🤖 Keep AI Schedulers started successfully!");
+    console.log("Task and Workflow schedulers are now running...");
+    console.log("Press Ctrl+C to stop the schedulers.");
+    debugWorker("Schedulers started");
 
     // Handle graceful shutdown
     const shutdown = async () => {
-      console.log("\n🛑 Shutting down worker...");
+      console.log("\n🛑 Shutting down schedulers...");
       try {
-        await worker.close();
+        await scheduler.close();
+        await workflowScheduler.close();
         await dbInterface.close();
-        console.log("✅ Worker stopped gracefully");
-        debugWorker("Worker shutdown completed");
+        console.log("✅ Schedulers stopped gracefully");
+        debugWorker("Schedulers shutdown completed");
         process.exit(0);
       } catch (error) {
         console.error("❌ Error during shutdown:", error);
@@ -104,8 +112,8 @@ async function runWorkerCommand(): Promise<void> {
     // Keep the process alive
     await new Promise(() => {}); // This will run indefinitely until interrupted
   } catch (error) {
-    console.error("❌ Failed to start worker:", error);
-    debugWorker("Failed to start worker:", error);
+    console.error("❌ Failed to start scheduler:", error);
+    debugWorker("Failed to start scheduler:", error);
     process.exit(1);
   }
 }

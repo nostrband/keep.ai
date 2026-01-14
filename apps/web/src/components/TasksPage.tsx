@@ -49,20 +49,14 @@ export default function TasksPage() {
                   <div className="flex-1">
                     <div className="flex items-center gap-2 mb-2">
                       <h3 className="font-medium text-gray-900">
-                        {task.title || (task.type === 'router' ? 'Router' : task.type === 'replier' ? 'Replier' : task.type === 'planner' ? 'Planner' : `Task ${task.id.slice(0, 8)}`)}
+                        {task.title || (task.type === 'planner' ? 'Planner' : `Task ${task.id.slice(0, 8)}`)}
                       </h3>
                       {getStatusBadge(task)}
                     </div>
-                    <p className="text-sm text-gray-600 mb-2 line-clamp-2">
-                      {task.task}
-                    </p>
                     <div className="flex items-center gap-4 text-xs text-gray-500">
                       <span>
                         Scheduled: {task.timestamp > 0 ? new Date(task.timestamp * 1000).toLocaleString() : "Not scheduled"}
                       </span>
-                      {task.cron && (
-                        <span>Cron: {task.cron}</span>
-                      )}
                     </div>
                   </div>
                 </div>

@@ -1,0 +1,263 @@
+import { generateId } from "ai";
+import { initSandbox, Sandbox } from "./sandbox/sandbox";
+import debug from "debug";
+import { KeepDbApi, Workflow, Script } from "@app/db";
+import { SandboxAPI } from "./sandbox/api";
+import { fileUtils } from "@app/node";
+import { ERROR_BAD_REQUEST, ERROR_PAYMENT_REQUIRED } from "./agent";
+import { WorkflowSignalHandler } from "./workflow-worker-signal";
+
+export interface WorkflowWorkerConfig {
+  api: KeepDbApi;
+  userPath?: string; // path to user files directory
+  gmailOAuth2Client?: any; // Gmail OAuth2 client
+  onSignal?: WorkflowSignalHandler; // Callback for scheduling signals
+}
+
+/**
+ * WorkflowWorker executes individual workflows by running their associated scripts.
+ * Use WorkflowScheduler for automatic workflow scheduling and retry management.
+ */
+export class WorkflowWorker {
+  private api: KeepDbApi;
+  private userPath?: string;
+  public readonly gmailOAuth2Client?: any;
+  private onSignal?: WorkflowSignalHandler;
+
+  private debug = debug("agent:WorkflowWorker");
+
+  constructor(config: WorkflowWorkerConfig) {
+    this.api = config.api;
+    this.userPath = config.userPath;
+    this.gmailOAuth2Client = config.gmailOAuth2Client;
+    this.onSignal = config.onSignal;
+    this.debug("Constructed");
+  }
+
+  /**
+   * Execute a single workflow by running its associated script.
+   * This is the main entry point for workflow execution.
+   */
+  public async executeWorkflow(workflow: Workflow): Promise<void> {
+    this.debug("Execute workflow", workflow);
+
+    try {
+      // Find scripts by workflow_id
+      const scripts = await this.api.scriptStore.getScriptsByWorkflowId(workflow.id);
+      
+      if (scripts.length === 0) {
+        this.debug("No scripts found for workflow", workflow.id);
+        throw new Error(`No scripts found for workflow ${workflow.id}`);
+      }
+
+      if (scripts.length > 1) {
+        this.debug(`Warning: Multiple scripts (${scripts.length}) found for workflow ${workflow.id}, using latest version`);
+      }
+
+      // Use the latest script (first one, since getScriptsByWorkflowId orders by version DESC)
+      const script = scripts[0];
+
+      await this.processWorkflowScript(workflow, script);
+    } catch (error) {
+      this.debug("Workflow handling error:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Emit a signal to the scheduler (if callback is provided)
+   */
+  private emitSignal(signal: Parameters<WorkflowSignalHandler>[0]): void {
+    if (this.onSignal) {
+      try {
+        this.onSignal(signal);
+      } catch (error) {
+        this.debug("Error in signal handler:", error);
+      }
+    }
+  }
+
+  private async processWorkflowScript(
+    workflow: Workflow,
+    script: Script
+  ) {
+    const scriptRunId = generateId();
+    this.debug(
+      "Running script run",
+      scriptRunId,
+      "script",
+      script.id,
+      "workflow",
+      workflow.id
+    );
+
+    await this.api.scriptStore.startScriptRun(
+      scriptRunId,
+      script.id,
+      new Date().toISOString(),
+      workflow.id,
+      "workflow"
+    );
+
+    // Initialize logs array for this script run
+    const logs: string[] = [];
+
+    try {
+      // JS sandbox with proper 'context' object
+      const sandbox = await this.createSandbox(
+        workflow,
+        scriptRunId,
+        logs
+      );
+
+      // Inits JS API in the sandbox
+      await this.createEnv(workflow, sandbox);
+
+      // Run the code
+      const result = await sandbox.eval(script.code, {
+        timeoutMs: 300000,
+      });
+
+      if (result.ok) {
+        this.debug("Script result", result.result);
+      } else {
+        this.debug("Script error", result.error);
+        throw new Error(result.error);
+      }
+
+      // Workflow script finished ok
+      await this.api.scriptStore.finishScriptRun(
+        scriptRunId,
+        new Date().toISOString(),
+        JSON.stringify(result.result) || "",
+        "",
+        logs.join("\n")
+      );
+
+      // Update workflow timestamp to mark last successful run
+      await this.api.scriptStore.updateWorkflow({
+        ...workflow,
+        timestamp: new Date().toISOString(),
+      });
+
+      // Signal success to scheduler
+      this.emitSignal({
+        type: "done",
+        workflowId: workflow.id,
+        timestamp: Date.now(),
+      });
+    } catch (error: any) {
+      const errorMessage =
+        error instanceof Error ? error.message : (error as string);
+
+      try {
+        await this.api.scriptStore.finishScriptRun(
+          scriptRunId,
+          new Date().toISOString(),
+          "",
+          errorMessage,
+          logs.join("\n")
+        );
+      } catch (e) {
+        this.debug("finishScriptRun error", e);
+      }
+
+      // Handle different error types
+      if (error === ERROR_BAD_REQUEST) {
+        this.debug("BAD_REQUEST: will not retry the workflow", workflow.id);
+
+        // Mark workflow as error status
+        try {
+          await this.api.scriptStore.updateWorkflow({
+            ...workflow,
+            status: "error",
+          });
+        } catch (e) {
+          this.debug("updateWorkflow error", e);
+        }
+
+        // Signal success (no retry) to scheduler
+        this.emitSignal({
+          type: "done",
+          workflowId: workflow.id,
+          timestamp: Date.now(),
+        });
+      } else if (error === ERROR_PAYMENT_REQUIRED) {
+        this.debug("PAYMENT_REQUIRED: Sending global pause signal");
+
+        // Signal global pause to scheduler
+        this.emitSignal({
+          type: "payment_required",
+          workflowId: workflow.id,
+          timestamp: Date.now(),
+          error: errorMessage,
+        });
+      } else {
+        // Regular error - signal retry to scheduler
+        this.emitSignal({
+          type: "retry",
+          workflowId: workflow.id,
+          timestamp: Date.now(),
+          error: errorMessage,
+        });
+      }
+
+      // Re-throw to let caller know about the error
+      throw error;
+    }
+  }
+
+  private async createEnv(workflow: Workflow, sandbox: Sandbox) {
+    // Create SandboxAPI directly without needing AgentEnv or dummy task
+    const sandboxAPI = new SandboxAPI({
+      api: this.api,
+      type: "workflow",
+      getContext: () => sandbox.context!,
+      userPath: this.userPath,
+      gmailOAuth2Client: this.gmailOAuth2Client,
+    });
+    
+    sandbox.setGlobal(await sandboxAPI.createGlobal());
+
+    return sandboxAPI;
+  }
+
+  private async createSandbox(
+    workflow: Workflow,
+    scriptRunId: string,
+    logs: string[]
+  ) {
+    // Sandbox
+    const sandbox = await initSandbox();
+
+    // Init context
+    sandbox.context = {
+      step: 0,
+      taskId: workflow.task_id || workflow.id,
+      taskRunId: undefined, // No task run for workflows
+      scriptRunId,
+      type: "workflow",
+      taskThreadId: "", // Workflows don't have threads
+      createEvent: async (type: string, content: any, tx?: any) => {
+        // set workflow fields
+        content.workflow_id = workflow.id;
+        content.script_run_id = scriptRunId;
+        // Send to main chat for now
+        await this.api.chatStore.saveChatEvent(
+          generateId(),
+          "main",
+          type,
+          content,
+          tx
+        );
+      },
+      onLog: async (line: string) => {
+        if (logs) {
+          logs.push(line);
+        }
+      },
+    };
+
+    return sandbox;
+  }
+}

@@ -24,6 +24,13 @@ export function makeSaveTool(opts: {
         opts.taskId
       );
       const version = script ? script.version + 1 : 1;
+      
+      // Get workflow by task_id to link the script
+      const workflow = await opts.scriptStore.getWorkflowByTaskId(opts.taskId);
+      if (!workflow) {
+        throw new Error(`Workflow not found for task ${opts.taskId}`);
+      }
+      
       const newScript: Script = {
         id: generateId(),
         code: info.code,
@@ -31,6 +38,8 @@ export function makeSaveTool(opts: {
         task_id: opts.taskId,
         timestamp: new Date().toISOString(),
         version,
+        workflow_id: workflow.id,
+        type: "",
       };
       await opts.scriptStore.addScript(newScript);
 

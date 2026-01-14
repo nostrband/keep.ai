@@ -7,6 +7,8 @@ import {
 } from "react-router-dom";
 import { useState } from "react";
 import ChatPage from "./components/ChatPage";
+import NewPage from "./components/NewPage";
+import ChatDetailPage from "./components/ChatDetailPage";
 import ThreadsPage from "./components/ThreadsPage";
 import ThreadDetailPage from "./components/ThreadDetailPage";
 import TasksPage from "./components/TasksPage";
@@ -15,6 +17,8 @@ import TaskRunDetailPage from "./components/TaskRunDetailPage";
 import ScriptsPage from "./components/ScriptsPage";
 import ScriptDetailPage from "./components/ScriptDetailPage";
 import ScriptRunDetailPage from "./components/ScriptRunDetailPage";
+import WorkflowsPage from "./components/WorkflowsPage";
+import WorkflowDetailPage from "./components/WorkflowDetailPage";
 import NotesPage from "./components/NotesPage";
 import NoteDetailPage from "./components/NoteDetailPage";
 import FilesPage from "./components/FilesPage";
@@ -203,8 +207,12 @@ function App() {
     <Router>
       <Routes>
         <Route path="/" element={<ChatPage />} />
+        <Route path="/new" element={<NewPage />} />
+        <Route path="/chats/:id" element={<ChatDetailPage />} />
         <Route path="/threads" element={<ThreadsPage />} />
         <Route path="/threads/:id" element={<ThreadDetailPage />} />
+        <Route path="/workflows" element={<WorkflowsPage />} />
+        <Route path="/workflows/:id" element={<WorkflowDetailPage />} />
         <Route path="/tasks" element={<TasksPage />} />
         <Route path="/tasks/:id" element={<TaskDetailPage />} />
         <Route path="/tasks/:id/run/:runId" element={<TaskRunDetailPage />} />

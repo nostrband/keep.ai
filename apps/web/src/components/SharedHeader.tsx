@@ -124,6 +124,13 @@ export default function SharedHeader({ title, subtitle }: SharedHeaderProps) {
                     Assistant
                   </Link>
                   <Link
+                    to="/workflows"
+                    className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                    onClick={() => setIsOpen(false)}
+                  >
+                    Workflows
+                  </Link>
+                  <Link
                     to="/tasks"
                     className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
                     onClick={() => setIsOpen(false)}

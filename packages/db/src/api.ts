@@ -3,13 +3,13 @@ import { ChatStore } from "./chat-store";
 import { KeepDb } from "./database";
 import { MemoryStore, Thread } from "./memory-store";
 import { NoteStore } from "./note-store";
-import { TaskStore } from "./task-store";
+import { Task, TaskStore, TaskType } from "./task-store";
 import { bytesToHex } from "@noble/ciphers/utils";
 import { randomBytes } from "@noble/ciphers/crypto";
 import { NostrPeerStore } from "./nostr-peer-store";
 import { InboxItem, InboxStore } from "./inbox-store";
 import { File, FileStore } from "./file-store";
-import { ScriptStore } from "./script-store";
+import { ScriptStore, Workflow } from "./script-store";
 
 export const MAX_STATUS_TTL = 60 * 1000; // 1 minute in milliseconds
 
@@ -37,7 +37,7 @@ export class KeepDbApi {
   }
 
   async addMessage(input: {
-    threadId: string;
+    chatId: string;
     content: string;
     role?: "user" | "assistant"; // default = user
     files?: File[]; // array of file paths
@@ -45,29 +45,17 @@ export class KeepDbApi {
     return await this.db.db.tx(async (tx) => {
       const now = new Date();
       const role = input.role || "user";
-      const chatId = input.threadId; // Reuse threadId as chatId
+      const chatId = input.chatId;
 
-      // First ensure the thread exists
-      const existingThread = await this.memoryStore.getThread(
-        input.threadId,
-        tx
-      );
-      if (!existingThread) {
-        const newThread: Thread = {
-          id: input.threadId,
-          title: input.threadId,
-          created_at: now,
-          updated_at: now,
-          metadata: {},
-        };
-        await this.memoryStore.saveThread(newThread, tx);
-      }
+      // Get taskId by chatId
+      const task = await this.taskStore.getTaskByChatId(chatId, tx);
+      const taskId = task?.id || "";
 
       // Create the message in AssistantUIMessage format
-      const parts: AssistantUIMessage['parts'] = [
-        { type: "text", text: input.content }
+      const parts: AssistantUIMessage["parts"] = [
+        { type: "text", text: input.content },
       ];
-      
+
       // Add file parts if files are provided
       if (input.files && input.files.length > 0) {
         for (const file of input.files) {
@@ -85,13 +73,12 @@ export class KeepDbApi {
         role,
         parts,
         metadata: {
-          threadId: input.threadId,
+          threadId: chatId,
           createdAt: now.toISOString(),
         },
       };
 
-      // Save the message to both tables
-      await this.memoryStore.saveMessages([message], tx);
+      // Save the message to chat
       await this.chatStore.saveChatMessages(chatId, [message], tx);
 
       // Ensure Chat object exists with threadId reused as chatId
@@ -104,20 +91,15 @@ export class KeepDbApi {
         await this.chatStore.createChat({ chatId, message }, tx);
       }
 
-      // Create task for agent to process the user message
+      // Send to task inbox
       if (role === "user") {
         const inboxItem: InboxItem = {
           id: message.id,
           source: "user",
           source_id: message.id,
-          target: "router",
-          target_id: "",
-          // FIXME Since we added 'postponing' to inbox,
-          // worker started delaying tasks due to clock drift
-          // across devices. We should add created_at timestamp
-          // to track when item was created, and use timestamp
-          // for postponing
-          timestamp: "", // for now, make it empty to ensure worker starts immediately
+          target: chatId === "main" ? "worker" : "planner",
+          target_id: taskId,
+          timestamp: now.toISOString(),
           content: JSON.stringify(message),
           handler_thread_id: "",
           handler_timestamp: "",
@@ -187,5 +169,105 @@ export class KeepDbApi {
     }
 
     return row.value;
+  }
+
+  async createTask(input: {
+    content: string;
+    files?: File[];
+    title?: string;
+  }): Promise<{ chatId: string; taskId: string }> {
+    return await this.db.db.tx(async (tx) => {
+      const now = new Date();
+      const timestamp = Math.floor(now.getTime() / 1000); // Convert to seconds
+
+      // Generate ids
+      const taskId = bytesToHex(randomBytes(16));
+      const workflowId = bytesToHex(randomBytes(16));
+      const chatId = bytesToHex(randomBytes(16));
+
+      // Create the message in AssistantUIMessage format
+      const parts: AssistantUIMessage["parts"] = [
+        { type: "text", text: input.content },
+      ];
+
+      // Add file parts if files are provided
+      if (input.files && input.files.length > 0) {
+        for (const file of input.files) {
+          parts.push({
+            type: "file",
+            url: file.path,
+            mediaType: file.media_type,
+            filename: file.name,
+          });
+        }
+      }
+
+      const message: AssistantUIMessage = {
+        id: bytesToHex(randomBytes(16)),
+        role: "user",
+        parts,
+        metadata: {
+          threadId: chatId,
+          createdAt: now.toISOString(),
+        },
+      };
+
+      // Create the chat with the first message
+      await this.chatStore.createChat({ chatId, message }, tx);
+
+      // Save the message to the chat
+      await this.chatStore.saveChatMessages(chatId, [message], tx);
+
+      // Task
+      const task: Task = {
+        id: taskId,
+        timestamp,
+        reply: "",
+        state: "",
+        thread_id: "",
+        error: "",
+        type: "planner",
+        title: input.title || "",
+        chat_id: chatId,
+      };
+
+      // Create new task with type=planner and chat_id=chatId
+      await this.taskStore.addTask(
+        task,
+        tx // pass transaction
+      );
+
+      const workflow: Workflow = {
+        id: workflowId,
+        cron: "",
+        events: "",
+        status: "",
+        task_id: taskId,
+        timestamp: now.toISOString(),
+        title: task.title,
+      };
+
+      // Create the matching workflow
+      await this.scriptStore.addWorkflow(
+        workflow,
+        tx // pass transaction
+      );
+
+      // Send message to the new task's inbox
+      const inboxItem: InboxItem = {
+        id: message.id,
+        source: "user",
+        source_id: message.id,
+        target: task.type as TaskType,
+        target_id: task.id,
+        timestamp: now.toISOString(),
+        content: JSON.stringify(message),
+        handler_thread_id: "",
+        handler_timestamp: "",
+      };
+      await this.inboxStore.saveInbox(inboxItem, tx);
+
+      return { chatId, taskId };
+    });
   }
 }

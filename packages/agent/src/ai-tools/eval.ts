@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { tool } from "ai";
 import { EvalResult, Sandbox } from "../sandbox/sandbox";
-import { TaskType } from "../agent-types";
+import { TaskType } from "@app/db";
 
 export function makeEvalTool(opts: {
   sandbox: Sandbox;

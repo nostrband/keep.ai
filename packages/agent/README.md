@@ -301,7 +301,6 @@ interface StepOutput {
   code?: string;
   reply?: string;
   reasoning?: string;
-  resumeAt?: string;
   patch?: Partial<TaskState>;
 }
 ```

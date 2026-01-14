@@ -1,13 +1,9 @@
 import { Command } from "commander";
-import { initSandbox, ReplEnv } from "@app/agent";
+import { initSandbox, ReplEnv, SandboxAPI } from "@app/agent";
 import type { Sandbox } from "@app/agent";
 import * as readline from "readline";
 import debug from "debug";
-import {
-  getOpenRouter,
-  ReplAgent,
-  Task,
-} from "@app/agent";
+import { getOpenRouter, ReplAgent, Task } from "@app/agent";
 import { z, ZodFirstPartyTypeKind as K } from "zod";
 import { createDBNode, getCurrentUser, getDBPath } from "@app/node";
 import { KeepDb, KeepDbApi } from "@app/db";
@@ -166,15 +162,33 @@ async function runAgentCommand(modelName: string): Promise<void> {
       step: 0,
       taskId: "",
       taskThreadId: "",
-      type: "router",
+      type: "worker",
+      createEvent: async () => {},
+      onLog: async () => {},
     };
 
-    const env = new ReplEnv(api, "router", () => sandbox!.context!);
-    const sandboxGlobal = await env.createGlobal();
+    const sandboxApi = new SandboxAPI({
+      api,
+      getContext: () => sandbox!.context!,
+      type: "worker",
+    });
+    const sandboxGlobal = await sandboxApi.createGlobal();
     sandbox.setGlobal(sandboxGlobal);
-
     console.log("global", sandboxGlobal);
-    console.log("tools", env.tools);
+    console.log("tools", sandboxApi.tools);
+
+    const task = {
+      id: "",
+      type: "worker" as const,
+      timestamp: 0,
+      reply: "",
+      state: "",
+      thread_id: "",
+      error: "",
+      title: "",
+      chat_id: "",
+    };
+    const env = new ReplEnv(api, "worker", task, sandboxApi.tools);
 
     // const test = await sandbox.eval("return docs('tools.getWeatherAsync')\n");
     // console.log("test", test);
@@ -188,16 +202,15 @@ async function runAgentCommand(modelName: string): Promise<void> {
         continue;
       }
 
-      const task: Task = {
+      const agentTask = {
         id: bytesToHex(randomBytes(8)),
-        type: "router",
+        type: "worker" as const,
+        state: { id: "", goal: "", notes: "", plan: "", asks: "" },
       };
-      const agent = new ReplAgent(model, env, sandbox, task);
+      const agent = new ReplAgent(model, env, sandbox, agentTask, "");
 
       try {
-        const reply = await agent.loop("start", {
-          inbox: [source],
-        });
+        const reply = await agent.loop([source]);
         console.log("reply", reply);
       } catch (error) {
         encounteredError = true;

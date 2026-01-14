@@ -18,9 +18,6 @@ export { setEnv, getEnv, setEnvFromProcess, type Env } from "./env";
 // Model configuration
 export { getOpenRouter, getModelName, DEFAULT_AGENT_MODEL } from "./model";
 
-// Utilities
-export { getWeekDay, createPlannerTaskPrompt, getMessageText } from "./utils";
-
 // Interfaces
 // export { type Memory } from "./interfaces";
 
@@ -38,7 +35,37 @@ export {
   type TaskWorkerConfig as ReplWorkerConfig,
 } from "./task-worker";
 
+export {
+  TaskScheduler,
+  type TaskSchedulerConfig,
+} from "./task-scheduler";
+
+export {
+  type TaskExecutionSignal,
+  type TaskSignalHandler,
+  type TaskRetryState,
+} from "./task-worker-signal";
+
+// Workflow scheduling
+export {
+  WorkflowScheduler,
+  type WorkflowSchedulerConfig,
+} from "./workflow-scheduler";
+
+export {
+  WorkflowWorker,
+  type WorkflowWorkerConfig,
+} from "./workflow-worker";
+
+export {
+  type WorkflowExecutionSignal,
+  type WorkflowSignalHandler,
+  type WorkflowRetryState,
+} from "./workflow-worker-signal";
+
 export { initSandbox } from "./sandbox/sandbox";
+
+export { SandboxAPI } from "./sandbox/api";
 
 export { AgentEnv as ReplEnv } from "./agent-env";
 

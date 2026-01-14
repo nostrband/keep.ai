@@ -6,8 +6,7 @@ import {
   QuickJSWASMModule,
   shouldInterruptAfterDeadline,
 } from "quickjs-emscripten";
-import { TaskType } from "../agent-types";
-import { DBInterface } from "packages/db/dist";
+import { DBInterface, TaskType } from "packages/db/dist";
 
 export interface EvalGlobal {
   memory: any,
@@ -45,7 +44,7 @@ export async function initSandbox(
 export interface EvalContext {
   taskThreadId: string;
   step: number;
-  type: TaskType;
+  type: TaskType | "workflow";
   taskId: string;
   taskRunId?: string;
   scriptRunId?: string;

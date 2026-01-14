@@ -13,26 +13,21 @@ export function makeAddTaskRecurringTool(
       title: string;
       goal?: string;
       notes?: string;
-      cron: string;
     }) => {
       if (!opts.title) throw new Error("Required 'title'");
-      if (!opts.cron) throw new Error("Required 'cron'");
-
-      // const nextRunDate = new Cron(opts.cron).nextRun();
-      // if (!nextRunDate) throw new Error("Invalid cron schedule");
-      // const timestamp = Math.floor(nextRunDate.getTime() / 1000);
       const id = generateId();
-      await taskStore.addTask(
+      await taskStore.addTask({
         id,
-        // Run planner immediately, next run will be scheduled
-        // after planner finishes
-        Math.floor(Date.now() / 1000),
-        "",
-        "planner",
-        "",
-        opts.title,
-        opts.cron
-      );
+        timestamp: Math.floor(Date.now() / 1000), // Run planner immediately, next run will be scheduled after planner finishes
+        reply: "",
+        state: "",
+        thread_id: "",
+        error: "",
+        type: "planner",
+        title: opts.title,
+        // cron: opts.cron,
+        chat_id: "",
+      });
       await taskStore.saveState({
         id,
         goal: opts.goal || "",
@@ -44,13 +39,12 @@ export function makeAddTaskRecurringTool(
       await getContext().createEvent("add_task_cron", {
         id,
         title: opts.title,
-        cron: opts.cron
       });
 
       return id;
     },
     description:
-      "You MUST check for existing tasks before creating new one! Creates a recurring background task using cron schedule. You don't have to call sendToTaskInbox after creating the task.",
+      "You MUST check for existing tasks before creating new one! Creates a recurring background task. You don't have to call sendToTaskInbox after creating the task.",
     inputSchema: z.object({
       title: z.string().describe("Task title for task management and audit"),
       goal: z
@@ -63,11 +57,6 @@ export function makeAddTaskRecurringTool(
         .optional()
         .nullable()
         .describe("Task notes for planner agent"),
-      cron: z
-        .string()
-        .describe(
-          "Cron expression for recurring task schedule (e.g., '0 9 * * MON' for every Monday at 9 AM)"
-        ),
     }),
     outputSchema: z.string().describe("Task id"),
   };

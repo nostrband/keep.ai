@@ -60,7 +60,6 @@ export interface AddTaskEventPayload extends BaseEventPayload {
 export interface AddTaskCronEventPayload extends BaseEventPayload {
   id: string;
   title: string;
-  cron: string;
 }
 
 export interface CancelThisTaskCronEventPayload extends BaseEventPayload {

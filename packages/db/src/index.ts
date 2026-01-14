@@ -21,7 +21,7 @@ export type { Note, NoteListItem } from "./note-store";
 
 // Task store
 export { TaskStore } from "./task-store";
-export type { Task, TaskRun, TaskRunEnd, TaskRunStart, TaskState } from "./task-store";
+export type { Task, TaskRun, TaskRunEnd, TaskRunStart, TaskState, TaskType } from "./task-store";
 
 // Nostr peer store
 export { NostrPeerStore } from "./nostr-peer-store";
@@ -37,7 +37,7 @@ export type { File } from "./file-store";
 
 // Script store
 export { ScriptStore } from "./script-store";
-export type { Script, ScriptRun } from "./script-store";
+export type { Script, ScriptRun, Workflow } from "./script-store";
 
 // Api
 export * from "./api";

@@ -19,7 +19,17 @@ export function makeAddTaskTool(
         (opts.startAt ? new Date(opts.startAt).getTime() : Date.now()) / 1000
       );
       const id = generateId();
-      await taskStore.addTask(id, timestamp, "", "worker", "", opts.title);
+      await taskStore.addTask({
+        id,
+        timestamp,
+        reply: "",
+        state: "",
+        thread_id: "",
+        error: "",
+        type: "worker",
+        title: opts.title,
+        chat_id: "",
+      });
       await taskStore.saveState({
         id,
         goal: opts.goal || "",

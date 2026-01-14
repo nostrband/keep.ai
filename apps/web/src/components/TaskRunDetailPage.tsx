@@ -37,11 +37,7 @@ export default function TaskRunDetailPage() {
         subtitle={`${
           task
             ? task.title ||
-              (task.type === "router"
-                ? "Router"
-                : task.type === "replier"
-                ? "Replier"
-                : task.type === "planner"
+              (task.type === "planner"
                 ? "Planner"
                 : `Task ${task.id.slice(0, 8)}`)
             : "Loading..."
@@ -69,11 +65,7 @@ export default function TaskRunDetailPage() {
                     className="text-lg font-semibold text-blue-600 hover:text-blue-800 underline"
                   >
                     {task.title ||
-                      (task.type === "router"
-                        ? "Router"
-                        : task.type === "replier"
-                        ? "Replier"
-                        : task.type === "planner"
+                      (task.type === "planner"
                         ? "Planner"
                         : `Task ${task.id.slice(0, 8)}`)}
                   </Link>

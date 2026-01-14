@@ -1,4 +1,3 @@
-import { generateId } from "ai";
 import { CRSqliteDB } from "./database";
 import { DBInterface } from "./interfaces";
 import { AssistantUIMessage, ChatEvent } from "@app/proto";
@@ -11,13 +10,6 @@ export class ChatStore {
 
   constructor(db: CRSqliteDB) {
     this.db = db;
-  }
-
-  // Create a new chat ID (but don't save to DB yet - only when first message is sent)
-  async createChatId(): Promise<string> {
-    const id = generateId();
-    // Don't write chats to db until first message is sent
-    return id;
   }
 
   // Save chat info when messages are sent (creates/updates chat entry)

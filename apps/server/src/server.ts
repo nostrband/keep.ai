@@ -25,7 +25,8 @@ import multipart, { MultipartFile } from "@fastify/multipart";
 import {
   setEnv,
   getEnv,
-  TaskWorker,
+  TaskScheduler,
+  WorkflowScheduler,
   Env,
   DEFAULT_AGENT_MODEL,
   setEnvFromProcess,
@@ -176,17 +177,23 @@ async function createGmailOAuth2Client(userPath: string) {
   }
 }
 
-async function createReplWorker(keepDB: KeepDb, userPath: string) {
+async function createScheduler(keepDB: KeepDb, userPath: string) {
   const gmailOAuth2Client = await createGmailOAuth2Client(userPath);
 
-  const worker = new TaskWorker({
+  const taskScheduler = new TaskScheduler({
     api: new KeepDbApi(keepDB),
     stepLimit: 20,
     userPath,
     gmailOAuth2Client,
   });
 
-  return worker;
+  const workflowScheduler = new WorkflowScheduler({
+    api: new KeepDbApi(keepDB),
+    userPath,
+    gmailOAuth2Client,
+  });
+
+  return { taskScheduler, workflowScheduler };
 }
 
 class KeyStore implements NostrSigner {
@@ -522,7 +529,7 @@ export async function createServer(config: ServerConfig = {}) {
   await nostr.start(peer.getConfig());
 
   // Performs background operations
-  const worker = await createReplWorker(keepDB, userPath);
+  const { taskScheduler, workflowScheduler } = await createScheduler(keepDB, userPath);
 
   // File transfer instances for each peer
   const fileSenders = new Map<string, FileSender>();
@@ -711,7 +718,10 @@ export async function createServer(config: ServerConfig = {}) {
       await setupFileTransfer();
     }
     if (tables.includes("tasks") || tables.includes("inbox"))
-      worker.checkWork();
+      taskScheduler.checkWork();
+
+    if (tables.includes("workflows") || tables.includes("scripts"))
+      workflowScheduler.checkWork();
 
     // Handle push notifications when messages table changes
     if (tables.includes("messages")) {
@@ -730,8 +740,9 @@ export async function createServer(config: ServerConfig = {}) {
     }
   });
 
-  // Start checking timestamped tasks
-  worker.start();
+  // Start checking tasks and workflows
+  taskScheduler.start();
+  workflowScheduler.start();
 
   // Check regularly for changes
   // FIXME call it on every mutation endpoint
@@ -883,7 +894,7 @@ export async function createServer(config: ServerConfig = {}) {
           const id = bytesToHex(randomBytes(16));
           await api.inboxStore.saveInbox({
             id,
-            source: "router",
+            source: "user",
             source_id: "",
             target: "worker",
             target_id: "",
@@ -1078,7 +1089,8 @@ export async function createServer(config: ServerConfig = {}) {
 
       const { tokens } = await oAuth2Client.getToken(code);
 
-      worker.gmailOAuth2Client?.setCredentials(tokens);
+      taskScheduler.gmailOAuth2Client?.setCredentials(tokens);
+      workflowScheduler.gmailOAuth2Client?.setCredentials(tokens);
 
       const gmailTokenPath = path.join(userPath, "gmail.json");
       await fsPromises.writeFile(

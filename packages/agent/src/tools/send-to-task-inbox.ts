@@ -19,19 +19,21 @@ export function makeSendToTaskInboxTool(
 
       const context = getContext();
       if (!context) throw new Error("No eval context");
-      if (context.type === "replier" || context.type === "planner")
-        throw new Error("Replier can't send to inbox");
+      if (context.type === "planner")
+        throw new Error("Planner can't send to inbox");
+      if (context.type === "workflow")
+        throw new Error("Workflow can't send to inbox");
 
       const id = `${context.taskThreadId}.${context.step}.${generateId()}`;
       await inboxStore.saveInbox({
         id,
-        source: context.type,
+        source: context.type as "worker", // Only workers can use this tool
         source_id: context.taskId,
         target: task.type,
         target_id: opts.id,
         timestamp: new Date().toISOString(),
         content: JSON.stringify({
-          role: context.type === "router" ? "user" : "assistant",
+          role: "assistant",
           parts: [
             {
               type: "text",

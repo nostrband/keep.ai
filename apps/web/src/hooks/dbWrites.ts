@@ -99,6 +99,75 @@ export function useUpdateTask() {
   });
 }
 
+export function usePauseTask() {
+  const { api } = useDbQuery();
+
+  return useMutation({
+    mutationFn: async (input: { taskId: string }) => {
+      if (!api) throw new Error("Task store not available");
+
+      // Get the current task first
+      const task = await api.taskStore.getTask(input.taskId);
+
+      // Update the task to paused state
+      await api.taskStore.updateTask({
+        ...task,
+        state: 'error',
+        reply: '',
+        error: 'Paused'
+      });
+
+      return task;
+    },
+    onSuccess: (_result, { taskId }) => {
+      // Invalidate task-related queries to get fresh data
+      queryClient.invalidateQueries({ queryKey: qk.task(taskId) });
+      queryClient.invalidateQueries({ queryKey: qk.allTasks(false) });
+      queryClient.invalidateQueries({ queryKey: qk.allTasks(true) });
+
+      notifyTablesChanged(["tasks"], true, api!);
+    },
+  });
+}
+
+export function useUpdateWorkflow() {
+  const { api } = useDbQuery();
+
+  return useMutation({
+    mutationFn: async (input: {
+      workflowId: string;
+      status?: string;
+      title?: string;
+      cron?: string;
+      events?: string;
+    }) => {
+      if (!api) throw new Error("Script store not available");
+
+      // Get the current workflow first
+      const workflow = await api.scriptStore.getWorkflow(input.workflowId);
+      if (!workflow) throw new Error("Workflow not found");
+
+      // Update the workflow with new values
+      await api.scriptStore.updateWorkflow({
+        ...workflow,
+        ...(input.status !== undefined && { status: input.status }),
+        ...(input.title !== undefined && { title: input.title }),
+        ...(input.cron !== undefined && { cron: input.cron }),
+        ...(input.events !== undefined && { events: input.events }),
+      });
+
+      return workflow;
+    },
+    onSuccess: (_result, { workflowId }) => {
+      // Invalidate workflow-related queries to get fresh data
+      queryClient.invalidateQueries({ queryKey: qk.workflow(workflowId) });
+      queryClient.invalidateQueries({ queryKey: qk.allWorkflows() });
+
+      notifyTablesChanged(["workflows"], true, api!);
+    },
+  });
+}
+
 export function useDeletePeer() {
   const { api } = useDbQuery();
 

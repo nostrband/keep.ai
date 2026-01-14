@@ -1,7 +1,7 @@
+import { TaskType } from "@app/db";
 import { EvalResult } from "./sandbox/sandbox";
 
-export type TaskType = "router" | "worker" | "planner" | "replier";
-export type StepReason = "start" | "code" | "input" | "timer";
+export type StepReason = "code" | "input"; // "start" | "timer";
 export type StepOutputKind = "done" | "code" | "wait";
 
 export type TaskState = {
@@ -41,7 +41,7 @@ export type StepInput = {
 export type StepOutput = { steps: number; reasoning?: string } & (
   | { kind: "done"; reply: string; patch?: TaskState }
   | { kind: "code"; code: string; patch?: TaskState }
-  | { kind: "wait"; reply?: string; resumeAt?: string; patch?: TaskState }
+  | { kind: "wait"; reply?: string; patch?: TaskState }
 );
 
 export type AgentTask = {

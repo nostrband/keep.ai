@@ -1,4 +1,4 @@
-import { generateId, StepResult } from "ai";
+import { generateId } from "ai";
 import {
   getModelName,
   getOpenRouter,
@@ -11,49 +11,36 @@ import debug from "debug";
 import {
   DBInterface,
   InboxItem,
-  InboxItemTarget,
   KeepDbApi,
-  MAX_STATUS_TTL,
-  Script,
   Task,
   TaskState,
+  TaskType,
 } from "@app/db";
-import { AgentTask, StepOutput, StepReason, TaskType } from "./agent-types";
-import { bytesToHex } from "@noble/ciphers/utils";
-import { randomBytes } from "@noble/ciphers/crypto";
+import { AgentTask, StepOutput, StepReason } from "./agent-types";
 import { AgentEnv } from "./agent-env";
-import { isValidEnv } from "./env";
-import { Cron } from "croner";
+import { SandboxAPI } from "./sandbox/api";
 import { fileUtils } from "@app/node";
 import { ERROR_BAD_REQUEST, ERROR_PAYMENT_REQUIRED } from "./agent";
+import { TaskSignalHandler } from "./task-worker-signal";
 
 export interface TaskWorkerConfig {
   api: KeepDbApi;
   stepLimit?: number; // default 50
   userPath?: string; // path to user files directory
   gmailOAuth2Client?: any; // Gmail OAuth2 client
+  onSignal?: TaskSignalHandler; // Callback for scheduling signals
 }
 
-interface TaskRetryState {
-  nextStart: number; // timestamp in milliseconds when task can be retried
-  retryCount: number; // number of retry attempts
-}
-
+/**
+ * TaskWorker executes individual tasks.
+ * Use TaskScheduler for automatic task scheduling and retry management.
+ */
 export class TaskWorker {
   private api: KeepDbApi;
   private stepLimit: number;
   private userPath?: string;
   public readonly gmailOAuth2Client?: any;
-
-  private isRunning: boolean = false;
-  private isShuttingDown: boolean = false;
-  private interval?: ReturnType<typeof setInterval>;
-
-  // Task state map for retry backoff (reset on program restart)
-  private taskRetryState: Map<string, TaskRetryState> = new Map();
-
-  // Global pause for PAYMENT_REQUIRED errors
-  private globalPauseUntil: number = 0;
+  private onSignal?: TaskSignalHandler;
 
   private debug = debug("agent:TaskWorker");
 
@@ -62,238 +49,36 @@ export class TaskWorker {
     this.stepLimit = config.stepLimit || 50;
     this.userPath = config.userPath;
     this.gmailOAuth2Client = config.gmailOAuth2Client;
+    this.onSignal = config.onSignal;
     this.debug("Constructed");
   }
 
-  async close(): Promise<void> {
-    if (!this.isRunning) return;
-    this.isShuttingDown = true;
-    if (this.interval) clearInterval(this.interval);
-  }
-
-  public start() {
-    if (this.interval) return;
-    this.interval = setInterval(() => this.checkWork(), 10000);
-
-    // check immediately
-    this.checkWork();
-  }
-
-  public async checkWork(): Promise<void> {
-    if (!isValidEnv()) {
-      this.debug("No api keys or invalid env config");
-      return;
-    }
-
-    this.debug(
-      "checkWork, running",
-      this.isRunning,
-      "shuttingDown",
-      this.isShuttingDown
-    );
-    if (this.isShuttingDown) return;
-    if (this.isRunning) return;
-    this.isRunning = true;
-    let processed = false;
-
-    try {
-      // Auto-create router and replier tasks,
-      // get task ids that have incoming mail
-      const items = await this.checkInbox();
-
-      // Any tasks?
-      processed = await this.processNextTask(items);
-    } catch (e) {
-      console.error("Error processing task", e);
-    }
-
-    // Done
-    this.isRunning = false;
-
-    // Retry immediately in case more jobs might be incoming
-    if (processed) this.checkWork();
-  }
-
-  private async checkInbox() {
-    try {
-      const items = await this.api.inboxStore.listInboxItems({
-        handled: false,
-      });
-      this.debug("Inbox items", items.length, "targets", [
-        ...new Set(items.map((i) => i.target)),
-      ]);
-
-      const ensureTask = async (type: InboxItemTarget) => {
-        const typeItems = items.filter((i) => i.target === type);
-        this.debug("Inbox items", typeItems.length, "target", type);
-        if (typeItems.length > 0) {
-          await this.ensureTask(type);
-        }
-      };
-
-      await ensureTask("router");
-      await ensureTask("replier");
-
-      return items;
-    } catch (err) {
-      this.debug("checkInbox error:", err);
-      return [];
-    }
-  }
-
-  private async processNextTask(inboxItems: InboxItem[]): Promise<boolean> {
-    let task: Task | undefined;
-    try {
-      this.debug(`checking @ ${new Date().toISOString()}`);
-
-      // Check global pause for PAYMENT_REQUIRED errors
-      if (this.globalPauseUntil > Date.now()) {
-        this.debug(
-          `Global pause active until ${new Date(
-            this.globalPauseUntil
-          ).toISOString()}`
-        );
-        return false;
-      }
-
-      // Get tasks with expired timers and with non-empty inboxes
-      const todoTasks = await this.api.taskStore.getTodoTasks();
-      if (inboxItems.find((i) => i.target === "router"))
-        todoTasks.push(
-          ...(await this.api.taskStore.listTasks(false, "router"))
-        );
-
-      // Turn off the replier
-      // if (inboxItems.find((i) => i.target === "replier"))
-      //   todoTasks.push(
-      //     ...(await this.api.taskStore.listTasks(false, "replier"))
-      //   );
-
-      const receiverIds = inboxItems
-        .map((i) => i.target_id)
-        .filter((id) => !!id);
-      const receiverTasks =
-        receiverIds.length > 0
-          ? await this.api.taskStore.getTasks(receiverIds)
-          : [];
-
-      // Dedup tasks
-      const taskMap = new Map<string, Task>();
-      todoTasks.map((t) => taskMap.set(t.id, t));
-      receiverTasks.map((t) => taskMap.set(t.id, t));
-
-      // Filter out tasks that are in retry backoff
-      const currentTime = Date.now();
-      const availableTasks = [...taskMap.values()].filter((t) => {
-        const retryState = this.taskRetryState.get(t.id);
-        if (retryState && retryState.nextStart > currentTime) {
-          this.debug(
-            `Skipping task ${t.id} in backoff until ${new Date(
-              retryState.nextStart
-            ).toISOString()}`
-          );
-          return false;
-        }
-        return true;
-      });
-
-      // Uniq tasks array, sorted by timestamp asc
-      const tasks = availableTasks.sort((a, b) => a.timestamp - b.timestamp);
-      this.debug("Pending tasks", tasks);
-
-      // Find highest-priority task:
-      // - router - top
-      task = tasks.find((t) => t.type === "router");
-      // - replier after router - next
-      if (!task)
-        task = tasks.find(
-          (t) =>
-            t.type === "replier" &&
-            inboxItems.find(
-              (i) => i.source === "router" && i.target === "replier"
-            )
-        );
-      // - planner
-      if (!task) task = tasks.find((t) => t.type === "planner");
-      // - worker
-      if (!task) task = tasks.find((t) => t.type === "worker");
-      // - replier after worker
-      if (!task) task = tasks.find((t) => t.type === "replier");
-
-      // Found anything?
-      if (task) {
-        this.debug(
-          `triggering task at ${new Date(
-            task.timestamp * 1000
-          ).toISOString()}: ${task.task}`
-        );
-
-        try {
-          await this.processTask(task);
-        } catch (error) {
-          this.debug("failed to process task:", error);
-        }
-      }
-    } catch (err) {
-      this.debug("checkTasks error:", err);
-    }
-
-    return !!task;
-  }
-
   /**
-   * Task states per type:
-   * - router/replier (isPersistentTask):
-   *  - if no task with state not in ('finished', 'error) - created
-   *  - can't return asks/wait
-   *  - when done state set to 'asks' and timestamp made current
-   * - worker single-shot:
-   *  - started when timestamp < now or if 'wait'/'asks' state and inbox is not empty
-   *  - if returns 'wait' => is asks not empty state = 'asks' else state = 'wait'
-   *  - timestamp set to resumeAt if returns 'wait'
-   * - worker recurring:
-   *  - started by same logic as single-shot
-   *  - same handling of 'wait' return status
-   *  - if returns 'done' then task state set to '' (new task) and timestamp set to cron next run
+   * Execute a single task.
+   * This is the main entry point for task execution.
    */
-  private async processTask(task: Task): Promise<void> {
-    this.debug("Process task", task);
+  public async executeTask(task: Task): Promise<void> {
+    this.debug("Execute task", task);
 
-    let statusUpdaterInterval: ReturnType<typeof setInterval> | undefined;
+    // let statusUpdaterInterval: ReturnType<typeof setInterval> | undefined;
     try {
       // Type check to cast to TaskType safely
-      if (
-        task.type !== "worker" &&
-        task.type !== "planner" &&
-        task.type !== "router" &&
-        task.type !== "replier"
-      ) {
+      if (task.type !== "worker" && task.type !== "planner") {
         this.debug("Unsupported task type", task.type);
         return this.finishTask(task, "Wrong type", "Unsupported task type");
       }
       const taskType: TaskType = task.type;
 
       const { inboxItems, inbox } = await this.getInboxItems(taskType, task.id);
-      if (taskType !== "worker" && taskType !== "planner" && !inbox.length) {
-        this.debug("Empty task inbox", task.type, task.id);
-        return this.finishTask(task, "Empty inbox", "Empty inbox");
-      }
-
+      
+      // All tasks now require non-empty inbox (agentic loop only)
       if (!inbox.length) {
         if (task.state === "finished" || task.state === "error") {
           this.debug("Task already processed with state:", task.state);
           return;
         }
-      }
-
-      // Running a script?
-      if (taskType === "planner" && !inbox.length) {
-        const script = await this.api.scriptStore.getLatestScriptByTaskId(
-          task.id
-        );
-        if (script) {
-          return await this.processTaskScript(task, taskType, script);
-        }
+        this.debug("Empty task inbox - tasks only run as agentic loops now");
+        return;
       }
 
       // =============================
@@ -304,22 +89,13 @@ export class TaskWorker {
       const lastStepLogs: string[] = [];
 
       // Set agent status in db
-      statusUpdaterInterval = await this.startStatusUpdater(taskType);
-
-      // Run reason
-      let reason: "start" | "input" | "timer" = "start";
-      if (inbox.length > 0) reason = "input";
-      else if (task.state !== "") reason = "timer";
+      // statusUpdaterInterval = await this.startStatusUpdater(taskType);
 
       // We restore existing session on 'input' reason for worker,
       // bcs that generally means user is supplying
       // a followup message/question to latest worker reply
       let history: AssistantUIMessage[] = [];
-      if (
-        (taskType === "worker" || taskType === "planner") &&
-        reason === "input" &&
-        task.thread_id
-      ) {
+      if ((taskType === "worker" || taskType === "planner") && task.thread_id) {
         // Load existing history
         // NOTE: we start a new thread but copy history from
         // old thread, to make sure our observability traces
@@ -338,7 +114,7 @@ export class TaskWorker {
       // Reuse existing thread
       task.thread_id = task.thread_id || generateId();
       // Placeholder, FIXME add title?
-      await this.ensureThread(task.thread_id, taskType);
+      await this.ensureThread(task, taskType);
 
       // Get task state
       const state = await this.getTaskState(task);
@@ -356,20 +132,19 @@ export class TaskWorker {
       const modelName = getModelName();
 
       // Start the run
-      const { taskRunId, runStartTime } = await this.createTaskRun(
+      const { taskRunId, runStartTime } = await this.createTaskRun({
         agentTask,
-        task.thread_id,
+        threadId: task.thread_id,
+        chatId: task.chat_id,
         modelName,
-        reason,
-        inbox
-      );
+        inbox,
+      });
 
       // Sandbox
       const sandbox = await this.createSandbox(
         taskType,
         task,
         taskRunId,
-        undefined,
         lastStepLogs
       );
 
@@ -396,15 +171,10 @@ export class TaskWorker {
         };
 
         // Load JS state if reason is "input" or "timer"
-        let jsState: any = undefined;
-        if (reason === "input" || reason === "timer") {
-          jsState = await this.loadJsState(task.id);
-        }
+        const jsState = await this.loadJsState(task.thread_id);
 
         // Use task.task as input message to the agent
-        const result = await agent.loop(reason, {
-          // Pass the input text to agent
-          inbox,
+        const result = await agent.loop(inbox, {
           jsState,
           getLogs: () => lastStepLogs.join("\n"),
           onStep: async (step, input, output, result) => {
@@ -452,89 +222,57 @@ export class TaskWorker {
         const taskReply = this.formatTaskReply(result);
 
         // Prepare run end
-        await this.finishTaskRun(
+        await this.finishTaskRun({
           taskRunId,
           runStartTime,
           result,
           state,
           taskReply,
           agent,
-          logs
-        );
+          chatId: task.chat_id,
+          logs,
+        });
 
-        // Recurring task cancelled?
-        const cancelled = !!sandbox.context?.data?.cancelled;
-
-        // Update task in wait status,
-        // Router and Replier always end up in 'wait/asks' status
-        // to reuse the same task for every run
-        const isWait =
-          !cancelled &&
-          (result.kind === "wait" ||
-            task.cron ||
-            taskType === "replier" ||
-            taskType === "router");
-
-        if (isWait) {
-          // Need new timestamp?
-          const isPersistentTask =
-            taskType === "router" || taskType === "replier";
-          const timestamp =
-            result.kind === "wait" && result.resumeAt
-              ? Math.floor(new Date(result.resumeAt).getTime() / 1000)
-              : isPersistentTask
-              ? Math.floor(Date.now() / 1000) // set to current time
-              : task.cron
-              ? Math.floor(new Cron(task.cron).nextRun()!.getTime() / 1000)
-              : task.timestamp;
-          const status =
-            result.kind === "wait" && result.resumeAt
-              ? "wait"
-              : task.cron
-              ? "" // Necessary to get on TODO list next time
-              : "asks";
-
+        // Update task in wait status
+        if (result.kind === "wait") {
           this.debug(
-            `Updating ${task.type || ""} task ${task.id} cron '${
-              task.cron
-            }' timestamp ${timestamp} (resumeAt '${
-              result.kind === "wait" ? result.resumeAt : ""
-            }') asks '${result.patch?.asks || ""}' status '${status}'`
+            `Updating ${task.type || ""} task ${task.id} asks '${
+              result.patch?.asks || ""
+            }'`
           );
 
           await this.api.taskStore.updateTask({
             ...task,
-            timestamp,
             reply: result.reply || "",
-            state: status,
+            state: "asks",
             error: "",
             thread_id: task.thread_id,
           });
 
-          this.debug(`Task '${status}':`, {
+          this.debug(`Task updated`, {
             id: task.id,
-            timestamp,
             threadId: task.thread_id,
-            status,
             asks: state?.asks,
-            cron: task.cron,
           });
         } else {
           // Single-shot task finished
-          await this.finishTask(task, taskReply, cancelled ? "Cancelled" : "");
+          await this.finishTask(task, taskReply, "");
 
           this.debug(`Task done:`, {
             reply: taskReply,
             threadId: task.thread_id,
-            cancelled,
           });
         }
 
         // Send reply/asks to recipient (replier inbox or user)
-        await this.handleReply(taskType, task, state, result, taskRunId);
+        await this.handleReply(taskType, task, state, result);
 
-        // Reset retry state on successful completion
-        this.taskRetryState.delete(task.id);
+        // Signal success to scheduler
+        this.emitSignal({
+          type: "done",
+          taskId: task.id,
+          timestamp: Date.now(),
+        });
       } catch (error) {
         this.debug("Task processing error:", error);
 
@@ -551,8 +289,26 @@ export class TaskWorker {
 
         // Not permanent error?
         if (error !== ERROR_BAD_REQUEST) {
-          // Schedule retry for this task
-          await this.retry(task, errorMessage, task.thread_id);
+          // Update the current task
+          try {
+            await this.api.taskStore.updateTask({
+              ...task,
+              reply: "",
+              state: "", // Keep state empty so it can be retried
+              error: errorMessage, // Set the error message
+              thread_id: task.thread_id,
+            });
+          } catch (e) {
+            this.debug("updateTask error", e);
+          }
+
+          // Signal retry to scheduler
+          this.emitSignal({
+            type: "retry",
+            taskId: task.id,
+            timestamp: Date.now(),
+            error: errorMessage,
+          });
         } else {
           this.debug("BAD_REQUEST: will not retry the task", task.id);
 
@@ -567,160 +323,52 @@ export class TaskWorker {
             "Bad LLM request"
           );
 
-          // Reset retry state on failed task
-          this.taskRetryState.delete(task.id);
+          // Signal success (no retry) to scheduler
+          this.emitSignal({
+            type: "done",
+            taskId: task.id,
+            timestamp: Date.now(),
+          });
         }
 
         // Provider low balance
         if (error === ERROR_PAYMENT_REQUIRED) {
-          // Pause ALL task processing for 10 minutes
-          this.globalPauseUntil = Date.now() + 10 * 60 * 1000; // 10 minutes from now
+          const pauseUntilMs = Date.now() + 10 * 60 * 1000; // 10 minutes from now
           this.debug(
-            `PAYMENT_REQUIRED: Pausing all task processing until ${new Date(
-              this.globalPauseUntil
+            `PAYMENT_REQUIRED: Sending global pause signal until ${new Date(
+              pauseUntilMs
             ).toISOString()}`
           );
+
+          // Signal global pause to scheduler
+          this.emitSignal({
+            type: "payment_required",
+            taskId: task.id,
+            timestamp: Date.now(),
+            error: errorMessage,
+          });
         }
       }
     } catch (error) {
       this.debug("Task handling error:", error);
       throw error;
     } finally {
-      if (statusUpdaterInterval) clearInterval(statusUpdaterInterval);
-      this.debug(`Clear agent status`);
-      await this.api.setAgentStatus("");
+      // if (statusUpdaterInterval) clearInterval(statusUpdaterInterval);
+      // this.debug(`Clear agent status`);
+      // await this.api.setAgentStatus("");
     }
   }
 
-  private async processTaskScript(
-    task: Task,
-    taskType: TaskType,
-    script: Script
-  ) {
-    const scriptRunId = generateId();
-    this.debug(
-      "Running script run",
-      scriptRunId,
-      "script",
-      script.id,
-      "task",
-      task.id
-    );
-
-    await this.api.scriptStore.startScriptRun(
-      scriptRunId,
-      script.id,
-      new Date().toISOString()
-    );
-
-    // Initialize logs array for this script run
-    const logs: string[] = [];
-
-    try {
-      // Js sandbox with proper 'context' object
-      const sandbox = await this.createSandbox(
-        taskType,
-        task,
-        undefined,
-        scriptRunId,
-        logs
-      );
-
-      // Inits js API in the sandbox
-      await this.createEnv(taskType, task, sandbox);
-
-      // Run the code
-      const result = await sandbox.eval(script.code, {
-        timeoutMs: 300000,
-      });
-
-      if (result.ok) {
-        this.debug("Script result", result.result);
-      } else {
-        this.debug("Script error", result.error);
-        throw result.error;
-      }
-
-      // Task finished ok
-      await this.api.scriptStore.finishScriptRun(
-        scriptRunId,
-        new Date().toISOString(),
-        JSON.stringify(result.result) || "",
-        "",
-        logs.join("\n")
-      );
-
-      if (task.cron) {
-        const timestamp = Math.floor(
-          new Cron(task.cron).nextRun()!.getTime() / 1000
-        );
-
-        this.debug(
-          `Updating ${task.type || ""} task ${task.id} cron '${
-            task.cron
-          }' timestamp ${timestamp}`
-        );
-
-        await this.api.taskStore.updateTask({
-          ...task,
-          timestamp,
-          reply: JSON.stringify(result.result) || "",
-          state: "wait",
-          error: "",
-          thread_id: task.thread_id,
-        });
-      } else {
-        // FIXME for event handlers, what do we do?
-      }
-    } catch (error: any) {
-      const errorMessage =
-        error instanceof Error ? error.message : (error as string);
-
+  /**
+   * Emit a signal to the scheduler (if callback is provided)
+   */
+  private emitSignal(signal: Parameters<TaskSignalHandler>[0]): void {
+    if (this.onSignal) {
       try {
-        await this.api.scriptStore.finishScriptRun(
-          scriptRunId,
-          new Date().toISOString(),
-          "",
-          errorMessage,
-          logs.join("\n")
-        );
-      } catch (e) {
-        this.debug("finishScriptRun error", e);
+        this.onSignal(signal);
+      } catch (error) {
+        this.debug("Error in signal handler:", error);
       }
-
-      // FIXME handle BAD_REQUEST and PAYMENT_REQUIRED from LLM tool calls
-
-      this.debug("Send script error to planner", task.id);
-
-      // Send error to parent task
-      await this.api.inboxStore.saveInbox({
-        id: scriptRunId,
-        source: "script",
-        source_id: scriptRunId,
-        target: "planner",
-        target_id: task.id,
-        timestamp: new Date().toISOString(),
-        content: JSON.stringify({
-          role: "assistant",
-          parts: [
-            {
-              type: "text",
-              text: "Last script launch resulted in error:\n" + errorMessage,
-            },
-          ],
-          metadata: {
-            createdAt: new Date().toISOString(),
-          },
-          reasoning: "",
-          sourceTaskId: task.id,
-          sourceTaskType: taskType,
-        }),
-        handler_thread_id: "",
-        handler_timestamp: "",
-      });
-
-      // Schedule a retry
-      await this.retry(task, errorMessage, task.thread_id);
     }
   }
 
@@ -741,26 +389,26 @@ export class TaskWorker {
     }
   }
 
-  private async loadJsState(taskId: string): Promise<any | undefined> {
+  private async loadJsState(threadId: string): Promise<any | undefined> {
     if (!this.userPath) return undefined;
 
     try {
       const stateFile = fileUtils.join(
         this.userPath,
         "state",
-        `${taskId}.json`
+        `${threadId}.json`
       );
       if (!fileUtils.existsSync(stateFile)) {
-        this.debug(`No JS state file found for task ${taskId}`);
+        this.debug(`No JS state file found for thread ${threadId}`);
         return undefined;
       }
 
       const stateContent = fileUtils.readFileSync(stateFile, "utf8") as string;
       const state = JSON.parse(stateContent);
-      this.debug(`Loaded JS state for task ${taskId} from ${stateFile}`);
+      this.debug(`Loaded JS state for thread ${threadId} from ${stateFile}`);
       return state;
     } catch (error) {
-      this.debug(`Failed to load JS state for task ${taskId}:`, error);
+      this.debug(`Failed to load JS state for thread ${threadId}:`, error);
       return undefined;
     }
   }
@@ -769,54 +417,48 @@ export class TaskWorker {
     taskType: TaskType,
     task: Task,
     state: TaskState,
-    result: StepOutput,
-    taskRunId: string
+    result: StepOutput
   ) {
     if (result.kind === "code") throw new Error("Can't handle 'code' reply");
 
     // Send reply after all done
     if (result.reply) {
-      await this.sendToUser(result.reply);
+      await this.sendToUser(task.chat_id, result.reply);
     }
 
     // We ran an iteraction and still have asks in state?
     // Send to replier
-    if (
-      result.kind === "wait" &&
-      (taskType === "worker" || taskType === "planner")
-    ) {
-      if (state.asks) {
-        await this.sendToUser(state.asks);
-      }
+    if (result.kind === "wait" && state.asks) {
+      await this.sendToUser(task.chat_id, state.asks);
     }
   }
 
-  private async createTaskRun(
-    agentTask: AgentTask,
-    threadId: string,
-    modelName: string,
-    reason: StepReason,
-    inbox: string[]
-  ) {
+  private async createTaskRun(opts: {
+    agentTask: AgentTask;
+    threadId: string;
+    chatId: string;
+    modelName: string;
+    inbox: string[];
+  }) {
     const taskRunId = generateId();
     const runStartTime = new Date();
     await this.api.taskStore.createTaskRun({
       id: taskRunId,
-      task_id: agentTask.id,
-      thread_id: threadId,
+      task_id: opts.agentTask.id,
+      thread_id: opts.threadId,
       start_timestamp: runStartTime.toISOString(),
-      type: agentTask.type,
-      model: modelName,
-      reason,
-      inbox: JSON.stringify(inbox),
-      input_asks: agentTask.state?.asks || "",
-      input_goal: agentTask.state?.goal || "",
-      input_plan: agentTask.state?.plan || "",
-      input_notes: agentTask.state?.notes || "",
+      type: opts.agentTask.type,
+      model: opts.modelName,
+      reason: "input",
+      inbox: JSON.stringify(opts.inbox),
+      input_asks: opts.agentTask.state?.asks || "",
+      input_goal: opts.agentTask.state?.goal || "",
+      input_plan: opts.agentTask.state?.plan || "",
+      input_notes: opts.agentTask.state?.notes || "",
     });
 
-    await this.api.chatStore.saveChatEvent(taskRunId, "main", "task_run", {
-      task_id: agentTask.id,
+    await this.api.chatStore.saveChatEvent(taskRunId, opts.chatId, "task_run", {
+      task_id: opts.agentTask.id,
       task_run_id: taskRunId,
     });
 
@@ -832,55 +474,71 @@ export class TaskWorker {
       await this.api.inboxStore.handleInboxItem(item.id, now, task.thread_id);
   }
 
-  private async finishTaskRun(
-    taskRunId: string,
-    runStartTime: Date,
-    result: StepOutput,
-    state: TaskState,
-    taskReply: string,
-    agent: ReplAgent,
-    logs: string[]
-  ) {
+  private async finishTaskRun(opts: {
+    taskRunId: string;
+    runStartTime: Date;
+    result: StepOutput;
+    state: TaskState;
+    taskReply: string;
+    agent: ReplAgent;
+    chatId: string;
+    logs: string[];
+  }) {
     const runEndTime = new Date();
+    const usage = opts.agent.usage;
     await this.api.taskStore.finishTaskRun({
-      id: taskRunId,
+      id: opts.taskRunId,
       run_sec: Math.floor(
-        (runEndTime.getTime() - runStartTime.getTime()) / 1000
+        (runEndTime.getTime() - opts.runStartTime.getTime()) / 1000
       ),
       end_timestamp: runEndTime.toISOString(),
-      steps: result.steps,
-      state: result.kind,
-      output_asks: state.asks,
-      output_goal: state.goal,
-      output_plan: state.plan,
-      output_notes: state.notes,
-      reply: taskReply,
-      input_tokens: agent.usage.inputTokens || 0,
-      cached_tokens: agent.usage.cachedInputTokens || 0,
-      output_tokens:
-        (agent.usage.outputTokens || 0) + (agent.usage.reasoningTokens || 0),
-      cost: Math.ceil((agent.openRouterUsage.cost || 0) * 1000000),
-      logs: logs.join("\n"),
+      steps: opts.result.steps,
+      state: opts.result.kind,
+      output_asks: opts.state.asks,
+      output_goal: opts.state.goal,
+      output_plan: opts.state.plan,
+      output_notes: opts.state.notes,
+      reply: opts.taskReply,
+      input_tokens: usage.inputTokens || 0,
+      cached_tokens: usage.cachedInputTokens || 0,
+      output_tokens: (usage.outputTokens || 0) + (usage.reasoningTokens || 0),
+      cost: Math.ceil((opts.agent.openRouterUsage.cost || 0) * 1000000),
+      logs: opts.logs.join("\n"),
     });
 
     // Write usage stats
-    await this.api.chatStore.saveChatEvent(taskRunId, "main", "task_run_end", {
-      task_id: state.id,
-      task_run_id: taskRunId,
-      usage: agent.openRouterUsage,
-    });
+    await this.api.chatStore.saveChatEvent(
+      opts.taskRunId,
+      opts.chatId,
+      "task_run_end",
+      {
+        task_id: opts.state.id,
+        task_run_id: opts.taskRunId,
+        usage: opts.agent.openRouterUsage,
+      }
+    );
   }
 
   private async createEnv(taskType: TaskType, task: Task, sandbox: Sandbox) {
+    // Create SandboxAPI for the JS sandbox
+    const sandboxAPI = new SandboxAPI({
+      api: this.api,
+      type: taskType,
+      getContext: () => sandbox.context!,
+      userPath: this.userPath,
+      gmailOAuth2Client: this.gmailOAuth2Client,
+    });
+    
+    sandbox.setGlobal(await sandboxAPI.createGlobal());
+
+    // Still create AgentEnv for system prompts, context building, etc.
     const env = new AgentEnv(
       this.api,
       taskType,
       task,
-      () => sandbox.context!,
+      sandboxAPI.tools,
       this.userPath,
-      this.gmailOAuth2Client
     );
-    sandbox.setGlobal(await env.createGlobal());
 
     return env;
   }
@@ -889,7 +547,6 @@ export class TaskWorker {
     taskType: TaskType,
     task: Task,
     taskRunId?: string,
-    scriptRunId?: string,
     logs?: string[]
   ) {
     // Sandbox
@@ -900,17 +557,17 @@ export class TaskWorker {
       step: 0,
       taskId: task.id,
       taskRunId,
-      scriptRunId,
+      scriptRunId: undefined, // No script runs for tasks anymore
       type: taskType,
       taskThreadId: task.thread_id,
       createEvent: async (type: string, content: any, tx?: DBInterface) => {
         // set task fields
         content.task_id = task.id;
         content.task_run_id = taskRunId;
-        content.script_run_id = scriptRunId;
+        // Send to task's chat
         await this.api.chatStore.saveChatEvent(
           generateId(),
-          "main",
+          task.chat_id,
           type,
           content,
           tx
@@ -979,50 +636,45 @@ export class TaskWorker {
     await this.api.taskStore.finishTask(task.id, task.thread_id, reply, error);
   }
 
-  private async startStatusUpdater(type: TaskType | "script") {
-    // Set agent status in db
-    let status = "";
-    switch (type) {
-      case "replier":
-        status = "Typing...";
-        break;
-      case "router":
-        status = "Thinking...";
-        break;
-      case "planner":
-        status = "Planning...";
-        break;
-      case "script":
-        status = "Executing...";
-        break;
-      default:
-        status = "Working...";
-        break;
-    }
-    const update = async () => {
-      this.debug(`Update agent status: '${status}'`);
-      await this.api.setAgentStatus(status);
-    };
-    const interval = setInterval(
-      update,
-      Math.max(10000, MAX_STATUS_TTL - 5000)
-    );
-    await update();
-    return interval;
-  }
+  // private async startStatusUpdater(type: TaskType | "script") {
+  //   // Set agent status in db
+  //   let status = "";
+  //   switch (type) {
+  //     case "planner":
+  //       status = "Planning...";
+  //       break;
+  //     case "script":
+  //       status = "Executing...";
+  //       break;
+  //     default:
+  //       status = "Working...";
+  //       break;
+  //   }
+  //   const update = async () => {
+  //     this.debug(`Update agent status: '${status}'`);
+  //     await this.api.setAgentStatus(status);
+  //   };
+  //   const interval = setInterval(
+  //     update,
+  //     Math.max(10000, MAX_STATUS_TTL - 5000)
+  //   );
+  //   await update();
+  //   return interval;
+  // }
 
-  private async ensureThread(threadId: string, taskType: TaskType) {
-    let title = "";
-    switch (taskType) {
-      case "router":
-        title = "Router";
-        break;
-      case "replier":
-        title = "Replier";
-        break;
-      case "worker":
-        title = "Worker";
-        break;
+  private async ensureThread(task: Task, taskType: TaskType) {
+    const threadId = task.thread_id;
+
+    let title = task.title;
+    if (!title) {
+      switch (taskType) {
+        case "worker":
+          title = "Worker";
+          break;
+        case "planner":
+          title = "Planner";
+          break;
+      }
     }
 
     const now = new Date();
@@ -1060,58 +712,6 @@ export class TaskWorker {
     );
   }
 
-  private async retry(task: Task, error: string, thread_id: string) {
-    // Get current retry state or create new one
-    const currentRetryState = this.taskRetryState.get(task.id) || {
-      retryCount: 0,
-      nextStart: 0,
-    };
-
-    // Increment retry count
-    currentRetryState.retryCount += 1;
-
-    // Calculate exponential backoff: 10s * 2^(retryCount-1), max 10 minutes (600s)
-    const baseDelayMs = 10 * 1000; // 10 seconds in milliseconds
-    const exponentialDelayMs =
-      baseDelayMs * Math.pow(2, currentRetryState.retryCount - 1);
-    const maxDelayMs = 10 * 60 * 1000; // 10 minutes in milliseconds
-    const actualDelayMs = Math.min(exponentialDelayMs, maxDelayMs);
-
-    // Set next start time in retry state map
-    currentRetryState.nextStart = Date.now() + actualDelayMs;
-    this.taskRetryState.set(task.id, currentRetryState);
-
-    // Write default retry delays to database as originally designed
-    const retryDelaySeconds =
-      task.type === "message" ? 10 : task.type ? 60 : 600;
-    const retryTimestamp = Math.floor(Date.now() / 1000) + retryDelaySeconds;
-
-    // FIXME reusing thread_id doesn't help much since we're only writing down agent replies
-    // in onFinish which means only if everything goes well, so on failure the thread will still be empty
-
-    // Update the current task instead of finishing and adding a new one
-    try {
-      await this.api.taskStore.updateTask({
-        ...task,
-        timestamp: retryTimestamp,
-        reply: "",
-        state: "", // Keep state empty so it can be retried
-        error, // Set the error message
-        thread_id, // Update thread_id if it was generated
-      });
-    } catch (e) {
-      this.debug("updateTask error", e);
-    }
-
-    this.debug(
-      `Updated ${task.type || ""} task ${
-        task.id
-      } for retry: DB timestamp ${retryTimestamp} (${retryDelaySeconds}s), actual retry in ${actualDelayMs}ms (${Math.round(
-        actualDelayMs / 1000
-      )}s), attempt ${currentRetryState.retryCount}, error: ${error}`
-    );
-  }
-
   private formatTaskReply(result: StepOutput) {
     if (result.kind === "code") throw new Error("Wrong task kind for reply");
     return `===REASONING===
@@ -1121,61 +721,7 @@ ${result.reply || ""}
 `;
   }
 
-  private async ensureTask(target: InboxItemTarget) {
-    const tasks = await this.api.taskStore.listTasks();
-    if (tasks.find((t) => t.type === target)) return;
-
-    this.debug("Creating task: ", target);
-    const taskId = bytesToHex(randomBytes(16));
-    const timestamp = Math.floor(Date.now() / 1000) - 1; // -1 - force to run immediately
-    await this.api.taskStore.addTask(
-      taskId,
-      timestamp,
-      "", // task content
-      target, // type
-      "", // Empty thread id, task has it's own thread
-      target, // title
-      "" // cron
-    );
-  }
-
-  private async sendToReplier(opts: {
-    taskType: "worker" | "router";
-    taskId: string;
-    taskRunId: string;
-    content: string;
-    reasoning: string;
-  }) {
-    this.debug("Send reply to replier", opts);
-    // Send router's reply to replier
-    await this.api.inboxStore.saveInbox({
-      id: opts.taskRunId,
-      source: opts.taskType,
-      source_id: opts.taskRunId,
-      target: "replier",
-      target_id: "",
-      timestamp: new Date().toISOString(),
-      content: JSON.stringify({
-        role: "assistant",
-        parts: [
-          {
-            type: "text",
-            text: opts.content,
-          },
-        ],
-        metadata: {
-          createdAt: new Date().toISOString(),
-        },
-        reasoning: opts.reasoning,
-        sourceTaskId: opts.taskId,
-        sourceTaskType: opts.taskType,
-      }),
-      handler_thread_id: "",
-      handler_timestamp: "",
-    });
-  }
-
-  private async sendToUser(reply: string) {
+  private async sendToUser(chat_id: string, reply: string) {
     this.debug("Save user reply", reply);
 
     const message = {
@@ -1183,7 +729,7 @@ ${result.reply || ""}
       role: "assistant" as const,
       metadata: {
         createdAt: new Date().toISOString(),
-        threadId: "main",
+        threadId: chat_id,
       },
       parts: [
         {
@@ -1193,10 +739,11 @@ ${result.reply || ""}
       ],
     };
 
-    // Save to both tables in one transaction
-    await this.api.db.db.tx(async (tx) => {
-      await this.api.memoryStore.saveMessages([message], tx);
-      await this.api.chatStore.saveChatMessages("main", [message], tx);
-    });
+    // Save to chat messages
+    await this.api.chatStore.saveChatMessages(chat_id, [message]);
+    // await this.api.db.db.tx(async (tx) => {
+    //   await this.api.memoryStore.saveMessages([message], tx);
+    //   await this.api.chatStore.saveChatMessages(tid, [message], tx);
+    // });
   }
 }

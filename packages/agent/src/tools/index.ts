@@ -15,8 +15,6 @@ export { makeAddTaskRecurringTool } from "./add-task-recurring";
 export { makeGetTaskTool } from "./get-task";
 export { makeListTasksTool } from "./list-tasks";
 export { makeSendToTaskInboxTool } from "./send-to-task-inbox";
-export { makeCancelThisRecurringTaskTool } from "./cancel-this-recurring-task";
-export { makePostponeInboxItemTool } from "./postpone-inbox-item";
 export { makeReadFileTool } from "./read-file";
 export { makeSaveFileTool } from "./save-file";
 export { makeListFilesTool } from "./list-files";
