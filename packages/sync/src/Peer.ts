@@ -129,7 +129,7 @@ export class Peer extends EventEmitter<{
   // If there are local changes:
   // - broadcasts to peers
   // - emits 'changes'
-  // Exposed as checkLocalChanges (see above) 
+  // Exposed as checkLocalChanges (see above)
   // through serialization with 'queued'
   private async checkLocalChangesImpl(): Promise<void> {
     await this.broadcastLocalChanges();
@@ -480,7 +480,11 @@ export class Peer extends EventEmitter<{
 
       // Initialize our own cursor
       this.cursor = await this.readCursor();
-      this.debug(`Initialized our cursor to ${JSON.stringify(serializeCursor(this.cursor))}`);
+      this.debug(
+        `Initialized our cursor to ${JSON.stringify(
+          serializeCursor(this.cursor)
+        )}`
+      );
 
       // Db version
       const schemaVersion = await this.db.execO<{ user_version: number }>(
@@ -775,10 +779,11 @@ export class Peer extends EventEmitter<{
 
       // Collect changes since known peer cursor
       let sql =
-        "SELECT `table`, pk, cid, val, col_version, db_version, site_id, cl, seq FROM crsql_change_history WHERE ";
+        "SELECT `table`, pk, cid, val, col_version, db_version, site_id, cl, seq FROM crsql_change_history ";
       const args = [];
       for (const [site_id, db_version] of map.entries()) {
         if (args.length) sql += " OR ";
+        else sql += " WHERE ";
         // db_version >= (or EQUALS) to make sure we deliver full changes per tx
         // FIXME: look into ensuring tx delivery by organizing change batches properly
         sql += "(site_id = ? AND db_version > ?)";
@@ -853,7 +858,7 @@ export class Peer extends EventEmitter<{
         this.debug(`Sync cancelled to peer '${peer.id}'`);
       }
 
-      // Send pending changes that have been or are being 
+      // Send pending changes that have been or are being
       // added by checkLocalChanges while active=false
       while (peer.pendingChanges.length) {
         // Consume
@@ -869,7 +874,6 @@ export class Peer extends EventEmitter<{
 
       // Now checkLocalChanges will send by itself
       peer.active = true;
-
     } catch (error) {
       this.debug("Error sending changes to", peer, error);
       throw error;

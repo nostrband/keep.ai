@@ -36,9 +36,7 @@ import path from "path";
 import os from "os";
 import fs from "fs";
 import { promises as fsPromises } from "fs";
-import { createHash } from "crypto";
 import dotenv from "dotenv";
-import { detectBufferMime, detectFilenameMime, mimeToExt } from "@app/node";
 import {
   NostrSigner,
   NostrTransport,
@@ -88,6 +86,9 @@ const GMAIL_CLIENT_ID =
 const GMAIL_CLIENT_SECRET =
   process.env.GMAIL_SECRET || process.env.BUILD_GMAIL_SECRET;
 
+// Backend server configuration for user authentication and API key management
+const BACKEND_SERVER_URL = "https://api.getkeep.ai";
+
 // Parse NOSTR_RELAYS environment variable
 const getNostrRelays = (): string[] => {
   const relaysEnv = process.env.NOSTR_RELAYS;
@@ -131,17 +132,23 @@ async function createGmailOAuth2Client(userPath: string) {
     oAuth2Client.setCredentials(tokens);
 
     // Listen for token refresh events and save new tokens
-    oAuth2Client.on('tokens', async (newTokens) => {
+    oAuth2Client.on("tokens", async (newTokens) => {
       try {
         debugServer("Gmail OAuth2 tokens refreshed, saving to file");
-        
+
         // Read current tokens from file
         let currentTokens = tokens;
         try {
-          const currentTokenData = await fsPromises.readFile(gmailTokenPath, "utf8");
+          const currentTokenData = await fsPromises.readFile(
+            gmailTokenPath,
+            "utf8"
+          );
           currentTokens = JSON.parse(currentTokenData);
         } catch (readError) {
-          debugServer("Could not read current tokens, using initial tokens:", readError);
+          debugServer(
+            "Could not read current tokens, using initial tokens:",
+            readError
+          );
         }
 
         // Update tokens
@@ -398,11 +405,12 @@ async function handlePushNotifications(
 // Test OpenRouter API key
 async function testOpenRouterKey(
   apiKey: string,
-  model: string
+  model: string,
+  baseUrl?: string
 ): Promise<{ success: boolean; error?: string }> {
   try {
     const testResponse = await fetch(
-      "https://openrouter.ai/api/v1/chat/completions",
+      `${baseUrl ? baseUrl : "https://openrouter.ai"}/api/v1/chat/completions`,
       {
         method: "POST",
         headers: {
@@ -529,7 +537,10 @@ export async function createServer(config: ServerConfig = {}) {
   await nostr.start(peer.getConfig());
 
   // Performs background operations
-  const { taskScheduler, workflowScheduler } = await createScheduler(keepDB, userPath);
+  const { taskScheduler, workflowScheduler } = await createScheduler(
+    keepDB,
+    userPath
+  );
 
   // File transfer instances for each peer
   const fileSenders = new Map<string, FileSender>();
@@ -911,8 +922,8 @@ export async function createServer(config: ServerConfig = {}) {
                 },
               ],
               metadata: {
-                createdAt: new Date().toISOString()
-              }
+                createdAt: new Date().toISOString(),
+              },
             }),
           });
         }
@@ -923,6 +934,139 @@ export async function createServer(config: ServerConfig = {}) {
       debugServer("Error in /api/set_config:", error);
       return reply.status(500).send({
         error: "Failed to save configuration",
+        message: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
+  // Endpoint to fetch API key from backend server using Clerk JWT
+  app.post("/api/fetch_api_key_from_backend", async (request, reply) => {
+    try {
+      const body = request.body as {
+        jwtToken: string;
+      };
+
+      if (!body.jwtToken) {
+        return reply.status(400).send({ error: "JWT token is required" });
+      }
+
+      debugServer("Fetching API key from backend:", BACKEND_SERVER_URL);
+
+      // Call the backend server to get the API key
+      const backendResponse = await fetch(
+        `${BACKEND_SERVER_URL}/api/v1/api-key`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${body.jwtToken}`,
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      if (!backendResponse.ok) {
+        const errorText = await backendResponse.text();
+        debugServer("Backend API error:", errorText);
+        let errorMessage = "Failed to fetch API key from backend server";
+        try {
+          const errorData = JSON.parse(errorText);
+          errorMessage = errorData.error || errorMessage;
+        } catch {
+          // Use default error message if parsing fails
+        }
+        return reply.status(backendResponse.status).send({
+          error: errorMessage,
+        });
+      }
+
+      const backendText = await backendResponse.text();
+      let backendData: any;
+      try {
+        backendData = JSON.parse(backendText);
+      } catch (e) {
+        return reply
+          .status(500)
+          .send({ error: "Invalid response from backend server" });
+      }
+
+      // Validate the received API key
+      if (!backendData.apiKey) {
+        return reply
+          .status(400)
+          .send({ error: "No API key received from backend" });
+      }
+
+      // Test the API key before saving
+      const openRouterTest = await testOpenRouterKey(
+        backendData.apiKey,
+        getEnv().AGENT_MODEL || DEFAULT_AGENT_MODEL,
+        BACKEND_SERVER_URL
+      );
+
+      if (!openRouterTest.success) {
+        return reply.status(400).send({
+          error: `Invalid API key received from backend: ${openRouterTest.error}`,
+        });
+      }
+
+      // Copy the current env
+      const newEnv = getEnv();
+
+      // Get current .env file
+      let envContent = "";
+      if (fs.existsSync(envPath)) {
+        envContent = fs.readFileSync(envPath, "utf8");
+      }
+
+      // Set the API key
+      newEnv.OPENROUTER_API_KEY = backendData.apiKey;
+      newEnv.OPENROUTER_BASE_URL = BACKEND_SERVER_URL + "/api/v1";
+
+      // Update the .env file
+      const updateVar = (
+        name: "OPENROUTER_API_KEY" | "OPENROUTER_BASE_URL"
+      ) => {
+        const value = newEnv[name];
+        if (!value) return;
+
+        const row = `${name}=${value}`;
+        let found = false;
+        const lines = envContent.split("\n");
+        for (let i = 0; i < lines.length; i++) {
+          if (lines[i].startsWith(name + "=")) {
+            lines[i] = row;
+            found = true;
+          }
+        }
+
+        // Append if not found
+        if (!found) lines.push(row);
+
+        // Format the content
+        envContent = lines.join("\n");
+
+        // Also update the global env used by this server instance
+        process.env[name] = value;
+      };
+
+      updateVar("OPENROUTER_API_KEY");
+      updateVar("OPENROUTER_BASE_URL");
+
+      // Set globally
+      setEnv(newEnv);
+      console.log("Updated env from backend:", newEnv);
+
+      // Write updated .env file
+      fs.writeFileSync(envPath, envContent, "utf8");
+
+      return reply.send({
+        success: true,
+        apiKey: backendData.apiKey,
+      });
+    } catch (error) {
+      debugServer("Error in /api/fetch_api_key_from_backend:", error);
+      return reply.status(500).send({
+        error: "Failed to fetch API key from backend",
         message: error instanceof Error ? error.message : "Unknown error",
       });
     }

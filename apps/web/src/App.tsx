@@ -26,9 +26,11 @@ import DevicesPage from "./components/DevicesPage";
 import ConsolePage from "./components/ConsolePage";
 import SettingsPage from "./components/SettingsPage";
 import { ConnectDeviceDialog } from "./components/ConnectDeviceDialog";
-import { ConfigDialog } from "./components/ConfigDialog";
+import { AuthDialog } from "./components/AuthDialog";
+import { ClerkAuthProvider } from "./components/ClerkAuthProvider";
 import { useDbQuery } from "./hooks/dbQuery";
 import { useConfig } from "./hooks/useConfig";
+import { CLERK_PUBLISHABLE_KEY } from "./constants/auth";
 
 // Access build-time constants
 declare const __SERVERLESS__: boolean;
@@ -139,7 +141,14 @@ function App() {
     }
 
     if (isConfigValid === false) {
-      return <ConfigDialog onConfigured={recheckConfig} />;
+      return (
+        <ClerkAuthProvider clerkPublishableKey={CLERK_PUBLISHABLE_KEY}>
+          <AuthDialog 
+            onAuthenticated={recheckConfig}
+            clerkPublishableKey={CLERK_PUBLISHABLE_KEY}
+          />
+        </ClerkAuthProvider>
+      );
     }
   }
 
