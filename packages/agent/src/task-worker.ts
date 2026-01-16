@@ -528,8 +528,11 @@ export class TaskWorker {
       userPath: this.userPath,
       gmailOAuth2Client: this.gmailOAuth2Client,
     });
-    
+
     sandbox.setGlobal(await sandboxAPI.createGlobal());
+
+    // Get user's autonomy preference for agent behavior
+    const autonomyMode = await this.api.getAutonomyMode();
 
     // Still create AgentEnv for system prompts, context building, etc.
     const env = new AgentEnv(
@@ -538,6 +541,7 @@ export class TaskWorker {
       task,
       sandboxAPI.tools,
       this.userPath,
+      autonomyMode,
     );
 
     return env;

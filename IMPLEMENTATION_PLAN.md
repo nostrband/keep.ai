@@ -60,21 +60,23 @@ Current UI uses wrong terminology and colors for workflow status badges.
   - Add conditional left border or pulse animation to list items
   - Example: `border-l-4 border-red-500` for attention items
 
-### 3. Autonomy Toggle System
+### 3. Autonomy Toggle System (COMPLETED 2026-01-16)
 Core product differentiator - user controls how much the AI decides vs coordinates.
 
 - [x] **Add autonomy preference storage** - Implemented useAutonomyPreference hook using localStorage
 
 - [x] **Add autonomy toggle UI on main screen** - Added toggle below input with tooltip explanation
 
-- [ ] **Respect autonomy setting in agent planning** - Requires passing preference to backend/agent
-  - File: `/packages/agent/src/agent-env.ts` - Modify system prompts
-  - When "coordinate": agent asks more clarifying questions
+- [x] **Respect autonomy setting in agent planning** - Backend integration completed
+  - File: `/packages/proto/src/schemas.ts` - Added AutonomyMode type and autonomy field to metadata
+  - File: `/packages/db/src/api.ts` - Added setAutonomyMode/getAutonomyMode methods using agent_state table
+  - File: `/apps/web/src/hooks/useAutonomyPreference.ts` - Updated to sync with backend database
+  - File: `/packages/agent/src/task-worker.ts` - Retrieves autonomy mode and passes to AgentEnv
+  - File: `/packages/agent/src/agent-env.ts` - Added autonomyPrompt() method with mode-specific guidance
+  - When "coordinate": agent asks clarifying questions before significant actions
   - When "ai_decides": agent uses safe defaults and minimizes questions
 
-- [ ] **Respect autonomy setting in modifications** - Requires backend integration
-
-Note: UI completed on 2026-01-16. Backend integration pending - need to pass preference through message/task to agent-env.ts system prompts.
+- [x] **Respect autonomy setting in modifications** - Same backend integration handles all agent interactions
 
 ### 4. Error Classification System
 Required for maintenance mode and proper error handling.

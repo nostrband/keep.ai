@@ -5,11 +5,14 @@ import { getEnv } from "./env";
 import { AssistantUIMessage } from "packages/proto/dist";
 import { generateId } from "ai";
 
+export type AutonomyMode = 'ai_decides' | 'coordinate';
+
 export class AgentEnv {
   #api: KeepDbApi;
   private type: TaskType;
   private task: Task;
   #tools: Map<string, string>;
+  private autonomyMode: AutonomyMode;
   private debug = debug("AgentEnv");
 
   constructor(
@@ -18,11 +21,13 @@ export class AgentEnv {
     task: Task,
     tools: Map<string, string>,
     private userPath?: string,
+    autonomyMode?: AutonomyMode,
   ) {
     this.#api = api;
     this.type = type;
     this.task = task;
     this.#tools = tools;
+    this.autonomyMode = autonomyMode || 'ai_decides';
   }
 
   get tools() {
@@ -405,6 +410,34 @@ If user asks what/who you are, or what you're capable of, here is what you shoul
 `;
   }
 
+  /**
+   * Generate autonomy-mode-specific guidance for the agent.
+   * This prompt tells the agent how much to decide independently vs. coordinate with user.
+   */
+  private autonomyPrompt() {
+    if (this.autonomyMode === 'coordinate') {
+      return `## Autonomy Mode: Coordinate With User
+The user prefers to coordinate decisions with you. Follow these guidelines:
+- Ask clarifying questions BEFORE taking significant actions
+- Present options and wait for user confirmation when there are multiple valid approaches
+- Confirm key decisions before proceeding (e.g., schedule time, data sources, output format)
+- Be more conservative with assumptions - when in doubt, ask
+- After asking, wait for user response before continuing
+- Maximum 3 clarifying questions before proceeding with safe defaults
+`;
+    } else {
+      return `## Autonomy Mode: AI Decides
+The user prefers you to make decisions autonomously. Follow these guidelines:
+- Minimize clarifying questions - use safe, sensible defaults instead
+- Only ask when truly necessary: ambiguous requirements, risky/irreversible actions, or missing critical info
+- Proceed with reasonable assumptions when context is clear
+- Briefly state your assumptions when using defaults (e.g., "Using daily at 9am since no time specified")
+- Use the 'eval' tool to explore data and discover patterns before asking questions
+- Aim for zero clarifying questions when possible
+`;
+    }
+  }
+
   private extraSystemPrompt() {
     const extra = getEnv().EXTRA_SYSTEM_PROMPT || "";
     if (!extra) return "";
@@ -441,9 +474,11 @@ ${this.filesPrompt()}
 
 ${this.userInputPrompt()}
 
+${this.autonomyPrompt()}
+
 ## Task complexity
 - You might have insufficient tools/APIs to solve the task or achieve the goals, that is normal and it's ok to admit it.
-- If task is too complex or not enough APIs, admit it and suggest to reduce the scope/goals to something you believe you could do. 
+- If task is too complex or not enough APIs, admit it and suggest to reduce the scope/goals to something you believe you could do.
 - You are also allowed and encouraged to ask clarifying questions, it's much better to ask and be sure about user's intent/expectations, than to waste resources on useless work.
 - Use 'pause' tool to send your questions/suggestion to the user, and if user input results in task scope/goals change - create new task and finish this one.
 
@@ -520,9 +555,11 @@ ${this.filesPrompt()}
 
 ${this.userInputPrompt()}
 
+${this.autonomyPrompt()}
+
 ## Task complexity
 - You might have insufficient tools/APIs to solve the task or achieve the goals, that is normal and it's ok to admit it.
-- If task is too complex or not enough APIs, admit it and suggest to reduce the scope/goals to something you believe you could do. 
+- If task is too complex or not enough APIs, admit it and suggest to reduce the scope/goals to something you believe you could do.
 - You are also allowed and encouraged to ask clarifying questions, it's much better to ask and be sure about user's intent/expectations, than to waste resources on useless work.
 - Use 'ask' tool to send your questions/suggestion to the user.
 

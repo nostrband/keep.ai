@@ -171,6 +171,40 @@ export class KeepDbApi {
     return row.value;
   }
 
+  /**
+   * Set the user's autonomy preference.
+   * @param mode - 'ai_decides' or 'coordinate'
+   */
+  async setAutonomyMode(mode: 'ai_decides' | 'coordinate'): Promise<void> {
+    const timestamp = new Date().toISOString();
+    const sql = `
+      INSERT OR REPLACE INTO agent_state (key, value, timestamp)
+      VALUES ('autonomy_mode', ?, ?)
+    `;
+    await this.db.db.exec(sql, [mode, timestamp]);
+  }
+
+  /**
+   * Get the user's autonomy preference.
+   * Defaults to 'ai_decides' if not set.
+   */
+  async getAutonomyMode(): Promise<'ai_decides' | 'coordinate'> {
+    const sql = `
+      SELECT value FROM agent_state WHERE key = 'autonomy_mode'
+    `;
+    const result = await this.db.db.execO<{ value: string }>(sql);
+
+    if (!result || result.length === 0) {
+      return 'ai_decides'; // Default mode
+    }
+
+    const value = result[0].value;
+    if (value === 'coordinate') {
+      return 'coordinate';
+    }
+    return 'ai_decides';
+  }
+
   async createTask(input: {
     content: string;
     files?: File[];

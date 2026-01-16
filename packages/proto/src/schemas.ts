@@ -1,10 +1,13 @@
 import { z } from "zod";
 import { UIMessage } from "ai";
 
+export type AutonomyMode = 'ai_decides' | 'coordinate';
+
 const metadataSchema = z.object({
   createdAt: z.string().datetime(),
   threadId: z.string().optional(),
   volatile: z.boolean().optional(),
+  autonomy: z.enum(['ai_decides', 'coordinate']).optional(),
 });
 export type MessageMetadata = z.infer<typeof metadataSchema>;
 
