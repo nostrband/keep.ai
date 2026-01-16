@@ -4,7 +4,7 @@ This document outlines the remaining work needed to ship a simple, lovable, and 
 
 The items below are prioritized by impact on user experience and product completeness. Each item references the relevant spec(s) and includes specific file locations and implementation notes.
 
-**Last Updated:** 2026-01-16 (removed console.log from worker files)
+**Last Updated:** 2026-01-16 (simplified ChatInterface ScrollToBottomDetector)
 
 ---
 
@@ -461,7 +461,7 @@ Improve completeness and handle edge cases.
   - Ensure database migrations work correctly
   - Test upgrade paths from each version
 
-### 17. Remaining FIXMEs (5 remaining, 2 completed)
+### 17. Remaining FIXMEs (4 remaining, 3 completed)
 
 These FIXMEs were identified during code exploration and still need work:
 
@@ -487,12 +487,13 @@ These FIXMEs were identified during code exploration and still need work:
   - Fixed by passing event timestamp to `readChat()` method
   - `readChat()` now uses the later of now or event timestamp to prevent repeated updates for future timestamps
 
-- [ ] **ChatInterface component complexity**
-  - File: `/apps/web/src/components/ChatInterface.tsx` line 23
-  - Component needs refactoring for complexity
+- [x] **ChatInterface component complexity** (COMPLETED 2026-01-16)
+  - File: `/apps/web/src/components/ChatInterface.tsx`
+  - Simplified ScrollToBottomDetector: consolidated 5 useEffect hooks into 1, combined 4 refs into 1 ref object
+  - Removed FIXME comment, improved code documentation
 
 - [ ] **Per-device notification tracking**
-  - File: `/packages/agent/src/MessageNotifications.ts` line 35
+  - File: `/apps/web/src/lib/MessageNotifications.ts` line 35
   - Track notifications per-device instead of globally
 
 ---

@@ -19,8 +19,10 @@ type ReadChatMutation = UseMutationResult<
   unknown
 >;
 
-/** Detects when the user is near the bottom of the page and marks the chat as read. */
-// FIXME this is some unnecessarily complex bs!
+/**
+ * Detects when the user is near the bottom of the page and marks the chat as read.
+ * Uses a single ref object to track mutable state without causing re-renders.
+ */
 const ScrollToBottomDetector = React.memo(function ScrollToBottomDetector({
   chatId,
   readChat,
@@ -30,22 +32,11 @@ const ScrollToBottomDetector = React.memo(function ScrollToBottomDetector({
   readChat: ReadChatMutation;
   bottomThreshold?: number;
 }) {
-  // Keep latest values without retriggering effects
-  const chatIdRef = useRef(chatId);
-  const mutateRef = useRef(readChat.mutate);
-  const pendingRef = useRef(readChat.isPending);
+  // Single ref object for all mutable values - updated synchronously on render
+  const stateRef = useRef({ chatId, mutate: readChat.mutate, isPending: readChat.isPending });
+  stateRef.current = { chatId, mutate: readChat.mutate, isPending: readChat.isPending };
 
-  useEffect(() => {
-    chatIdRef.current = chatId;
-  }, [chatId]);
-  useEffect(() => {
-    mutateRef.current = readChat.mutate;
-  }, [readChat.mutate]);
-  useEffect(() => {
-    pendingRef.current = readChat.isPending;
-  }, [readChat.isPending]);
-
-  // Throttling via rAF
+  // Throttling via requestAnimationFrame
   const rafRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -53,11 +44,11 @@ const ScrollToBottomDetector = React.memo(function ScrollToBottomDetector({
 
     const checkBottomAndMarkRead = () => {
       const { scrollTop, clientHeight, scrollHeight } = el;
-      const distanceFromBottom = scrollHeight - (scrollTop + clientHeight);
-      const isAtBottom = distanceFromBottom <= bottomThreshold;
+      const isAtBottom = scrollHeight - (scrollTop + clientHeight) <= bottomThreshold;
+      const { chatId, mutate, isPending } = stateRef.current;
 
-      if (isAtBottom && chatIdRef.current && !pendingRef.current) {
-        mutateRef.current({ chatId: chatIdRef.current });
+      if (isAtBottom && chatId && !isPending) {
+        mutate({ chatId });
       }
     };
 
@@ -69,28 +60,23 @@ const ScrollToBottomDetector = React.memo(function ScrollToBottomDetector({
       });
     };
 
+    const onVisibilityChange = () => {
+      const { chatId, mutate, isPending } = stateRef.current;
+      if (!document.hidden && chatId && !isPending) {
+        mutate({ chatId });
+      }
+    };
+
     window.addEventListener("scroll", onScroll, { passive: true });
-    // Run once on mount in case we land already at bottom
-    checkBottomAndMarkRead();
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    checkBottomAndMarkRead(); // Run once on mount
 
     return () => {
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
       window.removeEventListener("scroll", onScroll);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-    // Empty deps: attach once; use refs for latest values
   }, [bottomThreshold]);
-
-  // Also mark as read when the tab becomes visible
-  useEffect(() => {
-    const onVis = () => {
-      if (!document.hidden && chatIdRef.current && !pendingRef.current) {
-        // console.log("visibilityChange");
-        mutateRef.current({ chatId: chatIdRef.current });
-      }
-    };
-    document.addEventListener("visibilitychange", onVis);
-    return () => document.removeEventListener("visibilitychange", onVis);
-  }, []);
 
   return null;
 });
