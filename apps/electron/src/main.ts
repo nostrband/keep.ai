@@ -34,6 +34,7 @@ import {
   net,
   shell,
   Notification,
+  globalShortcut,
 } from "electron";
 import path from "path";
 import { createServer } from "@app/server";
@@ -222,6 +223,30 @@ function createTray(): void {
     },
     { type: "separator" },
     {
+      label: "New automation...",
+      accelerator: "CmdOrCtrl+N",
+      click: () => {
+        if (!mainWindow) {
+          createWindow();
+        }
+        mainWindow?.show();
+        mainWindow?.focus();
+        // Send message to renderer to focus the input
+        mainWindow?.webContents.send('focus-input');
+      },
+    },
+    {
+      label: "Pause all automations",
+      click: () => {
+        // Send message to renderer to pause all workflows
+        if (mainWindow) {
+          mainWindow.webContents.send('pause-all-automations');
+        }
+        debugMain('Pause all automations requested');
+      },
+    },
+    { type: "separator" },
+    {
       label: "Quit",
       click: () => {
         isQuiting = true;
@@ -294,6 +319,29 @@ async function fetchFile(fileIdOrName: string) {
   return { buffer, mimeType };
 }
 
+/**
+ * Register global keyboard shortcuts [Spec 00, 01]
+ */
+function registerGlobalShortcuts(): void {
+  // Cmd/Ctrl+N: Open app and focus input for new automation
+  const registered = globalShortcut.register('CmdOrCtrl+N', () => {
+    debugMain('Global shortcut CmdOrCtrl+N triggered');
+    if (!mainWindow) {
+      createWindow();
+    }
+    mainWindow?.show();
+    mainWindow?.focus();
+    // Send message to renderer to focus the input
+    mainWindow?.webContents.send('focus-input');
+  });
+
+  if (!registered) {
+    debugMain('Failed to register global shortcut CmdOrCtrl+N');
+  } else {
+    debugMain('Global shortcut CmdOrCtrl+N registered');
+  }
+}
+
 function setupDownloadHandler() {
   // Handle all file:// requests in this session
   protocol.handle("file", async (request) => {
@@ -359,6 +407,7 @@ app.whenReady().then(async () => {
     setupIpcHandlers();
     createWindow();
     createTray();
+    registerGlobalShortcuts();
 
     // Hide dock icon on macOS to make it a pure tray app
     if (process.platform === "darwin" && app.dock) {
@@ -442,8 +491,11 @@ app.on("before-quit", async (event: any) => {
   }
 });
 
-// Handle tray cleanup on quit
+// Handle tray and global shortcuts cleanup on quit
 app.on("will-quit", () => {
+  // Unregister all global shortcuts
+  globalShortcut.unregisterAll();
+
   if (tray) {
     tray.destroy();
     tray = null;

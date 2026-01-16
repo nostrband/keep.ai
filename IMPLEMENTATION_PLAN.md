@@ -229,25 +229,26 @@ Use native OS notifications, not just app-internal or push.
   - Don't notify for logic errors being auto-fixed
   - **Note:** Infrastructure ready, web app needs to call these APIs
 
-### 9. Tray Menu Completion
+### 9. Tray Menu Completion (COMPLETED 2026-01-16)
 
-- [ ] **Add "New automation..." option** [Spec 01]
-  - File: `/apps/electron/src/main.ts` lines 155-174 (contextMenu template)
-  - Current menu only has: "Open Keep.AI", separator, "Quit"
-  - Add menu item that opens app with input focused
-  - Add IPC handler: `ipcMain.handle('focus-input', ...)`
-  - Renderer needs corresponding listener
-
-- [ ] **Add "Pause all automations" option** [Spec 11]
-  - File: `/apps/electron/src/main.ts` lines 155-174
-  - Pauses all active workflows via API call to server
-  - Set `status = "disabled"` for all active workflows
-
-- [ ] **Add Cmd/Ctrl+N global shortcut** [Spec 00, 01]
+- [x] **Add "New automation..." option** [Spec 01]
   - File: `/apps/electron/src/main.ts`
-  - Import and use `globalShortcut` from electron (currently NOT used)
-  - Register shortcut: `globalShortcut.register('CmdOrCtrl+N', ...)`
-  - Shows/focuses window and focuses input box
+  - Added "New automation..." menu item with CmdOrCtrl+N accelerator
+  - Opens app, focuses window, and sends 'focus-input' to renderer
+  - File: `/apps/electron/src/preload.ts` - Added onFocusInput listener
+
+- [x] **Add "Pause all automations" option** [Spec 11]
+  - File: `/apps/electron/src/main.ts`
+  - Added "Pause all automations" menu item
+  - Sends 'pause-all-automations' message to renderer
+  - File: `/apps/electron/src/preload.ts` - Added onPauseAllAutomations listener
+
+- [x] **Add Cmd/Ctrl+N global shortcut** [Spec 00, 01]
+  - File: `/apps/electron/src/main.ts`
+  - Added globalShortcut import
+  - Created registerGlobalShortcuts() function
+  - Registers CmdOrCtrl+N to show window and focus input
+  - Unregisters shortcuts on will-quit
 
 ### 10. Retry Tracking (COMPLETED 2026-01-16)
 

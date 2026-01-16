@@ -44,6 +44,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onNavigateTo: (callback: (path: string) => void) => {
     ipcRenderer.on('navigate-to', (_event: any, path: string) => callback(path));
   },
+
+  // Listen for focus-input message from tray menu "New automation..." [Spec 01]
+  onFocusInput: (callback: () => void) => {
+    ipcRenderer.on('focus-input', () => callback());
+  },
+
+  // Listen for pause-all-automations message from tray menu [Spec 11]
+  onPauseAllAutomations: (callback: () => void) => {
+    ipcRenderer.on('pause-all-automations', () => callback());
+  },
 });
 
 // Custom logging for development
