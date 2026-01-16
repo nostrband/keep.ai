@@ -182,8 +182,6 @@ export class Sandbox {
         const stateHandle = this.#ctx.getProp(this.#ctx.global, "state");
         const state = await this.#resolveHandle(stateHandle, deadline);
 
-        console.log("result", result);
-        console.log("state", state);
         return { ok: true, result, state: state };
       } catch (error) {
         return { ok: false, error: this.#formatError(error) };
