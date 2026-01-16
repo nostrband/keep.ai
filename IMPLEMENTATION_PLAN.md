@@ -4,7 +4,7 @@ This document outlines the remaining work needed to ship a simple, lovable, and 
 
 The items below are prioritized by impact on user experience and product completeness. Each item references the relevant spec(s) and includes specific file locations and implementation notes.
 
-**Last Updated:** 2026-01-16 (context building enabled for agents)
+**Last Updated:** 2026-01-16 (thread title generation, context building enabled for agents)
 
 ---
 
@@ -338,7 +338,7 @@ Improve completeness and handle edge cases.
   - Suggest testing when user tries to activate untested draft
   - Needs spec
 
-### 14. Code Quality - FIXMEs (11 total)
+### 14. Code Quality - FIXMEs (10 total)
 
 - [ ] **Fix timezone assumption bug**
   - File: `/packages/db/src/task-store.ts` line 379
@@ -360,10 +360,11 @@ Improve completeness and handle edge cases.
   - FIXME: "not sure if all tools return all declared fields"
   - Output schema validation is disabled, should validate and fix tools
 
-- [ ] **Add thread title generation**
-  - File: `/packages/agent/src/task-worker.ts` line 116
-  - FIXME: "add title?"
-  - Currently uses placeholder "Placeholder" for thread titles
+- [x] **Add thread title generation** (COMPLETED 2026-01-16)
+  - File: `/packages/agent/src/task-worker.ts`
+  - Thread titles are now generated from the first user message
+  - Extracts text content and truncates to ~60 chars at word boundary
+  - Falls back to task type ("Worker" or "Planner") if no content available
 
 - [x] **Enable context building** (COMPLETED 2026-01-16)
   - File: `/packages/agent/src/agent-env.ts`

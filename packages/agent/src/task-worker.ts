@@ -23,6 +23,52 @@ import { fileUtils } from "@app/node";
 import { ERROR_BAD_REQUEST, ERROR_PAYMENT_REQUIRED } from "./agent";
 import { TaskSignalHandler } from "./task-worker-signal";
 
+/**
+ * Generate a concise title from the first user message.
+ * Extracts text content and truncates to ~60 chars at word boundary.
+ */
+function generateTitleFromInbox(inbox: string[]): string | undefined {
+  if (!inbox.length) return undefined;
+
+  try {
+    // Parse first inbox item
+    const firstMessage = JSON.parse(inbox[0]);
+
+    // Extract text from message parts
+    let text = "";
+    if (firstMessage.parts) {
+      for (const part of firstMessage.parts) {
+        if (part.type === "text" && part.text) {
+          text += part.text + " ";
+        }
+      }
+    } else if (typeof firstMessage === "string") {
+      text = firstMessage;
+    }
+
+    text = text.trim();
+    if (!text) return undefined;
+
+    // Truncate at word boundary (max 60 chars)
+    const maxLen = 60;
+    if (text.length <= maxLen) return text;
+
+    // Find last space before maxLen
+    const truncated = text.substring(0, maxLen);
+    const lastSpace = truncated.lastIndexOf(" ");
+
+    if (lastSpace > 20) {
+      // Truncate at word boundary if reasonable
+      return truncated.substring(0, lastSpace) + "...";
+    }
+
+    // Otherwise just truncate with ellipsis
+    return truncated.substring(0, maxLen - 3) + "...";
+  } catch {
+    return undefined;
+  }
+}
+
 export interface TaskWorkerConfig {
   api: KeepDbApi;
   stepLimit?: number; // default 50
@@ -113,8 +159,8 @@ export class TaskWorker {
 
       // Reuse existing thread
       task.thread_id = task.thread_id || generateId();
-      // Placeholder, FIXME add title?
-      await this.ensureThread(task, taskType);
+      // Generate title from first inbox message if task doesn't have one
+      await this.ensureThread(task, taskType, inbox);
 
       // Get task state
       const state = await this.getTaskState(task);
@@ -666,19 +712,16 @@ export class TaskWorker {
   //   return interval;
   // }
 
-  private async ensureThread(task: Task, taskType: TaskType) {
+  private async ensureThread(task: Task, taskType: TaskType, inbox: string[]) {
     const threadId = task.thread_id;
 
-    let title = task.title;
+    // Use task title, or generate from inbox content, or fall back to task type
+    let title: string | undefined = task.title;
     if (!title) {
-      switch (taskType) {
-        case "worker":
-          title = "Worker";
-          break;
-        case "planner":
-          title = "Planner";
-          break;
-      }
+      title = generateTitleFromInbox(inbox);
+    }
+    if (!title) {
+      title = taskType === "worker" ? "Worker" : "Planner";
     }
 
     const now = new Date();
