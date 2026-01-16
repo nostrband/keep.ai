@@ -43,6 +43,10 @@ const getStatusBadge = (workflow: any) => {
   }
 };
 
+// Error types that require user attention (non-fixable)
+// Logic errors are handled silently by the agent via maintenance mode
+const ATTENTION_ERROR_TYPES = ['auth', 'permission', 'network'];
+
 // Compute secondary line text for workflow
 function getSecondaryLine(workflow: any, latestRun: any, task: any): { text: string; isAttention: boolean } {
   // Check if task is waiting for input
@@ -50,12 +54,38 @@ function getSecondaryLine(workflow: any, latestRun: any, task: any): { text: str
     return { text: "Waiting for your input", isAttention: true };
   }
 
+  // Check if workflow is in maintenance mode (agent is auto-fixing)
+  // Per spec 09b: Logic errors are handled silently, don't show as needing attention
+  if (workflow.maintenance) {
+    return { text: "Auto-fixing issue...", isAttention: false };
+  }
+
   // Check latest run status
   if (latestRun) {
     if (latestRun.error) {
       const runTime = new Date(latestRun.end_timestamp || latestRun.start_timestamp);
       const ago = formatTimeAgo(runTime);
-      return { text: `⚠ Failed ${ago} - needs attention`, isAttention: true };
+      const errorType = latestRun.error_type || '';
+
+      // Only mark as needing attention for non-logic errors
+      // Logic errors are handled by the agent via maintenance mode
+      const needsAttention = ATTENTION_ERROR_TYPES.includes(errorType) ||
+        (errorType === '' && !workflow.maintenance); // Legacy errors or unclassified
+
+      if (needsAttention) {
+        // Show user-friendly message based on error type
+        if (errorType === 'auth') {
+          return { text: `⚠ Authentication expired ${ago}`, isAttention: true };
+        } else if (errorType === 'permission') {
+          return { text: `⚠ Permission denied ${ago}`, isAttention: true };
+        } else if (errorType === 'network') {
+          return { text: `⚠ Network error ${ago}`, isAttention: true };
+        }
+        return { text: `⚠ Failed ${ago} - needs attention`, isAttention: true };
+      } else {
+        // Logic error - agent is handling it
+        return { text: `Issue detected ${ago} - fixing...`, isAttention: false };
+      }
     }
 
     if (latestRun.end_timestamp) {
@@ -191,6 +221,15 @@ export default function MainPage() {
   const displayedWorkflows = showAttentionOnly
     ? sortedWorkflows.filter(w => w.needsAttention)
     : sortedWorkflows;
+
+  // Update tray badge when attention count changes (Electron only)
+  useEffect(() => {
+    if (window.electronAPI) {
+      window.electronAPI.updateTrayBadge(attentionCount).catch(() => {
+        // Ignore errors - this is optional functionality
+      });
+    }
+  }, [attentionCount]);
 
   const handleSubmit = useCallback(async (message: PromptInputMessage) => {
     const hasText = Boolean(message.text);

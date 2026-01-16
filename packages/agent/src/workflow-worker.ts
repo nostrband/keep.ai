@@ -161,7 +161,8 @@ export class WorkflowWorker {
         new Date().toISOString(),
         JSON.stringify(result.result) || "",
         "",
-        logs.join("\n")
+        logs.join("\n"),
+        "" // no error_type for successful runs
       );
 
       // Update workflow timestamp to mark last successful run
@@ -191,13 +192,24 @@ export class WorkflowWorker {
       const errorMessage =
         error instanceof Error ? error.message : (error as string);
 
+      // Determine error_type for storage and notification filtering
+      let errorType: ErrorType | '' = '';
+      if (error === ERROR_BAD_REQUEST) {
+        errorType = ''; // BAD_REQUEST is not a classified error type
+      } else if (error === ERROR_PAYMENT_REQUIRED) {
+        errorType = ''; // PAYMENT_REQUIRED is not a classified error type
+      } else if (isClassifiedError(error)) {
+        errorType = (error as ClassifiedError).type;
+      }
+
       try {
         await this.api.scriptStore.finishScriptRun(
           scriptRunId,
           new Date().toISOString(),
           "",
           errorMessage,
-          logs.join("\n")
+          logs.join("\n"),
+          errorType
         );
       } catch (e) {
         this.debug("finishScriptRun error", e);

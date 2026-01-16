@@ -20,6 +20,7 @@ export interface ScriptRun {
   start_timestamp: string;
   end_timestamp: string;
   error: string;
+  error_type: string;   // Classified error type: 'auth', 'permission', 'network', 'logic', or '' (no error)
   result: string;
   logs: string;
   workflow_id: string;
@@ -260,20 +261,20 @@ export class ScriptStore {
   }
 
   // Update a script run with end_timestamp, optional error, result, and logs
-  async finishScriptRun(id: string, end_timestamp: string, result: string, error: string = '', logs: string = '', tx?: DBInterface): Promise<void> {
+  async finishScriptRun(id: string, end_timestamp: string, result: string, error: string = '', logs: string = '', error_type: string = '', tx?: DBInterface): Promise<void> {
     const db = tx || this.db.db;
     await db.exec(
       `UPDATE script_runs
-       SET end_timestamp = ?, result = ?, error = ?, logs = ?
+       SET end_timestamp = ?, result = ?, error = ?, logs = ?, error_type = ?
        WHERE id = ?`,
-      [end_timestamp, result, error, logs, id]
+      [end_timestamp, result, error, logs, error_type, id]
     );
   }
 
   // Get a script run by ID
   async getScriptRun(id: string): Promise<ScriptRun | null> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, script_id, start_timestamp, end_timestamp, error, result, logs, workflow_id, type, retry_of, retry_count
+      `SELECT id, script_id, start_timestamp, end_timestamp, error, error_type, result, logs, workflow_id, type, retry_of, retry_count
        FROM script_runs
        WHERE id = ?`,
       [id]
@@ -290,6 +291,7 @@ export class ScriptStore {
       start_timestamp: row.start_timestamp as string,
       end_timestamp: row.end_timestamp as string,
       error: row.error as string,
+      error_type: (row.error_type as string) || '',
       result: row.result as string,
       logs: row.logs as string,
       workflow_id: row.workflow_id as string,
@@ -305,7 +307,7 @@ export class ScriptStore {
     limit: number = 100,
     offset: number = 0
   ): Promise<ScriptRun[]> {
-    let sql = `SELECT id, script_id, start_timestamp, end_timestamp, error, result, logs, workflow_id, type, retry_of, retry_count
+    let sql = `SELECT id, script_id, start_timestamp, end_timestamp, error, error_type, result, logs, workflow_id, type, retry_of, retry_count
                FROM script_runs`;
     const args: (string | number)[] = [];
 
@@ -329,6 +331,7 @@ export class ScriptStore {
       start_timestamp: row.start_timestamp as string,
       end_timestamp: row.end_timestamp as string,
       error: row.error as string,
+      error_type: (row.error_type as string) || '',
       result: row.result as string,
       logs: row.logs as string,
       workflow_id: row.workflow_id as string,
@@ -341,7 +344,7 @@ export class ScriptStore {
   // Get script runs by script_id
   async getScriptRunsByScriptId(script_id: string): Promise<ScriptRun[]> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, script_id, start_timestamp, end_timestamp, error, result, logs, workflow_id, type, retry_of, retry_count
+      `SELECT id, script_id, start_timestamp, end_timestamp, error, error_type, result, logs, workflow_id, type, retry_of, retry_count
        FROM script_runs
        WHERE script_id = ?
        ORDER BY start_timestamp DESC`,
@@ -356,6 +359,7 @@ export class ScriptStore {
       start_timestamp: row.start_timestamp as string,
       end_timestamp: row.end_timestamp as string,
       error: row.error as string,
+      error_type: (row.error_type as string) || '',
       result: row.result as string,
       logs: row.logs as string,
       workflow_id: row.workflow_id as string,
@@ -368,7 +372,7 @@ export class ScriptStore {
   // Get script runs by task_id (through scripts table)
   async getScriptRunsByTaskId(task_id: string): Promise<ScriptRun[]> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT sr.id, sr.script_id, sr.start_timestamp, sr.end_timestamp, sr.error, sr.result, sr.logs, sr.workflow_id, sr.type, sr.retry_of, sr.retry_count
+      `SELECT sr.id, sr.script_id, sr.start_timestamp, sr.end_timestamp, sr.error, sr.error_type, sr.result, sr.logs, sr.workflow_id, sr.type, sr.retry_of, sr.retry_count
        FROM script_runs sr
        INNER JOIN scripts s ON sr.script_id = s.id
        WHERE s.task_id = ?
@@ -384,6 +388,7 @@ export class ScriptStore {
       start_timestamp: row.start_timestamp as string,
       end_timestamp: row.end_timestamp as string,
       error: row.error as string,
+      error_type: (row.error_type as string) || '',
       result: row.result as string,
       logs: row.logs as string,
       workflow_id: row.workflow_id as string,
@@ -396,7 +401,7 @@ export class ScriptStore {
   // Get script runs by workflow_id
   async getScriptRunsByWorkflowId(workflow_id: string): Promise<ScriptRun[]> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, script_id, start_timestamp, end_timestamp, error, result, logs, workflow_id, type, retry_of, retry_count
+      `SELECT id, script_id, start_timestamp, end_timestamp, error, error_type, result, logs, workflow_id, type, retry_of, retry_count
        FROM script_runs
        WHERE workflow_id = ?
        ORDER BY start_timestamp DESC`,
@@ -411,6 +416,7 @@ export class ScriptStore {
       start_timestamp: row.start_timestamp as string,
       end_timestamp: row.end_timestamp as string,
       error: row.error as string,
+      error_type: (row.error_type as string) || '',
       result: row.result as string,
       logs: row.logs as string,
       workflow_id: row.workflow_id as string,

@@ -4,8 +4,9 @@ import {
   Routes,
   Route,
   Navigate,
+  useNavigate,
 } from "react-router-dom";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import MainPage from "./components/MainPage";
 import ChatPage from "./components/ChatPage";
 import NewPage from "./components/NewPage";
@@ -36,6 +37,27 @@ import { CLERK_PUBLISHABLE_KEY } from "./constants/auth";
 // Access build-time constants
 declare const __SERVERLESS__: boolean;
 declare const __ELECTRON__: boolean;
+
+// Component to handle electron-specific navigation events (notification clicks, etc.)
+function ElectronNavigationHandler() {
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!window.electronAPI) return;
+
+    // Set up listener for navigation from notification clicks
+    window.electronAPI.onNavigateTo((path: string) => {
+      navigate(path);
+    });
+
+    // Clean up on unmount
+    return () => {
+      window.electronAPI?.removeAllListeners('navigate-to');
+    };
+  }, [navigate]);
+
+  return null;
+}
 
 function SyncingStatus({ isServerless, isInitializing }: { isServerless: boolean; isInitializing: boolean }) {
   const [showTroubleOptions, setShowTroubleOptions] = useState(false);
@@ -215,6 +237,8 @@ function App() {
 
   return (
     <Router>
+      {/* Handle electron-specific navigation events */}
+      {isElectron && <ElectronNavigationHandler />}
       <Routes>
         <Route path="/" element={<MainPage />} />
         <Route path="/chat" element={<ChatPage />} />

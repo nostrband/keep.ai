@@ -4,7 +4,7 @@ This document outlines the remaining work needed to ship a simple, lovable, and 
 
 The items below are prioritized by impact on user experience and product completeness. Each item references the relevant spec(s) and includes specific file locations and implementation notes.
 
-**Last Updated:** 2026-01-16 (fix attempt tracking and escalation completed)
+**Last Updated:** 2026-01-16 (error type filtering for notifications completed)
 
 ---
 
@@ -227,10 +227,14 @@ Use native OS notifications, not just app-internal or push.
   - Exposed `electronAPI.updateTrayBadge()` for renderer
   - Added `electronAPI.onNavigateTo()` for navigation from notifications
 
-- [ ] **Filter notifications by error type** [Spec 09, 09b]
-  - Only notify for non-fixable errors (auth/permission/network)
-  - Don't notify for logic errors being auto-fixed
-  - **Note:** Infrastructure ready, web app needs to call these APIs
+- [x] **Filter notifications by error type** [Spec 09, 09b]
+  - Added `error_type` field to ScriptRun table via migration v22
+  - WorkflowWorker now saves error_type when finishing script runs
+  - Created WorkflowNotifications service that filters by error_type
+  - Notifications only shown for auth/permission/network errors
+  - Logic errors handled silently by agent via maintenance mode
+  - MainPage updated to show user-friendly error messages by type
+  - Tray badge updates with attention count
 
 ### 9. Tray Menu Completion (COMPLETED 2026-01-16)
 
