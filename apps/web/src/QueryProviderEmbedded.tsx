@@ -143,8 +143,6 @@ export function QueryProviderEmbedded({
 
   useEffect(() => {
     const handleControllerChange = async () => {
-      console.log("Service worker controller change");
-
       // Re-send key data to new service worker
       const localKey = localStorage.getItem("local_key");
       if (localKey && apiRef.current) {

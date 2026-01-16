@@ -182,8 +182,6 @@ export default function FilesPage() {
         // Upload file (without downloadId for direct upload)
         await fileSender.upload({ filename: file.name }, source);
         
-        console.log("File uploaded successfully via nostr:", file.name);
-        
         // Refresh file list
         refetch();
         

@@ -181,8 +181,6 @@ export function useFileUpload() {
           source
         );
 
-        console.log("File uploaded successfully via nostr:", file.name, fileRecord);
-
         // Refresh file list to get the new file record
         await refetchFiles();
 

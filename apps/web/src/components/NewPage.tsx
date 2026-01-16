@@ -72,7 +72,6 @@ export default function NewPage() {
       }
 
       // Call api.createTask
-      console.log('Creating task...');
       const result = await api.createTask({
         content: messageContent,
         files: attachedFiles,

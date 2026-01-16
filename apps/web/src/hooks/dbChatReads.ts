@@ -122,7 +122,6 @@ export function useChatEvents(chatId: string) {
         }
         
         // Otherwise, just invalidate the query
-        console.log("Invalidate");
         queryClient.invalidateQueries({ queryKey });
       },
     },

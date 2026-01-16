@@ -31,7 +31,6 @@ export function notifyTablesChanged(
   isLocalChange: boolean,
   api: KeepDbApi
 ) {
-  console.log("notifyTablesChanged", tables, isLocalChange, globalThis);
   const set = new Set(tables);
   queryClient.invalidateQueries({
     predicate(q) {
@@ -48,7 +47,7 @@ export function notifyTablesChanged(
         // Custom handler
         meta
           .onTablesUpdate(queryTables)
-          .catch((e: any) => console.log("error", e));
+          .catch((e: any) => console.error("onTablesUpdate error:", e));
         return false;
       } else {
         // Invalidate
