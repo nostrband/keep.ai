@@ -17,6 +17,7 @@ export interface WorkflowExecutionSignal {
   timestamp: number;
   error?: string;              // Error message for logging
   errorType?: ErrorType;       // Classified error type (auth, permission, network, logic)
+  scriptRunId?: string;        // ID of the script run that triggered this signal
 }
 
 /**
@@ -28,6 +29,7 @@ export type WorkflowSignalHandler = (signal: WorkflowExecutionSignal) => void;
  * Retry state for a specific workflow
  */
 export interface WorkflowRetryState {
-  nextStart: number; // timestamp in milliseconds when workflow can be retried
-  retryCount: number; // number of retry attempts
+  nextStart: number;      // timestamp in milliseconds when workflow can be retried
+  retryCount: number;     // number of retry attempts
+  originalRunId: string;  // ID of the original failed script run (for retry chain tracking)
 }

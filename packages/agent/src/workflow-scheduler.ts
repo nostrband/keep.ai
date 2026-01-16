@@ -54,11 +54,18 @@ export class WorkflowScheduler {
         // Get or create retry state
         const currentState = this.workflowRetryState.get(signal.workflowId) || {
           retryCount: 0,
-          nextStart: 0
+          nextStart: 0,
+          originalRunId: signal.scriptRunId || '', // Track the first failed run
         };
 
         // Increment retry count
         currentState.retryCount += 1;
+
+        // If this is a new retry chain (first failure), set the original run ID
+        // Otherwise keep the existing originalRunId (it's the first failure in the chain)
+        if (!currentState.originalRunId && signal.scriptRunId) {
+          currentState.originalRunId = signal.scriptRunId;
+        }
 
         // Calculate exponential backoff
         const baseDelayMs = 10 * 1000; // 10 seconds in milliseconds
@@ -71,7 +78,7 @@ export class WorkflowScheduler {
         this.workflowRetryState.set(signal.workflowId, currentState);
 
         this.debug(
-          `Workflow ${signal.workflowId} retry scheduled in ${actualDelayMs}ms (attempt ${currentState.retryCount})`
+          `Workflow ${signal.workflowId} retry scheduled in ${actualDelayMs}ms (attempt ${currentState.retryCount}, originalRunId: ${currentState.originalRunId})`
         );
         break;
 
@@ -220,12 +227,20 @@ export class WorkflowScheduler {
       // Execute first available workflow
       if (availableWorkflows.length > 0) {
         const workflow = availableWorkflows[0];
+        const retryState = this.workflowRetryState.get(workflow.id);
+
         this.debug(
-          `Triggering workflow: ${workflow.title} (${workflow.id})`
+          `Triggering workflow: ${workflow.title} (${workflow.id})`,
+          retryState ? `(retry #${retryState.retryCount} of ${retryState.originalRunId})` : '(fresh run)'
         );
 
         try {
-          await this.worker.executeWorkflow(workflow);
+          // Pass retry info to worker if this is a retry
+          await this.worker.executeWorkflow(
+            workflow,
+            retryState?.originalRunId || '',
+            retryState?.retryCount || 0
+          );
           
           // After execution, calculate and update next_run_timestamp from cron if available
           if (workflow.cron && workflow.cron.trim() !== '') {

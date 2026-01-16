@@ -46,14 +46,22 @@ export class WorkflowWorker {
   /**
    * Execute a single workflow by running its associated script.
    * This is the main entry point for workflow execution.
+   *
+   * @param workflow - The workflow to execute
+   * @param retryOf - ID of the original failed script run (for retry tracking)
+   * @param retryCount - Which retry attempt this is (0 for first attempt)
    */
-  public async executeWorkflow(workflow: Workflow): Promise<void> {
-    this.debug("Execute workflow", workflow);
+  public async executeWorkflow(
+    workflow: Workflow,
+    retryOf: string = '',
+    retryCount: number = 0
+  ): Promise<void> {
+    this.debug("Execute workflow", workflow, "retryOf:", retryOf, "retryCount:", retryCount);
 
     try {
       // Find scripts by workflow_id
       const scripts = await this.api.scriptStore.getScriptsByWorkflowId(workflow.id);
-      
+
       if (scripts.length === 0) {
         this.debug("No scripts found for workflow", workflow.id);
         throw new Error(`No scripts found for workflow ${workflow.id}`);
@@ -66,7 +74,7 @@ export class WorkflowWorker {
       // Use the latest script (first one, since getScriptsByWorkflowId orders by version DESC)
       const script = scripts[0];
 
-      await this.processWorkflowScript(workflow, script);
+      await this.processWorkflowScript(workflow, script, retryOf, retryCount);
     } catch (error) {
       this.debug("Workflow handling error:", error);
       throw error;
@@ -88,7 +96,9 @@ export class WorkflowWorker {
 
   private async processWorkflowScript(
     workflow: Workflow,
-    script: Script
+    script: Script,
+    retryOf: string = '',
+    retryCount: number = 0
   ) {
     const scriptRunId = generateId();
     this.debug(
@@ -97,7 +107,11 @@ export class WorkflowWorker {
       "script",
       script.id,
       "workflow",
-      workflow.id
+      workflow.id,
+      "retryOf:",
+      retryOf,
+      "retryCount:",
+      retryCount
     );
 
     await this.api.scriptStore.startScriptRun(
@@ -105,7 +119,9 @@ export class WorkflowWorker {
       script.id,
       new Date().toISOString(),
       workflow.id,
-      "workflow"
+      "workflow",
+      retryOf,
+      retryCount
     );
 
     // Initialize logs array for this script run
@@ -158,6 +174,7 @@ export class WorkflowWorker {
         type: "done",
         workflowId: workflow.id,
         timestamp: Date.now(),
+        scriptRunId,
       });
     } catch (error: any) {
       const errorMessage =
@@ -201,6 +218,7 @@ export class WorkflowWorker {
           type: "done",
           workflowId: workflow.id,
           timestamp: Date.now(),
+          scriptRunId,
         });
       } else if (error === ERROR_PAYMENT_REQUIRED) {
         this.debug("PAYMENT_REQUIRED: Sending global pause signal");
@@ -211,6 +229,7 @@ export class WorkflowWorker {
           workflowId: workflow.id,
           timestamp: Date.now(),
           error: errorMessage,
+          scriptRunId,
         });
       } else if (isClassifiedError(error)) {
         // Handle classified errors based on type
@@ -246,6 +265,7 @@ export class WorkflowWorker {
               timestamp: Date.now(),
               error: errorMessage,
               errorType: classifiedError.type,
+              scriptRunId,
             });
             break;
 
@@ -259,6 +279,7 @@ export class WorkflowWorker {
               timestamp: Date.now(),
               error: errorMessage,
               errorType: classifiedError.type,
+              scriptRunId,
             });
             break;
 
@@ -286,6 +307,7 @@ export class WorkflowWorker {
               timestamp: Date.now(),
               error: errorMessage,
               errorType: classifiedError.type,
+              scriptRunId,
             });
             break;
         }
@@ -297,6 +319,7 @@ export class WorkflowWorker {
           workflowId: workflow.id,
           timestamp: Date.now(),
           error: errorMessage,
+          scriptRunId,
         });
       }
 

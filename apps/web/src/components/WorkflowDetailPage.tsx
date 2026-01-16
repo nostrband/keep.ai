@@ -379,6 +379,12 @@ export default function WorkflowDetailPage() {
                             <Badge variant={run.error ? 'destructive' : run.end_timestamp ? 'default' : 'secondary'}>
                               {run.error ? 'error' : run.end_timestamp ? 'completed' : 'running'}
                             </Badge>
+                            {/* Show retry badge if this is a retry run */}
+                            {run.retry_of && run.retry_count > 0 && (
+                              <Badge variant="outline" className="text-orange-700 border-orange-300 bg-orange-50 text-xs">
+                                Retry #{run.retry_count}
+                              </Badge>
+                            )}
                           </div>
                           <div className="flex items-center gap-4 text-xs text-gray-500">
                             <span>Started: {new Date(run.start_timestamp).toLocaleString()}</span>

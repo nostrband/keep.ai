@@ -39,13 +39,21 @@ export default function ScriptRunDetailPage() {
                 <h2 className="text-xl font-semibold text-gray-900 mb-2">
                   Run {run.id.slice(0, 8)}
                 </h2>
-                {run.error ? (
-                  <Badge variant="destructive">Error</Badge>
-                ) : run.end_timestamp ? (
-                  <Badge variant="default" className="bg-green-100 text-green-800">Completed</Badge>
-                ) : (
-                  <Badge variant="secondary">Running</Badge>
-                )}
+                <div className="flex flex-wrap items-center gap-2">
+                  {run.error ? (
+                    <Badge variant="destructive">Error</Badge>
+                  ) : run.end_timestamp ? (
+                    <Badge variant="default" className="bg-green-100 text-green-800">Completed</Badge>
+                  ) : (
+                    <Badge variant="secondary">Running</Badge>
+                  )}
+                  {/* Show retry badge if this is a retry run */}
+                  {run.retry_of && run.retry_count > 0 && (
+                    <Badge variant="outline" className="text-orange-700 border-orange-300 bg-orange-50">
+                      Retry #{run.retry_count}
+                    </Badge>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -98,6 +106,22 @@ export default function ScriptRunDetailPage() {
                   <h3 className="text-sm font-medium text-gray-700 mb-2">Run ID</h3>
                   <p className="text-gray-900 font-mono text-sm">{run.id}</p>
                 </div>
+
+                {/* Show link to original failed run if this is a retry */}
+                {run.retry_of && (
+                  <div>
+                    <h3 className="text-sm font-medium text-gray-700 mb-2">Retry of Run</h3>
+                    <Link
+                      to={`/scripts/${run.script_id}/runs/${run.retry_of}`}
+                      className="text-blue-600 hover:text-blue-800 underline font-mono text-sm"
+                    >
+                      {run.retry_of.slice(0, 16)}...
+                    </Link>
+                    <p className="text-xs text-gray-500 mt-1">
+                      This is retry #{run.retry_count} of the original failed run
+                    </p>
+                  </div>
+                )}
               </div>
 
               {run.error && (

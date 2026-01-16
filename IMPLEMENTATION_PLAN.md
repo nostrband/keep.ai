@@ -245,23 +245,21 @@ Use native OS notifications, not just app-internal or push.
   - Register shortcut: `globalShortcut.register('CmdOrCtrl+N', ...)`
   - Shows/focuses window and focuses input box
 
-### 10. Retry Tracking
+### 10. Retry Tracking (COMPLETED 2026-01-16)
 
-- [ ] **Add `retry_of` and `retry_count` to script_runs table** [Spec 10]
-  - File: `/packages/db/src/script-store.ts` - Update ScriptRun interface
-  - Current script_runs schema: id, script_id, start_timestamp, end_timestamp, error, result, logs, workflow_id, type
-  - **Missing:** retry_of, retry_count fields
-  - Create migration adding: `retry_of TEXT`, `retry_count INTEGER DEFAULT 0`
+- [x] **Add `retry_of` and `retry_count` to script_runs table** [Spec 10]
+  - File: `/packages/db/src/migrations/v20.ts` - Created migration adding retry_of and retry_count fields
+  - File: `/packages/db/src/script-store.ts` - Updated ScriptRun interface and all queries
+  - File: `/packages/db/src/database.ts` - Registered v20 migration
 
-- [ ] **Update retry logic to track lineage** [Spec 10]
-  - File: `/packages/agent/src/workflow-worker.ts`
-  - When creating retry run, set retry_of to original run ID
-  - Increment retry_count from previous run
+- [x] **Update retry logic to track lineage** [Spec 10]
+  - File: `/packages/agent/src/workflow-worker-signal.ts` - Added scriptRunId to signals, originalRunId to retry state
+  - File: `/packages/agent/src/workflow-worker.ts` - Updated to accept/pass retry info, include scriptRunId in all signals
+  - File: `/packages/agent/src/workflow-scheduler.ts` - Tracks originalRunId, passes retry info to worker on execution
 
-- [ ] **Display retry chain in run history** [Spec 08, 10]
-  - File: `/apps/web/src/components/ScriptRunDetailPage.tsx`
-  - Show "Retry #N of {original run}" when viewing a retry
-  - Link to original failed run
+- [x] **Display retry chain in run history** [Spec 08, 10]
+  - File: `/apps/web/src/components/ScriptRunDetailPage.tsx` - Shows "Retry #N" badge and link to original run
+  - File: `/apps/web/src/components/WorkflowDetailPage.tsx` - Shows "Retry #N" badge in script runs list
 
 ---
 
