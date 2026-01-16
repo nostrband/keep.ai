@@ -4,7 +4,7 @@ This document outlines the remaining work needed to ship a simple, lovable, and 
 
 The items below are prioritized by impact on user experience and product completeness. Each item references the relevant spec(s) and includes specific file locations and implementation notes.
 
-**Last Updated:** 2026-01-16 (debug enable now dev-only; mutations now trigger sync immediately - removed timezone FIXME that didn't exist; console.log cleanup - 35 debug statements removed, 5 error handling statements kept; commented code removal - ~155 lines removed)
+**Last Updated:** 2026-01-16 (additional debug console.log cleanup in web app; debug enable now dev-only; mutations now trigger sync immediately; console.log cleanup - 45+ debug statements removed; commented code removal - ~155 lines removed)
 
 ---
 
@@ -395,6 +395,15 @@ Improve completeness and handle edge cases.
 - [x] **Fix unconditional debug enable** (COMPLETED 2026-01-16)
   - File: `/apps/web/src/main.tsx` line 23
   - Changed `debug.enable("*")` to only run in development mode via `import.meta.env.DEV`
+
+- [x] **Remove additional debug console.log statements** (COMPLETED 2026-01-16)
+  - `/apps/web/src/queryClient.ts` - Removed notifyTablesChanged debug log
+  - `/apps/web/src/components/NewPage.tsx` - Removed 'Creating task...' debug log
+  - `/apps/web/src/hooks/dbChatReads.ts` - Removed 'Invalidate' debug log
+  - `/apps/web/src/hooks/useFileUpload.ts` - Removed file upload success log
+  - `/apps/web/src/components/FilesPage.tsx` - Removed file upload success log
+  - `/apps/web/src/QueryProviderEmbedded.tsx` - Removed service worker controller change log
+  - `/apps/server/src/server.ts` - Removed fileRecord debug log in /api/file/get
 
 - [x] **Remove commented code blocks** (COMPLETED 2026-01-16)
   - [x] File: `/packages/agent/src/agent-env.ts` - Removed ~25 lines of commented out task listing code (lines 180-206) and ~5 lines of commented out tools prompt
