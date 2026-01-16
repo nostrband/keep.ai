@@ -20,8 +20,10 @@ import dedicatedWorkerUrl from "./worker.ts?sharedworker&url";
 declare const __ELECTRON__: boolean;
 const isElectron = __ELECTRON__; // (import.meta as any).env?.VITE_FLAVOR === "electron";
 
-// FIXME debug
-debug.enable("*");
+// Enable debug output only in development mode
+if (import.meta.env.DEV) {
+  debug.enable("*");
+}
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

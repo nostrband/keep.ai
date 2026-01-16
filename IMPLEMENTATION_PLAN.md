@@ -4,7 +4,7 @@ This document outlines the remaining work needed to ship a simple, lovable, and 
 
 The items below are prioritized by impact on user experience and product completeness. Each item references the relevant spec(s) and includes specific file locations and implementation notes.
 
-**Last Updated:** 2026-01-16 (mutations now trigger sync immediately - removed timezone FIXME that didn't exist; console.log cleanup - 35 debug statements removed, 5 error handling statements kept; commented code removal - ~155 lines removed)
+**Last Updated:** 2026-01-16 (debug enable now dev-only; mutations now trigger sync immediately - removed timezone FIXME that didn't exist; console.log cleanup - 35 debug statements removed, 5 error handling statements kept; commented code removal - ~155 lines removed)
 
 ---
 
@@ -391,6 +391,10 @@ Improve completeness and handle edge cases.
   - [x] `/apps/web/src/QueryProvider.tsx` - Removed 14 debug statements (kept only error handling statements)
   - [x] `/apps/web/src/main.tsx` - Cleaned up 4 console.log statements (kept only service worker registration error)
   - [x] `/packages/sync/src/Peer.ts` - Replaced 6 console.error statements with this.debug() for consistency
+
+- [x] **Fix unconditional debug enable** (COMPLETED 2026-01-16)
+  - File: `/apps/web/src/main.tsx` line 23
+  - Changed `debug.enable("*")` to only run in development mode via `import.meta.env.DEV`
 
 - [x] **Remove commented code blocks** (COMPLETED 2026-01-16)
   - [x] File: `/packages/agent/src/agent-env.ts` - Removed ~25 lines of commented out task listing code (lines 180-206) and ~5 lines of commented out tools prompt
