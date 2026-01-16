@@ -4,7 +4,7 @@ This document outlines the remaining work needed to ship a simple, lovable, and 
 
 The items below are prioritized by impact on user experience and product completeness. Each item references the relevant spec(s) and includes specific file locations and implementation notes.
 
-**Last Updated:** 2026-01-16 (thread title generation, context building enabled for agents, test fixes)
+**Last Updated:** 2026-01-16 (console.log cleanup - 35 debug statements removed, 5 error handling statements kept)
 
 ---
 
@@ -387,19 +387,14 @@ Improve completeness and handle edge cases.
   - File: `/packages/db/src/migrations/v1.ts` line 19
   - FIXME: "deprecate deleted, cron and task fields" on tasks table
 
-### 15. Code Quality - Debug Statements
+### 15. Code Quality - Debug Statements (COMPLETED 2026-01-16)
 
-- [ ] **Remove console.log statements** - 60+ occurrences across codebase
-  - Key files to clean:
-    - `/apps/web/src/QueryProvider.tsx` (14+ statements)
-    - `/apps/web/src/components/ConsolePage.tsx` (19 statements)
-    - `/apps/web/src/components/WorkflowEventGroup.tsx` line 60
-    - `/apps/web/src/components/EventItem.tsx` line 33
-    - `/apps/web/src/components/TaskEventGroup.tsx` line 83
-    - `/apps/web/src/main.tsx` (3 statements)
-    - `/apps/server/src/server.ts` (3 statements)
-    - `/packages/sync/src/Peer.ts` (6 statements)
-  - Replace with proper debug logging or remove
+- [x] **Remove console.log statements** - 35 debug statements removed, 5 error handling statements kept
+  - [x] `/apps/server/src/server.ts` - Removed 2 statements exposing environment config
+  - [x] `/apps/web/src/components/ConsolePage.tsx` - Removed 18 debug console.log statements
+  - [x] `/apps/web/src/QueryProvider.tsx` - Removed 14 debug statements (kept only error handling statements)
+  - [x] `/apps/web/src/main.tsx` - Cleaned up 4 console.log statements (kept only service worker registration error)
+  - [x] `/packages/sync/src/Peer.ts` - Replaced 6 console.error statements with this.debug() for consistency
 
 - [ ] **Remove commented code blocks**
   - File: `/packages/agent/src/agent-env.ts` - ~117 lines of commented context code

@@ -105,7 +105,6 @@ export function QueryProvider({
       const { type } = event.data;
       if (type === "pong") {
         // Worker responded to ping
-        console.log("[QueryProvider] Received pong from worker");
         if (to) {
           clearTimeout(to);
           setPingTimeout(null);
@@ -116,7 +115,6 @@ export function QueryProvider({
     const interval = setInterval(() => {
       // Only send ping if document is not hidden (tab is active)
       if (!document.hidden && workerPort) {
-        console.log("[QueryProvider] Sending ping to worker");
         workerPort.postMessage({ type: "ping" });
 
         // Set timeout for pong response (5 seconds)
@@ -166,12 +164,6 @@ export function QueryProvider({
       setApi(api);
 
       // Create and configure tab sync with callback
-      console.log("[QueryProvider] Starting worker", {
-        backendUrl,
-        sharedWorkerUrl,
-        dedicatedWorkerUrl,
-        isServerless,
-      });
       let transport: Transport | undefined;
       let workerPort: WorkerPort | undefined;
 
@@ -192,7 +184,6 @@ export function QueryProvider({
               )
             : sharedWorkerUrl,
         });
-        console.log("[QueryProvider] Worker started and message port obtained");
         setWorkerPort(workerPort);
 
         // Create transport and add message handler to port
@@ -210,11 +201,9 @@ export function QueryProvider({
           const { type } = event.data;
           if (type === "worker_sync") {
             // Worker started sync
-            console.log("[QueryProvider] Sync message received");
             if (!wasReady) setDbStatus("syncing");
           } else if (type === "worker_eose") {
             // Worker finished sync
-            console.log("[QueryProvider] EOSE message received");
             setDbStatus("ready");
             wasReady = true;
           }
@@ -231,17 +220,14 @@ export function QueryProvider({
               // us a local connection key to store in localstore,
               // as workers don't have localstore access and indexeddb is too heavy for this
               localStorage.setItem("local_key", data.key);
-              console.log("[QueryProvider] Stored local key");
             } else if (type === "connect_error") {
               setError(data.error);
               console.error("[QueryProvider] Connection error:", data.error);
             } else if (type === "worker_reconnecting") {
               setDbStatus("reconnecting");
-              console.error("[QueryProvider] Reconnecting...");
             } else if (type === "worker_reconnected") {
               if (wasReady)
                 setDbStatus("ready");
-              console.error("[QueryProvider] Reconnecting...");
             }
           });
         }
@@ -266,12 +252,10 @@ export function QueryProvider({
       if (backendUrl && !isServerless) {
         // Started sync
         peer.addListener("sync", () => {
-          console.log("[QueryProvider] Sync message received");
           setDbStatus("syncing");
         });
         // Finished sync
         peer.addListener("eose", () => {
-          console.log("[QueryProvider] EOSE message received");
           setDbStatus("ready");
         });
       }
@@ -282,7 +266,6 @@ export function QueryProvider({
 
       // Set up local changes callback to trigger sync
       setOnLocalChanges(() => {
-        console.log("[QueryProvider] Got local changes");
         peer.checkLocalChanges();
       });
 
@@ -293,16 +276,12 @@ export function QueryProvider({
         const localKey = localStorage.getItem("local_key");
         if (!localKey) {
           setDbStatus("disconnected");
-          console.log(
-            "[QueryProvider] No local key found, setting status to disconnected"
-          );
         } else {
           // Send the key to the worker
           workerPort!.postMessage({
             type: "local_key",
             data: { key: localKey },
           });
-          console.log("[QueryProvider] Sent existing local key to worker");
         }
 
         onResume = () => {
@@ -311,8 +290,6 @@ export function QueryProvider({
           });
         };
       }
-
-      console.log("[QueryProvider] Initialized successfully");
     } catch (err) {
       setDbStatus("error");
       setError((err as Error).message);
@@ -355,8 +332,6 @@ export function QueryProvider({
         type: "connect_device",
         data: { connectionString },
       });
-
-      console.log("[QueryProvider] Sent connect_device message to worker");
     } catch (err) {
       setError((err as Error).message);
       setDbStatus("disconnected");

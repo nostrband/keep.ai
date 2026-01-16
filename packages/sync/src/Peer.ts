@@ -191,11 +191,11 @@ export class Peer extends EventEmitter<{
     this.debug("onSync", peerId, peerCursor);
     const peer = this.peers.get(peerId);
     if (!peer) {
-      console.error("onSync for unknown peer", peerId);
+      this.debug("onSync for unknown peer", peerId);
       throw new Error("Peer not found");
     }
     if (peer.transport !== transport) {
-      console.error("onSync wrong transport for peer", peerId);
+      this.debug("onSync wrong transport for peer", peerId);
       throw new Error("Wrong transport for peer");
     }
 
@@ -292,11 +292,11 @@ export class Peer extends EventEmitter<{
   ): Promise<void> {
     const peer = this.peers.get(peerId);
     if (!peer) {
-      console.error("onReceive for unknown peer", peerId);
+      this.debug("onReceive for unknown peer", peerId);
       throw new Error("Peer not found");
     }
     if (peer.transport !== transport) {
-      console.error("onReceive wrong transport for peer", peerId);
+      this.debug("onReceive wrong transport for peer", peerId);
       throw new Error("Wrong transport for peer");
     }
 
@@ -493,7 +493,7 @@ export class Peer extends EventEmitter<{
       this.#schemaVersion = schemaVersion?.[0]?.user_version || 0;
       this.debug(`Initialized our schema version to ${this.schemaVersion}`);
     } catch (error) {
-      console.error("Error initializing last db version:", error);
+      this.debug("Error initializing last db version:", error);
       throw error;
     }
   }
@@ -912,8 +912,7 @@ export class Peer extends EventEmitter<{
         })
         .catch((err) => {
           // Prevent the queue from staying in a rejected state.
-          // You can swap this for your own logging.
-          console.error("Error in queued callback:", err);
+          this.debug("Error in queued callback:", err);
         });
 
       return resultPromise;

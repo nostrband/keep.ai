@@ -21,17 +21,11 @@ export default function ConsolePage() {
 
   const validateSelectOnly = (sql: string): boolean => {
     const trimmed = sql.trim().toLowerCase();
-    console.log("🔍 Validating SQL:", {
-      originalQuery: sql,
-      trimmedLower: trimmed,
-    });
 
     // Check if it starts with SELECT
     const isSelect = trimmed.startsWith("select");
-    console.log("🔍 Is SELECT query:", isSelect);
 
     if (!isSelect) {
-      console.log("❌ SQL Validation failed: Not a SELECT statement");
       return false;
     }
 
@@ -53,24 +47,17 @@ export default function ConsolePage() {
       (trimmed.includes("pragma") && trimmed.includes("="));
 
     if (hasDangerous) {
-      console.log("❌ SQL Validation failed: Contains dangerous keywords");
       return false;
     }
 
-    console.log("✅ SQL Validation passed");
     return true;
   };
 
   const executeQuery = async () => {
     if (!api || !sqlQuery.trim()) {
-      console.log("❌ Cannot execute: No API or empty query", {
-        hasApi: !!api,
-        queryLength: sqlQuery.length,
-      });
       return;
     }
 
-    console.log("🚀 Starting query execution...");
     setIsExecuting(true);
     const startTime = performance.now();
 
@@ -80,39 +67,11 @@ export default function ConsolePage() {
         throw new Error("Only SELECT statements are allowed");
       }
 
-      console.log("📊 Executing SQL query via execO...");
       const result = await api.db.db.execO<Record<string, unknown>>(sqlQuery);
       const endTime = performance.now();
 
-      console.log("✅ Query executed successfully", {
-        resultType: typeof result,
-        resultLength: result?.length || 0,
-        executionTime: endTime - startTime,
-      });
-
       const records = result || [];
       const outputLength = JSON.stringify(records).length;
-
-      console.log("📈 Query stats:", {
-        totalRecords: records.length,
-        outputLength: outputLength,
-        executionTime: endTime - startTime,
-        memoryUsageEstimate: `${(outputLength / 1024 / 1024).toFixed(2)} MB`,
-      });
-
-      // Check for large result sets
-      if (records.length > 1000) {
-        console.log("⚠️ Large result set detected:", records.length, "records");
-      }
-
-      if (outputLength > 10 * 1024 * 1024) {
-        // 10MB
-        console.log(
-          "⚠️ Large output size detected:",
-          (outputLength / 1024 / 1024).toFixed(2),
-          "MB"
-        );
-      }
 
       setQueryResult({
         records,
@@ -122,7 +81,6 @@ export default function ConsolePage() {
       });
     } catch (error) {
       const endTime = performance.now();
-      console.log("❌ Query execution failed:", error);
 
       setQueryResult({
         records: [],
@@ -133,7 +91,6 @@ export default function ConsolePage() {
       });
     } finally {
       setIsExecuting(false);
-      console.log("🏁 Query execution finished");
     }
   };
 
@@ -145,10 +102,6 @@ export default function ConsolePage() {
   };
 
   const handleCellClick = (value: unknown) => {
-    console.log("🔍 Cell clicked, showing modal with value:", {
-      valueType: typeof value,
-      valueLength: String(value).length,
-    });
     const stringValue =
       value === null
         ? "null"
@@ -159,7 +112,6 @@ export default function ConsolePage() {
   };
 
   const closeModal = () => {
-    console.log("🔍 Closing modal");
     setModalContent(null);
   };
 
@@ -167,7 +119,6 @@ export default function ConsolePage() {
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape" && modalContent !== null) {
-        console.log("🔍 Escape key pressed, closing modal");
         closeModal();
       }
     };
@@ -181,13 +132,11 @@ export default function ConsolePage() {
   }, [modalContent]);
 
   const insertCommonQuery = (query: string) => {
-    console.log("📝 Inserting common query:", query);
     setSqlQuery(query);
     // Focus the textarea so user can immediately press Ctrl+Enter
     setTimeout(() => {
       if (textareaRef.current) {
         textareaRef.current.focus();
-        console.log("📝 Focused textarea after inserting query");
       }
     }, 0);
   };

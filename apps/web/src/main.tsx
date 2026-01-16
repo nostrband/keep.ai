@@ -51,7 +51,6 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
 
 // Register service worker for PWA and push notifications
 if (!isElectron && "serviceWorker" in navigator) {
-  console.log("Registering service worker");
   window.addEventListener("load", async () => {
     try {
       const registration = await navigator.serviceWorker.register(
@@ -60,19 +59,13 @@ if (!isElectron && "serviceWorker" in navigator) {
           type: "module",
         }
       );
-      console.log("Service Worker registered successfully:", registration);
 
       // Update service worker if needed
       registration.addEventListener("updatefound", () => {
         const newWorker = registration.installing;
         if (newWorker) {
           newWorker.addEventListener("statechange", () => {
-            if (
-              newWorker.state === "installed" &&
-              navigator.serviceWorker.controller
-            ) {
-              console.log("New service worker installed, consider refresh");
-            }
+            // Service worker update detected
           });
         }
       });

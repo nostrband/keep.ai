@@ -890,7 +890,6 @@ export async function createServer(config: ServerConfig = {}) {
 
       // Set globally
       setEnv(newEnv);
-      console.log("newEnv", newEnv);
 
       // Write updated .env file
       fs.writeFileSync(envPath, envContent, "utf8");
@@ -1054,7 +1053,6 @@ export async function createServer(config: ServerConfig = {}) {
 
       // Set globally
       setEnv(newEnv);
-      console.log("Updated env from backend:", newEnv);
 
       // Write updated .env file
       fs.writeFileSync(envPath, envContent, "utf8");
