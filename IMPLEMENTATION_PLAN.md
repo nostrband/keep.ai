@@ -4,7 +4,7 @@ This document outlines the remaining work needed to ship a simple, lovable, and 
 
 The items below are prioritized by impact on user experience and product completeness. Each item references the relevant spec(s) and includes specific file locations and implementation notes.
 
-**Last Updated:** 2026-01-16 (fixed future timestamp edge case in readChat; cleaned up file parts handling in agent-env.ts)
+**Last Updated:** 2026-01-16 (added empty state example suggestions and Press Enter hint)
 
 ---
 
@@ -531,14 +531,20 @@ These add polish but are not essential for launch.
   - Move very old drafts to archive instead of deleting
   - Needs spec
 
-### 21. Empty State & Onboarding
+### 21. Empty State & Onboarding (COMPLETED 2026-01-16)
 
-- [ ] **Add example suggestions** [Spec 00]
-  - Show 2-3 example automations for first-time users
-  - Currently no empty state guidance
+- [x] **Add example suggestions** [Spec 00]
+  - Shows 4 example automations as clickable buttons (populated in input when clicked)
+  - File: `/apps/web/src/components/MainPage.tsx`
+  - Added `EXAMPLE_SUGGESTIONS` constant with examples
+  - Used `Suggestion` component from UI library for clickable buttons
+  - Added Sparkles icon for visual polish
+  - Shows different empty state message when filtering for attention items
 
-- [ ] **Add "Press Enter to create" hint** [Spec 00]
-  - Subtle hint when typing in input
+- [x] **Add "Press Enter to create" hint** [Spec 00]
+  - Shows when user has typed something in the input
+  - File: `/apps/web/src/components/MainPage.tsx`
+  - Added styled keyboard shortcut indicator using `kbd` styling
 
 ### 22. Real-time Updates
 

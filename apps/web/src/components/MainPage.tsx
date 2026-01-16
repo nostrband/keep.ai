@@ -20,12 +20,14 @@ import {
   PromptInputTextarea,
   PromptInputToolbar,
   PromptInputTools,
+  Suggestions,
+  Suggestion,
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from "../ui";
-import { PlusIcon, AlertCircle, Info } from "lucide-react";
+import { PlusIcon, AlertCircle, Info, Sparkles } from "lucide-react";
 import type { FileUIPart } from "ai";
 import type { File as DbFile } from "@app/db";
 
@@ -48,6 +50,14 @@ const getStatusBadge = (workflow: any) => {
 // Error types that require user attention (non-fixable)
 // Logic errors are handled silently by the agent via maintenance mode
 const ATTENTION_ERROR_TYPES = ['auth', 'permission', 'network'];
+
+// Example automation suggestions for first-time users
+const EXAMPLE_SUGGESTIONS = [
+  "Send me a daily summary of my unread emails",
+  "Alert me when a website changes",
+  "Remind me to drink water every 2 hours",
+  "Save interesting tweets to a note",
+];
 
 // Compute secondary line text for workflow
 function getSecondaryLine(workflow: any, latestRun: any, task: any): { text: string; isAttention: boolean } {
@@ -358,12 +368,30 @@ export default function MainPage() {
             </div>
           ) : displayedWorkflows.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 text-center">
-              <div className="text-gray-500 mb-2">
-                {showAttentionOnly ? "No workflows need attention" : "No automations yet"}
-              </div>
-              <div className="text-gray-400 text-sm">
-                Type below to create your first automation
-              </div>
+              {showAttentionOnly ? (
+                <>
+                  <div className="text-gray-500 mb-2">No workflows need attention</div>
+                  <div className="text-gray-400 text-sm">All automations are running smoothly</div>
+                </>
+              ) : (
+                <>
+                  <Sparkles className="size-12 text-gray-300 mb-4" />
+                  <div className="text-gray-500 text-lg mb-2">No automations yet</div>
+                  <div className="text-gray-400 text-sm mb-6">
+                    Type below or try one of these examples
+                  </div>
+                  <div className="flex flex-wrap justify-center gap-2 max-w-lg">
+                    {EXAMPLE_SUGGESTIONS.map((suggestion, index) => (
+                      <Suggestion
+                        key={index}
+                        suggestion={suggestion}
+                        onClick={() => setInput(suggestion)}
+                        className="text-xs"
+                      />
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
           ) : (
             <div className="space-y-3">
@@ -467,6 +495,13 @@ export default function MainPage() {
               />
             </PromptInputToolbar>
           </PromptInput>
+
+          {/* Press Enter hint - shown when user has typed something */}
+          {input.trim() && !uploadState.isUploading && (
+            <div className="text-center text-xs text-gray-400 mt-2">
+              Press <kbd className="px-1.5 py-0.5 bg-gray-100 rounded border border-gray-200 font-mono">Enter</kbd> to create automation
+            </div>
+          )}
 
           {/* Autonomy Toggle */}
           {isAutonomyLoaded && (
