@@ -25,7 +25,8 @@
       "@app/ui/*": ["packages/ui/src/*"],
       "@app/cli/*": ["apps/cli/src/*"],
       "@app/web/*": ["apps/web/src/*"],
-      "@app/server/*": ["apps/server/src/*"]
+      "@app/server/*": ["apps/server/src/*"],
+      "@app/user-server/*": ["apps/user-server/src/*"]
     }
   },
   "exclude": ["node_modules", "dist", "build"]
