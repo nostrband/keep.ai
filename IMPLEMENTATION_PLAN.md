@@ -4,7 +4,7 @@ This document outlines the remaining work needed to ship a simple, lovable, and 
 
 The items below are prioritized by impact on user experience and product completeness. Each item references the relevant spec(s) and includes specific file locations and implementation notes.
 
-**Last Updated:** 2026-01-16 (enabled output validation in sandbox/api.ts; fixed Tasks.list and Tasks.get return values; removed debug console.log from audio-explain.ts; fixed Vitest deprecation warning; updated misleading FIXME comment in v1.ts)
+**Last Updated:** 2026-01-16 (removed debug console.log from sandbox.ts; enabled output validation in sandbox/api.ts; fixed Tasks.list and Tasks.get return values; removed debug console.log from audio-explain.ts; fixed Vitest deprecation warning; updated misleading FIXME comment in v1.ts)
 
 ---
 
@@ -420,6 +420,10 @@ Improve completeness and handle edge cases.
 - [x] **Remove console.log from audio-explain.ts** (COMPLETED 2026-01-16)
   - File: `/packages/agent/src/ai-tools/audio-explain.ts`
   - Lines 129-130 had debug logging for file record and base64 audio length
+
+- [x] **Remove console.log from sandbox.ts** (COMPLETED 2026-01-16)
+  - File: `/packages/agent/src/sandbox/sandbox.ts`
+  - Lines 185-186 had always-on debug logging for result and state after every sandbox execution
 
 ### 16. Test Fixes
 
