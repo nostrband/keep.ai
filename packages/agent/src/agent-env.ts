@@ -515,10 +515,24 @@ and to perform calculations and data manipulations. Use this tool
 to test the script draft you're creating/updating.
 
 Use 'save' tool to save the created/updated script code when you're ready.
+When saving, you MUST also provide:
+- 'summary': A one-sentence description of what this automation does (user-friendly, no code jargon)
+- 'diagram': A Mermaid flowchart showing the automation flow (trigger -> steps -> output)
+
+Example diagram format:
+\`\`\`
+flowchart TD
+    A[Trigger: Daily at 9am] --> B[Fetch new emails]
+    B --> C{Found invoices?}
+    C -->|Yes| D[Extract data]
+    C -->|No| E[Done]
+    D --> F[Save to spreadsheet]
+    F --> E
+\`\`\`
 
 Use 'schedule' tool to set when the script runs automatically by providing a
 cron expression. If user requests automated/recurring execution, you MUST
-call 'schedule' after saving the first code version, otherwise the script 
+call 'schedule' after saving the first code version, otherwise the script
 will not run automatically.
 
 Use other tools to ask questions to user, use JS APIs to inspect the script code

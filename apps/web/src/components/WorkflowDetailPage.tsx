@@ -9,6 +9,7 @@ import { useTask } from "../hooks/dbTaskReads";
 import { useChat } from "../hooks/dbChatReads";
 import { useUpdateWorkflow } from "../hooks/dbWrites";
 import SharedHeader from "./SharedHeader";
+import MermaidDiagram from "./MermaidDiagram";
 import { Badge, Button } from "../ui";
 
 const getStatusBadge = (workflow: any) => {
@@ -268,6 +269,25 @@ export default function WorkflowDetailPage() {
                     </div>
                   </div>
                 </Link>
+              </div>
+            )}
+
+            {/* What This Automation Does - Summary and Diagram */}
+            {latestScript && (latestScript.summary || latestScript.diagram) && (
+              <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
+                <h2 className="text-lg font-semibold text-gray-900 mb-4">What This Automation Does</h2>
+
+                {/* Summary */}
+                {latestScript.summary && (
+                  <p className="text-gray-700 mb-4">{latestScript.summary}</p>
+                )}
+
+                {/* Mermaid Diagram */}
+                {latestScript.diagram && (
+                  <div className="mt-4 p-4 bg-gray-50 rounded-lg">
+                    <MermaidDiagram diagram={latestScript.diagram} />
+                  </div>
+                )}
               </div>
             )}
 

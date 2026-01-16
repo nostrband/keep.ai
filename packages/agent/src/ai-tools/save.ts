@@ -8,6 +8,14 @@ const SaveInfoSchema = z.object({
     .string()
     .optional()
     .describe("Comment for the code or code changes"),
+  summary: z
+    .string()
+    .optional()
+    .describe("One-sentence description of what the automation does"),
+  diagram: z
+    .string()
+    .optional()
+    .describe("Mermaid diagram source showing the automation flow (flowchart)"),
 });
 
 export type SaveInfo = z.infer<typeof SaveInfoSchema>;
@@ -43,6 +51,8 @@ export function makeSaveTool(opts: {
         version,
         workflow_id: workflow.id,
         type: "",
+        summary: info.summary || "",
+        diagram: info.diagram || "",
       };
       await opts.scriptStore.addScript(newScript);
 

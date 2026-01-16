@@ -10,6 +10,8 @@ export interface Script {
   change_comment: string;
   workflow_id: string;
   type: string;
+  summary: string;
+  diagram: string;
 }
 
 export interface ScriptRun {
@@ -47,16 +49,16 @@ export class ScriptStore {
   async addScript(script: Script, tx?: DBInterface): Promise<void> {
     const db = tx || this.db.db;
     await db.exec(
-      `INSERT INTO scripts (id, task_id, version, timestamp, code, change_comment, workflow_id, type)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [script.id, script.task_id, script.version, script.timestamp, script.code, script.change_comment, script.workflow_id, script.type]
+      `INSERT INTO scripts (id, task_id, version, timestamp, code, change_comment, workflow_id, type, summary, diagram)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [script.id, script.task_id, script.version, script.timestamp, script.code, script.change_comment, script.workflow_id, script.type, script.summary, script.diagram]
     );
   }
 
   // Get a script by ID
   async getScript(id: string): Promise<Script | null> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, task_id, version, timestamp, code, change_comment, workflow_id, type
+      `SELECT id, task_id, version, timestamp, code, change_comment, workflow_id, type, summary, diagram
        FROM scripts
        WHERE id = ?`,
       [id]
@@ -76,6 +78,8 @@ export class ScriptStore {
       change_comment: row.change_comment as string,
       workflow_id: row.workflow_id as string,
       type: row.type as string,
+      summary: row.summary as string,
+      diagram: row.diagram as string,
     };
   }
 
@@ -85,7 +89,7 @@ export class ScriptStore {
     limit: number = 100,
     offset: number = 0
   ): Promise<Script[]> {
-    let sql = `SELECT id, task_id, version, timestamp, code, change_comment, workflow_id, type
+    let sql = `SELECT id, task_id, version, timestamp, code, change_comment, workflow_id, type, summary, diagram
                FROM scripts`;
     const args: (string | number)[] = [];
 
@@ -112,6 +116,8 @@ export class ScriptStore {
       change_comment: row.change_comment as string,
       workflow_id: row.workflow_id as string,
       type: row.type as string,
+      summary: row.summary as string,
+      diagram: row.diagram as string,
     }));
   }
 
@@ -121,7 +127,7 @@ export class ScriptStore {
     offset: number = 0
   ): Promise<Script[]> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT s.id, s.task_id, s.version, s.timestamp, s.code, s.change_comment, s.workflow_id, s.type
+      `SELECT s.id, s.task_id, s.version, s.timestamp, s.code, s.change_comment, s.workflow_id, s.type, s.summary, s.diagram
        FROM scripts s
        INNER JOIN (
          SELECT task_id, MAX(version) as max_version
@@ -144,13 +150,15 @@ export class ScriptStore {
       change_comment: row.change_comment as string,
       workflow_id: row.workflow_id as string,
       type: row.type as string,
+      summary: row.summary as string,
+      diagram: row.diagram as string,
     }));
   }
 
   // Get scripts by task_id ordered by version
   async getScriptsByTaskId(task_id: string): Promise<Script[]> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, task_id, version, timestamp, code, change_comment, workflow_id, type
+      `SELECT id, task_id, version, timestamp, code, change_comment, workflow_id, type, summary, diagram
        FROM scripts
        WHERE task_id = ?
        ORDER BY version ASC`,
@@ -168,13 +176,15 @@ export class ScriptStore {
       change_comment: row.change_comment as string,
       workflow_id: row.workflow_id as string,
       type: row.type as string,
+      summary: row.summary as string,
+      diagram: row.diagram as string,
     }));
   }
 
   // Get the latest script version for a task
   async getLatestScriptByTaskId(task_id: string): Promise<Script | null> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, task_id, version, timestamp, code, change_comment, workflow_id, type
+      `SELECT id, task_id, version, timestamp, code, change_comment, workflow_id, type, summary, diagram
        FROM scripts
        WHERE task_id = ?
        ORDER BY version DESC
@@ -196,13 +206,15 @@ export class ScriptStore {
       change_comment: row.change_comment as string,
       workflow_id: row.workflow_id as string,
       type: row.type as string,
+      summary: row.summary as string,
+      diagram: row.diagram as string,
     };
   }
 
   // Get scripts by workflow_id
   async getScriptsByWorkflowId(workflow_id: string): Promise<Script[]> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, task_id, version, timestamp, code, change_comment, workflow_id, type
+      `SELECT id, task_id, version, timestamp, code, change_comment, workflow_id, type, summary, diagram
        FROM scripts
        WHERE workflow_id = ?
        ORDER BY version DESC`,
@@ -220,6 +232,8 @@ export class ScriptStore {
       change_comment: row.change_comment as string,
       workflow_id: row.workflow_id as string,
       type: row.type as string,
+      summary: row.summary as string,
+      diagram: row.diagram as string,
     }));
   }
 
@@ -387,7 +401,7 @@ export class ScriptStore {
   // Get the latest script version for a workflow
   async getLatestScriptByWorkflowId(workflow_id: string): Promise<Script | null> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, task_id, version, timestamp, code, change_comment, workflow_id, type
+      `SELECT id, task_id, version, timestamp, code, change_comment, workflow_id, type, summary, diagram
        FROM scripts
        WHERE workflow_id = ?
        ORDER BY version DESC
@@ -409,6 +423,8 @@ export class ScriptStore {
       change_comment: row.change_comment as string,
       workflow_id: row.workflow_id as string,
       type: row.type as string,
+      summary: row.summary as string,
+      diagram: row.diagram as string,
     };
   }
 

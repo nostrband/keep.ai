@@ -142,35 +142,34 @@ The "magical" auto-fix feature that makes the product special.
   - `maintenance_fixed` chat event created when save tool exits maintenance mode
   - Includes fix_comment from the agent's commit message
 
-### 6. Mermaid Diagram Display
+### 6. Mermaid Diagram Display (COMPLETED 2026-01-16)
 Visual explanation of automation logic for users.
 
-- [ ] **Add `summary` and `diagram` fields to scripts table** [Spec 12]
-  - File: `/packages/db/src/script-store.ts` - Update Script interface
-  - Current script schema: id, task_id, version, timestamp, code, change_comment, workflow_id, type
-  - **Missing:** summary, diagram fields
-  - Create migration v18 adding: `summary TEXT`, `diagram TEXT`
+- [x] **Add `summary` and `diagram` fields to scripts table** [Spec 12]
+  - File: `/packages/db/src/migrations/v19.ts` - Created migration adding fields
+  - File: `/packages/db/src/script-store.ts` - Updated Script interface with summary and diagram fields
+  - File: `/packages/db/src/database.ts` - Registered v19 migration
+  - All SELECT/INSERT queries updated to include new fields
 
-- [ ] **Update save tool to accept summary/diagram** [Spec 03, 12]
+- [x] **Update save tool to accept summary/diagram** [Spec 03, 12]
   - File: `/packages/agent/src/ai-tools/save.ts`
-  - Add input parameters: `summary: z.string().optional()`, `diagram: z.string().optional()`
-  - Store in script record on save
+  - Added `summary` and `diagram` as optional parameters in SaveInfoSchema
+  - Script creation includes summary and diagram fields
 
-- [ ] **Install and integrate mermaid renderer** [Spec 12]
-  - Run: `npm install mermaid` in apps/web
-  - mermaid package NOT currently installed in package.json
-  - Create `/apps/web/src/components/MermaidDiagram.tsx` component
+- [x] **Install and integrate mermaid renderer** [Spec 12]
+  - mermaid package installed in apps/web
+  - Created `/apps/web/src/components/MermaidDiagram.tsx` component
+  - Component renders Mermaid diagrams with error handling
 
-- [ ] **Display summary and diagram on workflow detail page** [Spec 12]
+- [x] **Display summary and diagram on workflow detail page** [Spec 12]
   - File: `/apps/web/src/components/WorkflowDetailPage.tsx`
-  - Add after the Script Runs section
-  - Show one-sentence summary above diagram
-  - Render mermaid diagram below
+  - Added "What This Automation Does" section after Script section
+  - Shows one-sentence summary and Mermaid flowchart diagram
 
-- [ ] **Generate explanation on script save** [Spec 03, 12]
-  - Agent produces summary + diagram analyzing script code, tools used
-  - Modify planner system prompt in `/packages/agent/src/agent-env.ts`
-  - Require summary/diagram on `save` tool calls
+- [x] **Generate explanation on script save** [Spec 03, 12]
+  - File: `/packages/agent/src/agent-env.ts` - Updated plannerSystemPrompt
+  - Agent is instructed to provide summary and diagram when using save tool
+  - Includes example Mermaid flowchart format
 
 ---
 
