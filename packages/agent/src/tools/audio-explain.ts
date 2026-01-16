@@ -126,8 +126,6 @@ Supports wav, mp3, mp4, mpeg, m4a, mpga, aac, flac, webm audio formats up to 10M
         }
 
         const base64Audio = fileUtils.bufferToBase64(audioBuffer);
-        console.log("fileRecord", fileRecord);
-        console.log("base64Audio", base64Audio.length);
 
         // Map media type to format for OpenRouter
         const getAudioFormat = (mediaType: string): string => {

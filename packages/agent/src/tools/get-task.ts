@@ -11,7 +11,7 @@ export function makeGetTaskTool(taskStore: TaskStore) {
         title: task.title,
         state: task.state,
         error: task.error,
-        runTime: new Date(task.timestamp * 1000),
+        runTime: new Date(task.timestamp * 1000).toISOString(),
         goal: state?.goal || "",
         notes: state?.notes || "",
         plan: state?.plan || "",

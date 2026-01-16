@@ -4,7 +4,7 @@ This document outlines the remaining work needed to ship a simple, lovable, and 
 
 The items below are prioritized by impact on user experience and product completeness. Each item references the relevant spec(s) and includes specific file locations and implementation notes.
 
-**Last Updated:** 2026-01-16 (additional debug console.log cleanup in web app; debug enable now dev-only; mutations now trigger sync immediately; console.log cleanup - 45+ debug statements removed; commented code removal - ~155 lines removed)
+**Last Updated:** 2026-01-16 (enabled output validation in sandbox/api.ts; fixed Tasks.list and Tasks.get return values; removed debug console.log from audio-explain.ts; fixed Vitest deprecation warning; updated misleading FIXME comment in v1.ts)
 
 ---
 
@@ -351,10 +351,12 @@ Improve completeness and handle edge cases.
   - File: `/packages/sync/src/Peer.ts` line 788
   - FIXME: "look into ensuring tx delivery by organizing change batches properly"
 
-- [ ] **Enable output validation**
-  - File: `/packages/agent/src/sandbox/api.ts` line 138
-  - FIXME: "not sure if all tools return all declared fields"
-  - Output schema validation is disabled, should validate and fix tools
+- [x] **Enable output validation** (COMPLETED 2026-01-16)
+  - File: `/packages/agent/src/sandbox/api.ts`
+  - Fixed unreachable code - validation was after return statement
+  - Fixed `Tasks.list` - was missing `runTime` field
+  - Fixed `Tasks.get` - was returning Date object instead of ISO string
+  - All 25 tools with outputSchema now pass validation
 
 - [x] **Add thread title generation** (COMPLETED 2026-01-16)
   - File: `/packages/agent/src/task-worker.ts`
@@ -379,9 +381,13 @@ Improve completeness and handle edge cases.
   - FIXME: "this is ugly hack, we don't want to send file/image parts"
   - File parts stripped from messages, only metadata kept
 
-- [ ] **Deprecate legacy task fields**
+- [x] **Update misleading FIXME in v1.ts** (COMPLETED 2026-01-16)
   - File: `/packages/db/src/migrations/v1.ts` line 19
-  - FIXME: "deprecate deleted, cron and task fields" on tasks table
+  - The FIXME said to deprecate `deleted`, `cron`, and `task` fields
+  - Analysis shows: only `task` field is unused (safe to remove)
+  - `deleted` is actively used for soft-delete pattern
+  - `cron` on tasks table is legacy but `cron` on workflows table is actively used
+  - Updated comment to clarify which fields are actually deprecated
 
 ### 15. Code Quality - Debug Statements (COMPLETED 2026-01-16)
 
@@ -411,6 +417,10 @@ Improve completeness and handle edge cases.
   - [x] File: `/packages/tests/src/nostr-transport-sync.test.ts` - Removed ~70 lines of commented out code (private key constants, console.logs, and establishPeerConnection3 function)
   - Total: ~155 lines of commented code removed
 
+- [x] **Remove console.log from audio-explain.ts** (COMPLETED 2026-01-16)
+  - File: `/packages/agent/src/ai-tools/audio-explain.ts`
+  - Lines 129-130 had debug logging for file record and base64 audio length
+
 ### 16. Test Fixes
 
 - [x] **Fix failing file-transfer.test.ts** (COMPLETED 2026-01-16)
@@ -427,9 +437,45 @@ Improve completeness and handle edge cases.
 
 **Note:** There is still 1 unhandled error "Statement is already finalized" that occurs during test cleanup but doesn't affect test results (55 tests pass).
 
+- [x] **Fix Vitest deprecation warning** (COMPLETED 2026-01-16)
+  - File: `/packages/tests/src/nip44-v3.test.ts`
+  - Changed `{ timeout: 20000 }` object to just `20000` number
+
 - [ ] **Add schema migration tests**
   - Ensure database migrations work correctly
   - Test upgrade paths from each version
+
+### 17. Remaining FIXMEs (7 items)
+
+These FIXMEs were identified during code exploration and still need work:
+
+- [ ] **StreamWriter bandwidth tuning**
+  - File: `/packages/sync/src/StreamWriter.ts` line 515
+  - Optimization for bandwidth tuning
+
+- [ ] **Transaction delivery batching**
+  - File: `/packages/sync/src/Peer.ts` line 788
+  - Ensure tx delivery by organizing change batches properly
+
+- [ ] **Node.js EventSource support**
+  - File: `/packages/sync/src/transport/TransportClientHttp.ts` line 176
+  - EventSource support for Node.js environment
+
+- [ ] **File/image parts handling hack**
+  - File: `/packages/agent/src/agent-env.ts` line 69
+  - Ugly hack to avoid sending file/image parts, only metadata kept
+
+- [ ] **Future timestamp edge case**
+  - File: `/packages/db/src/dbWrites.ts` line 56
+  - Handle edge case with future timestamps
+
+- [ ] **ChatInterface component complexity**
+  - File: `/apps/web/src/components/ChatInterface.tsx` line 23
+  - Component needs refactoring for complexity
+
+- [ ] **Per-device notification tracking**
+  - File: `/packages/agent/src/MessageNotifications.ts` line 35
+  - Track notifications per-device instead of globally
 
 ---
 
@@ -437,7 +483,7 @@ Improve completeness and handle edge cases.
 
 These add polish but are not essential for launch.
 
-### 17. Script Version History UI
+### 18. Script Version History UI
 
 - [ ] **Add diff view between script versions** [Spec 12]
   - Show what changed between versions
@@ -450,7 +496,7 @@ These add polish but are not essential for launch.
 - [ ] **Improve version list UI** [Spec 12]
   - Better visual hierarchy and timestamps
 
-### 18. Event Collapsing
+### 19. Event Collapsing
 
 - [ ] **Collapse low-signal events** [Spec 08]
   - Group routine successful runs
@@ -461,7 +507,7 @@ These add polish but are not essential for launch.
   - Failures, fixes, and user interactions stand out
   - Needs spec
 
-### 19. Abandoned Draft Handling
+### 20. Abandoned Draft Handling
 
 - [ ] **Detect abandoned drafts** [Spec 00]
   - Drafts with no activity for X days
@@ -475,7 +521,7 @@ These add polish but are not essential for launch.
   - Move very old drafts to archive instead of deleting
   - Needs spec
 
-### 20. Empty State & Onboarding
+### 21. Empty State & Onboarding
 
 - [ ] **Add example suggestions** [Spec 00]
   - Show 2-3 example automations for first-time users
@@ -484,7 +530,7 @@ These add polish but are not essential for launch.
 - [ ] **Add "Press Enter to create" hint** [Spec 00]
   - Subtle hint when typing in input
 
-### 21. Real-time Updates
+### 22. Real-time Updates
 
 - [ ] **Verify workflow list updates in real-time** [Spec 00]
   - List should update via db sync as states change

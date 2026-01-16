@@ -121,15 +121,15 @@ Example: await ${ns}.${name}(<input>)
         }
 
         // Execute the tool with validated input
+        let result: unknown;
         try {
-          const result = await tool.execute(validatedInput);
+          result = await tool.execute(validatedInput);
           this.debug("Tool called", {
             name,
             input,
             context: this.getContext(),
             result,
           });
-          return result;
         } catch (e) {
           // Preserve classified errors - they contain type information for routing
           if (isClassifiedError(e)) {
@@ -151,14 +151,18 @@ Example: await ${ns}.${name}(<input>)
         }
 
         // Validate output using outputSchema if present
-        // FIXME not sure if all tools return all declared fields
-        // if (tool.outputSchema) {
-        //   try {
-        //     tool.outputSchema.parse(result);
-        //   } catch (error) {
-        //     throw new Error(`Invalid output from ${ns}.${name}: ${error instanceof Error ? error.message : 'Unknown validation error'}`);
-        //   }
-        // }
+        if (tool.outputSchema) {
+          try {
+            tool.outputSchema.parse(result);
+          } catch (error) {
+            throw new LogicError(
+              `Invalid output from ${ns}.${name}: ${error instanceof Error ? error.message : 'Unknown validation error'}`,
+              { source: `${ns}.${name}` }
+            );
+          }
+        }
+
+        return result;
       };
 
       if (!("docs" in global)) global["docs"] = {};

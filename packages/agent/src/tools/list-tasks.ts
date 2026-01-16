@@ -21,6 +21,7 @@ export function makeListTasksTool(taskStore: TaskStore) {
           goal: state?.goal || "",
           asks: state?.asks || "",
           error: task.error,
+          runTime: new Date(task.timestamp * 1000).toISOString(),
         };
       });
     },

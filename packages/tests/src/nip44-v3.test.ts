@@ -78,6 +78,6 @@ describe('nip44_v3 encryption', () => {
       expect(decrypted).toBe(message);
       expect(decrypted.length).toBe(MAX_MESSAGE_BYTES);
     },
-    { timeout: 20000 },
+    20000,
   );
 });
