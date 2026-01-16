@@ -147,38 +147,15 @@ export default function ChatInterface({
   }, [hasNextPage, fetchNextPage, isFetching, hasData]);
 
   const scrollToBottom = useCallback((behavior: "auto" | "smooth") => {
-    // console.log("scroll", behavior);
     window.scrollTo({
       top: document.documentElement.scrollHeight,
       behavior,
     });
-
-    // const int = setInterval(() => {
-    //   if (
-    //     document.documentElement.scrollTop +
-    //       document.documentElement.clientHeight <
-    //     document.documentElement.scrollHeight - 10
-    //   ) {
-    //     console.log(
-    //       "interval scroll",
-    //       document.documentElement.scrollTop,
-    //       document.documentElement.clientHeight,
-    //       document.documentElement.scrollHeight
-    //     );
-    //     window.scrollTo({
-    //       top: document.documentElement.scrollHeight,
-    //       behavior,
-    //     });
-    //   } else {
-    //     clearInterval(int);
-    //   }
-    // }, 200);
   }, []);
 
   // Smart scroll logic - handles first load and new messages
   useEffect(() => {
-    // console.log("rows", rows.length, hasData, isFetching);
-    if (!hasData || isFetching) return; //  || isLoadingMoreRef.current
+    if (!hasData || isFetching) return;
 
     // First load - scroll to bottom immediately without animation
     if (isFirstLoadRef.current && rows.length > 0) {

@@ -42,7 +42,6 @@ async function ensureEvents(newEvents: ChatEvent[], chatId: string) {
     (old) => {
       if (!old) return old;
 
-      // console.log("old pages", old.pages);
       const pages = [...old.pages];
       const lastIndex = 0; // First page is where we'll append the events
       const lastPage = pages[lastIndex];
@@ -64,8 +63,6 @@ async function ensureEvents(newEvents: ChatEvent[], chatId: string) {
         ...lastPage,
         events,
       };
-
-      // console.log("new pages", pages);
 
       // Return updated object
       return { ...old, pages };
