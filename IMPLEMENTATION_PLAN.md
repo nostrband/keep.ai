@@ -4,7 +4,7 @@ This document outlines the remaining work needed to ship a simple, lovable, and 
 
 The items below are prioritized by impact on user experience and product completeness. Each item references the relevant spec(s) and includes specific file locations and implementation notes.
 
-**Last Updated:** 2026-01-16 (removed debug console.log from sandbox.ts; enabled output validation in sandbox/api.ts; fixed Tasks.list and Tasks.get return values; removed debug console.log from audio-explain.ts; fixed Vitest deprecation warning; updated misleading FIXME comment in v1.ts)
+**Last Updated:** 2026-01-16 (removed ~43 more lines of commented-out code; removed debug console.log from sandbox.ts; enabled output validation in sandbox/api.ts; fixed Tasks.list and Tasks.get return values; removed debug console.log from audio-explain.ts; fixed Vitest deprecation warning; updated misleading FIXME comment in v1.ts)
 
 ---
 
@@ -415,7 +415,11 @@ Improve completeness and handle edge cases.
   - [x] File: `/packages/agent/src/agent-env.ts` - Removed ~25 lines of commented out task listing code (lines 180-206) and ~5 lines of commented out tools prompt
   - [x] File: `/packages/db/src/task-store.ts` - Removed ~30 lines of commented out getTodoTasks method and ~25 lines of commented out hasCronTaskOfType and getNextMidnightTimestamp methods
   - [x] File: `/packages/tests/src/nostr-transport-sync.test.ts` - Removed ~70 lines of commented out code (private key constants, console.logs, and establishPeerConnection3 function)
-  - Total: ~155 lines of commented code removed
+  - [x] File: `/packages/db/src/nostr-peer-store.ts` - Removed unused listNostrPeerCursors() method (~10 lines)
+  - [x] File: `/packages/agent/src/task-worker.ts` - Removed unused startStatusUpdater() method (~26 lines)
+  - [x] File: `/packages/agent/src/task-scheduler.ts` - Removed deprecated getTodoTasks() references (~4 lines)
+  - [x] File: `/packages/agent/src/index.ts` - Removed unused Memory type export (~3 lines)
+  - Total: ~198 lines of commented code removed
 
 - [x] **Remove console.log from audio-explain.ts** (COMPLETED 2026-01-16)
   - File: `/packages/agent/src/ai-tools/audio-explain.ts`
