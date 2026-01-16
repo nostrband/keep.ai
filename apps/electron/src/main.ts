@@ -33,6 +33,7 @@ import {
   protocol,
   net,
   shell,
+  Notification,
 } from "electron";
 import path from "path";
 import { createServer } from "@app/server";
@@ -106,6 +107,62 @@ function setupIpcHandlers(): void {
   // Handle external URL opening
   ipcMain.handle('open-external', async (_event, url: string) => {
     await shell.openExternal(url);
+  });
+
+  // Handle OS-level notifications for workflow errors [Spec 09]
+  ipcMain.handle('show-notification', async (_event, options: {
+    title: string;
+    body: string;
+    workflowId?: string;
+  }) => {
+    if (!Notification.isSupported()) {
+      debugMain('Notifications are not supported on this system');
+      return false;
+    }
+
+    const notification = new Notification({
+      title: options.title,
+      body: options.body,
+      icon: path.join(__dirname, "../assets/icon.png"),
+    });
+
+    // When user clicks the notification, open the app
+    notification.on('click', () => {
+      if (!mainWindow) {
+        createWindow();
+      }
+      mainWindow?.show();
+      mainWindow?.focus();
+
+      // If workflowId provided, navigate to workflow detail page
+      if (options.workflowId) {
+        mainWindow?.webContents.send('navigate-to', `/workflows/${options.workflowId}`);
+      }
+    });
+
+    notification.show();
+    return true;
+  });
+
+  // Handle tray badge update for attention items [Spec 00, 09]
+  ipcMain.handle('update-tray-badge', async (_event, count: number) => {
+    if (!tray) return;
+
+    // On macOS, show badge count in tray title
+    if (process.platform === 'darwin') {
+      if (count > 0) {
+        tray.setTitle(` ${count}`);
+      } else {
+        tray.setTitle('');
+      }
+    }
+
+    // Update tooltip to reflect attention items
+    if (count > 0) {
+      tray.setToolTip(`Keep.AI - ${count} automation${count > 1 ? 's' : ''} need attention`);
+    } else {
+      tray.setToolTip('Keep.AI - Your Private AI Assistant');
+    }
   });
 
   // // Handle message sending
