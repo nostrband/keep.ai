@@ -20,6 +20,7 @@ export const qk = {
   taskState: (taskId: string) => [{ scope: "taskState", taskId }] as const,
   taskRuns: (taskId: string) => [{ scope: "taskRuns", taskId }] as const,
   taskRun: (runId: string) => [{ scope: "taskRun", runId }] as const,
+  taskByChatId: (chatId: string) => [{ scope: "taskByChatId", chatId }] as const,
   
   // Note-related queries
   allNotes: () => [{ scope: "allNotes" }] as const,

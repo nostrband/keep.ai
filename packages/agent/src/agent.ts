@@ -190,13 +190,14 @@ export class Agent {
         stopped = true;
 
         // 'wait' output
+        // Use formattedAsks which includes options as JSON if provided
         output = {
           kind: "wait",
           steps: input.step + 1,
           patch: {
             notes: info.notes,
             plan: info.plan,
-            asks: info.asks,
+            asks: info.formattedAsks,
           },
         };
       },

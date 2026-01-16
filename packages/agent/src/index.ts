@@ -69,6 +69,9 @@ export { SandboxAPI } from "./sandbox/api";
 
 export { AgentEnv as ReplEnv } from "./agent-env";
 
+// Ask tool utilities for UI
+export { parseAsks, type StructuredAsk } from "./ai-tools/ask";
+
 // Error classification system
 export {
   ClassifiedError,

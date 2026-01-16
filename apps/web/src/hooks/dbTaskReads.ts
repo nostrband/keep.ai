@@ -88,3 +88,21 @@ export function useTaskRun(runId: string) {
     enabled: !!api && !!runId,
   });
 }
+
+export function useTaskByChatId(chatId: string) {
+  const { api } = useDbQuery();
+  return useQuery({
+    queryKey: qk.taskByChatId(chatId),
+    queryFn: async () => {
+      if (!api) return null;
+      try {
+        const task = await api.taskStore.getTaskByChatId(chatId);
+        return task;
+      } catch (error) {
+        return null;
+      }
+    },
+    meta: { tables: ["tasks"] },
+    enabled: !!api && !!chatId,
+  });
+}

@@ -4,7 +4,7 @@ This document outlines the remaining work needed to ship a simple, lovable, and 
 
 The items below are prioritized by impact on user experience and product completeness. Each item references the relevant spec(s) and includes specific file locations and implementation notes.
 
-**Last Updated:** 2026-01-16 (event menu actions: retry and dropdown menus implemented)
+**Last Updated:** 2026-01-16 (question simplification: quick-reply buttons implemented)
 
 ---
 
@@ -305,16 +305,23 @@ Improve completeness and handle edge cases.
   - File: `/apps/web/src/components/EventItem.tsx` - Replaced console.log with dropdown menu
   - Added "View details" option for events that have navigation paths
 
-### 12. Question Simplification
+### 12. Question Simplification (COMPLETED 2026-01-16)
 
-- [ ] **Add quick-reply buttons for agent questions** [Spec 02]
+- [x] **Add quick-reply buttons for agent questions** [Spec 02]
   - When agent asks yes/no or multiple choice, show buttons
-  - File: `/apps/web/src/components/ChatInterface.tsx`
-  - Needs spec for structured question format
+  - File: `/packages/agent/src/ai-tools/ask.ts` - Added `options` field to AskInfoSchema
+  - File: `/packages/agent/src/agent.ts` - Updated to use formattedAsks with options
+  - File: `/apps/web/src/components/QuickReplyButtons.tsx` - New component for quick-reply buttons
+  - File: `/apps/web/src/components/ChatPage.tsx` - Integrated quick-reply buttons
+  - File: `/apps/web/src/components/MainPage.tsx` - Integrated quick-reply buttons
+  - File: `/apps/web/src/lib/parseAsks.ts` - Utility to parse structured asks
 
-- [ ] **Support structured question formats** [Spec 02]
-  - Agent can specify answer options in response
-  - UI renders as buttons/chips instead of free text input
+- [x] **Support structured question formats** [Spec 02]
+  - Agent can specify answer options when calling `ask` tool
+  - Options stored as JSON: `{"question": "...", "options": ["A", "B"]}`
+  - UI renders as pill-shaped buttons using existing Suggestion component
+  - Clicking a button sends that option as user's reply
+  - Backward compatible with plain string asks
 
 ### 13. Dry-Run Testing
 

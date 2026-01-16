@@ -2,7 +2,11 @@ import { z } from "zod";
 import { tool } from "ai";
 
 const AskInfoSchema = z.object({
-  asks: z.string().describe("Questions for user"),
+  asks: z.string().describe("Question for user. Keep it short and specific."),
+  options: z
+    .array(z.string())
+    .optional()
+    .describe("Quick-reply options for the user. Use for yes/no or multiple-choice questions. Example: ['Yes', 'No'] or ['Archive', 'Delete', 'Skip']"),
   notes: z
     .string()
     .optional()
@@ -12,17 +16,70 @@ const AskInfoSchema = z.object({
 
 export type AskInfo = z.infer<typeof AskInfoSchema>;
 
+/**
+ * Structured ask format stored in task state.
+ * Used by the UI to display quick-reply buttons.
+ */
+export interface StructuredAsk {
+  question: string;
+  options?: string[];
+}
+
+/**
+ * Parse the asks field from task state.
+ * Returns structured format if it's JSON, otherwise wraps the string.
+ */
+export function parseAsks(asks: string): StructuredAsk {
+  if (!asks) {
+    return { question: "" };
+  }
+
+  try {
+    const parsed = JSON.parse(asks);
+    if (typeof parsed === "object" && parsed.question) {
+      return {
+        question: parsed.question,
+        options: Array.isArray(parsed.options) ? parsed.options : undefined,
+      };
+    }
+  } catch {
+    // Not JSON, use as plain string
+  }
+
+  return { question: asks };
+}
+
+/**
+ * Format the ask info for storage in task state.
+ * If options are provided, stores as JSON; otherwise plain string.
+ */
+function formatAsks(asks: string, options?: string[]): string {
+  if (options && options.length > 0) {
+    return JSON.stringify({ question: asks, options });
+  }
+  return asks;
+}
+
 export function makeAskTool(opts: {
-  onAsk: (info: AskInfo) => void;
+  onAsk: (info: AskInfo & { formattedAsks: string }) => void;
 }) {
   return tool({
     execute: async (info: AskInfo): Promise<void> => {
-      opts.onAsk(info);
+      const formattedAsks = formatAsks(info.asks, info.options);
+      opts.onAsk({ ...info, formattedAsks });
       return Promise.resolve();
     },
-    description: `Pause execution of this task to ask questions to user.
-The 'asks' questions will be stored in task context and asked to user until answered.
-The 'notes' and 'plan', if provided, will update the values stored in task context. 
+    description: `Pause execution of this task to ask a question to the user.
+The question will be stored in task context and shown to the user.
+When possible, provide 'options' for quick-reply buttons (e.g., yes/no or multiple choice).
+Keep questions short and specific - user should be able to answer easily.
+
+Examples with options:
+- asks: "Archive or delete the processed emails?" options: ["Archive", "Delete"]
+- asks: "Send summary to you only, or also to the team?" options: ["Just me", "Include team"]
+- asks: "Should I process all invoice formats?" options: ["Yes, all formats", "Just PDFs"]
+
+The 'notes' and 'plan', if provided, will update the values stored in task context.
 `,
     inputSchema: AskInfoSchema,
   });

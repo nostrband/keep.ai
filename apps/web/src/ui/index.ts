@@ -117,7 +117,7 @@ export {
 export { Reasoning } from "./components/ai-elements/reasoning";
 export { Response } from "./components/ai-elements/response";
 export { Sources } from "./components/ai-elements/sources";
-export { Suggestion } from "./components/ai-elements/suggestion";
+export { Suggestion, Suggestions } from "./components/ai-elements/suggestion";
 export { Task } from "./components/ai-elements/task";
 export { Tool } from "./components/ai-elements/tool";
 export { WebPreview } from "./components/ai-elements/web-preview";
