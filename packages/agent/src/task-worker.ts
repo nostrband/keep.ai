@@ -686,32 +686,6 @@ export class TaskWorker {
     await this.api.taskStore.finishTask(task.id, task.thread_id, reply, error);
   }
 
-  // private async startStatusUpdater(type: TaskType | "script") {
-  //   // Set agent status in db
-  //   let status = "";
-  //   switch (type) {
-  //     case "planner":
-  //       status = "Planning...";
-  //       break;
-  //     case "script":
-  //       status = "Executing...";
-  //       break;
-  //     default:
-  //       status = "Working...";
-  //       break;
-  //   }
-  //   const update = async () => {
-  //     this.debug(`Update agent status: '${status}'`);
-  //     await this.api.setAgentStatus(status);
-  //   };
-  //   const interval = setInterval(
-  //     update,
-  //     Math.max(10000, MAX_STATUS_TTL - 5000)
-  //   );
-  //   await update();
-  //   return interval;
-  // }
-
   private async ensureThread(task: Task, taskType: TaskType, inbox: string[]) {
     const threadId = task.thread_id;
 

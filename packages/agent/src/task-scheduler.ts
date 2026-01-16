@@ -167,9 +167,6 @@ export class TaskScheduler {
         return false;
       }
 
-      // // Get tasks with expired timers and with non-empty inboxes
-      // const todoTasks = await this.api.taskStore.getTodoTasks();
-
       const receiverIds = inboxItems
         .map((i) => i.target_id)
         .filter((id) => !!id);
@@ -180,7 +177,6 @@ export class TaskScheduler {
 
       // Dedup tasks
       const taskMap = new Map<string, any>();
-      // todoTasks.map((t) => taskMap.set(t.id, t));
       receiverTasks.map((t) => taskMap.set(t.id, t));
 
       // Filter out tasks that are in retry backoff

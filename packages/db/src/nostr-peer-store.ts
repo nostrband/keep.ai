@@ -158,16 +158,6 @@ export class NostrPeerStore {
     return results[0];
   }
 
-  // async listNostrPeerCursors(): Promise<NostrPeerCursor[]> {
-  //   const results = await this.db.db.execO<NostrPeerCursor>(
-  //     "SELECT * FROM nostr_peer_cursors ORDER BY peer_pubkey"
-  //   );
-
-  //   if (!results) return [];
-
-  //   return results;
-  // }
-
   async deleteNostrPeerCursor(peerPubkey: string): Promise<void> {
     await this.db.db.exec(
       "DELETE FROM nostr_peer_cursors WHERE peer_pubkey = ?",
