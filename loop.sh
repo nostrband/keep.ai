@@ -53,17 +53,18 @@ while true; do
     # --model opus: Primary agent uses Opus for complex reasoning (task selection, prioritization)
     #               Can use 'sonnet' in build mode for speed if plan is clear and tasks well-defined
     # --verbose: Detailed execution logging
-    cat "$PROMPT_FILE" | claude -p \
+    docker sandbox run claude -p \
         --dangerously-skip-permissions \
         --output-format=stream-json \
         --model opus \
-        --verbose
+        --verbose \
+        "$(cat "$PROMPT_FILE")"
 
     # Push changes after each iteration
-    git push origin "$CURRENT_BRANCH" || {
-        echo "Failed to push. Creating remote branch..."
-        git push -u origin "$CURRENT_BRANCH"
-    }
+    # git push origin "$CURRENT_BRANCH" || {
+    #     echo "Failed to push. Creating remote branch..."
+    #     git push -u origin "$CURRENT_BRANCH"
+    # }
 
     ITERATION=$((ITERATION + 1))
     echo -e "\n\n======================== LOOP $ITERATION ========================\n"
