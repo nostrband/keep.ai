@@ -3,13 +3,15 @@ import { useParams, Link, useNavigate } from "react-router-dom";
 import {
   useWorkflow,
   useLatestScriptByWorkflowId,
-  useScriptRunsByWorkflowId
+  useScriptRunsByWorkflowId,
+  useScriptVersionsByWorkflowId
 } from "../hooks/dbScriptReads";
 import { useTask } from "../hooks/dbTaskReads";
 import { useChat } from "../hooks/dbChatReads";
-import { useUpdateWorkflow } from "../hooks/dbWrites";
+import { useUpdateWorkflow, useRollbackScript } from "../hooks/dbWrites";
 import SharedHeader from "./SharedHeader";
 import MermaidDiagram from "./MermaidDiagram";
+import ScriptDiff from "./ScriptDiff";
 import { Badge, Button } from "../ui";
 
 const getStatusBadge = (workflow: any) => {
@@ -30,9 +32,13 @@ export default function WorkflowDetailPage() {
   const { data: chat } = useChat(task?.chat_id || "");
   const { data: latestScript } = useLatestScriptByWorkflowId(id!);
   const { data: scriptRuns = [], isLoading: isLoadingRuns } = useScriptRunsByWorkflowId(id!);
+  const { data: scriptVersions = [], isLoading: isLoadingVersions } = useScriptVersionsByWorkflowId(id!);
   const [successMessage, setSuccessMessage] = useState<string>("");
-  
+  const [showVersionHistory, setShowVersionHistory] = useState(false);
+  const [diffVersions, setDiffVersions] = useState<{ oldId: string; newId: string } | null>(null);
+
   const updateWorkflowMutation = useUpdateWorkflow();
+  const rollbackMutation = useRollbackScript();
 
   // Get next run time from workflow.next_run_timestamp
   const nextRunTime = useMemo(() => {
@@ -112,6 +118,38 @@ export default function WorkflowDetailPage() {
       navigate(`/chats/${task.chat_id}`);
     }
   };
+
+  const handleRollback = (scriptId: string, version: number) => {
+    if (!workflow) return;
+
+    rollbackMutation.mutate({
+      workflowId: workflow.id,
+      targetScriptId: scriptId,
+    }, {
+      onSuccess: () => {
+        setSuccessMessage(`Rolled back to v${version}`);
+        setShowVersionHistory(false);
+        setDiffVersions(null);
+        setTimeout(() => setSuccessMessage(""), 3000);
+      },
+    });
+  };
+
+  const handleShowDiff = (oldScriptId: string, newScriptId: string) => {
+    if (diffVersions?.oldId === oldScriptId && diffVersions?.newId === newScriptId) {
+      setDiffVersions(null);  // Toggle off
+    } else {
+      setDiffVersions({ oldId: oldScriptId, newId: newScriptId });
+    }
+  };
+
+  // Get scripts for diff view
+  const diffScripts = useMemo(() => {
+    if (!diffVersions) return null;
+    const oldScript = scriptVersions.find((s: any) => s.id === diffVersions.oldId);
+    const newScript = scriptVersions.find((s: any) => s.id === diffVersions.newId);
+    return oldScript && newScript ? { old: oldScript, new: newScript } : null;
+  }, [diffVersions, scriptVersions]);
 
   if (!id) {
     return <div>Workflow ID not found</div>;
@@ -309,7 +347,21 @@ export default function WorkflowDetailPage() {
             {/* Script Section */}
             {latestScript && (
               <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
-                <h2 className="text-lg font-semibold text-gray-900 mb-4">Script</h2>
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-lg font-semibold text-gray-900">Script</h2>
+                  {scriptVersions.length > 1 && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowVersionHistory(!showVersionHistory)}
+                      className="cursor-pointer"
+                    >
+                      {showVersionHistory ? "Hide history" : `View history (${scriptVersions.length} versions)`}
+                    </Button>
+                  )}
+                </div>
+
+                {/* Latest Script */}
                 <Link
                   to={`/scripts/${latestScript.id}`}
                   className="block p-4 border border-gray-200 rounded-lg hover:border-gray-300 hover:shadow-sm transition-all"
@@ -319,6 +371,7 @@ export default function WorkflowDetailPage() {
                       <div className="flex items-center gap-2 mb-2">
                         <span className="font-medium text-gray-900">Script {latestScript.id.slice(0, 8)}</span>
                         <Badge variant="outline">v{latestScript.version}</Badge>
+                        <Badge className="bg-blue-100 text-blue-800">Current</Badge>
                       </div>
                       {latestScript.change_comment && (
                         <p className="text-sm text-gray-600 mb-2 line-clamp-2">
@@ -331,6 +384,96 @@ export default function WorkflowDetailPage() {
                     </div>
                   </div>
                 </Link>
+
+                {/* Version History */}
+                {showVersionHistory && (
+                  <div className="mt-4 border-t border-gray-200 pt-4">
+                    <h3 className="text-sm font-medium text-gray-700 mb-3">Version History</h3>
+                    {isLoadingVersions ? (
+                      <div className="text-sm text-gray-500">Loading versions...</div>
+                    ) : (
+                      <div className="space-y-2">
+                        {scriptVersions.map((version: any, index: number) => {
+                          const isLatest = version.id === latestScript.id;
+                          const previousVersion = scriptVersions[index + 1];
+                          const canShowDiff = previousVersion !== undefined;
+                          const isShowingDiff = diffVersions?.oldId === previousVersion?.id && diffVersions?.newId === version.id;
+
+                          return (
+                            <div key={version.id}>
+                              <div
+                                className={`p-3 border rounded-lg ${
+                                  isLatest
+                                    ? "border-blue-300 bg-blue-50"
+                                    : "border-gray-200 hover:border-gray-300"
+                                }`}
+                              >
+                                <div className="flex items-center justify-between">
+                                  <div className="flex-1">
+                                    <div className="flex items-center gap-2">
+                                      <Link
+                                        to={`/scripts/${version.id}`}
+                                        className="font-medium text-gray-900 hover:text-blue-600"
+                                      >
+                                        v{version.version}
+                                      </Link>
+                                      {isLatest && (
+                                        <Badge className="bg-blue-100 text-blue-800 text-xs">Current</Badge>
+                                      )}
+                                    </div>
+                                    {version.change_comment && (
+                                      <p className="text-sm text-gray-600 mt-1 line-clamp-1">
+                                        {version.change_comment}
+                                      </p>
+                                    )}
+                                    <div className="text-xs text-gray-500 mt-1">
+                                      {new Date(version.timestamp).toLocaleString()}
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-2 ml-4">
+                                    {canShowDiff && (
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => handleShowDiff(previousVersion.id, version.id)}
+                                        className="cursor-pointer text-xs"
+                                      >
+                                        {isShowingDiff ? "Hide diff" : "Show diff"}
+                                      </Button>
+                                    )}
+                                    {!isLatest && (
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => handleRollback(version.id, version.version)}
+                                        disabled={rollbackMutation.isPending}
+                                        className="cursor-pointer text-xs"
+                                      >
+                                        {rollbackMutation.isPending ? "Rolling back..." : "Rollback"}
+                                      </Button>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Diff View */}
+                              {isShowingDiff && diffScripts && (
+                                <div className="mt-2 ml-4">
+                                  <ScriptDiff
+                                    oldCode={diffScripts.old.code}
+                                    newCode={diffScripts.new.code}
+                                    oldVersion={diffScripts.old.version}
+                                    newVersion={diffScripts.new.version}
+                                  />
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 

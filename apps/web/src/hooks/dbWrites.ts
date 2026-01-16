@@ -188,3 +188,53 @@ export function useDeletePeer() {
     },
   });
 }
+
+export function useRollbackScript() {
+  const { api } = useDbQuery();
+
+  return useMutation({
+    mutationFn: async (input: {
+      workflowId: string;
+      targetScriptId: string;  // The script version to rollback to
+    }) => {
+      if (!api) throw new Error("Script store not available");
+
+      // Get the target script to rollback to
+      const targetScript = await api.scriptStore.getScript(input.targetScriptId);
+      if (!targetScript) throw new Error("Target script not found");
+
+      // Get the latest script to determine the next version number
+      const latestScript = await api.scriptStore.getLatestScriptByWorkflowId(input.workflowId);
+      const nextVersion = latestScript ? latestScript.version + 1 : 1;
+
+      // Generate a new ID for the rollback script
+      const { bytesToHex } = await import("@noble/ciphers/utils");
+      const { randomBytes } = await import("@noble/ciphers/crypto");
+      const newId = bytesToHex(randomBytes(16));
+
+      // Create the new script version with the old code
+      await api.scriptStore.addScript({
+        id: newId,
+        task_id: targetScript.task_id,
+        version: nextVersion,
+        timestamp: new Date().toISOString(),
+        code: targetScript.code,
+        change_comment: `Rolled back to v${targetScript.version}`,
+        workflow_id: input.workflowId,
+        type: targetScript.type,
+        summary: targetScript.summary,
+        diagram: targetScript.diagram,
+      });
+
+      return { newScriptId: newId, version: nextVersion };
+    },
+    onSuccess: (_result, { workflowId }) => {
+      // Invalidate script-related queries to get fresh data
+      queryClient.invalidateQueries({ queryKey: qk.workflowScripts(workflowId) });
+      queryClient.invalidateQueries({ queryKey: qk.latestWorkflowScript(workflowId) });
+      queryClient.invalidateQueries({ queryKey: qk.allScripts() });
+
+      notifyTablesChanged(["scripts"], true, api!);
+    },
+  });
+}

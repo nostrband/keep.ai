@@ -192,3 +192,21 @@ export function useScriptRunsByWorkflowId(workflowId: string) {
     enabled: !!api && !!workflowId,
   });
 }
+
+export function useScriptVersionsByWorkflowId(workflowId: string) {
+  const { api } = useDbQuery();
+  return useQuery({
+    queryKey: qk.workflowScripts(workflowId),
+    queryFn: async () => {
+      if (!api) return [];
+      try {
+        const scripts = await api.scriptStore.getScriptsByWorkflowId(workflowId);
+        return scripts;
+      } catch (error) {
+        return [];
+      }
+    },
+    meta: { tables: ["scripts"] },
+    enabled: !!api && !!workflowId,
+  });
+}

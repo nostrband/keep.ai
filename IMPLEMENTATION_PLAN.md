@@ -4,7 +4,7 @@ This document outlines the remaining work needed to ship a simple, lovable, and 
 
 The items below are prioritized by impact on user experience and product completeness. Each item references the relevant spec(s) and includes specific file locations and implementation notes.
 
-**Last Updated:** 2026-01-16 (added Cost Display in Script Runs)
+**Last Updated:** 2026-01-16 (added Script Version History UI)
 
 ---
 
@@ -531,18 +531,24 @@ These FIXMEs were identified during code exploration and still need work:
 
 These add polish but are not essential for launch.
 
-### 19. Script Version History UI
+### 19. Script Version History UI (COMPLETED 2026-01-16)
 
-- [ ] **Add diff view between script versions** [Spec 12]
-  - Show what changed between versions
-  - Needs spec
+- [x] **Add diff view between script versions** [Spec 12]
+  - File: `/apps/web/src/components/ScriptDiff.tsx` - Created component for line-by-line diff view
+  - Shows added/removed lines with colors (green for additions, red for removals)
+  - "Show diff" buttons to compare adjacent versions
 
-- [ ] **Add one-click rollback** [Spec 13]
-  - Revert to previous script version easily
-  - Needs spec
+- [x] **Add one-click rollback** [Spec 13]
+  - File: `/apps/web/src/hooks/dbWrites.ts` - Added `useRollbackScript` mutation
+  - "Rollback" buttons for non-current versions in version history list
+  - Restores previous script version as the current active version
 
-- [ ] **Improve version list UI** [Spec 12]
-  - Better visual hierarchy and timestamps
+- [x] **Improve version list UI** [Spec 12]
+  - File: `/apps/web/src/hooks/dbScriptReads.ts` - Added `useScriptVersionsByWorkflowId` hook
+  - File: `/apps/web/src/components/WorkflowDetailPage.tsx` - Updated with version history UI
+  - "View history (X versions)" button to expand version list
+  - Version history list with links to each version
+  - Better visual hierarchy with timestamps and version numbers
 
 ### 20. Event Collapsing
 
