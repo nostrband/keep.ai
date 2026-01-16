@@ -4,7 +4,7 @@ This document outlines the remaining work needed to ship a simple, lovable, and 
 
 The items below are prioritized by impact on user experience and product completeness. Each item references the relevant spec(s) and includes specific file locations and implementation notes.
 
-**Last Updated:** 2026-01-16 (removed ~43 more lines of commented-out code; removed debug console.log from sandbox.ts; enabled output validation in sandbox/api.ts; fixed Tasks.list and Tasks.get return values; removed debug console.log from audio-explain.ts; fixed Vitest deprecation warning; updated misleading FIXME comment in v1.ts)
+**Last Updated:** 2026-01-16 (fixed future timestamp edge case in readChat; cleaned up file parts handling in agent-env.ts)
 
 ---
 
@@ -453,7 +453,7 @@ Improve completeness and handle edge cases.
   - Ensure database migrations work correctly
   - Test upgrade paths from each version
 
-### 17. Remaining FIXMEs (7 items)
+### 17. Remaining FIXMEs (5 remaining, 2 completed)
 
 These FIXMEs were identified during code exploration and still need work:
 
@@ -469,13 +469,15 @@ These FIXMEs were identified during code exploration and still need work:
   - File: `/packages/sync/src/transport/TransportClientHttp.ts` line 176
   - EventSource support for Node.js environment
 
-- [ ] **File/image parts handling hack**
+- [x] **File/image parts handling hack** (COMPLETED 2026-01-16)
   - File: `/packages/agent/src/agent-env.ts` line 69
-  - Ugly hack to avoid sending file/image parts, only metadata kept
+  - Cleaned up the hack: file parts now converted to human-readable text descriptions
+  - LLM providers expect base64 content; we only store metadata, so files are described as `[Attached file: name (type)]`
 
-- [ ] **Future timestamp edge case**
-  - File: `/packages/db/src/dbWrites.ts` line 56
-  - Handle edge case with future timestamps
+- [x] **Future timestamp edge case** (COMPLETED 2026-01-16)
+  - File: `/apps/web/src/hooks/dbWrites.ts` line 56
+  - Fixed by passing event timestamp to `readChat()` method
+  - `readChat()` now uses the later of now or event timestamp to prevent repeated updates for future timestamps
 
 - [ ] **ChatInterface component complexity**
   - File: `/apps/web/src/components/ChatInterface.tsx` line 23

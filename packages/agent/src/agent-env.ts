@@ -66,18 +66,21 @@ ${systemPrompt}
   }
 
   prepareUserMessage(msg: AssistantUIMessage): AssistantUIMessage {
-    // FIXME this is ugly hack, we don't want to send
-    // file/image parts bcs provider expects base64 body,
-    // but we only provide file metadata for agent to use
-    // tools to handle them
+    // LLM providers expect file parts to have full base64-encoded content,
+    // but we only store metadata (filename, mediaType, url path).
+    // Convert file parts to text descriptions so the agent knows files were
+    // attached and can use dedicated file-handling tools (Files.*, Images.*).
     return {
       id: msg.id,
       role: msg.role,
       parts: msg.parts.map((p) => {
         if (p.type === "file") {
-          p = {
-            type: "text",
-            text: "Attached file: " + JSON.stringify(p),
+          // Extract relevant metadata for agent context
+          const filename = (p as any).filename || 'file';
+          const mediaType = (p as any).mediaType || 'unknown';
+          return {
+            type: "text" as const,
+            text: `[Attached file: ${filename} (${mediaType})]`,
           };
         }
         return p;

@@ -53,10 +53,8 @@ export function useReadChat() {
 
       // Only update if last read timestamp was less than latest event's timestamp
       if (events.length && events[0].timestamp > (chat?.read_at || "")) {
-        // FIXME in theory event might have timestamp in the future,
-        // and without passing it to the read method and having it set 'now' as read_at,
-        // we'll be updating it on every scroll until that future timestamp
-        await api.chatStore.readChat(input.chatId);
+        // Pass event timestamp to handle future timestamp edge case
+        await api.chatStore.readChat(input.chatId, events[0].timestamp);
         return true;
       } else {
         // No need to update

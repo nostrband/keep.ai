@@ -108,11 +108,15 @@ export class ChatStore {
   }
 
   // Mark chat as read by updating read_at timestamp
-  async readChat(chatId: string): Promise<void> {
+  // If eventTimestamp is provided and is in the future, use it to prevent
+  // repeated updates from the future timestamp edge case
+  async readChat(chatId: string, eventTimestamp?: string): Promise<void> {
     const now = new Date().toISOString();
+    // Use the later of now or event timestamp to avoid repeated updates for future timestamps
+    const readAt = eventTimestamp && eventTimestamp > now ? eventTimestamp : now;
 
     await this.db.db.exec(`UPDATE chats SET read_at = ? WHERE id = ?`, [
-      now,
+      readAt,
       chatId,
     ]);
   }
