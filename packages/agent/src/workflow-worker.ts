@@ -16,6 +16,10 @@ import {
   ErrorType,
 } from "./errors";
 
+// Maximum number of consecutive fix attempts before escalating to user (spec 09b)
+// After this many failed auto-fix attempts, the workflow is paused and user is notified.
+const MAX_FIX_ATTEMPTS = 3;
+
 export interface WorkflowWorkerConfig {
   api: KeepDbApi;
   userPath?: string; // path to user files directory
@@ -165,6 +169,13 @@ export class WorkflowWorker {
         ...workflow,
         timestamp: new Date().toISOString(),
       });
+
+      // Reset maintenance fix count on successful run (the fix worked!)
+      // This prevents old fix counts from persisting after issues are resolved
+      if (workflow.maintenance_fix_count > 0) {
+        await this.api.scriptStore.resetMaintenanceFixCount(workflow.id);
+        this.debug("Reset maintenance fix count for workflow", workflow.id);
+      }
 
       // Check for warnings or errors in logs and notify
       await this.checkLogsAndNotify(workflow, scriptRunId, logs);
@@ -401,6 +412,9 @@ export class WorkflowWorker {
    * Enter maintenance mode for a workflow when a logic error occurs.
    * This sets the maintenance flag and sends the error context to the
    * planner task inbox for agent auto-fix.
+   *
+   * If the fix count exceeds MAX_FIX_ATTEMPTS, escalates to user instead
+   * of attempting another auto-fix (spec 09b).
    */
   private async enterMaintenanceMode(
     workflow: Workflow,
@@ -409,17 +423,30 @@ export class WorkflowWorker {
     error: ClassifiedError,
     logs: string[]
   ): Promise<void> {
-    // 1. Set maintenance flag on workflow
-    await this.api.scriptStore.setWorkflowMaintenance(workflow.id, true);
-    this.debug("Maintenance mode enabled for workflow", workflow.id);
+    // 1. Check if we've exceeded max fix attempts - escalate to user if so
+    const currentFixCount = workflow.maintenance_fix_count || 0;
+    if (currentFixCount >= MAX_FIX_ATTEMPTS) {
+      this.debug(
+        `Workflow ${workflow.id} has exceeded max fix attempts (${currentFixCount}/${MAX_FIX_ATTEMPTS}), escalating to user`
+      );
+      await this.escalateToUser(workflow, script, scriptRunId, error, logs, currentFixCount);
+      return;
+    }
 
-    // 2. Check if workflow has an associated planner task
+    // 2. Increment fix count and set maintenance flag
+    const newFixCount = await this.api.scriptStore.incrementMaintenanceFixCount(workflow.id);
+    await this.api.scriptStore.setWorkflowMaintenance(workflow.id, true);
+    this.debug(
+      `Maintenance mode enabled for workflow ${workflow.id}, fix attempt ${newFixCount}/${MAX_FIX_ATTEMPTS}`
+    );
+
+    // 3. Check if workflow has an associated planner task
     if (!workflow.task_id) {
       this.debug("No task_id for workflow, cannot route to planner inbox");
       return;
     }
 
-    // 3. Get the planner task
+    // 4. Get the planner task
     let task;
     try {
       task = await this.api.taskStore.getTask(workflow.task_id);
@@ -433,7 +460,7 @@ export class WorkflowWorker {
       return;
     }
 
-    // 4. Build the maintenance message with error context for the agent
+    // 5. Build the maintenance message with error context for the agent
     const recentLogs = logs.slice(-50).join("\n"); // Last 50 log lines
     const maintenanceMessage = {
       type: "maintenance_request",
@@ -475,7 +502,7 @@ Please:
 After saving the fix, the workflow will automatically exit maintenance mode and run again to verify the fix works.`,
     };
 
-    // 5. Create inbox item to route to planner task
+    // 6. Create inbox item to route to planner task
     const inboxId = `maintenance.${workflow.id}.${scriptRunId}.${generateId()}`;
     await this.api.inboxStore.saveInbox({
       id: inboxId,
@@ -504,7 +531,7 @@ After saving the fix, the workflow will automatically exit maintenance mode and 
 
     this.debug("Maintenance request sent to planner inbox", inboxId);
 
-    // 6. Create a chat event to show in the workflow chat
+    // 7. Create a chat event to show in the workflow chat
     if (task.chat_id) {
       try {
         await this.api.chatStore.saveChatEvent(
@@ -522,6 +549,106 @@ After saving the fix, the workflow will automatically exit maintenance mode and 
         this.debug("Failed to save maintenance_started event:", e);
       }
     }
+  }
+
+  /**
+   * Escalate a workflow to user after max fix attempts have been exceeded.
+   * This pauses the workflow and notifies the user that manual intervention is needed.
+   * Per spec 09b: "After N failed attempts, escalate to user and pause workflow"
+   */
+  private async escalateToUser(
+    workflow: Workflow,
+    script: Script,
+    scriptRunId: string,
+    error: ClassifiedError,
+    logs: string[],
+    fixAttempts: number
+  ): Promise<void> {
+    // 1. Pause the workflow and reset fix count (gives user a fresh start)
+    await this.api.scriptStore.updateWorkflow({
+      ...workflow,
+      status: "disabled",
+      maintenance: false, // Clear maintenance since we're not auto-fixing
+      maintenance_fix_count: 0, // Reset so user gets fresh fix attempts when re-enabled
+    });
+    this.debug(`Workflow ${workflow.id} paused due to repeated fix failures`);
+
+    // 2. Get the task and chat to notify user
+    if (!workflow.task_id) {
+      this.debug("No task_id for workflow, cannot notify user of escalation");
+      return;
+    }
+
+    let task;
+    try {
+      task = await this.api.taskStore.getTask(workflow.task_id);
+    } catch (e) {
+      this.debug("Failed to get task for escalation:", e);
+      return;
+    }
+
+    // 3. Create a chat event to show the escalation in the workflow chat
+    if (task.chat_id) {
+      try {
+        await this.api.chatStore.saveChatEvent(
+          generateId(),
+          task.chat_id,
+          "maintenance_escalated",
+          {
+            workflow_id: workflow.id,
+            script_run_id: scriptRunId,
+            error_type: error.type,
+            error_message: error.message,
+            fix_attempts: fixAttempts,
+            max_fix_attempts: MAX_FIX_ATTEMPTS,
+          }
+        );
+      } catch (e) {
+        this.debug("Failed to save maintenance_escalated event:", e);
+      }
+
+      // 4. Send a user-facing message explaining the escalation
+      const recentLogs = logs.slice(-20).join("\n");
+      const escalationMessage = `**Automation Paused: Manual Intervention Required**
+
+I've tried to automatically fix this workflow ${fixAttempts} times, but the same issue keeps occurring. I've paused the automation to prevent further problems.
+
+**Error:** ${error.message}
+**Error Type:** ${error.type}
+
+**Recent Logs:**
+\`\`\`
+${recentLogs || "(no logs)"}
+\`\`\`
+
+**What you can do:**
+1. Review the error and logs above
+2. Check if there's a fundamental issue with the automation logic
+3. Update the script manually if needed
+4. Re-enable the automation when ready
+
+If you'd like me to try fixing it again, just ask and I'll give it another go with fresh context.`;
+
+      try {
+        await this.api.addMessage({
+          chatId: task.chat_id,
+          content: escalationMessage,
+          role: "assistant",
+        });
+      } catch (e) {
+        this.debug("Failed to send escalation message:", e);
+      }
+    }
+
+    // 5. Emit a signal so scheduler knows this workflow needs attention
+    this.emitSignal({
+      type: "needs_attention",
+      workflowId: workflow.id,
+      timestamp: Date.now(),
+      error: `Auto-fix failed after ${fixAttempts} attempts: ${error.message}`,
+      errorType: "logic",
+      scriptRunId,
+    });
   }
 
   private async createEnv(workflow: Workflow, sandbox: Sandbox) {

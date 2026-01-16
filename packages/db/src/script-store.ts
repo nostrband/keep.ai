@@ -38,6 +38,7 @@ export interface Workflow {
   status: string;
   next_run_timestamp: string;
   maintenance: boolean;
+  maintenance_fix_count: number;  // Tracks consecutive fix attempts in maintenance mode
 }
 
 export class ScriptStore {
@@ -453,9 +454,9 @@ export class ScriptStore {
   async addWorkflow(workflow: Workflow, tx?: DBInterface): Promise<void> {
     const db = tx || this.db.db;
     await db.exec(
-      `INSERT INTO workflows (id, title, task_id, timestamp, cron, events, status, next_run_timestamp, maintenance)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [workflow.id, workflow.title, workflow.task_id, workflow.timestamp, workflow.cron, workflow.events, workflow.status, workflow.next_run_timestamp, workflow.maintenance ? 1 : 0]
+      `INSERT INTO workflows (id, title, task_id, timestamp, cron, events, status, next_run_timestamp, maintenance, maintenance_fix_count)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [workflow.id, workflow.title, workflow.task_id, workflow.timestamp, workflow.cron, workflow.events, workflow.status, workflow.next_run_timestamp, workflow.maintenance ? 1 : 0, workflow.maintenance_fix_count || 0]
     );
   }
 
@@ -464,16 +465,16 @@ export class ScriptStore {
     const db = tx || this.db.db;
     await db.exec(
       `UPDATE workflows
-       SET title = ?, task_id = ?, timestamp = ?, cron = ?, events = ?, status = ?, next_run_timestamp = ?, maintenance = ?
+       SET title = ?, task_id = ?, timestamp = ?, cron = ?, events = ?, status = ?, next_run_timestamp = ?, maintenance = ?, maintenance_fix_count = ?
        WHERE id = ?`,
-      [workflow.title, workflow.task_id, workflow.timestamp, workflow.cron, workflow.events, workflow.status, workflow.next_run_timestamp, workflow.maintenance ? 1 : 0, workflow.id]
+      [workflow.title, workflow.task_id, workflow.timestamp, workflow.cron, workflow.events, workflow.status, workflow.next_run_timestamp, workflow.maintenance ? 1 : 0, workflow.maintenance_fix_count || 0, workflow.id]
     );
   }
 
   // Get a workflow by ID
   async getWorkflow(id: string): Promise<Workflow | null> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, title, task_id, timestamp, cron, events, status, next_run_timestamp, maintenance
+      `SELECT id, title, task_id, timestamp, cron, events, status, next_run_timestamp, maintenance, maintenance_fix_count
        FROM workflows
        WHERE id = ?`,
       [id]
@@ -494,13 +495,14 @@ export class ScriptStore {
       status: row.status as string,
       next_run_timestamp: row.next_run_timestamp as string,
       maintenance: Boolean(row.maintenance),
+      maintenance_fix_count: (row.maintenance_fix_count as number) || 0,
     };
   }
 
   // Get workflow by task_id
   async getWorkflowByTaskId(task_id: string): Promise<Workflow | null> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, title, task_id, timestamp, cron, events, status, next_run_timestamp, maintenance
+      `SELECT id, title, task_id, timestamp, cron, events, status, next_run_timestamp, maintenance, maintenance_fix_count
        FROM workflows
        WHERE task_id = ?
        LIMIT 1`,
@@ -522,6 +524,7 @@ export class ScriptStore {
       status: row.status as string,
       next_run_timestamp: row.next_run_timestamp as string,
       maintenance: Boolean(row.maintenance),
+      maintenance_fix_count: (row.maintenance_fix_count as number) || 0,
     };
   }
 
@@ -531,7 +534,7 @@ export class ScriptStore {
     offset: number = 0
   ): Promise<Workflow[]> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, title, task_id, timestamp, cron, events, status, next_run_timestamp, maintenance
+      `SELECT id, title, task_id, timestamp, cron, events, status, next_run_timestamp, maintenance, maintenance_fix_count
        FROM workflows
        ORDER BY timestamp DESC
        LIMIT ? OFFSET ?`,
@@ -550,6 +553,7 @@ export class ScriptStore {
       status: row.status as string,
       next_run_timestamp: row.next_run_timestamp as string,
       maintenance: Boolean(row.maintenance),
+      maintenance_fix_count: (row.maintenance_fix_count as number) || 0,
     }));
   }
 
@@ -559,6 +563,30 @@ export class ScriptStore {
     await db.exec(
       `UPDATE workflows SET maintenance = ? WHERE id = ?`,
       [maintenance ? 1 : 0, workflowId]
+    );
+  }
+
+  // Increment the maintenance fix count for a workflow (when entering maintenance mode)
+  async incrementMaintenanceFixCount(workflowId: string, tx?: DBInterface): Promise<number> {
+    const db = tx || this.db.db;
+    await db.exec(
+      `UPDATE workflows SET maintenance_fix_count = maintenance_fix_count + 1 WHERE id = ?`,
+      [workflowId]
+    );
+    // Return the new count
+    const result = await (tx || this.db.db).execO<{ maintenance_fix_count: number }>(
+      `SELECT maintenance_fix_count FROM workflows WHERE id = ?`,
+      [workflowId]
+    );
+    return result && result.length > 0 ? result[0].maintenance_fix_count : 0;
+  }
+
+  // Reset the maintenance fix count (when a fix succeeds or workflow runs successfully)
+  async resetMaintenanceFixCount(workflowId: string, tx?: DBInterface): Promise<void> {
+    const db = tx || this.db.db;
+    await db.exec(
+      `UPDATE workflows SET maintenance_fix_count = 0 WHERE id = ?`,
+      [workflowId]
     );
   }
 }

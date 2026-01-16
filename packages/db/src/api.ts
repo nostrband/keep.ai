@@ -281,6 +281,7 @@ export class KeepDbApi {
         title: task.title,
         next_run_timestamp: "",
         maintenance: false,
+        maintenance_fix_count: 0,
       };
 
       // Create the matching workflow

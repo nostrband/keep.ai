@@ -4,7 +4,7 @@ This document outlines the remaining work needed to ship a simple, lovable, and 
 
 The items below are prioritized by impact on user experience and product completeness. Each item references the relevant spec(s) and includes specific file locations and implementation notes.
 
-**Last Updated:** 2026-01-16 (comprehensive codebase audit completed)
+**Last Updated:** 2026-01-16 (fix attempt tracking and escalation completed)
 
 ---
 
@@ -133,10 +133,13 @@ The "magical" auto-fix feature that makes the product special.
   - Sets next_run_timestamp to trigger immediate re-run to verify fix
   - Creates `maintenance_fixed` chat event
 
-- [ ] **Add fix attempt tracking and escalation** [Spec 09b]
-  - Track consecutive failed fix attempts (use notes or new field)
-  - After N failed attempts, escalate to user and pause workflow
-  - **Status:** TBD per spec - exact retry limits and escalation rules not yet defined
+- [x] **Add fix attempt tracking and escalation** [Spec 09b] (COMPLETED 2026-01-16)
+  - File: `/packages/db/src/migrations/v21.ts` - Added `maintenance_fix_count` field to workflows table
+  - File: `/packages/db/src/script-store.ts` - Updated Workflow interface, added `incrementMaintenanceFixCount()` and `resetMaintenanceFixCount()` methods
+  - File: `/packages/agent/src/workflow-worker.ts` - Updated `enterMaintenanceMode()` to check count and escalate if exceeded
+  - Added `escalateToUser()` method to pause workflow and notify user after MAX_FIX_ATTEMPTS (3)
+  - Fix count resets on successful run or when escalating to user
+  - Creates `maintenance_escalated` chat event when escalating
 
 - [x] **Show "Fixed: [issue]" in chat** [Spec 09b]
   - `maintenance_fixed` chat event created when save tool exits maintenance mode
