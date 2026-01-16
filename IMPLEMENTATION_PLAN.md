@@ -4,7 +4,7 @@ This document outlines the remaining work needed to ship a simple, lovable, and 
 
 The items below are prioritized by impact on user experience and product completeness. Each item references the relevant spec(s) and includes specific file locations and implementation notes.
 
-**Last Updated:** 2026-01-16 (added empty state example suggestions and Press Enter hint)
+**Last Updated:** 2026-01-16 (removed console.log from worker files)
 
 ---
 
@@ -428,6 +428,14 @@ Improve completeness and handle edge cases.
 - [x] **Remove console.log from sandbox.ts** (COMPLETED 2026-01-16)
   - File: `/packages/agent/src/sandbox/sandbox.ts`
   - Lines 185-186 had always-on debug logging for result and state after every sandbox execution
+
+- [x] **Remove console.log from worker files** (COMPLETED 2026-01-16)
+  - `/apps/web/src/service-worker.ts` - Replaced ~22 console.log statements with `debugLog()` function (disabled by default)
+  - `/apps/web/src/shared-worker.ts` - Replaced 2 console.log statements with debug module
+  - `/apps/web/src/worker.ts` - Fixed unconditional `debug.enable("*")` to only enable in DEV mode, replaced console.log with debug module
+  - `/apps/web/src/lib/worker.ts` - Replaced ~10 console.log statements with debug module (kept console.error for actual errors)
+  - `/apps/web/src/components/ConnectDeviceDialog.tsx` - Silenced QR scan callback that logged on every frame without QR code
+  - `/apps/web/vite.config.ts` - Added `__DEV__` build-time constant for conditional debug logging in workers
 
 ### 16. Test Fixes
 

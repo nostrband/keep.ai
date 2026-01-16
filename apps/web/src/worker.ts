@@ -5,7 +5,13 @@ import debug from "debug";
 import { SyncWorker } from "./lib/worker";
 import { API_ENDPOINT } from "./const";
 
-debug.enable("*");
+// Only enable debug logging in development mode
+declare const __DEV__: boolean;
+if (typeof __DEV__ !== "undefined" && __DEV__) {
+  debug.enable("*");
+}
+
+const log = debug("keep:worker");
 
 // MessagePortLike implementation that forwards to globalThis
 class GlobalMessagePort implements MessagePortLike {
@@ -32,6 +38,6 @@ async function main() {
   worker.start();
 }
 
-console.log("[Worker] Starting...");
+log("Starting...");
 
-main()
+main();

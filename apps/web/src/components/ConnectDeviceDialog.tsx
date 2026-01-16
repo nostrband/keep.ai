@@ -84,9 +84,9 @@ export function ConnectDeviceDialog({ onClose }: ConnectDeviceDialogProps) {
               setConnectionString(decodedText);
               stopQrScanner();
             },
-            (errorMessage) => {
-              // Handle scan error (optional)
-              console.log("QR scan error:", errorMessage);
+            () => {
+              // QR scan callback is called frequently when no QR code in frame
+              // This is expected behavior and should be silent
             }
           );
         } catch (err) {

@@ -14,6 +14,9 @@ import { getPublicKey } from "nostr-tools";
 import { bytesToHex } from "nostr-tools/utils";
 import { createDB } from "../db";
 import { DB_FILE } from "../const";
+import debug from "debug";
+
+const log = debug("keep:sync-worker");
 
 declare const __SERVERLESS__: boolean;
 const isServerless = __SERVERLESS__; // import.meta.env.VITE_FLAVOR === "serverless";
@@ -32,7 +35,7 @@ export class SyncWorker {
   private status: "initializing" | "sync" | "ready" = "initializing";
 
   constructor(backendUrl?: string, embeddedWorker?: boolean) {
-    console.log("[Worker] Initializing...");
+    log("Initializing...");
     this.backendUrl = backendUrl;
     this.embeddedWorker = !!embeddedWorker;
     if (!isServerless && !backendUrl) throw new Error("Backend url required");
@@ -94,7 +97,7 @@ export class SyncWorker {
       // Let tabs know we've started to sync
       peer.on("connect", (peerId: string, transport: Transport) => {
         if (transport === backendTransport) {
-          console.log("[Worker] connected to backend peer", peerId);
+          log("connected to backend peer", peerId);
           this.status = "sync";
           this.workerEvents.broadcast({ type: "worker_sync" });
         }
@@ -102,7 +105,7 @@ export class SyncWorker {
       // Let tabs know we've finished syncing
       peer.on("eose", (peerId: string, transport: Transport) => {
         if (transport === backendTransport) {
-          console.log("[Worker] finished sync from backend peer", peerId);
+          log("finished sync from backend peer", peerId);
           this.status = "ready";
           this.workerEvents.broadcast({ type: "worker_eose" });
         }
@@ -132,7 +135,7 @@ export class SyncWorker {
         // Init serverless message protocol handlers
         this.workerEvents.on("connect", async (connStr, port) => {
           try {
-            console.log("[Worker] Received connect_device message:", connStr);
+            log("Received connect_device message:", connStr);
 
             // Create NostrConnector and connect
             const connector = new NostrConnector();
@@ -142,7 +145,7 @@ export class SyncWorker {
               getDeviceInfo()
             );
 
-            console.log("[Worker] Connected successfully:", {
+            log("Connected successfully:", {
               peer_pubkey: result.peer_pubkey,
               peer_id: result.peer_id,
               peer_device_info: result.peer_device_info,
@@ -173,7 +176,7 @@ export class SyncWorker {
               },
             });
 
-            console.log("[Worker] Device connected and key sent to tab");
+            log("Device connected and key sent to tab");
           } catch (error) {
             console.error("[Worker] Failed to connect device:", error);
             port.postMessage({
@@ -187,7 +190,7 @@ export class SyncWorker {
 
         this.workerEvents.on("local_key", async (key) => {
           try {
-            console.log("[Worker] Received local_key message");
+            log("Received local_key message");
 
             // Set the key in the signer
             signer.setKey(key);
@@ -195,7 +198,7 @@ export class SyncWorker {
             // Start NostrTransport
             await backendTransport.start(peer.getConfig());
 
-            console.log("[Worker] NostrTransport started with existing key");
+            log("NostrTransport started with existing key");
           } catch (error) {
             console.error("[Worker] Failed to start with local key:", error);
           }
@@ -212,7 +215,7 @@ export class SyncWorker {
       // Can start now - will deliver buffered messages
       this.workerEvents.start();
 
-      console.log("[Worker] Initialized successfully");
+      log("Initialized successfully");
     } catch (error) {
       console.error("[Worker] Failed to initialize:", error);
       throw error;
