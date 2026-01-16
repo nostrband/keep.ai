@@ -3,6 +3,7 @@ import { tool } from "ai";
 import { FileStore } from "@app/db";
 import { storeFileData } from "@app/node";
 import { EvalContext } from "../sandbox/sandbox";
+import { LogicError, PermissionError } from "../errors";
 
 export function makeSaveFileTool(fileStore: FileStore, userPath: string | undefined, getContext: () => EvalContext) {
   return tool({
@@ -37,7 +38,7 @@ Returns the created file record with metadata.`,
     }),
     execute: async (input) => {
       if (!userPath) {
-        throw new Error("User path not configured");
+        throw new PermissionError("User path not configured", { source: "Files.save" });
       }
 
       let fileBuffer: Buffer;
@@ -50,7 +51,7 @@ Returns the created file record with metadata.`,
       } else if (input.base64 !== undefined) {
         fileBuffer = Buffer.from(input.base64, 'base64');
       } else {
-        throw new Error("No file content provided");
+        throw new LogicError("No file content provided", { source: "Files.save" });
       }
 
       // Use the moved storeFileData function with optional parameters

@@ -2,6 +2,7 @@ import { z } from "zod";
 import { tool } from "ai";
 import { FileStore, type File } from "@app/db";
 import { fileUtils } from "@app/node";
+import { LogicError, PermissionError, classifyFileError } from "../errors";
 
 export function makeReadFileTool(fileStore: FileStore, userPath?: string) {
   return tool({
@@ -29,35 +30,40 @@ If found, reads the actual file content from <userPath>/files/<db_file.path> and
     }),
     execute: async (input) => {
       if (!userPath) {
-        throw new Error("User path not configured");
+        throw new PermissionError("User path not configured", { source: "Files.read" });
       }
 
       // Extract filename without extension to use as ID
       const filename = fileUtils.basename(input.path, fileUtils.extname(input.path));
-      
+
       // Get file record from database
       const fileRecord = await fileStore.getFile(filename);
       if (!fileRecord) {
-        throw new Error(`File not found with ID: ${filename}`);
+        throw new LogicError(`File not found with ID: ${filename}`, { source: "Files.read" });
       }
 
       // Construct full path to actual file
       const fullPath = fileUtils.join(userPath, "files", fileRecord.path);
-      
+
       // Check if file exists
       if (!fileUtils.existsSync(fullPath)) {
-        throw new Error(`File not found on disk: ${fullPath}`);
+        throw new LogicError(`File not found on disk: ${fullPath}`, { source: "Files.read" });
       }
 
       // Read file with offset and length
-      const fd = fileUtils.openSync(fullPath, 'r');
+      let fd: number;
+      try {
+        fd = fileUtils.openSync(fullPath, 'r');
+      } catch (error) {
+        throw classifyFileError(error as NodeJS.ErrnoException, "Files.read");
+      }
       try {
         const stats = fileUtils.fstatSync(fd);
         const fileSize = stats.size;
-        
+
         const startOffset = input.offset || 0;
         if (startOffset >= fileSize) {
-          throw new Error(`Offset ${startOffset} is beyond file size ${fileSize}`);
+          throw new LogicError(`Offset ${startOffset} is beyond file size ${fileSize}`, { source: "Files.read" });
         }
 
         const maxLength = fileSize - startOffset;

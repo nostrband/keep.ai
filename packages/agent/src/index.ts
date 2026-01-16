@@ -69,6 +69,23 @@ export { SandboxAPI } from "./sandbox/api";
 
 export { AgentEnv as ReplEnv } from "./agent-env";
 
+// Error classification system
+export {
+  ClassifiedError,
+  AuthError,
+  PermissionError,
+  NetworkError,
+  LogicError,
+  isClassifiedError,
+  isErrorType,
+  classifyHttpError,
+  classifyFileError,
+  classifyGenericError,
+  classifyGoogleApiError,
+  ensureClassified,
+  type ErrorType,
+} from "./errors";
+
 export type {
   Sandbox,
   SandboxOptions,

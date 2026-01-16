@@ -4,6 +4,7 @@ import { tool } from "ai";
 import { getEnv } from "../env";
 import debug from "debug";
 import { EvalContext } from "../sandbox/sandbox";
+import { AuthError, LogicError, classifyGenericError } from "../errors";
 
 const debugWebSearch = debug("agent:web-search");
 
@@ -93,12 +94,12 @@ export function makeWebSearchTool(getContext: () => EvalContext) {
       }
 
       if (!query || typeof query !== "string") {
-        throw new Error("query must be a non-empty string");
+        throw new LogicError("query must be a non-empty string", { source: "Web.search" });
       }
 
       const apiKey = getEnv().EXA_API_KEY;
       if (!apiKey) {
-        throw new Error("EXA_API_KEY environment variable is not set");
+        throw new AuthError("EXA_API_KEY environment variable is not set. Web search is not configured.", { source: "Web.search" });
       }
 
       const exa = new Exa(apiKey);
@@ -135,7 +136,13 @@ export function makeWebSearchTool(getContext: () => EvalContext) {
         ...searchOptions,
       });
 
-      const result = await exa.search(query, searchOptions);
+      let result;
+      try {
+        result = await exa.search(query, searchOptions);
+      } catch (error) {
+        // Classify Exa API errors
+        throw classifyGenericError(error instanceof Error ? error : new Error(String(error)), "Web.search");
+      }
 
       // Format the results for better readability
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

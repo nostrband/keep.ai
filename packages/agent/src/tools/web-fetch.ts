@@ -4,6 +4,7 @@ import { tool } from "ai";
 import { getEnv } from "../env";
 import debug from "debug";
 import { EvalContext } from "../sandbox/sandbox";
+import { AuthError, LogicError, NetworkError, classifyGenericError } from "../errors";
 
 const debugWebFetch = debug("agent:web-fetch");
 
@@ -77,12 +78,12 @@ export function makeWebFetchTool(getContext: () => EvalContext) {
       }
 
       if (!url || typeof url !== "string") {
-        throw new Error("url must be a valid URL string");
+        throw new LogicError("url must be a valid URL string", { source: "Web.fetchParse" });
       }
 
       const apiKey = getEnv().EXA_API_KEY;
       if (!apiKey) {
-        throw new Error("EXA_API_KEY environment variable is not set");
+        throw new AuthError("EXA_API_KEY environment variable is not set. Web fetch is not configured.", { source: "Web.fetchParse" });
       }
 
       const exa = new Exa(apiKey);
@@ -104,10 +105,16 @@ export function makeWebFetchTool(getContext: () => EvalContext) {
         ...contentOptions,
       });
 
-      const result = await exa.getContents([url], contentOptions);
+      let result;
+      try {
+        result = await exa.getContents([url], contentOptions);
+      } catch (error) {
+        // Classify network/API errors from Exa
+        throw classifyGenericError(error instanceof Error ? error : new Error(String(error)), "Web.fetchParse");
+      }
 
       if (!result.results || result.results.length === 0) {
-        throw new Error("No content could be fetched from the provided URL");
+        throw new NetworkError("No content could be fetched from the provided URL", { source: "Web.fetchParse" });
       }
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

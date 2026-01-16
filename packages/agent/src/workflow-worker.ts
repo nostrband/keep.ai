@@ -6,6 +6,15 @@ import { SandboxAPI } from "./sandbox/api";
 import { fileUtils } from "@app/node";
 import { ERROR_BAD_REQUEST, ERROR_PAYMENT_REQUIRED } from "./agent";
 import { WorkflowSignalHandler } from "./workflow-worker-signal";
+import {
+  isClassifiedError,
+  ClassifiedError,
+  AuthError,
+  PermissionError,
+  NetworkError,
+  LogicError,
+  ErrorType,
+} from "./errors";
 
 export interface WorkflowWorkerConfig {
   api: KeepDbApi;
@@ -173,7 +182,7 @@ export class WorkflowWorker {
         this.debug("checkLogsAndNotify error", e);
       }
 
-      // Handle different error types
+      // Handle different error types based on classification
       if (error === ERROR_BAD_REQUEST) {
         this.debug("BAD_REQUEST: will not retry the workflow", workflow.id);
 
@@ -203,8 +212,79 @@ export class WorkflowWorker {
           timestamp: Date.now(),
           error: errorMessage,
         });
+      } else if (isClassifiedError(error)) {
+        // Handle classified errors based on type
+        const classifiedError = error as ClassifiedError;
+        this.debug(
+          `Classified error [${classifiedError.type}]:`,
+          classifiedError.message,
+          "source:",
+          classifiedError.source
+        );
+
+        switch (classifiedError.type) {
+          case "auth":
+          case "permission":
+            // Auth/Permission errors require user action - no auto-retry
+            // User must reconnect/grant access
+            this.debug(`${classifiedError.type.toUpperCase()}: User action required, not retrying workflow`, workflow.id);
+
+            // Mark workflow as needing attention (error status)
+            try {
+              await this.api.scriptStore.updateWorkflow({
+                ...workflow,
+                status: "error",
+              });
+            } catch (e) {
+              this.debug("updateWorkflow error", e);
+            }
+
+            // Signal that we're done (no retry) but user needs to act
+            this.emitSignal({
+              type: "needs_attention",
+              workflowId: workflow.id,
+              timestamp: Date.now(),
+              error: errorMessage,
+              errorType: classifiedError.type,
+            });
+            break;
+
+          case "network":
+            // Network errors can self-heal - auto-retry with backoff
+            this.debug("NETWORK: Scheduling retry for workflow", workflow.id);
+
+            this.emitSignal({
+              type: "retry",
+              workflowId: workflow.id,
+              timestamp: Date.now(),
+              error: errorMessage,
+              errorType: classifiedError.type,
+            });
+            break;
+
+          case "logic":
+            // Logic errors should go to agent for auto-fix (maintenance mode)
+            // For now, treat as retry - maintenance mode implementation is separate
+            this.debug("LOGIC: Script bug detected, scheduling retry for workflow", workflow.id);
+
+            // TODO: Implement maintenance mode (spec 09b)
+            // - Set workflow.maintenance = true
+            // - Route error to planner task inbox
+            // - Agent analyzes and generates fix
+            // - On fix: clear maintenance flag, re-run immediately
+
+            this.emitSignal({
+              type: "retry",
+              workflowId: workflow.id,
+              timestamp: Date.now(),
+              error: errorMessage,
+              errorType: classifiedError.type,
+            });
+            break;
+        }
       } else {
-        // Regular error - signal retry to scheduler
+        // Unclassified error - signal retry to scheduler (fallback)
+        this.debug("Unclassified error, scheduling retry:", errorMessage);
         this.emitSignal({
           type: "retry",
           workflowId: workflow.id,

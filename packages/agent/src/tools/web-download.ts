@@ -4,6 +4,7 @@ import { FileStore } from "@app/db";
 import { storeFileData } from "@app/node";
 import { EvalContext } from "../sandbox/sandbox";
 import debug from "debug";
+import { LogicError, NetworkError, PermissionError, classifyHttpError, classifyGenericError } from "../errors";
 
 const debugWebDownload = debug("agent:web-download");
 
@@ -34,21 +35,31 @@ Returns the created file record with metadata.`,
     }),
     execute: async (input) => {
       if (!userPath) {
-        throw new Error("User path not configured");
+        throw new PermissionError("User path not configured", { source: "Web.download" });
       }
 
       debugWebDownload("Downloading file from URL:", input.url);
 
       // Fetch the file with size limit
-      const response = await fetch(input.url, {
-        method: 'GET',
-        headers: {
-          'User-Agent': 'KeepAI-Agent/1.0',
-        },
-      });
+      let response: Response;
+      try {
+        response = await fetch(input.url, {
+          method: 'GET',
+          headers: {
+            'User-Agent': 'KeepAI-Agent/1.0',
+          },
+        });
+      } catch (error) {
+        // Network errors (connection refused, timeout, etc.)
+        throw classifyGenericError(error instanceof Error ? error : new Error(String(error)), "Web.download");
+      }
 
       if (!response.ok) {
-        throw new Error(`Failed to download file: ${response.status} ${response.statusText}`);
+        throw classifyHttpError(
+          response.status,
+          `Failed to download file: ${response.status} ${response.statusText}`,
+          { source: "Web.download" }
+        );
       }
 
       // Check content length if provided
@@ -56,7 +67,7 @@ Returns the created file record with metadata.`,
       const MAX_SIZE = 10 * 1024 * 1024; // 10MB
 
       if (contentLength && parseInt(contentLength) > MAX_SIZE) {
-        throw new Error(`File too large: ${contentLength} bytes (max: ${MAX_SIZE} bytes)`);
+        throw new LogicError(`File too large: ${contentLength} bytes (max: ${MAX_SIZE} bytes)`, { source: "Web.download" });
       }
 
       // Get MIME type from response headers
@@ -68,7 +79,7 @@ Returns the created file record with metadata.`,
       // Read response as array buffer with size check
       const reader = response.body?.getReader();
       if (!reader) {
-        throw new Error("Failed to get response reader");
+        throw new NetworkError("Failed to get response reader", { source: "Web.download" });
       }
 
       const chunks: Uint8Array[] = [];
@@ -82,7 +93,7 @@ Returns the created file record with metadata.`,
           
           totalSize += value.length;
           if (totalSize > MAX_SIZE) {
-            throw new Error(`File too large: ${totalSize} bytes (max: ${MAX_SIZE} bytes)`);
+            throw new LogicError(`File too large: ${totalSize} bytes (max: ${MAX_SIZE} bytes)`, { source: "Web.download" });
           }
           
           chunks.push(value);

@@ -78,32 +78,35 @@ Core product differentiator - user controls how much the AI decides vs coordinat
 
 - [x] **Respect autonomy setting in modifications** - Same backend integration handles all agent interactions
 
-### 4. Error Classification System
+### 4. Error Classification System (COMPLETED 2026-01-16)
 Required for maintenance mode and proper error handling.
 
-- [ ] **Create typed error classes** - Implement error types for classification [Spec 09b]
-  - File: New `/packages/agent/src/errors.ts`
+- [x] **Create typed error classes** - Implement error types for classification [Spec 09b]
+  - File: `/packages/agent/src/errors.ts` - New file created
   - Classes: `AuthError`, `PermissionError`, `NetworkError`, `LogicError`
-  - Each extends base Error with `type` property
+  - Each extends `ClassifiedError` base class with `type` property
+  - Helper functions: `classifyHttpError()`, `classifyFileError()`, `classifyGenericError()`, `classifyGoogleApiError()`
+  - Exported from `/packages/agent/src/index.ts`
 
-- [ ] **Classify errors at tool level** - Each tool wrapper throws typed errors [Spec 09b]
-  - Files in `/packages/agent/src/tools/*.ts`
-  - Key files: `gmail.ts`, `web-fetch.ts`, `web-download.ts`
+- [x] **Classify errors at tool level** - Each tool wrapper throws typed errors [Spec 09b]
+  - Files updated: `gmail.ts`, `web-fetch.ts`, `web-download.ts`, `text-extract.ts`, `web-search.ts`, `read-file.ts`, `save-file.ts`
   - Classification rules:
     - 401 -> AuthError
     - 403 -> PermissionError
     - 5xx/timeout/connection refused -> NetworkError
     - Parsing/null reference/unexpected data -> LogicError
 
-- [ ] **Propagate typed errors through sandbox** [Spec 09b]
-  - File: `/packages/agent/src/sandbox/api.ts` lines 102-146 - tool wrapper
-  - File: `/packages/agent/src/sandbox/sandbox.ts`
-  - Preserve error type when throwing into QuickJS
+- [x] **Propagate typed errors through sandbox** [Spec 09b]
+  - File: `/packages/agent/src/sandbox/api.ts` - Updated tool wrapper to preserve error types
+  - Classified errors are re-thrown with enhanced context
+  - Unclassified errors are wrapped as LogicError
 
-- [ ] **Route errors based on type** [Spec 09, 09b, 10]
-  - Auth/permission errors -> notify user, no retry
-  - Network errors -> notify + backoff retry
-  - Logic errors -> enter maintenance mode
+- [x] **Route errors based on type** [Spec 09, 09b, 10]
+  - File: `/packages/agent/src/workflow-worker.ts` - Updated error handling
+  - File: `/packages/agent/src/workflow-worker-signal.ts` - Added `needs_attention` signal type and `errorType` field
+  - Auth/permission errors -> set workflow status to "error", emit `needs_attention` signal (no retry)
+  - Network errors -> emit `retry` signal with backoff
+  - Logic errors -> emit `retry` signal (TODO: maintenance mode implementation is separate)
 
 ### 5. Maintenance Mode for Logic Errors
 The "magical" auto-fix feature that makes the product special.

@@ -3,6 +3,7 @@ import { tool } from "ai";
 import { EvalContext } from "../sandbox/sandbox";
 import debug from "debug";
 import { google } from "googleapis";
+import { AuthError, PermissionError, classifyGoogleApiError } from "../errors";
 
 const debugGmail = debug("agent:gmail");
 
@@ -37,7 +38,7 @@ export function makeGmailTool(getContext: () => EvalContext, gmailOAuth2Client?:
 
       try {
         if (!gmailOAuth2Client) {
-          throw new Error("Gmail OAuth client not available. Please ensure Gmail is properly configured.");
+          throw new AuthError("Gmail OAuth client not available. Please connect your Gmail account.", { source: "Gmail.api" });
         }
 
         // Create Gmail API client
@@ -80,7 +81,8 @@ export function makeGmailTool(getContext: () => EvalContext, gmailOAuth2Client?:
         return result.data;
       } catch (error) {
         debugGmail("Gmail API call failed", { method, error: error instanceof Error ? error.message : String(error) });
-        throw error;
+        // Classify the error based on Gmail API response
+        throw classifyGoogleApiError(error, "Gmail.api");
       }
     },
   });

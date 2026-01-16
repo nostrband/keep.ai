@@ -41,6 +41,7 @@ import {
 import { z, ZodFirstPartyTypeKind as K } from "zod";
 import { EvalContext, EvalGlobal } from "./sandbox";
 import debug from "debug";
+import { ClassifiedError, isClassifiedError, LogicError } from "../errors";
 
 export interface SandboxAPIConfig {
   api: KeepDbApi;
@@ -130,8 +131,23 @@ Example: await ${ns}.${name}(<input>)
           });
           return result;
         } catch (e) {
+          // Preserve classified errors - they contain type information for routing
+          if (isClassifiedError(e)) {
+            // Add context to message but preserve error type
+            const contextMessage = `Failed at ${ns}.${name}: ${e.message}`;
+            // Create new error of same type with enhanced message
+            const EnhancedError = e.constructor as new (
+              message: string,
+              options?: { cause?: Error; source?: string }
+            ) => ClassifiedError;
+            throw new EnhancedError(contextMessage, { cause: e.cause, source: e.source || `${ns}.${name}` });
+          }
+          // Wrap unclassified errors as LogicError (script bug or unexpected issue)
           const message = `Failed at ${ns}.${name}: ${e}.\nUsage: ${desc}`;
-          throw new Error(message);
+          throw new LogicError(message, {
+            cause: e instanceof Error ? e : undefined,
+            source: `${ns}.${name}`
+          });
         }
 
         // Validate output using outputSchema if present
