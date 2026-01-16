@@ -18,17 +18,6 @@ import debug from "debug";
 import { hexToBytes } from "nostr-tools/utils";
 debug.enable("*");
 
-// Unusable bcs if we use :memory: tables then each new run
-// will see events from previous pubkeys but site_ids will not match
-// const pk1_2 =
-//   "76ecba3d7757348b9b2cfbc052e6bf70f846044134a7af3803402e4be624fdf7";
-// const pk2_1 =
-//   "269a45ad04b88e7c2817bbb976819615ec55eccc8e17ba3a0c07c2a44e9f7f76";
-// const pk1_3 =
-//   "20ea85498654fba42df535b98fe0247511f56cb077a86b503e40bb5b754356fc";
-// const pk3_1 =
-//   "c0a15fa092f92bfa46e982badb116f3051f7289506425259d252bd40482e02fc";
-
 class TestNostrSigner implements NostrSigner {
   private keys = new Map<string, Uint8Array>();
 
@@ -150,11 +139,6 @@ describe.skip("NostrTransport Synchronization", () => {
     // Set keys
     signer1.addKey(privateKey1);
     signer2.addKey(privateKey2);
-
-    // const peers1 = await nostrPeerStore1.listPeers();
-    // const peers2 = await nostrPeerStore2.listPeers();
-    // console.log("peers1", peers1);
-    // console.log("peers2", peers2);
 
     // Start transports
     await transport1.start(peer1.getConfig());
@@ -651,61 +635,4 @@ describe.skip("NostrTransport Synchronization", () => {
     await db3.close();
     connector3.close();
   }, 45000);
-
-  // async function establishPeerConnection3(
-  //   peerId1: string,
-  //   peerId3: string,
-  //   pk1: Uint8Array,
-  //   pk3: Uint8Array,
-  //   nostrPeerStore3: NostrPeerStore
-  // ) {
-  //   const relays = ["wss://relay1.getkeep.ai"];
-  //   const deviceInfo1 = "Test Device 1";
-  //   const deviceInfo3 = "Test Device 3";
-
-  //   // Generate connection string
-  //   const connInfo = await connector1.generateConnectionString(relays, pk1);
-
-  //   // Start listening and connecting
-  //   const listenerPromise = connector1.listen(connInfo, peerId1, deviceInfo1);
-
-  //   // Give a small delay to ensure listener is ready
-  //   await wait(100);
-
-  //   const connector3 = new NostrConnector();
-  //   const connectorPromise = connector3.connect(
-  //     connInfo.str,
-  //     peerId3,
-  //     deviceInfo3,
-  //     pk3
-  //   );
-
-  //   // Wait for both operations to complete
-  //   const [listenerResult, connectorResult] = await Promise.all([
-  //     listenerPromise,
-  //     connectorPromise,
-  //   ]);
-
-  //   // Add peers to stores
-  //   await nostrPeerStore1.addPeer({
-  //     peer_pubkey: listenerResult.peer_pubkey,
-  //     peer_id: listenerResult.peer_id,
-  //     local_pubkey: getPublicKey(listenerResult.key),
-  //     local_id: peerId1,
-  //     device_info: listenerResult.peer_device_info,
-  //     relays: relays.join(","),
-  //     timestamp: "",
-  //   });
-  //   await nostrPeerStore3.addPeer({
-  //     peer_pubkey: connectorResult.peer_pubkey,
-  //     peer_id: connectorResult.peer_id,
-  //     local_pubkey: getPublicKey(connectorResult.key),
-  //     local_id: peerId3,
-  //     device_info: connectorResult.peer_device_info,
-  //     relays: relays.join(","),
-  //     timestamp: "",
-  //   });
-
-  //   connector3.close();
-  // }
 });

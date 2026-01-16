@@ -4,7 +4,7 @@ This document outlines the remaining work needed to ship a simple, lovable, and 
 
 The items below are prioritized by impact on user experience and product completeness. Each item references the relevant spec(s) and includes specific file locations and implementation notes.
 
-**Last Updated:** 2026-01-16 (console.log cleanup - 35 debug statements removed, 5 error handling statements kept)
+**Last Updated:** 2026-01-16 (console.log cleanup - 35 debug statements removed, 5 error handling statements kept; commented code removal - ~155 lines removed)
 
 ---
 
@@ -396,11 +396,11 @@ Improve completeness and handle edge cases.
   - [x] `/apps/web/src/main.tsx` - Cleaned up 4 console.log statements (kept only service worker registration error)
   - [x] `/packages/sync/src/Peer.ts` - Replaced 6 console.error statements with this.debug() for consistency
 
-- [ ] **Remove commented code blocks**
-  - File: `/packages/agent/src/agent-env.ts` - ~117 lines of commented context code
-  - File: `/packages/db/src/task-store.ts` - ~25 lines commented
-  - File: `/packages/tests/src/nostr-transport-sync.test.ts` - ~35 lines commented
-  - Review and either restore or delete
+- [x] **Remove commented code blocks** (COMPLETED 2026-01-16)
+  - [x] File: `/packages/agent/src/agent-env.ts` - Removed ~25 lines of commented out task listing code (lines 180-206) and ~5 lines of commented out tools prompt
+  - [x] File: `/packages/db/src/task-store.ts` - Removed ~30 lines of commented out getTodoTasks method and ~25 lines of commented out hasCronTaskOfType and getNextMidnightTimestamp methods
+  - [x] File: `/packages/tests/src/nostr-transport-sync.test.ts` - Removed ~70 lines of commented out code (private key constants, console.logs, and establishPeerConnection3 function)
+  - Total: ~155 lines of commented code removed
 
 ### 16. Test Fixes
 

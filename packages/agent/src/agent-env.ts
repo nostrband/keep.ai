@@ -177,34 +177,6 @@ ${systemPrompt}
 
     let currentState = "";
 
-    //       const tasks = await this.#api.taskStore.listTasks();
-    //       const states = await this.#api.taskStore.getStates(
-    //         tasks.map((t) => t.id)
-    //       );
-
-    //       const text = `
-    // ===TASKS===
-    // Below are the active tasks, use Tasks.* API to get more info.
-    // \`\`\`json
-    // ${tasks
-    //   .map((task) =>
-    //     JSON.stringify({
-    //       id: task.id,
-    //       title: task.title,
-    //       type: task.type,
-    //       state: task.state,
-    //       // Active tasks don't have it, and we don't want task replies to leak to router
-    //       // reply: task.reply,
-    //       goal: states.find((s) => s.id === task.id)?.goal || "",
-    //       asks: states.find((s) => s.id === task.id)?.asks || "",
-    //     })
-    //   )
-    //   .join("\n")}
-    // \`\`\``;
-
-    //       // Append tasks
-    //       if (tasks.length) currentState += text;
-
     // Stats
     currentState += `
 ===STATS===
@@ -306,11 +278,6 @@ ${taskInfo.join("\n")}
 
   private toolsPrompt() {
     return "";
-    //     return `## Tools
-    // Your only tool available is 'eval', which takes js-code as input, and returns result for your processing.
-    // Input: { jsCode: string } - an object with jsCode field, code will be executed in the sandbox
-    // Output: string - stringified JSON returned in 'result' field (details below).
-    // `;
   }
 
   private jsPrompt(mainAPIs: string[]) {

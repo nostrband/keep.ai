@@ -189,38 +189,6 @@ export class TaskStore {
     // We'll assume the operation succeeded if no error was thrown
   }
 
-  // // Get task with oldest timestamp with reply '' for this user that is ready to trigger (timestamp <= now)
-  // // Prioritizes tasks with 'message' type over other types
-  // async getTodoTasks(): Promise<Task[]> {
-  //   const currentTimeSeconds = Math.floor(Date.now() / 1000); // Convert milliseconds to seconds
-
-  //   // Fetch all pending tasks (no LIMIT 1)
-  //   const results = await this.db.db.execO<Record<string, unknown>>(
-  //     `SELECT id, timestamp, reply, state, thread_id, error, type, title, chat_id
-  //         FROM tasks
-  //         WHERE (state = '' OR state = 'wait') AND timestamp <= ? AND (deleted IS NULL OR deleted = FALSE)
-  //         ORDER BY timestamp ASC`,
-  //     [currentTimeSeconds]
-  //   );
-
-  //   if (!results) return [];
-
-  //   // Convert results to Task objects
-  //   const tasks: Task[] = results.map((row) => ({
-  //     id: row.id as string,
-  //     timestamp: row.timestamp as number,
-  //     reply: row.reply as string,
-  //     state: row.state as string,
-  //     thread_id: row.thread_id as string,
-  //     error: row.error as string,
-  //     type: (row.type as string) || "",
-  //     title: (row.title as string) || "",
-  //     chat_id: (row.chat_id as string) || "",
-  //   }));
-
-  //   return tasks;
-  // }
-
   // Get task by id
   async getTask(id: string): Promise<Task> {
     const results = await this.db.db.execO<Record<string, unknown>>(
@@ -361,30 +329,6 @@ export class TaskStore {
     // Note: cr-sqlite exec doesn't return changes count like better-sqlite3
     // We'll assume the operation succeeded if no error was thrown
   }
-
-  // // Check if there's a cron task of a specific type
-  // async hasCronTaskOfType(taskType: string): Promise<boolean> {
-  //   const results = await this.db.db.execO<{ count: number }>(
-  //     `SELECT COUNT(*) as count
-  //         FROM tasks
-  //         WHERE type = ? AND cron != '' AND (deleted IS NULL OR deleted = FALSE)`,
-  //     [taskType]
-  //   );
-
-  //   const count = results?.[0]?.count || 0;
-  //   return count > 0;
-  // }
-
-  // Get the next midnight timestamp in local time
-  // FIXME: This assumes the server's timezone is the user's local timezone.
-  // In a multi-user system, this should be configurable per user or use a specific timezone.
-  // getNextMidnightTimestamp(): number {
-  //   const now = new Date();
-  //   const tomorrow = new Date(now);
-  //   tomorrow.setDate(tomorrow.getDate() + 1);
-  //   tomorrow.setHours(0, 1, 0, 0); // 00:01 to make sure "today" means today
-  //   return Math.floor(tomorrow.getTime() / 1000);
-  // }
 
   // Save task state - overwrites by id if it exists
   async saveState(taskState: TaskState): Promise<void> {
