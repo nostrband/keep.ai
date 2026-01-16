@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useTask, useTaskRun } from "../hooks/dbTaskReads";
 import { useScriptRun } from "../hooks/dbScriptReads";
 import { EventItem } from "./EventItem";
@@ -9,6 +9,12 @@ import {
   GmailApiCallEventPayload,
   EVENT_TYPES,
 } from "../types/events";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "../ui";
 
 // Transform Gmail API method names to simpler, user-friendly names
 function transformGmailMethod(method: string): string {
@@ -51,15 +57,16 @@ interface TaskEventGroupProps {
 }
 
 export function TaskEventGroup({ taskId, events }: TaskEventGroupProps) {
+  const navigate = useNavigate();
   const { data: task } = useTask(taskId);
 
   // Get task_run_id or script_run_id from any event
   const taskRunId = events.length > 0 ? events[0].content?.task_run_id : null;
   const scriptRunId = events.length > 0 ? events[0].content?.script_run_id : null;
-  
+
   // Fetch task run data to get metadata
   const { data: taskRun } = useTaskRun(taskRunId || "");
-  
+
   // Fetch script run data if this is a script run
   const { data: scriptRun } = useScriptRun(scriptRunId || "");
 
@@ -77,10 +84,10 @@ export function TaskEventGroup({ taskId, events }: TaskEventGroupProps) {
     }
   }, [taskRun, scriptRun]);
 
-  const handleTaskMenuClick = (e: React.MouseEvent) => {
+  const handleViewTask = (e: React.MouseEvent) => {
+    e.preventDefault();
     e.stopPropagation();
-    // TODO: Implement task menu actions (mute task, etc.)
-    console.log("Task menu clicked for task:", taskId);
+    navigate(`/tasks/${taskId}`);
   };
 
   const taskTitle = task?.title || `Task ${taskId.slice(0, 8)}`;
@@ -213,13 +220,23 @@ export function TaskEventGroup({ taskId, events }: TaskEventGroupProps) {
             </div>
           </div>
 
-          <button
-            onClick={handleTaskMenuClick}
-            className="ml-2 px-2 py-1 text-gray-400 hover:text-gray-600 flex-shrink-0"
-            aria-label="Task actions"
-          >
-            ···
-          </button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                onClick={(e) => e.stopPropagation()}
+                className="ml-2 px-2 py-1 text-gray-400 hover:text-gray-600 flex-shrink-0"
+                aria-label="Task actions"
+              >
+                ···
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={handleViewTask}>
+                <span className="mr-2">👁️</span>
+                View task
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </Link>
       ) : (
         <div
@@ -261,13 +278,23 @@ export function TaskEventGroup({ taskId, events }: TaskEventGroupProps) {
             </div>
           </div>
 
-          <button
-            onClick={handleTaskMenuClick}
-            className="ml-2 px-2 py-1 text-gray-400 hover:text-gray-600 flex-shrink-0"
-            aria-label="Task actions"
-          >
-            ···
-          </button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                onClick={(e) => e.stopPropagation()}
+                className="ml-2 px-2 py-1 text-gray-400 hover:text-gray-600 flex-shrink-0"
+                aria-label="Task actions"
+              >
+                ···
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={handleViewTask}>
+                <span className="mr-2">👁️</span>
+                View task
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       )}
 

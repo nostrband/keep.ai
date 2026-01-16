@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
+import React, { useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { useWorkflow } from "../hooks/dbScriptReads";
+import { useUpdateWorkflow } from "../hooks/dbWrites";
 import { EventItem } from "./EventItem";
 import {
   EventType,
@@ -8,6 +9,13 @@ import {
   GmailApiCallEventPayload,
   EVENT_TYPES,
 } from "../types/events";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from "../ui";
 
 // Transform Gmail API method names to simpler, user-friendly names
 function transformGmailMethod(method: string): string {
@@ -52,12 +60,35 @@ interface WorkflowEventGroupProps {
 }
 
 export function WorkflowEventGroup({ workflowId, scriptId, scriptRunId, events }: WorkflowEventGroupProps) {
+  const navigate = useNavigate();
   const { data: workflow } = useWorkflow(workflowId);
+  const updateWorkflowMutation = useUpdateWorkflow();
+  const [successMessage, setSuccessMessage] = useState<string>("");
 
-  const handleWorkflowMenuClick = (e: React.MouseEvent) => {
+  const handleRetry = (e: React.MouseEvent) => {
+    e.preventDefault();
     e.stopPropagation();
-    // TODO: Implement workflow menu actions
-    console.log("Workflow menu clicked for workflow:", workflowId);
+
+    if (!workflow) return;
+
+    // Set next_run_timestamp to current time to trigger immediate execution
+    const now = new Date().toISOString();
+
+    updateWorkflowMutation.mutate({
+      workflowId: workflow.id,
+      next_run_timestamp: now,
+    }, {
+      onSuccess: () => {
+        setSuccessMessage("Retry scheduled");
+        setTimeout(() => setSuccessMessage(""), 3000);
+      },
+    });
+  };
+
+  const handleViewWorkflow = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    navigate(`/workflows/${workflowId}`);
   };
 
   const workflowTitle = workflow?.title || `Workflow ${workflowId.slice(0, 8)}`;
@@ -137,8 +168,13 @@ export function WorkflowEventGroup({ workflowId, scriptId, scriptRunId, events }
           <span className="text-sm text-gray-600">
             ⚙ Executing: <span className="text-gray-600">{workflowTitle}</span>
           </span>
-          {/* Metadata: cost */}
+          {/* Metadata: cost and success message */}
           <div className="flex items-center gap-2 text-xs text-gray-400">
+            {successMessage && (
+              <span className="text-green-600 bg-green-50 px-2 py-0.5 rounded border border-green-200">
+                {successMessage}
+              </span>
+            )}
             {totalCost > 0 && (
               <span className="flex items-center gap-1">
                 <span>💵</span>
@@ -148,13 +184,28 @@ export function WorkflowEventGroup({ workflowId, scriptId, scriptRunId, events }
           </div>
         </div>
 
-        <button
-          onClick={handleWorkflowMenuClick}
-          className="ml-2 px-2 py-1 text-gray-400 hover:text-gray-600 flex-shrink-0"
-          aria-label="Workflow actions"
-        >
-          ···
-        </button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              onClick={(e) => e.stopPropagation()}
+              className="ml-2 px-2 py-1 text-gray-400 hover:text-gray-600 flex-shrink-0"
+              aria-label="Workflow actions"
+            >
+              ···
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={handleRetry} disabled={updateWorkflowMutation.isPending}>
+              <span className="mr-2">🔄</span>
+              {updateWorkflowMutation.isPending ? "Retrying..." : "Retry"}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={handleViewWorkflow}>
+              <span className="mr-2">👁️</span>
+              View workflow
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </Link>
 
       {/* Events List - only show if there are visible events */}

@@ -4,7 +4,7 @@ This document outlines the remaining work needed to ship a simple, lovable, and 
 
 The items below are prioritized by impact on user experience and product completeness. Each item references the relevant spec(s) and includes specific file locations and implementation notes.
 
-**Last Updated:** 2026-01-16 (error type filtering for notifications completed)
+**Last Updated:** 2026-01-16 (event menu actions: retry and dropdown menus implemented)
 
 ---
 
@@ -279,21 +279,31 @@ Use native OS notifications, not just app-internal or push.
 
 Improve completeness and handle edge cases.
 
-### 11. Event Menu Actions
+### 11. Event Menu Actions (PARTIALLY COMPLETED 2026-01-16)
 
 - [ ] **Implement "Mute this task" action** [Spec 08]
-  - File: `/apps/web/src/components/TaskEventGroup.tsx` line 82 - currently console.log only
+  - File: `/apps/web/src/components/TaskEventGroup.tsx`
   - Suppress future notifications for specific task
   - Needs spec for mute behavior/duration
 
 - [ ] **Implement "Mute workflow" action** [Spec 08]
-  - File: `/apps/web/src/components/WorkflowEventGroup.tsx` line 59 - currently console.log only
+  - File: `/apps/web/src/components/WorkflowEventGroup.tsx`
   - Suppress all notifications for workflow
   - Needs spec
 
-- [ ] **Implement "Retry" action from event menu** [Spec 10]
-  - File: `/apps/web/src/components/EventItem.tsx` line 32 - currently console.log only
-  - Trigger immediate re-run from failed run event
+- [x] **Implement "Retry" action from event menu** [Spec 10] (COMPLETED 2026-01-16)
+  - File: `/apps/web/src/components/WorkflowEventGroup.tsx` - Added dropdown menu with Retry option
+  - Sets `next_run_timestamp` to now to trigger immediate re-run via scheduler
+  - Shows success message when retry is scheduled
+  - Also added "View workflow" menu option
+
+- [x] **Update TaskEventGroup dropdown menu** (COMPLETED 2026-01-16)
+  - File: `/apps/web/src/components/TaskEventGroup.tsx` - Replaced console.log with dropdown menu
+  - Added "View task" option
+
+- [x] **Update EventItem dropdown menu** (COMPLETED 2026-01-16)
+  - File: `/apps/web/src/components/EventItem.tsx` - Replaced console.log with dropdown menu
+  - Added "View details" option for events that have navigation paths
 
 ### 12. Question Simplification
 

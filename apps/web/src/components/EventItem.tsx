@@ -1,6 +1,12 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { EVENT_CONFIGS, EventType, EventPayload } from '../types/events';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from '../ui';
 
 interface EventItemProps {
   type: EventType;
@@ -27,10 +33,12 @@ export function EventItem({ type, content, timestamp, usage }: EventItemProps) {
     }
   };
 
-  const handleMenuClick = (e: React.MouseEvent) => {
+  const handleViewEntity = (e: React.MouseEvent) => {
+    e.preventDefault();
     e.stopPropagation();
-    // TODO: Implement menu actions (mute, etc.)
-    console.log('Menu clicked for event:', type, content);
+    if (hasNavigation && config.getEntityPath) {
+      navigate(config.getEntityPath(content));
+    }
   };
 
   return (
@@ -67,13 +75,31 @@ export function EventItem({ type, content, timestamp, usage }: EventItemProps) {
         )}
       </div>
       
-      <button
-        onClick={handleMenuClick}
-        className="ml-2 px-2 py-1 text-gray-400 hover:text-gray-600 flex-shrink-0"
-        aria-label="Event actions"
-      >
-        ···
-      </button>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            onClick={(e) => e.stopPropagation()}
+            className="ml-2 px-2 py-1 text-gray-400 hover:text-gray-600 flex-shrink-0"
+            aria-label="Event actions"
+          >
+            ···
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          {hasNavigation && (
+            <DropdownMenuItem onClick={handleViewEntity}>
+              <span className="mr-2">👁️</span>
+              View details
+            </DropdownMenuItem>
+          )}
+          {!hasNavigation && (
+            <DropdownMenuItem disabled>
+              <span className="mr-2">ℹ️</span>
+              No actions available
+            </DropdownMenuItem>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   );
 }
