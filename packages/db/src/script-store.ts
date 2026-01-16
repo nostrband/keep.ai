@@ -27,6 +27,7 @@ export interface ScriptRun {
   type: string;
   retry_of: string;     // ID of the original failed run (empty for non-retry runs)
   retry_count: number;  // Which retry attempt this is (0 for non-retry runs)
+  cost: number;         // Total cost in microdollars (cost * 1,000,000) accumulated from tool calls
 }
 
 export interface Workflow {
@@ -260,21 +261,21 @@ export class ScriptStore {
     );
   }
 
-  // Update a script run with end_timestamp, optional error, result, and logs
-  async finishScriptRun(id: string, end_timestamp: string, result: string, error: string = '', logs: string = '', error_type: string = '', tx?: DBInterface): Promise<void> {
+  // Update a script run with end_timestamp, optional error, result, logs, and cost
+  async finishScriptRun(id: string, end_timestamp: string, result: string, error: string = '', logs: string = '', error_type: string = '', cost: number = 0, tx?: DBInterface): Promise<void> {
     const db = tx || this.db.db;
     await db.exec(
       `UPDATE script_runs
-       SET end_timestamp = ?, result = ?, error = ?, logs = ?, error_type = ?
+       SET end_timestamp = ?, result = ?, error = ?, logs = ?, error_type = ?, cost = ?
        WHERE id = ?`,
-      [end_timestamp, result, error, logs, error_type, id]
+      [end_timestamp, result, error, logs, error_type, cost, id]
     );
   }
 
   // Get a script run by ID
   async getScriptRun(id: string): Promise<ScriptRun | null> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, script_id, start_timestamp, end_timestamp, error, error_type, result, logs, workflow_id, type, retry_of, retry_count
+      `SELECT id, script_id, start_timestamp, end_timestamp, error, error_type, result, logs, workflow_id, type, retry_of, retry_count, cost
        FROM script_runs
        WHERE id = ?`,
       [id]
@@ -298,6 +299,7 @@ export class ScriptStore {
       type: row.type as string,
       retry_of: (row.retry_of as string) || '',
       retry_count: (row.retry_count as number) || 0,
+      cost: (row.cost as number) || 0,
     };
   }
 
@@ -307,7 +309,7 @@ export class ScriptStore {
     limit: number = 100,
     offset: number = 0
   ): Promise<ScriptRun[]> {
-    let sql = `SELECT id, script_id, start_timestamp, end_timestamp, error, error_type, result, logs, workflow_id, type, retry_of, retry_count
+    let sql = `SELECT id, script_id, start_timestamp, end_timestamp, error, error_type, result, logs, workflow_id, type, retry_of, retry_count, cost
                FROM script_runs`;
     const args: (string | number)[] = [];
 
@@ -338,13 +340,14 @@ export class ScriptStore {
       type: row.type as string,
       retry_of: (row.retry_of as string) || '',
       retry_count: (row.retry_count as number) || 0,
+      cost: (row.cost as number) || 0,
     }));
   }
 
   // Get script runs by script_id
   async getScriptRunsByScriptId(script_id: string): Promise<ScriptRun[]> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, script_id, start_timestamp, end_timestamp, error, error_type, result, logs, workflow_id, type, retry_of, retry_count
+      `SELECT id, script_id, start_timestamp, end_timestamp, error, error_type, result, logs, workflow_id, type, retry_of, retry_count, cost
        FROM script_runs
        WHERE script_id = ?
        ORDER BY start_timestamp DESC`,
@@ -366,13 +369,14 @@ export class ScriptStore {
       type: row.type as string,
       retry_of: (row.retry_of as string) || '',
       retry_count: (row.retry_count as number) || 0,
+      cost: (row.cost as number) || 0,
     }));
   }
 
   // Get script runs by task_id (through scripts table)
   async getScriptRunsByTaskId(task_id: string): Promise<ScriptRun[]> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT sr.id, sr.script_id, sr.start_timestamp, sr.end_timestamp, sr.error, sr.error_type, sr.result, sr.logs, sr.workflow_id, sr.type, sr.retry_of, sr.retry_count
+      `SELECT sr.id, sr.script_id, sr.start_timestamp, sr.end_timestamp, sr.error, sr.error_type, sr.result, sr.logs, sr.workflow_id, sr.type, sr.retry_of, sr.retry_count, sr.cost
        FROM script_runs sr
        INNER JOIN scripts s ON sr.script_id = s.id
        WHERE s.task_id = ?
@@ -395,13 +399,14 @@ export class ScriptStore {
       type: row.type as string,
       retry_of: (row.retry_of as string) || '',
       retry_count: (row.retry_count as number) || 0,
+      cost: (row.cost as number) || 0,
     }));
   }
 
   // Get script runs by workflow_id
   async getScriptRunsByWorkflowId(workflow_id: string): Promise<ScriptRun[]> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, script_id, start_timestamp, end_timestamp, error, error_type, result, logs, workflow_id, type, retry_of, retry_count
+      `SELECT id, script_id, start_timestamp, end_timestamp, error, error_type, result, logs, workflow_id, type, retry_of, retry_count, cost
        FROM script_runs
        WHERE workflow_id = ?
        ORDER BY start_timestamp DESC`,
@@ -423,6 +428,7 @@ export class ScriptStore {
       type: row.type as string,
       retry_of: (row.retry_of as string) || '',
       retry_count: (row.retry_count as number) || 0,
+      cost: (row.cost as number) || 0,
     }));
   }
 

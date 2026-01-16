@@ -163,6 +163,7 @@ async function runAgentCommand(modelName: string): Promise<void> {
       taskId: "",
       taskThreadId: "",
       type: "worker",
+      cost: 0, // Accumulated cost from tool calls
       createEvent: async () => {},
       onLog: async () => {},
     };

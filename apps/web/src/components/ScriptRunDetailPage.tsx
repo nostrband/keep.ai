@@ -107,6 +107,17 @@ export default function ScriptRunDetailPage() {
                   <p className="text-gray-900 font-mono text-sm">{run.id}</p>
                 </div>
 
+                {/* Show cost if any (stored in microdollars, display as dollars) */}
+                {run.cost > 0 && (
+                  <div>
+                    <h3 className="text-sm font-medium text-gray-700 mb-2">Cost</h3>
+                    <p className="text-gray-900 flex items-center gap-1">
+                      <span>💵</span>
+                      <span>${(run.cost / 1000000).toFixed(4)}</span>
+                    </p>
+                  </div>
+                )}
+
                 {/* Show link to original failed run if this is a retry */}
                 {run.retry_of && (
                   <div>

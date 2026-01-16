@@ -50,6 +50,7 @@ export interface EvalContext {
   taskRunId?: string;
   scriptRunId?: string;
   data?: any;
+  cost: number;  // Accumulated cost from tool calls (in dollars, will be converted to microdollars when saving)
   createEvent(type: string, content: any, tx?: DBInterface): Promise<void>;
   onLog(line: string): Promise<void>;
 }

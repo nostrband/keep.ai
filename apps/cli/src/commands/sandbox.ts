@@ -63,6 +63,7 @@ async function runSandboxCommand(type: string): Promise<void> {
       taskThreadId: "",
       type: taskType,
       taskRunId: "",
+      cost: 0, // Accumulated cost from tool calls
       createEvent: async (type, content, tx) => {},
       onLog: async (line:string) => {},
     };

@@ -4,7 +4,7 @@ This document outlines the remaining work needed to ship a simple, lovable, and 
 
 The items below are prioritized by impact on user experience and product completeness. Each item references the relevant spec(s) and includes specific file locations and implementation notes.
 
-**Last Updated:** 2026-01-16 (implemented per-device notification tracking)
+**Last Updated:** 2026-01-16 (added Cost Display in Script Runs)
 
 ---
 
@@ -273,13 +273,38 @@ Use native OS notifications, not just app-internal or push.
   - File: `/apps/web/src/components/ScriptRunDetailPage.tsx` - Shows "Retry #N" badge and link to original run
   - File: `/apps/web/src/components/WorkflowDetailPage.tsx` - Shows "Retry #N" badge in script runs list
 
+### 11. Cost Display in Script Runs (COMPLETED 2026-01-16)
+Track and display LLM API costs for each script run.
+
+- [x] **Add cost column to script_runs table** [Spec 08]
+  - File: `/packages/db/src/migrations/v24.ts` - Migration adding cost column (stored as microdollars)
+  - File: `/packages/db/src/script-store.ts` - Updated ScriptRun interface to include cost field
+
+- [x] **Update finishScriptRun to accept cost parameter** [Spec 08]
+  - File: `/packages/db/src/script-store.ts` - finishScriptRun method updated to save cost
+
+- [x] **Track cost in sandbox execution context** [Spec 08]
+  - File: `/packages/agent/src/sandbox/sandbox.ts` - Added cost tracking in EvalContext interface
+
+- [x] **Track cost from tool events in workers** [Spec 08]
+  - File: `/packages/agent/src/workflow-worker.ts` - Tracks cost from tool events and saves to database
+  - File: `/packages/agent/src/task-worker.ts` - Tracks cost from tool events
+
+- [x] **Display cost in UI** [Spec 08]
+  - File: `/apps/web/src/components/ScriptRunDetailPage.tsx` - Shows cost for individual run
+  - File: `/apps/web/src/components/WorkflowDetailPage.tsx` - Shows cost in script runs list
+
+- [x] **Update CLI commands to include cost in context** [Spec 08]
+  - File: `/packages/agent/src/ai-tools/agent.ts` - Updated to include cost in context
+  - File: `/packages/agent/src/sandbox/sandbox.ts` - Updated to include cost in context
+
 ---
 
 ## MEDIUM PRIORITY
 
 Improve completeness and handle edge cases.
 
-### 11. Event Menu Actions (PARTIALLY COMPLETED 2026-01-16)
+### 12. Event Menu Actions (PARTIALLY COMPLETED 2026-01-16)
 
 - [ ] **Implement "Mute this task" action** [Spec 08]
   - File: `/apps/web/src/components/TaskEventGroup.tsx`
@@ -305,7 +330,7 @@ Improve completeness and handle edge cases.
   - File: `/apps/web/src/components/EventItem.tsx` - Replaced console.log with dropdown menu
   - Added "View details" option for events that have navigation paths
 
-### 12. Question Simplification (COMPLETED 2026-01-16)
+### 13. Question Simplification (COMPLETED 2026-01-16)
 
 - [x] **Add quick-reply buttons for agent questions** [Spec 02]
   - When agent asks yes/no or multiple choice, show buttons
@@ -323,7 +348,7 @@ Improve completeness and handle edge cases.
   - Clicking a button sends that option as user's reply
   - Backward compatible with plain string asks
 
-### 13. Dry-Run Testing
+### 14. Dry-Run Testing
 
 - [ ] **Promote test run button** [Spec 06]
   - Make more prominent/discoverable before enabling
@@ -338,7 +363,7 @@ Improve completeness and handle edge cases.
   - Suggest testing when user tries to activate untested draft
   - Needs spec
 
-### 14. Code Quality - FIXMEs (9 total)
+### 15. Code Quality - FIXMEs (9 total)
 
 - [x] **Fix mutations not triggering sync** (COMPLETED 2026-01-16)
   - File: `/apps/server/src/server.ts` line 759
@@ -389,7 +414,7 @@ Improve completeness and handle edge cases.
   - `cron` on tasks table is legacy but `cron` on workflows table is actively used
   - Updated comment to clarify which fields are actually deprecated
 
-### 15. Code Quality - Debug Statements (COMPLETED 2026-01-16)
+### 16. Code Quality - Debug Statements (COMPLETED 2026-01-16)
 
 - [x] **Remove console.log statements** - 35 debug statements removed, 5 error handling statements kept
   - [x] `/apps/server/src/server.ts` - Removed 2 statements exposing environment config
@@ -437,7 +462,7 @@ Improve completeness and handle edge cases.
   - `/apps/web/src/components/ConnectDeviceDialog.tsx` - Silenced QR scan callback that logged on every frame without QR code
   - `/apps/web/vite.config.ts` - Added `__DEV__` build-time constant for conditional debug logging in workers
 
-### 16. Test Fixes
+### 17. Test Fixes
 
 - [x] **Fix failing file-transfer.test.ts** (COMPLETED 2026-01-16)
   - File: `/packages/tests/src/file-transfer.test.ts`
@@ -461,7 +486,7 @@ Improve completeness and handle edge cases.
   - Ensure database migrations work correctly
   - Test upgrade paths from each version
 
-### 17. Remaining FIXMEs (3 remaining, 4 completed)
+### 18. Remaining FIXMEs (3 remaining, 4 completed)
 
 These FIXMEs were identified during code exploration and still need work:
 
@@ -506,7 +531,7 @@ These FIXMEs were identified during code exploration and still need work:
 
 These add polish but are not essential for launch.
 
-### 18. Script Version History UI
+### 19. Script Version History UI
 
 - [ ] **Add diff view between script versions** [Spec 12]
   - Show what changed between versions
@@ -519,7 +544,7 @@ These add polish but are not essential for launch.
 - [ ] **Improve version list UI** [Spec 12]
   - Better visual hierarchy and timestamps
 
-### 19. Event Collapsing
+### 20. Event Collapsing
 
 - [ ] **Collapse low-signal events** [Spec 08]
   - Group routine successful runs
@@ -530,7 +555,7 @@ These add polish but are not essential for launch.
   - Failures, fixes, and user interactions stand out
   - Needs spec
 
-### 20. Abandoned Draft Handling
+### 21. Abandoned Draft Handling
 
 - [ ] **Detect abandoned drafts** [Spec 00]
   - Drafts with no activity for X days
@@ -544,7 +569,7 @@ These add polish but are not essential for launch.
   - Move very old drafts to archive instead of deleting
   - Needs spec
 
-### 21. Empty State & Onboarding (COMPLETED 2026-01-16)
+### 22. Empty State & Onboarding (COMPLETED 2026-01-16)
 
 - [x] **Add example suggestions** [Spec 00]
   - Shows 4 example automations as clickable buttons (populated in input when clicked)
@@ -559,7 +584,7 @@ These add polish but are not essential for launch.
   - File: `/apps/web/src/components/MainPage.tsx`
   - Added styled keyboard shortcut indicator using `kbd` styling
 
-### 22. Real-time Updates
+### 23. Real-time Updates
 
 - [ ] **Verify workflow list updates in real-time** [Spec 00]
   - List should update via db sync as states change

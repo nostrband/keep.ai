@@ -610,7 +610,12 @@ export class TaskWorker {
       scriptRunId: undefined, // No script runs for tasks anymore
       type: taskType,
       taskThreadId: task.thread_id,
+      cost: 0, // Accumulated cost from tool calls (in dollars)
       createEvent: async (type: string, content: any, tx?: DBInterface) => {
+        // Accumulate cost from events that have usage.cost (e.g., text_generate, images_generate)
+        if (content?.usage?.cost != null && typeof content.usage.cost === 'number') {
+          sandbox.context!.cost += content.usage.cost;
+        }
         // set task fields
         content.task_id = task.id;
         content.task_run_id = taskRunId;

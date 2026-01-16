@@ -391,6 +391,13 @@ export default function WorkflowDetailPage() {
                             {run.end_timestamp && (
                               <span>Ended: {new Date(run.end_timestamp).toLocaleString()}</span>
                             )}
+                            {/* Show cost if any (stored in microdollars, display as dollars) */}
+                            {run.cost > 0 && (
+                              <span className="flex items-center gap-1">
+                                <span>💵</span>
+                                <span>${(run.cost / 1000000).toFixed(4)}</span>
+                              </span>
+                            )}
                           </div>
                         </div>
                       </div>

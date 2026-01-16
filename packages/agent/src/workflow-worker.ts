@@ -131,9 +131,12 @@ export class WorkflowWorker {
     // Initialize logs array for this script run
     const logs: string[] = [];
 
+    // Declare sandbox outside try block so we can access cost in both success and error paths
+    let sandbox: Sandbox | undefined;
+
     try {
       // JS sandbox with proper 'context' object
-      const sandbox = await this.createSandbox(
+      sandbox = await this.createSandbox(
         workflow,
         scriptRunId,
         logs,
@@ -155,6 +158,9 @@ export class WorkflowWorker {
         throw new Error(result.error);
       }
 
+      // Convert accumulated cost from dollars to microdollars for storage
+      const costMicrodollars = Math.ceil((sandbox.context?.cost || 0) * 1000000);
+
       // Workflow script finished ok
       await this.api.scriptStore.finishScriptRun(
         scriptRunId,
@@ -162,7 +168,8 @@ export class WorkflowWorker {
         JSON.stringify(result.result) || "",
         "",
         logs.join("\n"),
-        "" // no error_type for successful runs
+        "", // no error_type for successful runs
+        costMicrodollars
       );
 
       // Update workflow timestamp to mark last successful run
@@ -203,13 +210,17 @@ export class WorkflowWorker {
       }
 
       try {
+        // Convert accumulated cost from dollars to microdollars for storage (may be partially accumulated before error)
+        const costMicrodollars = Math.ceil((sandbox?.context?.cost || 0) * 1000000);
+
         await this.api.scriptStore.finishScriptRun(
           scriptRunId,
           new Date().toISOString(),
           "",
           errorMessage,
           logs.join("\n"),
-          errorType
+          errorType,
+          costMicrodollars
         );
       } catch (e) {
         this.debug("finishScriptRun error", e);
@@ -687,7 +698,7 @@ If you'd like me to try fixing it again, just ask and I'll give it another go wi
     // Sandbox
     const sandbox = await initSandbox();
 
-    // Init context
+    // Init context with cost tracking
     sandbox.context = {
       step: 0,
       taskId: workflow.task_id || workflow.id,
@@ -695,7 +706,12 @@ If you'd like me to try fixing it again, just ask and I'll give it another go wi
       scriptRunId,
       type: "workflow",
       taskThreadId: "", // Workflows don't have threads
+      cost: 0, // Accumulated cost from tool calls (in dollars)
       createEvent: async (type: string, content: any, tx?: any) => {
+        // Accumulate cost from events that have usage.cost (e.g., text_generate, images_generate)
+        if (content?.usage?.cost != null && typeof content.usage.cost === 'number') {
+          sandbox.context!.cost += content.usage.cost;
+        }
         // set workflow fields
         content.workflow_id = workflow.id;
         content.script_run_id = scriptRunId;
