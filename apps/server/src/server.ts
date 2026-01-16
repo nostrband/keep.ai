@@ -1660,7 +1660,6 @@ export async function createServer(config: ServerConfig = {}) {
       if (!fs.existsSync(filePathLocal)) {
         return reply.status(404).send({ error: "File not found on disk" });
       }
-      console.log("fileRecord", fileRecord);
 
       // Set appropriate headers
       reply.header("Content-Type", fileRecord.media_type);
