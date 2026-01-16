@@ -169,9 +169,10 @@ export class WorkflowScheduler {
       // Get all workflows
       const allWorkflows = await this.api.scriptStore.listWorkflows(1000, 0);
       
-      // Filter active workflows (not disabled, error, or in maintenance mode)
+      // Filter active workflows - per spec 06, only workflows with status="active" run
+      // Draft ("") and Paused ("disabled") workflows do not run on schedule
       const activeWorkflows = allWorkflows.filter(
-        (w) => w.status !== 'disabled' && w.status !== 'error' && !w.maintenance
+        (w) => w.status === 'active' && !w.maintenance
       );
 
       this.debug(`Found ${activeWorkflows.length} active workflows`);

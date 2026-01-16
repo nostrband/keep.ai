@@ -177,21 +177,31 @@ Visual explanation of automation logic for users.
 
 These features significantly improve user experience and product polish.
 
-### 7. Activation Flow
+### 7. Activation Flow (COMPLETED 2026-01-16)
 Clear security boundary between drafts and running automations.
 
-- [ ] **Add distinct "Activate" button for drafts** [Spec 06]
-  - File: `/apps/web/src/components/WorkflowDetailPage.tsx`
-  - Show only on draft workflows
-  - Separate from enable/disable toggle
+- [x] **Fix scheduler to only run "active" workflows** [Spec 06]
+  - File: `/packages/agent/src/workflow-scheduler.ts`
+  - Changed filter to only execute workflows with `status === 'active'`
+  - Draft ("") and Paused ("disabled") workflows no longer run automatically
 
-- [ ] **Pre-activation validation** [Spec 06]
-  - Check that script exists before allowing activation
-  - Show error if no script saved
-
-- [ ] **Add "Run now" button for unscheduled workflows** [Spec 06]
-  - One-time trigger when no cron schedule set
+- [x] **Add distinct "Activate" button for drafts** [Spec 06]
   - File: `/apps/web/src/components/WorkflowDetailPage.tsx`
+  - Shows green "Activate" button only for draft workflows with a script
+  - Clicking sets `status = "active"` to enable scheduling
+
+- [x] **Pre-activation validation** [Spec 06]
+  - Button only appears if `latestScript` exists
+  - Shows "Script required to activate" hint when no script saved
+
+- [x] **Add proper button states** [Spec 06]
+  - Draft + script: "Activate" (green) + "Run now"
+  - Active: "Run now" + "Pause"
+  - Paused: "Resume"
+
+- [x] **"Run now" button for testing** [Spec 06]
+  - Available for draft and active workflows with scripts
+  - Sets `next_run_timestamp` to now for immediate execution
 
 ### 8. OS-Level Notifications
 Use native OS notifications, not just app-internal or push.

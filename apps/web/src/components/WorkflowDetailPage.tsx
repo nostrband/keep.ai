@@ -48,17 +48,43 @@ export default function WorkflowDetailPage() {
     }
   }, [workflow?.next_run_timestamp, workflow?.status]);
 
-  const handleDisable = async () => {
-    if (!workflow) return;
-    
-    const newStatus = workflow.status === "disabled" ? "" : "disabled";
-    
+  const handleActivate = async () => {
+    if (!workflow || !latestScript) return;
+
     updateWorkflowMutation.mutate({
       workflowId: workflow.id,
-      status: newStatus,
+      status: "active",
     }, {
       onSuccess: () => {
-        setSuccessMessage(newStatus === "disabled" ? "Workflow paused" : "Workflow resumed");
+        setSuccessMessage("Automation activated!");
+        setTimeout(() => setSuccessMessage(""), 3000);
+      },
+    });
+  };
+
+  const handlePause = async () => {
+    if (!workflow) return;
+
+    updateWorkflowMutation.mutate({
+      workflowId: workflow.id,
+      status: "disabled",
+    }, {
+      onSuccess: () => {
+        setSuccessMessage("Automation paused");
+        setTimeout(() => setSuccessMessage(""), 3000);
+      },
+    });
+  };
+
+  const handleResume = async () => {
+    if (!workflow) return;
+
+    updateWorkflowMutation.mutate({
+      workflowId: workflow.id,
+      status: "active",
+    }, {
+      onSuccess: () => {
+        setSuccessMessage("Automation resumed");
         setTimeout(() => setSuccessMessage(""), 3000);
       },
     });
@@ -121,23 +147,53 @@ export default function WorkflowDetailPage() {
                 </div>
                 <div className="flex flex-col items-end gap-2">
                   <div className="flex gap-2">
-                    <Button
-                      onClick={handleRunNow}
-                      size="sm"
-                      variant="outline"
-                      className="cursor-pointer"
-                    >
-                      Run now
-                    </Button>
-                    <Button
-                      onClick={handleDisable}
-                      disabled={updateWorkflowMutation.isPending}
-                      size="sm"
-                      variant="outline"
-                      className="cursor-pointer"
-                    >
-                      {workflow.status === "disabled" ? "Resume" : "Pause"}
-                    </Button>
+                    {/* Show Activate button for Draft workflows with a script */}
+                    {workflow.status === "" && latestScript && (
+                      <Button
+                        onClick={handleActivate}
+                        disabled={updateWorkflowMutation.isPending}
+                        size="sm"
+                        className="cursor-pointer bg-green-600 hover:bg-green-700 text-white"
+                      >
+                        Activate
+                      </Button>
+                    )}
+                    {/* Show Run now button for Draft workflows without cron, or for testing */}
+                    {(workflow.status === "" || workflow.status === "active") && latestScript && (
+                      <Button
+                        onClick={handleRunNow}
+                        disabled={updateWorkflowMutation.isPending}
+                        size="sm"
+                        variant="outline"
+                        className="cursor-pointer"
+                      >
+                        Run now
+                      </Button>
+                    )}
+                    {/* Show Pause button for Active workflows */}
+                    {workflow.status === "active" && (
+                      <Button
+                        onClick={handlePause}
+                        disabled={updateWorkflowMutation.isPending}
+                        size="sm"
+                        variant="outline"
+                        className="cursor-pointer"
+                      >
+                        Pause
+                      </Button>
+                    )}
+                    {/* Show Resume button for Paused workflows */}
+                    {workflow.status === "disabled" && (
+                      <Button
+                        onClick={handleResume}
+                        disabled={updateWorkflowMutation.isPending}
+                        size="sm"
+                        variant="outline"
+                        className="cursor-pointer"
+                      >
+                        Resume
+                      </Button>
+                    )}
                     {task?.chat_id && (
                       <Button
                         onClick={handleChat}
@@ -149,6 +205,12 @@ export default function WorkflowDetailPage() {
                       </Button>
                     )}
                   </div>
+                  {/* Show hint if no script exists yet */}
+                  {workflow.status === "" && !latestScript && (
+                    <div className="text-sm text-gray-500">
+                      Script required to activate
+                    </div>
+                  )}
                   {successMessage && (
                     <div className="text-sm text-green-600 bg-green-50 px-2 py-1 rounded border border-green-200">
                       {successMessage}
