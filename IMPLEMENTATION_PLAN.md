@@ -4,7 +4,7 @@ This document outlines the remaining work needed to ship a simple, lovable, and 
 
 The items below are prioritized by impact on user experience and product completeness. Each item references the relevant spec(s) and includes specific file locations and implementation notes.
 
-**Last Updated:** 2026-01-16 (console.log cleanup - 35 debug statements removed, 5 error handling statements kept; commented code removal - ~155 lines removed)
+**Last Updated:** 2026-01-16 (mutations now trigger sync immediately - removed timezone FIXME that didn't exist; console.log cleanup - 35 debug statements removed, 5 error handling statements kept; commented code removal - ~155 lines removed)
 
 ---
 
@@ -338,18 +338,14 @@ Improve completeness and handle edge cases.
   - Suggest testing when user tries to activate untested draft
   - Needs spec
 
-### 14. Code Quality - FIXMEs (10 total)
+### 14. Code Quality - FIXMEs (9 total)
 
-- [ ] **Fix timezone assumption bug**
-  - File: `/packages/db/src/task-store.ts` line 379
-  - FIXME: "This assumes the server's timezone is the user's local timezone"
-  - Should be configurable per user or use specific timezone
-
-- [ ] **Fix mutations not triggering sync**
+- [x] **Fix mutations not triggering sync** (COMPLETED 2026-01-16)
   - File: `/apps/server/src/server.ts` line 759
-  - FIXME: "call it on every mutation endpoint"
-  - Currently has 1s delay polling instead of immediate trigger
-  - **Impact:** Up to 1 second delay for task/workflow processing
+  - Added `triggerLocalSync()` helper that calls `peer.checkLocalChanges()` non-blocking
+  - Now called after `/api/set_config` inbox write and `/api/file/upload`
+  - Reduced fallback polling interval from 1s to 5s
+  - **Impact:** Changes now propagate immediately instead of up to 1s delay
 
 - [ ] **Fix transaction delivery reliability**
   - File: `/packages/sync/src/Peer.ts` line 788

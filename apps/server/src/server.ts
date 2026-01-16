@@ -755,11 +755,19 @@ export async function createServer(config: ServerConfig = {}) {
   taskScheduler.start();
   workflowScheduler.start();
 
-  // Check regularly for changes
-  // FIXME call it on every mutation endpoint
+  // Helper to trigger sync after local mutations
+  // This is non-blocking to avoid slowing down the request/response cycle
+  const triggerLocalSync = () => {
+    peer.checkLocalChanges().catch((error) => {
+      debugServer("Error checking local changes:", error);
+    });
+  };
+
+  // Check regularly for changes (fallback for any edge cases)
+  // Now with a longer interval since mutations trigger sync immediately
   const check = async () => {
     await peer.checkLocalChanges();
-    setTimeout(check, 1000);
+    setTimeout(check, 5000);
   };
   check();
 
@@ -925,6 +933,8 @@ export async function createServer(config: ServerConfig = {}) {
               },
             }),
           });
+          // Trigger sync immediately after inbox write
+          triggerLocalSync();
         }
       }
 
@@ -1612,6 +1622,8 @@ export async function createServer(config: ServerConfig = {}) {
       }
 
       const fileRecord = await processFileUpload(data, userPath, fileStore);
+      // Trigger sync immediately after file upload
+      triggerLocalSync();
       return reply.send(fileRecord);
     } catch (error) {
       debugServer("Error in /api/upload:", error);
