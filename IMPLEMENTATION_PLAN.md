@@ -4,7 +4,7 @@ This document outlines the remaining work needed to ship a simple, lovable, and 
 
 The items below are prioritized by impact on user experience and product completeness. Each item references the relevant spec(s) and includes specific file locations and implementation notes.
 
-**Last Updated:** 2026-01-16 (simplified ChatInterface ScrollToBottomDetector)
+**Last Updated:** 2026-01-16 (cleaned up ChatInterface and dbChatReads commented code)
 
 ---
 
