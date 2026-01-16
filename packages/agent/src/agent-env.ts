@@ -2,7 +2,7 @@ import { KeepDbApi, Task, TaskType } from "@app/db";
 import { StepInput, TaskState } from "./agent-types";
 import debug from "debug";
 import { getEnv } from "./env";
-import { AssistantUIMessage } from "packages/proto/dist";
+import { AssistantUIMessage, ChatEvent } from "@app/proto";
 import { generateId } from "ai";
 
 export type AutonomyMode = 'ai_decides' | 'coordinate';
@@ -87,95 +87,93 @@ ${systemPrompt}
   }
 
   async buildContext(input: StepInput): Promise<AssistantUIMessage[]> {
-    // FIXME add task info, workflow info, etc
-    return [];
-    // let tokens = 0;
-    // const history: ChatEvent[] = [];
+    let tokens = 0;
+    const history: ChatEvent[] = [];
 
-    // // Parse inbox
-    // const inbox: any[] = input.inbox
-    //   .map((i) => {
-    //     // FIXME this is really ugly!
-    //     try {
-    //       return JSON.parse(i);
-    //     } catch {
-    //       return undefined;
-    //     }
-    //   })
-    //   .filter(Boolean);
+    // Parse inbox to check for duplicates
+    const inbox: any[] = input.inbox
+      .map((i) => {
+        try {
+          return JSON.parse(i);
+        } catch {
+          return undefined;
+        }
+      })
+      .filter(Boolean);
 
-    // const MAX_TOKENS = this.type === "worker" ? 1000 : 5000;
-    // let before: string | undefined;
-    // let since: string | undefined;
-    // if (this.type === "worker" && inbox.length) {
-    //   // Gap before last inbox item
-    //   before = inbox.at(-1).timestamp;
+    const MAX_TOKENS = this.type === "worker" ? 1000 : 5000;
+    let before: string | undefined;
+    let since: string | undefined;
+    if (this.type === "worker" && inbox.length) {
+      // Gap before last inbox item
+      before = inbox.at(-1)?.timestamp;
 
-    //   // And after latest task run
-    //   const runs = await this.#api.taskStore.listTaskRuns(this.task.id);
-    //   // Ordered by timestamp desc
-    //   since = runs.filter((r) => !!r.end_timestamp)[0]?.start_timestamp;
-    //   this.debug(
-    //     "Build context for worker",
-    //     this.task.id,
-    //     "from",
-    //     since,
-    //     "till",
-    //     before
-    //   );
-    // }
+      // And after latest task run
+      const runs = await this.#api.taskStore.listTaskRuns(this.task.id);
+      // Ordered by timestamp desc
+      since = runs.filter((r) => !!r.end_timestamp)[0]?.start_timestamp;
+      this.debug(
+        "Build context for worker",
+        this.task.id,
+        "from",
+        since,
+        "till",
+        before
+      );
+    }
 
-    // while (tokens < MAX_TOKENS) {
-    //   const events = await this.#api.chatStore.getChatEvents({
-    //     chatId: "main",
-    //     limit: 100,
-    //     before,
-    //     since,
-    //   });
+    while (tokens < MAX_TOKENS) {
+      const events = await this.#api.chatStore.getChatEvents({
+        chatId: this.task.thread_id || "main",
+        limit: 100,
+        before,
+        since,
+      });
 
-    //   if (!events.length) break;
+      if (!events.length) break;
 
-    //   before = events.at(-1)!.timestamp;
+      before = events.at(-1)!.timestamp;
 
-    //   for (const e of events) {
-    //     // Skip messages that we're putting to inbox
-    //     if (e.type === "message") {
-    //       const isInInbox = inbox.find((i) => i.id === e.id);
-    //       if (isInInbox) continue;
-    //     }
+      for (const e of events) {
+        // Skip messages that we're putting to inbox
+        if (e.type === "message") {
+          const isInInbox = inbox.find((i) => i.id === e.id);
+          if (isInInbox) continue;
+        }
 
-    //     // rough token estimate
-    //     tokens += Math.ceil(JSON.stringify(e).length / 2);
-    //     history.push(e);
+        // rough token estimate
+        tokens += Math.ceil(JSON.stringify(e).length / 2);
+        history.push(e);
 
-    //     if (tokens >= MAX_TOKENS) break;
-    //   }
+        if (tokens >= MAX_TOKENS) break;
+      }
 
-    //   if (tokens >= MAX_TOKENS) break;
-    // }
+      if (tokens >= MAX_TOKENS) break;
+    }
 
-    // // Re-sort in ASC order
-    // history.sort(
-    //   (a, b) =>
-    //     new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-    // );
+    // Re-sort in ASC order
+    history.sort(
+      (a, b) =>
+        new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    );
 
     const context: AssistantUIMessage[] = [];
-    // for (const e of history) {
-    //   if (e.type === "message") {
-    //     context.push(this.prepareUserMessage(e.content as AssistantUIMessage));
-    //   } else {
-    //     context.push({
-    //       id: generateId(),
-    //       role: "assistant",
-    //       // FIXME cut timestamp from json, as we're writing it to metadata
-    //       parts: [{ type: "text", text: "Action Event: " + JSON.stringify(e) }],
-    //       metadata: {
-    //         createdAt: e.timestamp,
-    //       },
-    //     });
-    //   }
-    // }
+    for (const e of history) {
+      if (e.type === "message") {
+        context.push(this.prepareUserMessage(e.content as AssistantUIMessage));
+      } else {
+        // Include action events as context (but strip timestamp from content since it's in metadata)
+        const { timestamp, ...eventContent } = e;
+        context.push({
+          id: generateId(),
+          role: "assistant",
+          parts: [{ type: "text", text: "Action Event: " + JSON.stringify(eventContent) }],
+          metadata: {
+            createdAt: e.timestamp,
+          },
+        });
+      }
+    }
 
     let currentState = "";
 

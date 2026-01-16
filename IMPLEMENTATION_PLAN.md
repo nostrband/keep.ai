@@ -4,7 +4,7 @@ This document outlines the remaining work needed to ship a simple, lovable, and 
 
 The items below are prioritized by impact on user experience and product completeness. Each item references the relevant spec(s) and includes specific file locations and implementation notes.
 
-**Last Updated:** 2026-01-16 (question simplification: quick-reply buttons implemented)
+**Last Updated:** 2026-01-16 (context building enabled for agents)
 
 ---
 
@@ -338,7 +338,7 @@ Improve completeness and handle edge cases.
   - Suggest testing when user tries to activate untested draft
   - Needs spec
 
-### 14. Code Quality - FIXMEs (12 total)
+### 14. Code Quality - FIXMEs (11 total)
 
 - [ ] **Fix timezone assumption bug**
   - File: `/packages/db/src/task-store.ts` line 379
@@ -365,11 +365,11 @@ Improve completeness and handle edge cases.
   - FIXME: "add title?"
   - Currently uses placeholder "Placeholder" for thread titles
 
-- [ ] **Enable context building**
-  - File: `/packages/agent/src/agent-env.ts` lines 85-203 (large commented block)
-  - FIXME: "add task info, workflow info, etc"
-  - ~117 lines of disabled context-building code (chat events, task info, active task list)
-  - `buildContext()` currently returns empty array
+- [x] **Enable context building** (COMPLETED 2026-01-16)
+  - File: `/packages/agent/src/agent-env.ts`
+  - Enabled chat event history context for agents
+  - Agents now receive up to 1000 tokens (workers) or 5000 tokens (planners) of chat history
+  - Context includes past messages and action events for better situational awareness
 
 - [ ] **Fix file/image parts handling**
   - File: `/packages/agent/src/agent-env.ts` line 64
