@@ -4,7 +4,7 @@ This document outlines the remaining work needed to ship a simple, lovable, and 
 
 The items below are prioritized by impact on user experience and product completeness. Each item references the relevant spec(s) and includes specific file locations and implementation notes.
 
-**Last Updated:** 2026-01-16 (cleaned up ChatInterface and dbChatReads commented code)
+**Last Updated:** 2026-01-16 (implemented per-device notification tracking)
 
 ---
 
@@ -461,7 +461,7 @@ Improve completeness and handle edge cases.
   - Ensure database migrations work correctly
   - Test upgrade paths from each version
 
-### 17. Remaining FIXMEs (4 remaining, 3 completed)
+### 17. Remaining FIXMEs (3 remaining, 4 completed)
 
 These FIXMEs were identified during code exploration and still need work:
 
@@ -492,9 +492,13 @@ These FIXMEs were identified during code exploration and still need work:
   - Simplified ScrollToBottomDetector: consolidated 5 useEffect hooks into 1, combined 4 refs into 1 ref object
   - Removed FIXME comment, improved code documentation
 
-- [ ] **Per-device notification tracking**
+- [x] **Per-device notification tracking** (COMPLETED 2026-01-16)
   - File: `/apps/web/src/lib/MessageNotifications.ts` line 35
-  - Track notifications per-device instead of globally
+  - Created migration v23 adding `chat_notifications` table (local, not synced)
+  - Added `markChatNotifiedOnDevice()` and `getChatNotifiedAt()` methods to ChatStore
+  - Added `getDeviceId()` and `getNewAssistantMessagesForDevice()` methods to KeepDbApi
+  - Updated MessageNotifications to use per-device tracking via cr-sqlite site_id
+  - Multi-device users now receive notifications on each device independently
 
 ---
 

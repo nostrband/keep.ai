@@ -8,6 +8,7 @@ export class MessageNotifications {
   private isRunning = false;
   private desktopNotificationsEnabled: boolean | null = null;
   private lastConfigCheck = 0;
+  private deviceId: string | null = null;
 
   async checkNewMessages(api: KeepDbApi): Promise<void> {
     // If already running, this is a noop
@@ -18,8 +19,14 @@ export class MessageNotifications {
     this.isRunning = true;
 
     try {
+      // Get device ID (cached after first call)
+      if (!this.deviceId) {
+        this.deviceId = await api.getDeviceId();
+      }
+
       while (true) {
-        const newMessages = await api.getNewAssistantMessages();
+        // Use per-device notification tracking to properly support multi-device users
+        const newMessages = await api.getNewAssistantMessagesForDevice(this.deviceId);
 
         // If no new messages, exit the loop
         if (newMessages.length === 0) {
@@ -31,10 +38,13 @@ export class MessageNotifications {
           const message = newMessages.shift()!;
           await this.showNotification(message);
 
-          // mark chat as read to make sure we don't repeat this notification
-          // FIXME use separate notified_at? per device?
-          await api.chatStore.readChat(message.metadata!.threadId!);
-          notifyTablesChanged(["chats"], true, api);
+          // Mark chat as notified on this specific device (not globally).
+          // This allows other devices to still receive their own notifications.
+          await api.chatStore.markChatNotifiedOnDevice(
+            message.metadata!.threadId!,
+            this.deviceId
+          );
+          notifyTablesChanged(["chat_notifications"], true, api);
 
           // Always sleep after a shown notif to make sure next one
           // isn't shown immediately

@@ -111,6 +111,24 @@ export class KeepDbApi {
     });
   }
 
+  /**
+   * Get the current device's ID (cr-sqlite site_id as hex string).
+   * This uniquely identifies the device/database instance and persists across restarts.
+   */
+  async getDeviceId(): Promise<string> {
+    const result = await this.db.db.execO<{ site_id: Uint8Array }>(
+      "SELECT crsql_site_id() as site_id"
+    );
+    if (!result || result.length === 0) {
+      throw new Error("Failed to get cr-sqlite site_id");
+    }
+    return bytesToHex(result[0].site_id);
+  }
+
+  /**
+   * @deprecated Use getNewAssistantMessagesForDevice instead for multi-device support.
+   * This method uses global read_at which doesn't work properly across devices.
+   */
   async getNewAssistantMessages(): Promise<AssistantUIMessage[]> {
     const sql = `
       SELECT m.*
@@ -121,6 +139,45 @@ export class KeepDbApi {
     `;
 
     const result = await this.db.db.execO<Record<string, unknown>>(sql);
+    if (!result) return [];
+
+    return result
+      .filter((row) => !!row.content)
+      .map((row) => {
+        // Parse the full UIMessage from content field
+        try {
+          return JSON.parse(row.content as string) as AssistantUIMessage;
+        } catch (e) {
+          console.debug("Bad message in db", row, e);
+          return undefined;
+        }
+      })
+      .filter((m) => !!m)
+      .filter((m) => !!m.role);
+  }
+
+  /**
+   * Get new assistant messages that haven't been notified on this specific device.
+   * Uses the chat_notifications table for per-device tracking instead of global read_at.
+   *
+   * @param deviceId - The device ID (cr-sqlite site_id in hex). If not provided, uses current device.
+   */
+  async getNewAssistantMessagesForDevice(deviceId?: string): Promise<AssistantUIMessage[]> {
+    // Get device ID if not provided
+    const device = deviceId || await this.getDeviceId();
+
+    // Query messages that are newer than the last notification timestamp for this device.
+    // LEFT JOIN to chat_notifications: if no record exists, notified_at will be NULL.
+    // This means unnotified chats will be included.
+    const sql = `
+      SELECT m.*
+      FROM messages AS m
+      LEFT JOIN chat_notifications AS cn ON cn.chat_id = m.thread_id AND cn.device_id = ?
+      WHERE (cn.notified_at IS NULL OR m.created_at > cn.notified_at) AND m.role = 'assistant'
+      ORDER BY m.created_at
+    `;
+
+    const result = await this.db.db.execO<Record<string, unknown>>(sql, [device]);
     if (!result) return [];
 
     return result
