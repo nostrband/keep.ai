@@ -104,7 +104,7 @@ export class PushNotificationManager {
       
       subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
-        applicationServerKey
+        applicationServerKey: applicationServerKey.buffer as ArrayBuffer
       });
     }
 

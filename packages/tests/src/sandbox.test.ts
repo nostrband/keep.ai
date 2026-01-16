@@ -160,6 +160,6 @@ describe("Sandbox", () => {
 
     const result = await evaluation;
     const error = await expectErr(result);
-    expect(error).toBe("Aborted");
+    expect(error.toLowerCase()).toContain("abort");
   });
 });

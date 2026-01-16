@@ -6,11 +6,11 @@ import { Badge, Button } from "../ui";
 
 const getStatusBadge = (workflow: any) => {
   if (workflow.status === "disabled") {
-    return <Badge variant="secondary">Disabled</Badge>;
+    return <Badge className="bg-yellow-100 text-yellow-800">Paused</Badge>;
   } else if (workflow.status === "active") {
-    return <Badge variant="default" className="bg-green-100 text-green-800">Active</Badge>;
+    return <Badge className="bg-green-100 text-green-800">Running</Badge>;
   } else {
-    return <Badge variant="outline">Pending</Badge>;
+    return <Badge variant="outline">Draft</Badge>;
   }
 };
 

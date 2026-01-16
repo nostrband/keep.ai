@@ -9,10 +9,11 @@ import {
 import { DBInterface, TaskType } from "packages/db/dist";
 
 export interface EvalGlobal {
-  memory: any,
-  tools: any,
-  tasks: any,
-  docs: (tool: string) => string;
+  memory?: any,
+  tools?: any,
+  tasks?: any,
+  docs?: (tool: string) => string;
+  [key: string]: any;
 }
 
 export type EvalResult =
@@ -87,6 +88,10 @@ export class Sandbox {
     this.#abortedCallback = undefined;
   }
 
+  [Symbol.dispose](): void {
+    this.dispose();
+  }
+
   get context(): EvalContext | undefined {
     return this.#context;
   }
@@ -113,7 +118,14 @@ export class Sandbox {
 
     // Helper
     const setAbortedReason = () => {
-      this.#abortedReason = signal?.reason?.toString() || "Aborted";
+      const reason = signal?.reason;
+      if (reason instanceof Error) {
+        this.#abortedReason = reason.message || reason.name || "Aborted";
+      } else if (reason !== undefined) {
+        this.#abortedReason = String(reason);
+      } else {
+        this.#abortedReason = "Aborted";
+      }
     };
 
     // Immediate signal check

@@ -13,11 +13,11 @@ import { Badge, Button } from "../ui";
 
 const getStatusBadge = (workflow: any) => {
   if (workflow.status === "disabled") {
-    return <Badge variant="secondary">Disabled</Badge>;
+    return <Badge className="bg-yellow-100 text-yellow-800">Paused</Badge>;
   } else if (workflow.status === "active") {
-    return <Badge variant="default" className="bg-green-100 text-green-800">Active</Badge>;
+    return <Badge className="bg-green-100 text-green-800">Running</Badge>;
   } else {
-    return <Badge variant="outline">Pending</Badge>;
+    return <Badge variant="outline">Draft</Badge>;
   }
 };
 
@@ -57,7 +57,7 @@ export default function WorkflowDetailPage() {
       status: newStatus,
     }, {
       onSuccess: () => {
-        setSuccessMessage(newStatus === "disabled" ? "Workflow disabled" : "Workflow enabled");
+        setSuccessMessage(newStatus === "disabled" ? "Workflow paused" : "Workflow resumed");
         setTimeout(() => setSuccessMessage(""), 3000);
       },
     });
@@ -135,7 +135,7 @@ export default function WorkflowDetailPage() {
                       variant="outline"
                       className="cursor-pointer"
                     >
-                      {workflow.status === "disabled" ? "Enable" : "Disable"}
+                      {workflow.status === "disabled" ? "Resume" : "Pause"}
                     </Button>
                     {task?.chat_id && (
                       <Button

@@ -233,10 +233,12 @@ export default function TaskDetailPage() {
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-2">
                         <span className="font-medium text-gray-900">{workflow.title || `Workflow ${workflow.id.slice(0, 8)}`}</span>
-                        {workflow.status && (
-                          <Badge variant={workflow.status === 'active' ? 'default' : 'secondary'}>
-                            {workflow.status}
-                          </Badge>
+                        {workflow.status === 'active' ? (
+                          <Badge className="bg-green-100 text-green-800">Running</Badge>
+                        ) : workflow.status === 'disabled' ? (
+                          <Badge className="bg-yellow-100 text-yellow-800">Paused</Badge>
+                        ) : (
+                          <Badge variant="outline">Draft</Badge>
                         )}
                       </div>
                       <div className="flex items-center gap-4 text-xs text-gray-500">
