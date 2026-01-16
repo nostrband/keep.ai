@@ -57,32 +57,49 @@ class Sqlite3DBWrapper implements DBInterface {
         }
 
         const results: any[] = [];
-        let completed = 0;
-        const total = args.length;
+        let currentIndex = 0;
+        let finalized = false;
 
-        for (let i = 0; i < args.length; i++) {
-          const argSet = args[i];
+        // Safe finalize that only runs once
+        const safeFinalize = (callback: (err?: Error | null) => void) => {
+          if (finalized) {
+            callback();
+            return;
+          }
+          finalized = true;
+          stmt.finalize(callback);
+        };
+
+        // Execute statements sequentially to avoid SQLite race conditions
+        const executeNext = () => {
+          if (currentIndex >= args.length) {
+            // All done, finalize and resolve
+            safeFinalize((finalizeErr) => {
+              if (finalizeErr) {
+                reject(finalizeErr);
+              } else {
+                resolve(results);
+              }
+            });
+            return;
+          }
+
+          const argSet = args[currentIndex];
+          const index = currentIndex;
+          currentIndex++;
+
           stmt.run(argSet || [], function(runErr) {
             if (runErr) {
-              stmt.finalize();
-              reject(runErr);
+              safeFinalize(() => reject(runErr));
               return;
             }
 
-            results[i] = { lastID: this.lastID, changes: this.changes };
-            completed++;
-
-            if (completed === total) {
-              stmt.finalize((finalizeErr) => {
-                if (finalizeErr) {
-                  reject(finalizeErr);
-                } else {
-                  resolve(results);
-                }
-              });
-            }
+            results[index] = { lastID: this.lastID, changes: this.changes };
+            executeNext(); // Execute next statement after current completes
           });
-        }
+        };
+
+        executeNext();
       });
     });
   }
