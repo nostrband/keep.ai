@@ -56,29 +56,25 @@ Current UI uses wrong terminology and colors for workflow status badges.
 
 - [x] **Fixed sandbox abort signal error message handling**
 
-- [ ] **Add visual attention indicator** - Workflows needing attention should pulse subtly or have colored left border [Spec 00]
+- [x] **Add visual attention indicator** - Implemented red left border for attention items in MainPage.tsx
   - Add conditional left border or pulse animation to list items
   - Example: `border-l-4 border-red-500` for attention items
 
 ### 3. Autonomy Toggle System
 Core product differentiator - user controls how much the AI decides vs coordinates.
 
-- [ ] **Add autonomy preference storage** - Store user's choice ("ai_decides" vs "coordinate") [Spec 00, 02]
-  - Option A: New `user_preferences` table in database
-  - Option B: Local storage in web app
-  - File: `/packages/db/src/` - Add new store if using database
+- [x] **Add autonomy preference storage** - Implemented useAutonomyPreference hook using localStorage
 
-- [ ] **Add autonomy toggle UI on main screen** - Subtle toggle below input [Spec 00]
-  - Text: "AI decides details" / "Coordinate with me"
-  - Include info tooltip explaining behavior differences
-  - Add to unified main page component
+- [x] **Add autonomy toggle UI on main screen** - Added toggle below input with tooltip explanation
 
-- [ ] **Respect autonomy setting in agent planning** [Spec 02, 03]
+- [ ] **Respect autonomy setting in agent planning** - Requires passing preference to backend/agent
   - File: `/packages/agent/src/agent-env.ts` - Modify system prompts
   - When "coordinate": agent asks more clarifying questions
   - When "ai_decides": agent uses safe defaults and minimizes questions
 
-- [ ] **Respect autonomy setting in modifications** - Same behavior for modifying existing automations [Spec 13]
+- [ ] **Respect autonomy setting in modifications** - Requires backend integration
+
+Note: UI completed on 2026-01-16. Backend integration pending - need to pass preference through message/task to agent-env.ts system prompts.
 
 ### 4. Error Classification System
 Required for maintenance mode and proper error handling.

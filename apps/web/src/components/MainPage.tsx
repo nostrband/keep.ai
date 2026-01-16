@@ -5,6 +5,7 @@ import { useTasks } from "../hooks/dbTaskReads";
 import { useAddMessage } from "../hooks/dbWrites";
 import { useFileUpload } from "../hooks/useFileUpload";
 import { useDbQuery } from "../hooks/dbQuery";
+import { useAutonomyPreference } from "../hooks/useAutonomyPreference";
 import SharedHeader from "./SharedHeader";
 import {
   Badge,
@@ -17,8 +18,12 @@ import {
   PromptInputTextarea,
   PromptInputToolbar,
   PromptInputTools,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
 } from "../ui";
-import { PlusIcon, AlertCircle } from "lucide-react";
+import { PlusIcon, AlertCircle, Info } from "lucide-react";
 import type { FileUIPart } from "ai";
 import type { File as DbFile } from "@app/db";
 
@@ -117,6 +122,7 @@ export default function MainPage() {
   const { api } = useDbQuery();
   const { data: workflows = [], isLoading: isLoadingWorkflows } = useWorkflows();
   const { data: tasks = [] } = useTasks(false); // Get non-finished tasks
+  const { mode: autonomyMode, toggleMode: toggleAutonomyMode, isLoaded: isAutonomyLoaded } = useAutonomyPreference();
   const [input, setInput] = useState("");
   const [promptHeight, setPromptHeight] = useState(0);
   const [latestRuns, setLatestRuns] = useState<Record<string, any>>({});
@@ -385,6 +391,36 @@ export default function MainPage() {
               />
             </PromptInputToolbar>
           </PromptInput>
+
+          {/* Autonomy Toggle */}
+          {isAutonomyLoaded && (
+            <div className="mt-2 flex justify-center">
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={toggleAutonomyMode}
+                      className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-700 transition-colors py-1 px-2 rounded hover:bg-gray-100"
+                    >
+                      <span>{autonomyMode === 'ai_decides' ? 'AI decides details' : 'Coordinate with me'}</span>
+                      <Info className="size-3.5" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="max-w-xs text-center">
+                    <p className="font-medium mb-1">
+                      {autonomyMode === 'ai_decides' ? 'AI Decides Details' : 'Coordinate With Me'}
+                    </p>
+                    <p className="text-xs text-gray-600">
+                      {autonomyMode === 'ai_decides'
+                        ? 'The AI will minimize questions and use safe defaults to complete tasks quickly.'
+                        : 'The AI will ask clarifying questions before proceeding with key decisions.'}
+                    </p>
+                    <p className="text-xs text-gray-500 mt-1">Click to switch</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
+          )}
         </div>
       </div>
     </div>
