@@ -12,29 +12,29 @@ The items below are prioritized by impact on user experience and product complet
 
 These features are core to the product promise. Without them, the product feels incomplete or broken.
 
-### 1. Main Screen Consolidation
+### 1. Main Screen Consolidation (COMPLETED 2026-01-16)
 The spec shows a unified main screen with input box and workflow list together, but they are currently on separate routes.
 
-- [ ] **Unify input box and workflow list on single page** - Merge `/` and `/workflows` routes into a single unified main screen [Spec 00]
+- [x] **Unify input box and workflow list on single page** - Created MainPage.tsx combining both
   - File: `/apps/web/src/components/ChatPage.tsx` (lines 106-178) - Contains the PromptInput component
   - File: `/apps/web/src/components/WorkflowsPage.tsx` (lines 48-74) - Contains workflow list
   - File: `/apps/web/src/App.tsx` (lines 217-238) - Route configuration
   - Create new unified `MainPage.tsx` that combines both
 
-- [ ] **Add attention banner** - Show "X need attention" banner when workflows have failed runs or are waiting for input [Spec 00]
+- [x] **Add attention banner** - Shows "X need attention" banner with click to filter
   - Add to unified main page
   - Click should filter to attention items only
 
-- [ ] **Compute attention state** - Calculate which workflows need attention [Spec 00]
+- [x] **Compute attention state** - Calculates attention from failed runs and waiting tasks
   - Attention = failed recent run OR waiting for user input (task.state="wait" or "asks")
   - May require new computed field or join in workflow queries
 
-- [ ] **Add secondary line to workflow list items** - Show contextual run status [Spec 00]
+- [x] **Add secondary line to workflow list items** - Shows run status with time formatting
   - Currently shows: cron/events/created (lines 63-68 in WorkflowsPage.tsx)
   - Should show: "Last run: 2h ago ✓", "Waiting for your input", "⚠ Failed 3h ago - needs attention", "Not scheduled", "Next run: {time}"
   - Requires joining with latest `script_run` and checking `task.state`
 
-- [ ] **Sort workflow list by attention first** - Attention items at top, then by last activity [Spec 00]
+- [x] **Sort workflow list by attention first** - Attention items appear at top
 
 ### 2. Status Badge Alignment (COMPLETED 2026-01-16)
 Current UI uses wrong terminology and colors for workflow status badges.

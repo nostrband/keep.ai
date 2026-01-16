@@ -6,6 +6,7 @@ import {
   Navigate,
 } from "react-router-dom";
 import { useState } from "react";
+import MainPage from "./components/MainPage";
 import ChatPage from "./components/ChatPage";
 import NewPage from "./components/NewPage";
 import ChatDetailPage from "./components/ChatDetailPage";
@@ -215,7 +216,8 @@ function App() {
   return (
     <Router>
       <Routes>
-        <Route path="/" element={<ChatPage />} />
+        <Route path="/" element={<MainPage />} />
+        <Route path="/chat" element={<ChatPage />} />
         <Route path="/new" element={<NewPage />} />
         <Route path="/chats/:id" element={<ChatDetailPage />} />
         <Route path="/threads" element={<ThreadsPage />} />
