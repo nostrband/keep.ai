@@ -86,6 +86,24 @@ export class WorkflowScheduler {
         this.workflowRetryState.delete(signal.workflowId);
         this.debug(`Workflow ${signal.workflowId} completed successfully, retry state cleared`);
         break;
+
+      case 'needs_attention':
+        // User action required (auth/permission errors)
+        // Clear retry state since retries won't help
+        this.workflowRetryState.delete(signal.workflowId);
+        this.debug(
+          `Workflow ${signal.workflowId} needs user attention (${signal.errorType}): ${signal.error}`
+        );
+        break;
+
+      case 'maintenance':
+        // Workflow entered maintenance mode for agent auto-fix
+        // Clear retry state - the workflow will be skipped until maintenance is cleared
+        this.workflowRetryState.delete(signal.workflowId);
+        this.debug(
+          `Workflow ${signal.workflowId} entered maintenance mode for auto-fix (${signal.errorType}): ${signal.error}`
+        );
+        break;
     }
   }
 
@@ -151,9 +169,9 @@ export class WorkflowScheduler {
       // Get all workflows
       const allWorkflows = await this.api.scriptStore.listWorkflows(1000, 0);
       
-      // Filter active workflows (not disabled or error)
+      // Filter active workflows (not disabled, error, or in maintenance mode)
       const activeWorkflows = allWorkflows.filter(
-        (w) => w.status !== 'disabled' && w.status !== 'error'
+        (w) => w.status !== 'disabled' && w.status !== 'error' && !w.maintenance
       );
 
       this.debug(`Found ${activeWorkflows.length} active workflows`);

@@ -24,13 +24,16 @@ export function makeSaveTool(opts: {
         opts.taskId
       );
       const version = script ? script.version + 1 : 1;
-      
+
       // Get workflow by task_id to link the script
       const workflow = await opts.scriptStore.getWorkflowByTaskId(opts.taskId);
       if (!workflow) {
         throw new Error(`Workflow not found for task ${opts.taskId}`);
       }
-      
+
+      // Check if workflow was in maintenance mode (agent auto-fix)
+      const wasInMaintenance = workflow.maintenance;
+
       const newScript: Script = {
         id: generateId(),
         code: info.code,
@@ -49,6 +52,26 @@ export function makeSaveTool(opts: {
         script_id: newScript.id,
         version
       });
+
+      // If workflow was in maintenance mode, clear it and trigger immediate re-run
+      if (wasInMaintenance) {
+        // Clear maintenance flag and set next_run_timestamp to now for immediate re-run
+        await opts.scriptStore.updateWorkflow({
+          ...workflow,
+          maintenance: false,
+          next_run_timestamp: new Date().toISOString(),
+        });
+
+        // Create a chat event to show the fix was applied
+        await opts.chatStore.saveChatEvent(generateId(), "main", "maintenance_fixed", {
+          task_id: opts.taskId,
+          task_run_id: opts.taskRunId,
+          script_id: newScript.id,
+          workflow_id: workflow.id,
+          fix_comment: info.comments || "Script updated",
+          version,
+        });
+      }
 
       return newScript;
     },

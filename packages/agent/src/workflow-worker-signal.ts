@@ -6,12 +6,13 @@ import { ErrorType } from "./errors";
  *
  * Signal types:
  * - 'done': Workflow completed successfully or failed without retry
- * - 'retry': Workflow should be retried (network errors, logic errors pending auto-fix)
+ * - 'retry': Workflow should be retried (network errors, transient failures)
  * - 'payment_required': Global pause needed (LLM API quota/payment issue)
  * - 'needs_attention': Workflow requires user action (auth/permission errors)
+ * - 'maintenance': Workflow entered maintenance mode for agent auto-fix (logic errors)
  */
 export interface WorkflowExecutionSignal {
-  type: 'retry' | 'payment_required' | 'done' | 'needs_attention';
+  type: 'retry' | 'payment_required' | 'done' | 'needs_attention' | 'maintenance';
   workflowId: string;
   timestamp: number;
   error?: string;              // Error message for logging

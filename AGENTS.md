@@ -21,5 +21,8 @@ Succinct learnings about how to RUN the project:
 **Development**:
 - `cd apps/web && npm run build:frontend && cd ../apps/server && npm run build:all && npm start` - single nodejs process that hosts background workers and serves the web app
 
+**DB migrations**
+- use `crsql_as_crr` when creating tables that should be synched, use `crsql_begin_alter`/`crsql_commit_alter` when altering synched tables, see other migrations as examples.
+
 # Codebase Patterns
 <add when discovered>

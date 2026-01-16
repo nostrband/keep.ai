@@ -263,18 +263,25 @@ export class WorkflowWorker {
             break;
 
           case "logic":
-            // Logic errors should go to agent for auto-fix (maintenance mode)
-            // For now, treat as retry - maintenance mode implementation is separate
-            this.debug("LOGIC: Script bug detected, scheduling retry for workflow", workflow.id);
+            // Logic errors go to agent for auto-fix via maintenance mode (spec 09b)
+            this.debug("LOGIC: Script bug detected, entering maintenance mode for workflow", workflow.id);
 
-            // TODO: Implement maintenance mode (spec 09b)
-            // - Set workflow.maintenance = true
-            // - Route error to planner task inbox
-            // - Agent analyzes and generates fix
-            // - On fix: clear maintenance flag, re-run immediately
+            // Enter maintenance mode and route to planner for auto-fix
+            try {
+              await this.enterMaintenanceMode(
+                workflow,
+                script,
+                scriptRunId,
+                classifiedError,
+                logs
+              );
+            } catch (e) {
+              this.debug("Failed to enter maintenance mode:", e);
+            }
 
+            // Signal maintenance mode to scheduler
             this.emitSignal({
-              type: "retry",
+              type: "maintenance",
               workflowId: workflow.id,
               timestamp: Date.now(),
               error: errorMessage,
@@ -364,6 +371,133 @@ export class WorkflowWorker {
       );
     } catch (error) {
       this.debug("Error sending log notification:", error);
+    }
+  }
+
+  /**
+   * Enter maintenance mode for a workflow when a logic error occurs.
+   * This sets the maintenance flag and sends the error context to the
+   * planner task inbox for agent auto-fix.
+   */
+  private async enterMaintenanceMode(
+    workflow: Workflow,
+    script: Script,
+    scriptRunId: string,
+    error: ClassifiedError,
+    logs: string[]
+  ): Promise<void> {
+    // 1. Set maintenance flag on workflow
+    await this.api.scriptStore.setWorkflowMaintenance(workflow.id, true);
+    this.debug("Maintenance mode enabled for workflow", workflow.id);
+
+    // 2. Check if workflow has an associated planner task
+    if (!workflow.task_id) {
+      this.debug("No task_id for workflow, cannot route to planner inbox");
+      return;
+    }
+
+    // 3. Get the planner task
+    let task;
+    try {
+      task = await this.api.taskStore.getTask(workflow.task_id);
+    } catch (e) {
+      this.debug("Failed to get planner task:", e);
+      return;
+    }
+
+    if (task.type !== "planner") {
+      this.debug("Task is not a planner type, skipping inbox routing");
+      return;
+    }
+
+    // 4. Build the maintenance message with error context for the agent
+    const recentLogs = logs.slice(-50).join("\n"); // Last 50 log lines
+    const maintenanceMessage = {
+      type: "maintenance_request",
+      workflow_id: workflow.id,
+      workflow_title: workflow.title,
+      script_run_id: scriptRunId,
+      script_id: script.id,
+      script_version: script.version,
+      error: {
+        type: error.type,
+        message: error.message,
+        source: error.source,
+        stack: error.stack,
+      },
+      context: {
+        script_code: script.code,
+        recent_logs: recentLogs,
+        change_comment: script.change_comment,
+      },
+      instructions: `A logic error occurred in your script. Please analyze the error and fix the script code.
+
+Error Type: ${error.type}
+Error Message: ${error.message}
+${error.source ? `Error Source: ${error.source}` : ""}
+
+Recent Logs:
+${recentLogs || "(no logs)"}
+
+Current Script Code:
+\`\`\`javascript
+${script.code}
+\`\`\`
+
+Please:
+1. Analyze the error and understand what went wrong
+2. Update the script code to fix the issue
+3. Use the 'save' tool to save the fixed script
+
+After saving the fix, the workflow will automatically exit maintenance mode and run again to verify the fix works.`,
+    };
+
+    // 5. Create inbox item to route to planner task
+    const inboxId = `maintenance.${workflow.id}.${scriptRunId}.${generateId()}`;
+    await this.api.inboxStore.saveInbox({
+      id: inboxId,
+      source: "script",
+      source_id: scriptRunId,
+      target: "planner",
+      target_id: task.id,
+      timestamp: new Date().toISOString(),
+      content: JSON.stringify({
+        role: "user",
+        parts: [{
+          type: "text",
+          text: maintenanceMessage.instructions,
+        }],
+        metadata: {
+          createdAt: new Date().toISOString(),
+          maintenanceRequest: true,
+          workflowId: workflow.id,
+          scriptRunId: scriptRunId,
+          errorType: error.type,
+        },
+      }),
+      handler_thread_id: "",
+      handler_timestamp: "",
+    });
+
+    this.debug("Maintenance request sent to planner inbox", inboxId);
+
+    // 6. Create a chat event to show in the workflow chat
+    if (task.chat_id) {
+      try {
+        await this.api.chatStore.saveChatEvent(
+          generateId(),
+          task.chat_id,
+          "maintenance_started",
+          {
+            workflow_id: workflow.id,
+            script_run_id: scriptRunId,
+            error_type: error.type,
+            error_message: error.message,
+          }
+        );
+      } catch (e) {
+        this.debug("Failed to save maintenance_started event:", e);
+      }
     }
   }
 

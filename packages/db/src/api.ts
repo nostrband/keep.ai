@@ -280,6 +280,7 @@ export class KeepDbApi {
         timestamp: now.toISOString(),
         title: task.title,
         next_run_timestamp: "",
+        maintenance: false,
       };
 
       // Create the matching workflow

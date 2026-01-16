@@ -103,41 +103,44 @@ Required for maintenance mode and proper error handling.
 
 - [x] **Route errors based on type** [Spec 09, 09b, 10]
   - File: `/packages/agent/src/workflow-worker.ts` - Updated error handling
-  - File: `/packages/agent/src/workflow-worker-signal.ts` - Added `needs_attention` signal type and `errorType` field
+  - File: `/packages/agent/src/workflow-worker-signal.ts` - Added `needs_attention` and `maintenance` signal types
   - Auth/permission errors -> set workflow status to "error", emit `needs_attention` signal (no retry)
   - Network errors -> emit `retry` signal with backoff
-  - Logic errors -> emit `retry` signal (TODO: maintenance mode implementation is separate)
+  - Logic errors -> enter maintenance mode, route to planner inbox for auto-fix
 
-### 5. Maintenance Mode for Logic Errors
+### 5. Maintenance Mode for Logic Errors (COMPLETED 2026-01-16)
 The "magical" auto-fix feature that makes the product special.
 
-- [ ] **Add `maintenance` flag to workflows table** [Spec 09b]
-  - File: `/packages/db/src/script-store.ts` - Update Workflow interface
-  - Create new migration v18 in `/packages/db/src/migrations/`
-  - Add boolean column `maintenance` default false
-  - Current schema (v17) has: id, title, task_id, timestamp, cron, events, status, next_run_timestamp
-  - **Missing:** maintenance flag, no retry tracking
+- [x] **Add `maintenance` flag to workflows table** [Spec 09b]
+  - File: `/packages/db/src/migrations/v18.ts` - Created migration adding maintenance column
+  - File: `/packages/db/src/script-store.ts` - Updated Workflow interface with `maintenance: boolean`
+  - File: `/packages/db/src/database.ts` - Registered v18 migration
+  - File: `/packages/db/src/api.ts` - Updated workflow creation to include `maintenance: false`
 
-- [ ] **Skip workflows in maintenance during scheduling** [Spec 07, 09b]
-  - File: `/packages/agent/src/workflow-scheduler.ts`
-  - Check `maintenance = true` and skip execution
+- [x] **Skip workflows in maintenance during scheduling** [Spec 07, 09b]
+  - File: `/packages/agent/src/workflow-scheduler.ts` - Added `!w.maintenance` check in active workflows filter
+  - Workflows in maintenance mode are skipped until maintenance is cleared
 
-- [ ] **Route logic errors to agent inbox** [Spec 09b]
-  - When logic error occurs, create inbox item for planner task
-  - Include error details + context (script code, run logs)
+- [x] **Route logic errors to agent inbox** [Spec 09b]
+  - File: `/packages/agent/src/workflow-worker.ts` - Added `enterMaintenanceMode()` method
+  - When logic error occurs, creates inbox item for planner task with error context
+  - Includes: error message, stack trace, recent logs, script code
+  - Creates `maintenance_started` chat event for visibility
 
-- [ ] **Implement agent auto-fix workflow** [Spec 09b]
-  - Agent analyzes error, generates fix
-  - Saves new script version with fix
-  - Clears maintenance flag
-  - Triggers immediate re-run to verify fix
+- [x] **Implement agent auto-fix workflow** [Spec 09b]
+  - File: `/packages/agent/src/ai-tools/save.ts` - Updated to detect and exit maintenance mode
+  - When agent saves a fix, workflow.maintenance is cleared
+  - Sets next_run_timestamp to trigger immediate re-run to verify fix
+  - Creates `maintenance_fixed` chat event
 
 - [ ] **Add fix attempt tracking and escalation** [Spec 09b]
   - Track consecutive failed fix attempts (use notes or new field)
   - After N failed attempts, escalate to user and pause workflow
+  - **Status:** TBD per spec - exact retry limits and escalation rules not yet defined
 
-- [ ] **Show "Fixed: [issue]" in chat** [Spec 09b]
-  - When agent successfully fixes an issue, add brief note to workflow chat history
+- [x] **Show "Fixed: [issue]" in chat** [Spec 09b]
+  - `maintenance_fixed` chat event created when save tool exits maintenance mode
+  - Includes fix_comment from the agent's commit message
 
 ### 6. Mermaid Diagram Display
 Visual explanation of automation logic for users.
