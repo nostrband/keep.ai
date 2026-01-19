@@ -97,10 +97,11 @@ This document prioritizes tasks for achieving a simple, lovable, and complete v1
 - **Resolution**: Added try-catch around Notification creation and show. Errors are logged via debugMain and handler returns false to indicate failure instead of throwing.
 
 ### 13. batch-fetch-workflow-runs.md
-- **Status**: NOT_STARTED
+- **Status**: COMPLETED (2026-01-19)
 - **Effort**: M
 - **Description**: MainPage and WorkflowNotifications fetch latest runs sequentially in for loops - creates N queries. No batch method exists in scriptStore.
 - **Files**: `packages/db/src/script-store.ts`, `apps/web/src/components/MainPage.tsx`, `apps/web/src/lib/WorkflowNotifications.ts`
+- **Resolution**: Added `getLatestRunsByWorkflowIds(workflowIds: string[])` method to ScriptStore that fetches latest run for each workflow in a single SQL query using a subquery with `MAX(start_timestamp)` and `GROUP BY workflow_id`. Updated MainPage.tsx to use batch method and added cleanup flag to prevent stale state updates if component unmounts during fetch. Updated WorkflowNotifications.ts to use batch method instead of sequential loop.
 
 ### 14. notification-icon.md
 - **Status**: COMPLETED (2026-01-19)
@@ -368,10 +369,10 @@ These are documented FIXMEs in the codebase that need attention:
 | Priority | Count | Status |
 |----------|-------|--------|
 | P0 (Critical) | 5 | 5 COMPLETED |
-| P1 (Important) | 13 | 9 COMPLETED, 4 NOT_STARTED |
+| P1 (Important) | 13 | 10 COMPLETED, 3 NOT_STARTED |
 | P2 (Nice-to-have) | 26 | 1 NEEDS_VERIFICATION, 25 NOT_STARTED |
 | P3 (Post-V1) | 3 | 3 NOT_STARTED |
-| **Total** | **47** | **14 COMPLETED, 1 NEEDS_VERIFICATION, 32 NOT_STARTED** |
+| **Total** | **47** | **15 COMPLETED, 1 NEEDS_VERIFICATION, 31 NOT_STARTED** |
 
 ### V1 Feature Ideas
 

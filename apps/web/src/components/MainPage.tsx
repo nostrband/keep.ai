@@ -190,26 +190,37 @@ export default function MainPage() {
     return parsed.options || [];
   }, [mainTask, mainTaskState]);
 
-  // Fetch latest run for each workflow
+  // Fetch latest run for each workflow using batch query
   useEffect(() => {
     if (!api || workflows.length === 0) return;
 
+    let cancelled = false;
+
     const fetchRuns = async () => {
-      const runs: Record<string, any> = {};
-      for (const workflow of workflows) {
-        try {
-          const workflowRuns = await api.scriptStore.getScriptRunsByWorkflowId(workflow.id);
-          if (workflowRuns.length > 0) {
-            runs[workflow.id] = workflowRuns[0]; // Latest run
-          }
-        } catch {
-          // Ignore errors
+      try {
+        const workflowIds = workflows.map(w => w.id);
+        const runsMap = await api.scriptStore.getLatestRunsByWorkflowIds(workflowIds);
+
+        // Check if component unmounted during fetch
+        if (cancelled) return;
+
+        // Convert Map to Record for state
+        const runs: Record<string, any> = {};
+        for (const [workflowId, run] of runsMap) {
+          runs[workflowId] = run;
         }
+        setLatestRuns(runs);
+      } catch {
+        // Ignore errors
       }
-      setLatestRuns(runs);
     };
 
     fetchRuns();
+
+    // Cleanup: prevent state update if component unmounts during fetch
+    return () => {
+      cancelled = true;
+    };
   }, [api, workflows]);
 
   // Create a map of task_id to task for quick lookup

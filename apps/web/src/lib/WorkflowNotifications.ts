@@ -60,38 +60,37 @@ export class WorkflowNotifications {
         shouldNotify: boolean;
       }> = [];
 
+      // Batch fetch latest runs for all workflows in a single query
+      const workflowIds = workflows.map(w => w.id);
+      const latestRunsMap = await api.scriptStore.getLatestRunsByWorkflowIds(workflowIds);
+
       // Check each workflow's latest run for errors
       for (const workflow of workflows) {
-        try {
-          const runs = await api.scriptStore.getScriptRunsByWorkflowId(workflow.id);
-          const latestRun = runs.length > 0 ? runs[0] : null;
+        const latestRun = latestRunsMap.get(workflow.id) || null;
 
-          // Check if workflow is in maintenance mode (agent is auto-fixing)
-          // Don't notify for workflows in maintenance - agent is handling it
-          if (workflow.maintenance) {
-            continue;
+        // Check if workflow is in maintenance mode (agent is auto-fixing)
+        // Don't notify for workflows in maintenance - agent is handling it
+        if (workflow.maintenance) {
+          continue;
+        }
+
+        // Check if latest run has an error
+        if (latestRun?.error) {
+          const errorType = latestRun.error_type || '';
+
+          // Determine if this should show a notification
+          const shouldNotify = NOTIFY_ERROR_TYPES.includes(errorType);
+          const isLogicError = errorType === 'logic' || SILENT_ERROR_TYPES.includes(errorType);
+
+          // Only count non-logic errors as needing attention
+          // Logic errors are handled by the agent in maintenance mode
+          if (!isLogicError) {
+            workflowsNeedingAttention.push({
+              workflow,
+              latestRun,
+              shouldNotify,
+            });
           }
-
-          // Check if latest run has an error
-          if (latestRun?.error) {
-            const errorType = latestRun.error_type || '';
-
-            // Determine if this should show a notification
-            const shouldNotify = NOTIFY_ERROR_TYPES.includes(errorType);
-            const isLogicError = errorType === 'logic' || SILENT_ERROR_TYPES.includes(errorType);
-
-            // Only count non-logic errors as needing attention
-            // Logic errors are handled by the agent in maintenance mode
-            if (!isLogicError) {
-              workflowsNeedingAttention.push({
-                workflow,
-                latestRun,
-                shouldNotify,
-              });
-            }
-          }
-        } catch (e) {
-          // Ignore individual workflow errors
         }
       }
 

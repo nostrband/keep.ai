@@ -432,6 +432,57 @@ export class ScriptStore {
     }));
   }
 
+  // Get latest script run for each of multiple workflow IDs in a single query
+  // Returns a Map from workflow_id to its latest ScriptRun (or undefined if no runs exist)
+  async getLatestRunsByWorkflowIds(workflowIds: string[]): Promise<Map<string, ScriptRun>> {
+    if (workflowIds.length === 0) {
+      return new Map();
+    }
+
+    // Build placeholders for the IN clause
+    const placeholders = workflowIds.map(() => '?').join(', ');
+
+    // Use a subquery to find the latest run for each workflow_id
+    // This performs a single database query instead of N queries
+    const results = await this.db.db.execO<Record<string, unknown>>(
+      `SELECT sr.id, sr.script_id, sr.start_timestamp, sr.end_timestamp, sr.error, sr.error_type, sr.result, sr.logs, sr.workflow_id, sr.type, sr.retry_of, sr.retry_count, sr.cost
+       FROM script_runs sr
+       INNER JOIN (
+         SELECT workflow_id, MAX(start_timestamp) as max_start
+         FROM script_runs
+         WHERE workflow_id IN (${placeholders})
+         GROUP BY workflow_id
+       ) latest ON sr.workflow_id = latest.workflow_id AND sr.start_timestamp = latest.max_start
+       WHERE sr.workflow_id IN (${placeholders})`,
+      [...workflowIds, ...workflowIds]
+    );
+
+    const runMap = new Map<string, ScriptRun>();
+
+    if (!results) return runMap;
+
+    for (const row of results) {
+      const run: ScriptRun = {
+        id: row.id as string,
+        script_id: row.script_id as string,
+        start_timestamp: row.start_timestamp as string,
+        end_timestamp: row.end_timestamp as string,
+        error: row.error as string,
+        error_type: (row.error_type as string) || '',
+        result: row.result as string,
+        logs: row.logs as string,
+        workflow_id: row.workflow_id as string,
+        type: row.type as string,
+        retry_of: (row.retry_of as string) || '',
+        retry_count: (row.retry_count as number) || 0,
+        cost: (row.cost as number) || 0,
+      };
+      runMap.set(run.workflow_id, run);
+    }
+
+    return runMap;
+  }
+
   // Get the latest script version for a workflow
   async getLatestScriptByWorkflowId(workflow_id: string): Promise<Script | null> {
     const results = await this.db.db.execO<Record<string, unknown>>(
