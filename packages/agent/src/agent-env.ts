@@ -3,7 +3,7 @@ import { StepInput, TaskState } from "./agent-types";
 import debug from "debug";
 import { getEnv } from "./env";
 import { AssistantUIMessage, ChatEvent, AutonomyMode } from "@app/proto";
-import { generateId } from "ai";
+import { generateId, isFileUIPart } from "ai";
 
 export class AgentEnv {
   #api: KeepDbApi;
@@ -72,10 +72,10 @@ ${systemPrompt}
       id: msg.id,
       role: msg.role,
       parts: msg.parts.map((p) => {
-        if (p.type === "file") {
+        if (isFileUIPart(p)) {
           // Extract relevant metadata for agent context
-          const filename = (p as any).filename || 'file';
-          const mediaType = (p as any).mediaType || 'unknown';
+          const filename = p.filename || 'file';
+          const mediaType = p.mediaType || 'unknown';
           return {
             type: "text" as const,
             text: `[Attached file: ${filename} (${mediaType})]`,

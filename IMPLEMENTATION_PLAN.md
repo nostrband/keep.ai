@@ -318,10 +318,11 @@ This document prioritizes tasks for achieving a simple, lovable, and complete v1
 - **Files**: `packages/tests/src/nostr-transport.test.ts`
 
 ### 44. use-file-ui-part-type-guard.md
-- **Status**: NOT_STARTED
+- **Status**: COMPLETED (2026-01-19)
 - **Effort**: S
 - **Description**: Uses `(p as any).filename` instead of proper `isFileUIPart()` type guard. Better type safety and IDE autocomplete.
 - **Files**: `packages/agent/src/agent-env.ts`
+- **Resolution**: Imported `isFileUIPart` from `ai` package and replaced `(p as any)` casts with proper type guard. Now uses `isFileUIPart(p)` for type narrowing which provides proper type safety and IDE autocomplete.
 
 ---
 
@@ -398,9 +399,9 @@ These are documented FIXMEs in the codebase that need attention:
 |----------|-------|--------|
 | P0 (Critical) | 5 | 5 COMPLETED |
 | P1 (Important) | 13 | 13 COMPLETED, 0 NOT_STARTED |
-| P2 (Nice-to-have) | 26 | 17 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 NEEDS_VERIFICATION, 7 NOT_STARTED |
+| P2 (Nice-to-have) | 26 | 18 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 NEEDS_VERIFICATION, 6 NOT_STARTED |
 | P3 (Post-V1) | 3 | 3 NOT_STARTED |
-| **Total** | **47** | **35 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 NEEDS_VERIFICATION, 10 NOT_STARTED** |
+| **Total** | **47** | **36 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 NEEDS_VERIFICATION, 9 NOT_STARTED** |
 
 ### V1 Feature Ideas
 
