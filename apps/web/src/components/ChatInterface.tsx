@@ -1,4 +1,5 @@
 import { useEffect, useRef, useMemo, useCallback } from "react";
+import { useLocation } from "react-router-dom";
 import { useChatRows } from "../hooks/useChatRows";
 import { useAddMessage, useReadChat } from "../hooks/dbWrites";
 import { MessageItem } from "../ui/components/ai-elements/message-item";
@@ -6,6 +7,9 @@ import { TaskEventGroup } from "./TaskEventGroup";
 import { WorkflowEventGroup } from "./WorkflowEventGroup";
 import type { UseMutationResult } from "@tanstack/react-query";
 import React from "react";
+
+// Helper to get sessionStorage key for scroll position
+const getScrollStorageKey = (chatId: string) => `chat-scroll-${chatId}`;
 
 interface ChatInterfaceProps {
   chatId?: string;
@@ -86,6 +90,7 @@ export default function ChatInterface({
   promptHeight,
 }: ChatInterfaceProps) {
   const chatId = propChatId || "main";
+  const location = useLocation();
   const containerRef = useRef<HTMLDivElement>(null);
 
   const { rows, isLoading, fetchNextPage, hasNextPage, isFetching, hasData } =
@@ -102,7 +107,41 @@ export default function ChatInterface({
   const currentScrollFromBottom = useRef<number | null>(null);
   const wasAtBottomRef = useRef(true); // Start assuming at bottom
   const isFirstLoadRef = useRef(true);
+  // Track if we should restore scroll position instead of scroll-to-bottom
+  const shouldRestoreScrollRef = useRef(false);
+  const restoredScrollRef = useRef(false);
   // const isLoadingMoreRef = useRef(false);
+
+  // Check for saved scroll position on mount - runs before first load effect
+  useEffect(() => {
+    const storageKey = getScrollStorageKey(chatId);
+    const savedPosition = sessionStorage.getItem(storageKey);
+
+    if (savedPosition) {
+      const position = parseInt(savedPosition, 10);
+      if (!isNaN(position)) {
+        shouldRestoreScrollRef.current = true;
+        // Don't clear yet - we clear after restoring
+      }
+    }
+  }, [chatId]);
+
+  // Save scroll position when navigating away
+  useEffect(() => {
+    const storageKey = getScrollStorageKey(chatId);
+
+    // Save current scroll position before navigating away
+    const handleBeforeUnload = () => {
+      const scrollTop = document.documentElement.scrollTop;
+      sessionStorage.setItem(storageKey, String(scrollTop));
+    };
+
+    // Also save when location changes (in-app navigation)
+    return () => {
+      const scrollTop = document.documentElement.scrollTop;
+      sessionStorage.setItem(storageKey, String(scrollTop));
+    };
+  }, [chatId, location.pathname]);
 
   // Track scroll position to know if user is at bottom and remember distance from bottom
   useEffect(() => {
@@ -153,14 +192,40 @@ export default function ChatInterface({
     });
   }, []);
 
-  // Smart scroll logic - handles first load and new messages
+  // Smart scroll logic - handles first load, scroll restoration, and new messages
   useEffect(() => {
     if (!hasData || isFetching) return;
 
-    // First load - scroll to bottom immediately without animation
+    // First load - check if we should restore scroll position or scroll to bottom
     if (isFirstLoadRef.current && rows.length > 0) {
       isFirstLoadRef.current = false;
       lastTimestampRef.current = lastMessageTimestamp;
+
+      // Check if we should restore scroll position from sessionStorage
+      if (shouldRestoreScrollRef.current && !restoredScrollRef.current) {
+        const storageKey = getScrollStorageKey(chatId);
+        const savedPosition = sessionStorage.getItem(storageKey);
+
+        if (savedPosition) {
+          const position = parseInt(savedPosition, 10);
+          if (!isNaN(position)) {
+            // Restore saved position
+            window.scrollTo({ top: position, behavior: "auto" });
+            // Clear saved position after restoring
+            sessionStorage.removeItem(storageKey);
+            // Mark as restored and update wasAtBottom based on restored position
+            restoredScrollRef.current = true;
+            shouldRestoreScrollRef.current = false;
+            // Check if restored position is at bottom
+            const el = document.documentElement;
+            const distanceFromBottom = el.scrollHeight - (position + el.clientHeight);
+            wasAtBottomRef.current = distanceFromBottom <= 30;
+            return;
+          }
+        }
+      }
+
+      // No saved position to restore - scroll to bottom as before
       scrollToBottom("auto");
       return;
     }
@@ -188,8 +253,8 @@ export default function ChatInterface({
     if (lastMessageTimestamp) {
       lastTimestampRef.current = lastMessageTimestamp;
     }
-    // scrollToBottom dependency
-  }, [hasData, lastMessageTimestamp, rows.length, isFetching]);
+    // scrollToBottom and chatId dependencies
+  }, [hasData, lastMessageTimestamp, rows.length, isFetching, chatId, scrollToBottom]);
 
   // Pin-to-bottom using ResizeObserver - keeps user at bottom when content expands
   // (images loading, markdown rendering, etc.) without relying on scroll events
@@ -220,13 +285,16 @@ export default function ChatInterface({
     return () => observer.disconnect();
   }, [scrollToBottom]);
 
-  // Reset first load flag when chatId changes
+  // Reset state when chatId changes
   useEffect(() => {
     isFirstLoadRef.current = true;
     lastTimestampRef.current = null;
     wasAtBottomRef.current = true;
     // isLoadingMoreRef.current = false;
     currentScrollFromBottom.current = 0;
+    // Reset scroll restoration flags for new chat
+    shouldRestoreScrollRef.current = false;
+    restoredScrollRef.current = false;
   }, [chatId]);
 
   if (isLoading && !hasData) {

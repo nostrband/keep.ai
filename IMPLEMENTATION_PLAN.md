@@ -132,10 +132,11 @@ This document prioritizes tasks for achieving a simple, lovable, and complete v1
 - **Resolution**: Added ResizeObserver to ChatInterface.tsx that observes the container element. When content expands (images loading, markdown rendering) and user was at bottom, automatically scrolls to maintain bottom position. The three existing scroll listeners are kept separate as they serve distinct purposes: `ScrollToBottomDetector` marks chat as read, scroll position tracking detects user intent, and infinite scroll loads older messages.
 
 ### 18. restore-chat-scroll-position.md
-- **Status**: NOT_STARTED
+- **Status**: COMPLETED (2026-01-19)
 - **Effort**: M
 - **Description**: Navigating away from chat and returning doesn't restore scroll position. Use sessionStorage, React Router state, or scroll restoration library. Must coordinate with pin-to-bottom logic.
 - **Files**: `apps/web/src/components/ChatInterface.tsx`
+- **Resolution**: Added scroll position persistence using sessionStorage with per-chat keys (`chat-scroll-${chatId}`). Position is saved in useEffect cleanup when navigating away. On mount, checks for saved position and restores it instead of scrolling to bottom. After restoration, clears saved position and updates `wasAtBottomRef` based on restored position. Coordinates with pin-to-bottom logic - restoration takes priority over auto-scroll-to-bottom on first load.
 
 ---
 
@@ -371,10 +372,10 @@ These are documented FIXMEs in the codebase that need attention:
 | Priority | Count | Status |
 |----------|-------|--------|
 | P0 (Critical) | 5 | 5 COMPLETED |
-| P1 (Important) | 13 | 12 COMPLETED, 1 NOT_STARTED |
+| P1 (Important) | 13 | 13 COMPLETED, 0 NOT_STARTED |
 | P2 (Nice-to-have) | 26 | 1 NEEDS_VERIFICATION, 25 NOT_STARTED |
 | P3 (Post-V1) | 3 | 3 NOT_STARTED |
-| **Total** | **47** | **17 COMPLETED, 1 NEEDS_VERIFICATION, 29 NOT_STARTED** |
+| **Total** | **47** | **18 COMPLETED, 1 NEEDS_VERIFICATION, 28 NOT_STARTED** |
 
 ### V1 Feature Ideas
 
