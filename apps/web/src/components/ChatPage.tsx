@@ -5,7 +5,7 @@ import { QuickReplyButtons } from "./QuickReplyButtons";
 import { useAddMessage } from "../hooks/dbWrites";
 import { useFileUpload } from "../hooks/useFileUpload";
 import { useTaskByChatId, useTaskState } from "../hooks/dbTaskReads";
-import { parseAsks } from "@app/agent";
+import { parseAsks } from "@app/proto";
 import {
   PromptInput,
   PromptInputAttachment,

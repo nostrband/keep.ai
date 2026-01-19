@@ -2,6 +2,20 @@ import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "node:path";
 
+// Plugin to inject global polyfill without affecting string replacements
+const globalPolyfillPlugin = (): Plugin => ({
+  name: "global-polyfill",
+  transformIndexHtml: {
+    order: "pre",
+    handler(html) {
+      return html.replace(
+        "<head>",
+        `<head><script>window.global = window;</script>`
+      );
+    },
+  },
+});
+
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
   const flavor = mode; // "frontend", "serverless", or "electron"
@@ -10,14 +24,13 @@ export default defineConfig(({ mode }) => {
   const isElectron = mode === "electron";
 
   return {
-    plugins: [react()],
+    plugins: [globalPolyfillPlugin(), react()],
     resolve: {
       alias: {
         "@app": path.resolve(__dirname, "../../packages"),
       },
     },
     define: {
-      global: "globalThis",
       // Build-time constants (stringified!)
       __FLAVOR__: JSON.stringify(flavor),
       __FRONTEND__: JSON.stringify(isFrontend),
@@ -35,11 +48,7 @@ export default defineConfig(({ mode }) => {
         "@app/browser",
         "@vlcn.io/crsqlite-wasm",
       ],
-      esbuildOptions: {
-        define: {
-          global: "globalThis",
-        },
-      },
+      esbuildOptions: {},
     },
     server: {
       fs: {

@@ -1,6 +1,9 @@
 import { z } from "zod";
 import { tool } from "ai";
 
+// Re-export from @app/proto for backward compatibility
+export { parseAsks, type StructuredAsk } from "@app/proto";
+
 const AskInfoSchema = z.object({
   asks: z.string().describe("Question for user. Keep it short and specific."),
   options: z
@@ -15,39 +18,6 @@ const AskInfoSchema = z.object({
 });
 
 export type AskInfo = z.infer<typeof AskInfoSchema>;
-
-/**
- * Structured ask format stored in task state.
- * Used by the UI to display quick-reply buttons.
- */
-export interface StructuredAsk {
-  question: string;
-  options?: string[];
-}
-
-/**
- * Parse the asks field from task state.
- * Returns structured format if it's JSON, otherwise wraps the string.
- */
-export function parseAsks(asks: string): StructuredAsk {
-  if (!asks) {
-    return { question: "" };
-  }
-
-  try {
-    const parsed = JSON.parse(asks);
-    if (typeof parsed === "object" && parsed.question) {
-      return {
-        question: parsed.question,
-        options: Array.isArray(parsed.options) ? parsed.options : undefined,
-      };
-    }
-  } catch {
-    // Not JSON, use as plain string
-  }
-
-  return { question: asks };
-}
 
 /**
  * Format the ask info for storage in task state.
