@@ -171,10 +171,11 @@ This document prioritizes tasks for achieving a simple, lovable, and complete v1
 - **Resolution**: Conditionally render dropdown menu only when `hasNavigation` is true. Added spacer div with matching width (34px) when no actions available to maintain consistent layout alignment with other event items that have menus.
 
 ### 23. extract-event-helper-functions.md
-- **Status**: NOT_STARTED
+- **Status**: COMPLETED (2026-01-19)
 - **Effort**: S
 - **Description**: `transformGmailMethod()` and `formatDuration()` duplicated in TaskEventGroup and WorkflowEventGroup.
 - **Files**: Create `apps/web/src/lib/event-helpers.ts`
+- **Resolution**: Created `apps/web/src/lib/event-helpers.ts` with shared `transformGmailMethod()` and `formatDuration()` functions. Updated TaskEventGroup.tsx and WorkflowEventGroup.tsx to import from the shared location. Standardized `transformGmailMethod` to use descriptive labels like "read messages" instead of just "messages".
 
 ### 24. extract-quick-reply-hook.md
 - **Status**: NOT_STARTED
@@ -377,9 +378,9 @@ These are documented FIXMEs in the codebase that need attention:
 |----------|-------|--------|
 | P0 (Critical) | 5 | 5 COMPLETED |
 | P1 (Important) | 13 | 13 COMPLETED, 0 NOT_STARTED |
-| P2 (Nice-to-have) | 26 | 4 COMPLETED, 1 NEEDS_VERIFICATION, 21 NOT_STARTED |
+| P2 (Nice-to-have) | 26 | 5 COMPLETED, 1 NEEDS_VERIFICATION, 20 NOT_STARTED |
 | P3 (Post-V1) | 3 | 3 NOT_STARTED |
-| **Total** | **47** | **22 COMPLETED, 1 NEEDS_VERIFICATION, 24 NOT_STARTED** |
+| **Total** | **47** | **23 COMPLETED, 1 NEEDS_VERIFICATION, 23 NOT_STARTED** |
 
 ### V1 Feature Ideas
 
