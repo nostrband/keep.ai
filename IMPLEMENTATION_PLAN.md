@@ -343,10 +343,11 @@ This document prioritizes tasks for achieving a simple, lovable, and complete v1
 - **Resolution**: Added debug mode toggle to SettingsPage in the new "Advanced" section. Toggle persists in localStorage ("keep-ai-debug-mode" key). Modified main.tsx to check localStorage and enable debug module when set. Added visual "DEBUG" badge indicator in SharedHeader when debug mode is active. Requires page refresh to take effect (as noted in UI).
 
 ### 46. app-update-notification.md
-- **Status**: NOT_STARTED
+- **Status**: COMPLETED (2026-01-19)
 - **Effort**: M
 - **Description**: No UI notification when service worker updates and new version activates. Add subtle toast or banner notification.
 - **Files**: `apps/web/src/service-worker.ts`, `apps/web/src/App.tsx`
+- **Resolution**: Added service worker update detection in main.tsx that dispatches a custom `APP_UPDATE_EVENT` when a new service worker is activated (but only when there was a previous controller, to avoid showing on first install). Created `AppUpdateBanner` component in App.tsx that listens for this event and displays a subtle blue banner at the top of the screen. Banner shows 'App updated to a new version', auto-dismisses after 10 seconds, and can be manually dismissed. Only shown in web/PWA mode (not Electron since it uses different update mechanisms).
 
 ### 47. retry-reverse-navigation.md
 - **Status**: COMPLETED (2026-01-19)
@@ -442,9 +443,9 @@ These are documented FIXMEs in the codebase that need attention:
 | P0 (Critical) | 5 | 5 COMPLETED |
 | P1 (Important) | 13 | 13 COMPLETED, 0 NOT_STARTED |
 | P2 (Nice-to-have) | 26 | 23 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 VERIFIED_NO_ISSUE, 1 SKIPPED, 0 NOT_STARTED |
-| P3 (Post-V1) | 3 | 2 COMPLETED, 1 NOT_STARTED |
+| P3 (Post-V1) | 3 | 3 COMPLETED, 0 NOT_STARTED |
 | V1 Feature Ideas | 3 | 3 IMPLEMENTED |
-| **Total** | **50** | **46 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 VERIFIED_NO_ISSUE, 1 SKIPPED, 1 NOT_STARTED** |
+| **Total** | **50** | **47 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 VERIFIED_NO_ISSUE, 1 SKIPPED, 0 NOT_STARTED** |
 
 ### V1 Feature Ideas
 

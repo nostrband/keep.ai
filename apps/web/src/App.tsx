@@ -8,6 +8,7 @@ import {
   useLocation,
 } from "react-router-dom";
 import { useState, useEffect, useRef, useCallback } from "react";
+import { APP_UPDATE_EVENT } from "./main";
 import MainPage from "./components/MainPage";
 import ChatPage from "./components/ChatPage";
 import NewPage from "./components/NewPage";
@@ -134,6 +135,39 @@ function ElectronIPCHandler() {
 
 // Export the custom event name for MainPage to use
 export { FOCUS_INPUT_EVENT };
+
+// Banner shown when the app has been updated via service worker
+function AppUpdateBanner() {
+  const [showBanner, setShowBanner] = useState(false);
+
+  useEffect(() => {
+    const handleAppUpdate = () => {
+      setShowBanner(true);
+      // Auto-dismiss after 10 seconds
+      setTimeout(() => setShowBanner(false), 10000);
+    };
+
+    window.addEventListener(APP_UPDATE_EVENT, handleAppUpdate);
+    return () => window.removeEventListener(APP_UPDATE_EVENT, handleAppUpdate);
+  }, []);
+
+  if (!showBanner) return null;
+
+  return (
+    <div className="fixed top-0 left-0 right-0 bg-blue-600 text-white px-4 py-2 text-sm flex items-center justify-between z-50 shadow-md">
+      <span>App updated to a new version</span>
+      <button
+        onClick={() => setShowBanner(false)}
+        className="ml-4 p-1 hover:bg-blue-700 rounded"
+        aria-label="Dismiss"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+          <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+        </svg>
+      </button>
+    </div>
+  );
+}
 
 function SyncingStatus({ isServerless, isInitializing }: { isServerless: boolean; isInitializing: boolean }) {
   const [showTroubleOptions, setShowTroubleOptions] = useState(false);
@@ -315,6 +349,8 @@ function App() {
     <Router>
       {/* Handle electron-specific IPC events (navigation, focus-input, pause-all) */}
       {isElectron && <ElectronIPCHandler />}
+      {/* Show banner when app is updated via service worker (not in Electron) */}
+      {!isElectron && <AppUpdateBanner />}
       <Routes>
         <Route path="/" element={<MainPage />} />
         <Route path="/chat" element={<ChatPage />} />

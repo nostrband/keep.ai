@@ -52,6 +52,9 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
   </React.StrictMode>
 );
 
+// Custom event for app update notification
+export const APP_UPDATE_EVENT = 'keep-ai-app-updated';
+
 // Register service worker for PWA and push notifications
 if (!isElectron && "serviceWorker" in navigator) {
   window.addEventListener("load", async () => {
@@ -68,7 +71,13 @@ if (!isElectron && "serviceWorker" in navigator) {
         const newWorker = registration.installing;
         if (newWorker) {
           newWorker.addEventListener("statechange", () => {
-            // Service worker update detected
+            // When the new service worker is activated, notify the app
+            if (newWorker.state === "activated") {
+              // Only notify if there was a previous controller (not first install)
+              if (navigator.serviceWorker.controller) {
+                window.dispatchEvent(new CustomEvent(APP_UPDATE_EVENT));
+              }
+            }
           });
         }
       });
