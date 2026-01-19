@@ -25,7 +25,6 @@ export class WorkflowNotifications {
   private notifiedWorkflows: Set<string> = new Set(); // Track which workflows we've already notified
   private lastCheckTime: number = 0;
   private isRunning = false;
-  private checkIntervalMs: number = 10000; // Check every 10 seconds
 
   /**
    * Check for workflows that need attention and trigger notifications

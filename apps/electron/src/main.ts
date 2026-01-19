@@ -49,12 +49,74 @@ const disposeContextMenu = contextMenu({
   showCopyLink: true,
 });
 
+/**
+ * Get the app icon as a NativeImage.
+ * Returns icon from file if exists, otherwise generates from embedded SVG.
+ * The SVG matches the "K in square" design from SharedHeader.
+ */
+function getAppIcon(): Electron.NativeImage {
+  const iconPath = path.join(__dirname, "../assets/icon.png");
+
+  // Try to load from file first
+  try {
+    const icon = nativeImage.createFromPath(iconPath);
+    if (!icon.isEmpty()) {
+      return icon;
+    }
+  } catch (error) {
+    debugMain('Could not load icon from file:', error);
+  }
+
+  // Fallback: create from embedded SVG (matches the "K in square" design)
+  // Golden border: #D6A642, white background, black K
+  const svgIcon = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+      <rect x="8" y="8" width="240" height="240" rx="24" ry="24" fill="white" stroke="#D6A642" stroke-width="16"/>
+      <text x="128" y="168" font-family="Arial, sans-serif" font-size="160" font-weight="bold" text-anchor="middle" fill="black">K</text>
+    </svg>
+  `;
+  const dataUrl = `data:image/svg+xml;base64,${Buffer.from(svgIcon).toString('base64')}`;
+
+  return nativeImage.createFromDataURL(dataUrl);
+}
+
 // Keep a global reference of the window object
 let mainWindow: any = null;
 let server: any = null;
 let serverPort: number = 0;
 let tray: Tray | null = null;
 let isQuiting = false;
+
+// Track if window webContents has finished loading
+let windowReady = false;
+let windowReadyPromise: Promise<void> | null = null;
+let windowReadyResolve: (() => void) | null = null;
+
+/**
+ * Wait for the window to be ready to receive IPC messages.
+ * Returns immediately if window is already ready.
+ * Creates the window if it doesn't exist.
+ */
+async function ensureWindowReady(): Promise<void> {
+  if (!mainWindow) {
+    createWindow();
+  }
+
+  if (windowReady) {
+    return;
+  }
+
+  if (windowReadyPromise) {
+    return windowReadyPromise;
+  }
+
+  // Window exists but not yet ready - wait for it
+  windowReadyPromise = new Promise((resolve) => {
+    windowReadyResolve = resolve;
+  });
+
+  return windowReadyPromise;
+}
 
 function createWindow(): void {
   // Create the browser window
@@ -66,12 +128,23 @@ function createWindow(): void {
       contextIsolation: true, // Security best practice
       preload: path.join(__dirname, "preload.cjs"), // Use a preload script
     },
-    icon: path.join(__dirname, "../assets/icon.png"), // Optional: Add an app icon
+    icon: getAppIcon(),
     title: "Keep.AI",
   });
 
   // Load the SPA build
   mainWindow.loadFile(path.join(__dirname, "../public/index.html"));
+
+  // Track when webContents finishes loading
+  mainWindow.webContents.on('did-finish-load', () => {
+    debugMain('Window webContents finished loading');
+    windowReady = true;
+    if (windowReadyResolve) {
+      windowReadyResolve();
+      windowReadyResolve = null;
+      windowReadyPromise = null;
+    }
+  });
 
   // Open DevTools in development
   if (process.argv.includes("--dev")) {
@@ -89,6 +162,9 @@ function createWindow(): void {
   // Handle window closed
   mainWindow.on("closed", () => {
     mainWindow = null;
+    windowReady = false;
+    windowReadyPromise = null;
+    windowReadyResolve = null;
   });
 
   // Optional: minimize to tray instead
@@ -125,14 +201,12 @@ function setupIpcHandlers(): void {
       const notification = new Notification({
         title: options.title,
         body: options.body,
-        icon: path.join(__dirname, "../assets/icon.png"),
+        icon: getAppIcon(),
       });
 
       // When user clicks the notification, open the app
-      notification.on('click', () => {
-        if (!mainWindow) {
-          createWindow();
-        }
+      notification.on('click', async () => {
+        await ensureWindowReady();
         mainWindow?.show();
         mainWindow?.focus();
 
@@ -197,31 +271,15 @@ function setupIpcHandlers(): void {
 }
 
 function createTray(): void {
-  // Try to find an icon, fallback to a basic one if not found
-  const iconPath = path.join(__dirname, "../assets/icon.png");
-  let trayIcon;
-
-  try {
-    trayIcon = nativeImage.createFromPath(iconPath);
-    // If icon is empty, create a simple fallback
-    if (trayIcon.isEmpty()) {
-      trayIcon = nativeImage.createFromNamedImage("NSApplicationIcon");
-    }
-  } catch (error) {
-    // Fallback to system icon if app icon not found
-    trayIcon = nativeImage.createFromNamedImage("NSApplicationIcon");
-  }
-
+  const trayIcon = getAppIcon();
   tray = new Tray(trayIcon);
   tray.setToolTip("Keep.AI - Your Private AI Assistant");
 
   const contextMenu = Menu.buildFromTemplate([
     {
       label: "Open Keep.AI",
-      click: () => {
-        if (!mainWindow) {
-          createWindow();
-        }
+      click: async () => {
+        await ensureWindowReady();
         mainWindow?.show();
         mainWindow?.focus();
       },
@@ -230,10 +288,8 @@ function createTray(): void {
     {
       label: "New automation...",
       accelerator: "CmdOrCtrl+N",
-      click: () => {
-        if (!mainWindow) {
-          createWindow();
-        }
+      click: async () => {
+        await ensureWindowReady();
         mainWindow?.show();
         mainWindow?.focus();
         // Send message to renderer to focus the input
@@ -263,10 +319,8 @@ function createTray(): void {
   tray.setContextMenu(contextMenu);
 
   // Single-click on tray restores window
-  tray.on("click", () => {
-    if (!mainWindow) {
-      createWindow();
-    }
+  tray.on("click", async () => {
+    await ensureWindowReady();
     if (mainWindow?.isVisible()) {
       mainWindow.hide();
     } else {
@@ -329,11 +383,9 @@ async function fetchFile(fileIdOrName: string) {
  */
 function registerGlobalShortcuts(): void {
   // Cmd/Ctrl+N: Open app and focus input for new automation
-  const registered = globalShortcut.register('CmdOrCtrl+N', () => {
+  const registered = globalShortcut.register('CmdOrCtrl+N', async () => {
     debugMain('Global shortcut CmdOrCtrl+N triggered');
-    if (!mainWindow) {
-      createWindow();
-    }
+    await ensureWindowReady();
     mainWindow?.show();
     mainWindow?.focus();
     // Send message to renderer to focus the input

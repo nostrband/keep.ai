@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import {
   useWorkflow,
@@ -13,6 +13,7 @@ import SharedHeader from "./SharedHeader";
 import MermaidDiagram from "./MermaidDiagram";
 import ScriptDiff from "./ScriptDiff";
 import { Badge, Button } from "../ui";
+import { workflowNotifications } from "../lib/WorkflowNotifications";
 
 const getStatusBadge = (workflow: any) => {
   if (workflow.status === "disabled") {
@@ -39,6 +40,14 @@ export default function WorkflowDetailPage() {
 
   const updateWorkflowMutation = useUpdateWorkflow();
   const rollbackMutation = useRollbackScript();
+
+  // Clear workflow notifications when viewing this workflow
+  // This prevents re-notifying user for errors they've already seen
+  useEffect(() => {
+    if (id) {
+      workflowNotifications.clearWorkflowNotifications(id);
+    }
+  }, [id]);
 
   // Get next run time from workflow.next_run_timestamp
   // Only show for active workflows - scheduler only executes where status === 'active'

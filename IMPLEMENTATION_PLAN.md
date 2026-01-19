@@ -83,10 +83,11 @@ This document prioritizes tasks for achieving a simple, lovable, and complete v1
 - **Resolution**: Changed `usage` to `usage: { cost: usage.cost }` in createEvent call, matching the pattern used by all other tools (pdf-explain, images-explain, text-generate, etc.). This ensures audio processing costs are properly tracked.
 
 ### 11. electron-window-ready-before-ipc.md
-- **Status**: NOT_STARTED
+- **Status**: COMPLETED (2026-01-19)
 - **Effort**: S
 - **Description**: IPC messages sent immediately after createWindow() are lost - window not ready yet. Need to wait for `did-finish-load` event before IPC send.
 - **Files**: `apps/electron/src/main.ts`
+- **Resolution**: Created `getAppIcon()` helper function that loads icon from file or generates from embedded SVG (matches "K in square" design). Added `ensureWindowReady()` async function that waits for `did-finish-load` event before sending IPC. Updated all handlers (notification click, tray menu, global shortcuts) to use `ensureWindowReady()` before sending IPC messages. Window ready state is tracked via `windowReady` flag and reset when window is closed.
 
 ### 12. notification-error-handling.md
 - **Status**: COMPLETED (2026-01-19)
@@ -102,10 +103,11 @@ This document prioritizes tasks for achieving a simple, lovable, and complete v1
 - **Files**: `packages/db/src/script-store.ts`, `apps/web/src/components/MainPage.tsx`, `apps/web/src/lib/WorkflowNotifications.ts`
 
 ### 14. notification-icon.md
-- **Status**: NOT_STARTED
+- **Status**: COMPLETED (2026-01-19)
 - **Effort**: S
 - **Description**: `apps/electron/assets/` directory and `icon.png` don't exist. Notifications show missing/default icon. Need 256x256 or 512x512 PNG with "K in square" logo.
 - **Files**: Create `apps/electron/assets/icon.png`
+- **Resolution**: Added `getAppIcon()` helper function in main.ts that first tries to load from `assets/icon.png` file, then falls back to an embedded SVG icon matching the "K in square" design (golden border #D6A642, white background, black K). Updated createWindow(), Notification, and Tray to use this helper. Removed hardcoded icon paths. Created empty `apps/electron/assets/` directory for future custom icon file.
 
 ### 15. tray-menu-ipc-handlers.md
 - **Status**: NOT_STARTED
@@ -114,10 +116,11 @@ This document prioritizes tasks for achieving a simple, lovable, and complete v1
 - **Files**: `apps/web/src/App.tsx`, `apps/electron/src/preload.ts`
 
 ### 16. wire-up-workflow-notifications-methods.md
-- **Status**: NOT_STARTED
+- **Status**: COMPLETED (2026-01-19)
 - **Effort**: S
 - **Description**: WorkflowNotifications has `clearWorkflowNotifications()` and `reset()` methods but they're never called. `checkIntervalMs` property unused.
 - **Files**: `apps/web/src/lib/WorkflowNotifications.ts`, `apps/web/src/components/WorkflowDetailPage.tsx`
+- **Resolution**: Added import of `workflowNotifications` singleton to WorkflowDetailPage.tsx. Added `useEffect` to call `clearWorkflowNotifications(id)` when viewing a workflow, preventing re-notifications for errors user has already seen. Removed unused `checkIntervalMs` property from WorkflowNotifications class. The `reset()` method remains available for future logout flow integration.
 
 ### 17. fix-chat-pin-to-bottom.md
 - **Status**: NOT_STARTED
@@ -365,10 +368,10 @@ These are documented FIXMEs in the codebase that need attention:
 | Priority | Count | Status |
 |----------|-------|--------|
 | P0 (Critical) | 5 | 5 COMPLETED |
-| P1 (Important) | 13 | 6 COMPLETED, 7 NOT_STARTED |
+| P1 (Important) | 13 | 9 COMPLETED, 4 NOT_STARTED |
 | P2 (Nice-to-have) | 26 | 1 NEEDS_VERIFICATION, 25 NOT_STARTED |
 | P3 (Post-V1) | 3 | 3 NOT_STARTED |
-| **Total** | **47** | **11 COMPLETED, 1 NEEDS_VERIFICATION, 35 NOT_STARTED** |
+| **Total** | **47** | **14 COMPLETED, 1 NEEDS_VERIFICATION, 32 NOT_STARTED** |
 
 ### V1 Feature Ideas
 
