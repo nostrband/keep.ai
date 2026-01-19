@@ -25,6 +25,7 @@ export default function SharedHeader({ title, subtitle }: SharedHeaderProps) {
   const location = useLocation();
   const navigate = useNavigate();
   const isServerless = __SERVERLESS__;
+  const debugMode = localStorage.getItem("keep-ai-debug-mode") === "true";
   
   const isRootPage = location.pathname === '/';
   
@@ -81,7 +82,14 @@ export default function SharedHeader({ title, subtitle }: SharedHeaderProps) {
             )}
             <AssistantIcon />
             <div>
-              <h1 className="text-lg font-bold text-gray-900">{title}</h1>
+              <div className="flex items-center gap-2">
+                <h1 className="text-lg font-bold text-gray-900">{title}</h1>
+                {debugMode && (
+                  <span className="text-xs px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded font-medium">
+                    DEBUG
+                  </span>
+                )}
+              </div>
               {subtitle && (
                 <p className="text-sm text-gray-600">{subtitle}</p>
               )}

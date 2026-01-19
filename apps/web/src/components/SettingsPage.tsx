@@ -71,6 +71,9 @@ export default function SettingsPage() {
   const [checkingGmail, setCheckingGmail] = useState(false);
   const [gmailChecking, setGmailChecking] = useState(false);
   const [gmailCheckResult, setGmailCheckResult] = useState<string>("");
+  const [debugMode, setDebugMode] = useState(() =>
+    localStorage.getItem("keep-ai-debug-mode") === "true"
+  );
 
   const [formData, setFormData] = useState({
     OPENROUTER_API_KEY: "",
@@ -608,6 +611,44 @@ export default function SettingsPage() {
                   {gmailCheckResult}
                 </div>
               )}
+            </div>
+
+            <div className="border-t border-gray-200 pt-6 mt-6">
+              <h3 className="text-sm font-medium text-gray-700 mb-4">Advanced</h3>
+              <div>
+                <div className="flex items-center justify-between">
+                  <label
+                    htmlFor="debugMode"
+                    className="text-sm font-medium text-gray-700"
+                  >
+                    Debug Mode
+                  </label>
+                  <input
+                    type="checkbox"
+                    id="debugMode"
+                    checked={debugMode}
+                    onChange={(e) => {
+                      const enabled = e.target.checked;
+                      setDebugMode(enabled);
+                      if (enabled) {
+                        localStorage.setItem("keep-ai-debug-mode", "true");
+                      } else {
+                        localStorage.removeItem("keep-ai-debug-mode");
+                      }
+                    }}
+                    className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                    disabled={saving}
+                  />
+                </div>
+                <p className="text-sm text-gray-500 mt-1">
+                  Enable verbose debug output in the browser console. Requires page refresh to take effect.
+                </p>
+                {debugMode && (
+                  <p className="text-xs text-amber-600 mt-1">
+                    Debug mode is enabled. Refresh the page to see debug output in the console.
+                  </p>
+                )}
+              </div>
             </div>
 
             {error && (

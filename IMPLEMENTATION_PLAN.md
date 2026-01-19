@@ -336,10 +336,11 @@ This document prioritizes tasks for achieving a simple, lovable, and complete v1
 ## Priority P3 - Post-V1 (Future Enhancements)
 
 ### 45. debug-mode-settings-toggle.md
-- **Status**: NOT_STARTED
+- **Status**: COMPLETED (2026-01-19)
 - **Effort**: M
 - **Description**: Add debug mode toggle in settings screen for production debugging. Enable verbose debug output when activated. Persist in localStorage.
-- **Files**: `apps/web/src/components/SettingsPage.tsx`
+- **Files**: `apps/web/src/components/SettingsPage.tsx`, `apps/web/src/main.tsx`, `apps/web/src/components/SharedHeader.tsx`
+- **Resolution**: Added debug mode toggle to SettingsPage in the new "Advanced" section. Toggle persists in localStorage ("keep-ai-debug-mode" key). Modified main.tsx to check localStorage and enable debug module when set. Added visual "DEBUG" badge indicator in SharedHeader when debug mode is active. Requires page refresh to take effect (as noted in UI).
 
 ### 46. app-update-notification.md
 - **Status**: NOT_STARTED
@@ -366,6 +367,18 @@ These are documented FIXMEs in the codebase that need attention:
 ---
 
 ## Additional Issues Found
+
+### Web Build Failure - @app/agent importing in browser
+- **File**: `apps/web/src/components/ChatPage.tsx`
+- **Status**: FIXED (2026-01-19)
+- **Issue**: Importing `parseAsks` from `@app/agent` caused the entire agent bundle to be included in the web build, which contains Node.js-only code (crypto, @app/node, @nostrband/crsqlite). The build was also broken by `global: "globalThis"` define in vite.config.ts which was rewriting import paths like `../internal/global-utils` to `../internal/globalThis-utils`.
+- **Resolution**: Moved `parseAsks` and `StructuredAsk` to `@app/proto` (browser-compatible). Added global polyfill plugin to inject `window.global = window` script tag instead of using aggressive define replacement. @app/agent re-exports for backward compatibility.
+
+### Test Race Condition in user-server Integration Tests
+- **File**: `apps/user-server/src/__tests__/integration.test.ts`
+- **Status**: FIXED (2026-01-19)
+- **Issue**: Integration tests using `db.run()` directly were not properly awaiting the SQLite callback, causing a race condition where `findApiKey()` was called before the UPDATE completed.
+- **Resolution**: Wrapped `db.run()` calls in Promises to properly await completion before querying.
 
 ### Gmail Tool Limited Implementation
 - **File**: `packages/agent/src/tools/gmail.ts`
@@ -428,9 +441,9 @@ These are documented FIXMEs in the codebase that need attention:
 | P0 (Critical) | 5 | 5 COMPLETED |
 | P1 (Important) | 13 | 13 COMPLETED, 0 NOT_STARTED |
 | P2 (Nice-to-have) | 26 | 23 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 VERIFIED_NO_ISSUE, 1 SKIPPED, 0 NOT_STARTED |
-| P3 (Post-V1) | 3 | 3 NOT_STARTED |
+| P3 (Post-V1) | 3 | 1 COMPLETED, 2 NOT_STARTED |
 | V1 Feature Ideas | 3 | 3 IMPLEMENTED |
-| **Total** | **50** | **44 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 VERIFIED_NO_ISSUE, 1 SKIPPED, 3 NOT_STARTED** |
+| **Total** | **50** | **45 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 VERIFIED_NO_ISSUE, 1 SKIPPED, 2 NOT_STARTED** |
 
 ### V1 Feature Ideas
 

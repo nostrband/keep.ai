@@ -20,8 +20,9 @@ import dedicatedWorkerUrl from "./worker.ts?sharedworker&url";
 declare const __ELECTRON__: boolean;
 const isElectron = __ELECTRON__; // (import.meta as any).env?.VITE_FLAVOR === "electron";
 
-// Enable debug output only in development mode
-if (import.meta.env.DEV) {
+// Enable debug output in development mode or when debug mode is enabled via settings
+const debugModeEnabled = localStorage.getItem("keep-ai-debug-mode") === "true";
+if (import.meta.env.DEV || debugModeEnabled) {
   debug.enable("*");
 }
 
