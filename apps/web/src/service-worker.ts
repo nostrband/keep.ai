@@ -7,13 +7,13 @@ import { FileReceiver, getStreamFactory } from "@app/sync";
 import { getDefaultCompression } from "@app/browser";
 import { hexToBytes } from "nostr-tools/utils";
 import { ServerlessNostrSigner } from "./lib/signer";
+import debug from "debug";
 
 declare const __SERVERLESS__: boolean;
 const isServerless = __SERVERLESS__; // (import.meta as any).env?.VITE_FLAVOR === "serverless";
 
-// Debug logging for service worker - disabled in production
-const DEBUG_SW = false;
-const debugLog = (...args: any[]) => DEBUG_SW && console.log(...args);
+// Debug logging using the standard debug module
+const log = debug("keep:service-worker");
 
 declare const self: ServiceWorkerGlobalScope;
 
@@ -39,16 +39,16 @@ const urlsToCache: string[] = [
 
 // Installation event - cache resources
 self.addEventListener("install", (event: ExtendableEvent) => {
-  debugLog("[SW] Installing service worker");
+  log("[SW] Installing service worker");
   event.waitUntil(
     caches
       .open(CACHE_NAME)
       .then((cache) => {
-        debugLog("[SW] Opened cache");
+        log("[SW] Opened cache");
         return cache.addAll(urlsToCache);
       })
       .then(() => {
-        debugLog("[SW] Resources cached");
+        log("[SW] Resources cached");
         return self.skipWaiting();
       })
   );
@@ -56,7 +56,7 @@ self.addEventListener("install", (event: ExtendableEvent) => {
 
 // Activation event - clean up old caches
 self.addEventListener("activate", (event: ExtendableEvent) => {
-  debugLog("[SW] Activating service worker");
+  log("[SW] Activating service worker");
   event.waitUntil(
     caches
       .keys()
@@ -64,14 +64,14 @@ self.addEventListener("activate", (event: ExtendableEvent) => {
         return Promise.all(
           cacheNames.map((cacheName) => {
             if (cacheName !== CACHE_NAME) {
-              debugLog("[SW] Deleting old cache:", cacheName);
+              log("[SW] Deleting old cache:", cacheName);
               return caches.delete(cacheName);
             }
           })
         );
       })
       .then(() => {
-        debugLog("[SW] Service worker activated");
+        log("[SW] Service worker activated");
         return self.clients.claim();
       })
   );
@@ -106,11 +106,11 @@ self.addEventListener("fetch", (event: FetchEvent) => {
 
 // Listen for messages from main thread
 self.addEventListener("message", async (event) => {
-  debugLog("[SW] got message", event);
+  log("[SW] got message", event);
   const { type, payload } = event.data || {};
 
   if (type === "FILE_TRANSFER_KEYS") {
-    debugLog("[SW] Received file transfer keys");
+    log("[SW] Received file transfer keys");
     fileTransferKeys = payload;
 
     // Initialize FileReceiver and pool when we get keys
@@ -161,7 +161,7 @@ async function initializeFileReceiver() {
 
     // Start the receiver
     fileReceiver.start();
-    debugLog("[SW] FileReceiver initialized and started");
+    log("[SW] FileReceiver initialized and started");
   } catch (error) {
     console.error("[SW] Error initializing FileReceiver:", error);
   }
@@ -214,7 +214,7 @@ async function fetchNostr(name: string) {
         }
       },
       cancel(reason) {
-        debugLog("[SW] Stream cancelled:", reason);
+        log("[SW] Stream cancelled:", reason);
       },
     });
 
@@ -227,7 +227,7 @@ async function fetchNostr(name: string) {
       },
     });
 
-    debugLog("[SW] Streaming file via nostr:", name);
+    log("[SW] Streaming file via nostr:", name);
     return response;
   } catch (error) {
     console.error("[SW] Failed to download file via nostr:", error);
@@ -254,11 +254,11 @@ async function handleFileRequest(event: FetchEvent) {
   // 1) Try cache first
   const cachedResponse = await cache.match(request);
   if (cachedResponse) {
-    debugLog("[SW] Serving file from cache", name);
+    log("[SW] Serving file from cache", name);
     return cachedResponse;
   }
 
-  debugLog("[SW] fetch", url, {
+  log("[SW] fetch", url, {
     isServerless,
     fileReceiver: !!fileReceiver,
     fileTransferKeys: !!fileTransferKeys,
@@ -267,11 +267,11 @@ async function handleFileRequest(event: FetchEvent) {
   let response: Response;
   if (isServerless) {
     // Download over Nostr
-    debugLog("[SW] Downloading file via Nostr:", name);
+    log("[SW] Downloading file via Nostr:", name);
     response = await fetchNostr(name);
   } else {
     // Download from API
-    debugLog("[SW] Downloading file via API:", name);
+    log("[SW] Downloading file via API:", name);
     response = await fetch(
       `${API_ENDPOINT}/file/get?url=${encodeURIComponent(name)}`
     );
@@ -283,7 +283,7 @@ async function handleFileRequest(event: FetchEvent) {
     (async () => {
       try {
         await cache.put(request, responseForCache);
-        debugLog("[SW] Downloaded and cached file:", name);
+        log("[SW] Downloaded and cached file:", name);
       } catch (error) {
         console.error("[SW] Failed to cache file:", error);
       }
@@ -294,10 +294,10 @@ async function handleFileRequest(event: FetchEvent) {
 }
 
 const handlePush = async (event: PushEvent) => {
-  debugLog("[SW] Push notification received:", event);
+  log("[SW] Push notification received:", event);
 
   if (!event.data) {
-    debugLog("[SW] Push event has no data");
+    log("[SW] Push event has no data");
     return;
   }
 
@@ -310,33 +310,33 @@ const handlePush = async (event: PushEvent) => {
       (client: any) => client.visibilityState === "visible" && "focus" in client
     );
     if (hasVisibleClient) {
-      debugLog("[SW] Push event suppressed for visible client");
+      log("[SW] Push event suppressed for visible client");
       return;
     }
   } catch {}
 
   try {
     const pushData = event.data.text();
-    debugLog("[SW] Push data received:", pushData);
+    log("[SW] Push data received:", pushData);
 
     // Parse the Nostr event (kind 24683)
     const nostrEvent: Event = JSON.parse(pushData);
 
     if (nostrEvent.kind !== 24683) {
-      debugLog("[SW] Invalid event kind:", nostrEvent.kind);
+      log("[SW] Invalid event kind:", nostrEvent.kind);
       return;
     }
 
     // Get stored push configuration
     const pushConfig = await getStoredPushConfig();
     if (!pushConfig) {
-      debugLog("[SW] No push config found");
+      log("[SW] No push config found");
       return;
     }
 
     // Verify sender pubkey matches the one we subscribed for
     if (nostrEvent.pubkey !== pushConfig.senderPubkey) {
-      debugLog(
+      log(
         "[SW] Sender pubkey mismatch:",
         nostrEvent.pubkey,
         "vs",
@@ -354,7 +354,7 @@ const handlePush = async (event: PushEvent) => {
 
     // Parse the decrypted payload as AssistantUIMessage
     const message = JSON.parse(decryptedContent);
-    debugLog("[SW] Decrypted message:", message);
+    log("[SW] Decrypted message:", message);
 
     // Extract notification text from message parts
     const notificationText = extractNotificationText(message);
@@ -385,7 +385,7 @@ if (isServerless) {
 
   // Notification click event
   self.addEventListener("notificationclick", (event: NotificationEvent) => {
-    debugLog("[SW] Notification click received:", event);
+    log("[SW] Notification click received:", event);
 
     event.notification.close();
 
