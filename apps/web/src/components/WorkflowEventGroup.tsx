@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useWorkflow, useScriptRun } from "../hooks/dbScriptReads";
 import { useUpdateWorkflow } from "../hooks/dbWrites";
 import { EventItem } from "./EventItem";
+import { CollapsedEventSummary } from "./CollapsedEventSummary";
 import {
   EventType,
   EventPayload,
@@ -17,6 +18,7 @@ import {
   DropdownMenuSeparator,
 } from "../ui";
 import { transformGmailMethod } from "../lib/event-helpers";
+import { partitionEventsBySignal } from "../lib/eventSignal";
 
 interface WorkflowEvent {
   id: string;
@@ -38,6 +40,7 @@ export function WorkflowEventGroup({ workflowId, scriptId, scriptRunId, events }
   const { data: scriptRun } = useScriptRun(scriptRunId || "");
   const updateWorkflowMutation = useUpdateWorkflow();
   const [successMessage, setSuccessMessage] = useState<string>("");
+  const [isLowSignalCollapsed, setIsLowSignalCollapsed] = useState(true);
   const successTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Cleanup timeout on unmount
@@ -145,16 +148,21 @@ export function WorkflowEventGroup({ workflowId, scriptId, scriptRunId, events }
   }
 
   // Combine non-gmail events with consolidated gmail event
-  const finalEvents = [
+  const allVisibleEvents = [
     ...nonGmailEvents,
     ...(consolidatedGmailEvent ? [consolidatedGmailEvent] : []),
   ];
 
-  // Check if this is an empty group (only workflow_run events)
-  const isEmpty = finalEvents.length === 0;
-
   // Determine if this run has an error (for header styling)
   const hasError = scriptRun?.error && scriptRun.error.length > 0;
+
+  // Partition events by signal level for collapsing behavior
+  // When there's an error, show all events for debugging context
+  const { highSignal, lowSignal } = partitionEventsBySignal(allVisibleEvents);
+  const shouldCollapseEvents = !hasError && lowSignal.length > 0;
+
+  // Check if this is an empty group (only workflow_run events)
+  const isEmpty = allVisibleEvents.length === 0;
 
   // Error styling: red left border on container, error-tinted header
   const containerClass = `mx-0 my-3 border bg-gray-50 rounded-lg ${
@@ -223,7 +231,8 @@ export function WorkflowEventGroup({ workflowId, scriptId, scriptRunId, events }
       {/* Events List - only show if there are visible events */}
       {!isEmpty && (
         <div className="p-2 space-y-1">
-          {finalEvents.map((event) => (
+          {/* High-signal events are always visible */}
+          {highSignal.map((event) => (
             <EventItem
               key={event.id}
               type={event.type as EventType}
@@ -232,6 +241,40 @@ export function WorkflowEventGroup({ workflowId, scriptId, scriptRunId, events }
               usage={(event.content as any)?.usage}
             />
           ))}
+
+          {/* Low-signal events can be collapsed */}
+          {shouldCollapseEvents && (
+            <>
+              <CollapsedEventSummary
+                events={lowSignal}
+                isExpanded={!isLowSignalCollapsed}
+                onToggle={() => setIsLowSignalCollapsed(!isLowSignalCollapsed)}
+              />
+              {/* Show expanded low-signal events when not collapsed */}
+              {!isLowSignalCollapsed &&
+                lowSignal.map((event) => (
+                  <EventItem
+                    key={event.id}
+                    type={event.type as EventType}
+                    content={event.content as EventPayload}
+                    timestamp={event.timestamp}
+                    usage={(event.content as any)?.usage}
+                  />
+                ))}
+            </>
+          )}
+
+          {/* When there's an error, show all low-signal events without collapse */}
+          {hasError &&
+            lowSignal.map((event) => (
+              <EventItem
+                key={event.id}
+                type={event.type as EventType}
+                content={event.content as EventPayload}
+                timestamp={event.timestamp}
+                usage={(event.content as any)?.usage}
+              />
+            ))}
         </div>
       )}
     </div>

@@ -390,16 +390,23 @@ These are documented FIXMEs in the codebase that need attention:
 - **Files**: `apps/web/src/types/events.ts`, `apps/web/src/components/EventItem.tsx`, `apps/web/src/components/TaskEventGroup.tsx`, `apps/web/src/components/WorkflowEventGroup.tsx`
 - **Resolution**: Added EventSignificance type ('normal', 'write', 'error', 'success', 'user', 'state') to events.ts. Updated all EVENT_CONFIGS entries with significance field. Added getEventSignificance() function for dynamic Gmail method detection. Updated EventItem.tsx with significance-based styling (different border/background colors per significance level). Updated TaskEventGroup and WorkflowEventGroup to show red left border and error-tinted header for runs with errors.
 
+### 49. collapse-low-signal-events.md
+- **Status**: IMPLEMENTED (2026-01-19)
+- **Effort**: S
+- **Description**: Auto-collapse routine read operations (web fetch, text analysis, Gmail reads) while keeping high-signal events (writes, errors, user interactions) visible. Users can expand collapsed sections to see full details.
+- **Files**: `apps/web/src/lib/eventSignal.ts` (new), `apps/web/src/components/CollapsedEventSummary.tsx` (new), `apps/web/src/components/TaskEventGroup.tsx`, `apps/web/src/components/WorkflowEventGroup.tsx`
+- **Resolution**: Created SignalLevel classification ('high' | 'low') separate from EventSignificance for visual styling. Added getEventSignalLevel() for dynamic classification including Gmail read vs write detection. Created CollapsedEventSummary component showing event count, types, and aggregate cost. Updated both EventGroup components to partition events and show collapsible low-signal section. Error states auto-expand all events for debugging context.
+
 ---
 
 ### Implemented
 - **simplify-question-answering.md**: QuickReplyButtons component implemented for answering agent questions
 - **script-versioning.md**: Full UI implemented with diff view and rollback capability
 - **highlight-significant-events.md**: Color-coded event display for better visual scannability (see #48 above)
+- **collapse-low-signal-events.md**: Auto-collapse routine read operations, keep high-signal events visible (see #49 above)
 
 ### High Priority for V1 UX (NOT_STARTED)
 - **dry-run-testing.md**: Safely test automation scripts before enabling scheduled runs
-- **collapse-low-signal-events.md**: Auto-collapse routine read operations, keep high-signal events visible
 
 ### Future Enhancements (Post-V1)
 - **user-balance-and-payments.md**: Credit system, Stripe integration, low-balance notifications
@@ -417,13 +424,13 @@ These are documented FIXMEs in the codebase that need attention:
 | P1 (Important) | 13 | 13 COMPLETED, 0 NOT_STARTED |
 | P2 (Nice-to-have) | 26 | 23 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 VERIFIED_NO_ISSUE, 1 SKIPPED, 0 NOT_STARTED |
 | P3 (Post-V1) | 3 | 3 NOT_STARTED |
-| V1 Feature Ideas | 1 | 1 IMPLEMENTED |
-| **Total** | **48** | **42 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 VERIFIED_NO_ISSUE, 1 SKIPPED, 3 NOT_STARTED** |
+| V1 Feature Ideas | 2 | 2 IMPLEMENTED |
+| **Total** | **49** | **43 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 VERIFIED_NO_ISSUE, 1 SKIPPED, 3 NOT_STARTED** |
 
 ### V1 Feature Ideas
 
 | Status | Count |
 |--------|-------|
-| IMPLEMENTED | 3 |
-| NOT_STARTED (High Priority) | 2 |
+| IMPLEMENTED | 4 |
+| NOT_STARTED (High Priority) | 1 |
 | NOT_STARTED (Post-V1) | 4+ |

@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useTask, useTaskRun } from "../hooks/dbTaskReads";
 import { useScriptRun } from "../hooks/dbScriptReads";
 import { EventItem } from "./EventItem";
+import { CollapsedEventSummary } from "./CollapsedEventSummary";
 import {
   EventType,
   EventPayload,
@@ -16,6 +17,7 @@ import {
   DropdownMenuItem,
 } from "../ui";
 import { transformGmailMethod, formatDuration } from "../lib/event-helpers";
+import { partitionEventsBySignal } from "../lib/eventSignal";
 
 interface TaskEvent {
   id: string;
@@ -32,6 +34,7 @@ interface TaskEventGroupProps {
 export function TaskEventGroup({ taskId, events }: TaskEventGroupProps) {
   const navigate = useNavigate();
   const { data: task } = useTask(taskId);
+  const [isLowSignalCollapsed, setIsLowSignalCollapsed] = useState(true);
 
   // Get task_run_id or script_run_id from any event
   const taskRunId = events.length > 0 ? events[0].content?.task_run_id : null;
@@ -126,16 +129,21 @@ export function TaskEventGroup({ taskId, events }: TaskEventGroupProps) {
   }
 
   // Combine non-gmail events with consolidated gmail event
-  const finalEvents = [
+  const allVisibleEvents = [
     ...nonGmailEvents,
     ...(consolidatedGmailEvent ? [consolidatedGmailEvent] : []),
   ];
 
-  // Check if this is an empty group (only task_run events)
-  const isEmpty = finalEvents.length === 0;
-
   // Determine if this run has an error (for header styling)
   const hasError = run?.error && run.error.length > 0;
+
+  // Partition events by signal level for collapsing behavior
+  // When there's an error, show all events for debugging context
+  const { highSignal, lowSignal } = partitionEventsBySignal(allVisibleEvents);
+  const shouldCollapseEvents = !hasError && lowSignal.length > 0;
+
+  // Check if this is an empty group (only task_run events)
+  const isEmpty = allVisibleEvents.length === 0;
 
   // Shared header content component to avoid duplication
   const HeaderContent = () => (
@@ -226,7 +234,8 @@ export function TaskEventGroup({ taskId, events }: TaskEventGroupProps) {
       {/* Events List - only show if there are visible events */}
       {!isEmpty && (
         <div className="p-2 space-y-1">
-          {finalEvents.map((event) => (
+          {/* High-signal events are always visible */}
+          {highSignal.map((event) => (
             <EventItem
               key={event.id}
               type={event.type as EventType}
@@ -235,6 +244,40 @@ export function TaskEventGroup({ taskId, events }: TaskEventGroupProps) {
               usage={(event.content as any)?.usage}
             />
           ))}
+
+          {/* Low-signal events can be collapsed */}
+          {shouldCollapseEvents && (
+            <>
+              <CollapsedEventSummary
+                events={lowSignal}
+                isExpanded={!isLowSignalCollapsed}
+                onToggle={() => setIsLowSignalCollapsed(!isLowSignalCollapsed)}
+              />
+              {/* Show expanded low-signal events when not collapsed */}
+              {!isLowSignalCollapsed &&
+                lowSignal.map((event) => (
+                  <EventItem
+                    key={event.id}
+                    type={event.type as EventType}
+                    content={event.content as EventPayload}
+                    timestamp={event.timestamp}
+                    usage={(event.content as any)?.usage}
+                  />
+                ))}
+            </>
+          )}
+
+          {/* When there's an error, show all low-signal events without collapse */}
+          {hasError &&
+            lowSignal.map((event) => (
+              <EventItem
+                key={event.id}
+                type={event.type as EventType}
+                content={event.content as EventPayload}
+                timestamp={event.timestamp}
+                usage={(event.content as any)?.usage}
+              />
+            ))}
         </div>
       )}
     </div>
