@@ -199,10 +199,11 @@ This document prioritizes tasks for achieving a simple, lovable, and complete v1
 - **Resolution**: Updated formatAsks() in packages/agent/src/ai-tools/ask.ts to filter empty/whitespace-only strings and remove duplicates from options array using trim(), filter(), and Set.
 
 ### 27. remove-duplicate-parse-asks.md
-- **Status**: NOT_STARTED
+- **Status**: COMPLETED (2026-01-19)
 - **Effort**: S
 - **Description**: parseAsks and StructuredAsk duplicated in `apps/web/src/lib/parseAsks.ts` and `packages/agent/src/ai-tools/ask.ts`. Delete web copy, import from @app/agent.
 - **Files**: Delete `apps/web/src/lib/parseAsks.ts`
+- **Resolution**: Added `@app/agent` dependency to apps/web/package.json. Updated ChatPage.tsx to import `parseAsks` from `@app/agent` instead of local duplicate. Deleted `apps/web/src/lib/parseAsks.ts`. Single source of truth now in packages/agent.
 
 ### 28. consolidate-autonomy-mode-type.md
 - **Status**: NOT_STARTED
@@ -381,9 +382,9 @@ These are documented FIXMEs in the codebase that need attention:
 |----------|-------|--------|
 | P0 (Critical) | 5 | 5 COMPLETED |
 | P1 (Important) | 13 | 13 COMPLETED, 0 NOT_STARTED |
-| P2 (Nice-to-have) | 26 | 7 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 NEEDS_VERIFICATION, 17 NOT_STARTED |
+| P2 (Nice-to-have) | 26 | 8 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 NEEDS_VERIFICATION, 16 NOT_STARTED |
 | P3 (Post-V1) | 3 | 3 NOT_STARTED |
-| **Total** | **47** | **25 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 NEEDS_VERIFICATION, 20 NOT_STARTED** |
+| **Total** | **47** | **26 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 NEEDS_VERIFICATION, 19 NOT_STARTED** |
 
 ### V1 Feature Ideas
 
