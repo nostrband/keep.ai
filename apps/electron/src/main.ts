@@ -121,28 +121,33 @@ function setupIpcHandlers(): void {
       return false;
     }
 
-    const notification = new Notification({
-      title: options.title,
-      body: options.body,
-      icon: path.join(__dirname, "../assets/icon.png"),
-    });
+    try {
+      const notification = new Notification({
+        title: options.title,
+        body: options.body,
+        icon: path.join(__dirname, "../assets/icon.png"),
+      });
 
-    // When user clicks the notification, open the app
-    notification.on('click', () => {
-      if (!mainWindow) {
-        createWindow();
-      }
-      mainWindow?.show();
-      mainWindow?.focus();
+      // When user clicks the notification, open the app
+      notification.on('click', () => {
+        if (!mainWindow) {
+          createWindow();
+        }
+        mainWindow?.show();
+        mainWindow?.focus();
 
-      // If workflowId provided, navigate to workflow detail page
-      if (options.workflowId) {
-        mainWindow?.webContents.send('navigate-to', `/workflows/${options.workflowId}`);
-      }
-    });
+        // If workflowId provided, navigate to workflow detail page
+        if (options.workflowId) {
+          mainWindow?.webContents.send('navigate-to', `/workflows/${options.workflowId}`);
+        }
+      });
 
-    notification.show();
-    return true;
+      notification.show();
+      return true;
+    } catch (error) {
+      debugMain('Failed to create notification:', error);
+      return false;
+    }
   });
 
   // Handle tray badge update for attention items [Spec 00, 09]

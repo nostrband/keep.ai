@@ -87,10 +87,11 @@ This document prioritizes tasks for achieving a simple, lovable, and complete v1
 - **Files**: `apps/electron/src/main.ts`
 
 ### 12. notification-error-handling.md
-- **Status**: NOT_STARTED
+- **Status**: COMPLETED (2026-01-19)
 - **Effort**: S
 - **Description**: Electron notification IPC handler has no try-catch around Notification constructor.
 - **Files**: `apps/electron/src/main.ts`
+- **Resolution**: Added try-catch around Notification creation and show. Errors are logged via debugMain and handler returns false to indicate failure instead of throwing.
 
 ### 13. batch-fetch-workflow-runs.md
 - **Status**: NOT_STARTED
@@ -362,10 +363,10 @@ These are documented FIXMEs in the codebase that need attention:
 | Priority | Count | Status |
 |----------|-------|--------|
 | P0 (Critical) | 5 | 5 COMPLETED |
-| P1 (Important) | 13 | 3 COMPLETED, 10 NOT_STARTED |
+| P1 (Important) | 13 | 4 COMPLETED, 9 NOT_STARTED |
 | P2 (Nice-to-have) | 26 | 1 NEEDS_VERIFICATION, 25 NOT_STARTED |
 | P3 (Post-V1) | 3 | 3 NOT_STARTED |
-| **Total** | **47** | **8 COMPLETED, 1 NEEDS_VERIFICATION, 38 NOT_STARTED** |
+| **Total** | **47** | **9 COMPLETED, 1 NEEDS_VERIFICATION, 37 NOT_STARTED** |
 
 ### V1 Feature Ideas
 
