@@ -224,7 +224,7 @@ Supports wav, mp3, mp4, mpeg, m4a, mpga, aac, flac, webm audio formats up to 10M
           explanation:
             explanation.substring(0, 200) +
             (explanation.length > 200 ? "..." : ""),
-          usage
+          usage: { cost: usage.cost },
         });
 
         return {

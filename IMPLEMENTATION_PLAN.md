@@ -74,10 +74,11 @@ This document prioritizes tasks for achieving a simple, lovable, and complete v1
 - **Files**: `packages/agent/src/workflow-worker.ts`, `packages/agent/src/errors.ts`
 
 ### 10. fix-audio-explain-cost-tracking.md
-- **Status**: NOT_STARTED
+- **Status**: COMPLETED (2026-01-19)
 - **Effort**: S
 - **Description**: audio-explain tool passes full `usage` object instead of `{ usage: { cost: usage.cost } }`. Costs may not accumulate correctly.
 - **Files**: `packages/agent/src/tools/audio-explain.ts`
+- **Resolution**: Changed `usage` to `usage: { cost: usage.cost }` in createEvent call, matching the pattern used by all other tools (pdf-explain, images-explain, text-generate, etc.). This ensures audio processing costs are properly tracked.
 
 ### 11. electron-window-ready-before-ipc.md
 - **Status**: NOT_STARTED
@@ -361,10 +362,10 @@ These are documented FIXMEs in the codebase that need attention:
 | Priority | Count | Status |
 |----------|-------|--------|
 | P0 (Critical) | 5 | 5 COMPLETED |
-| P1 (Important) | 13 | 2 COMPLETED, 11 NOT_STARTED |
+| P1 (Important) | 13 | 3 COMPLETED, 10 NOT_STARTED |
 | P2 (Nice-to-have) | 26 | 1 NEEDS_VERIFICATION, 25 NOT_STARTED |
 | P3 (Post-V1) | 3 | 3 NOT_STARTED |
-| **Total** | **47** | **7 COMPLETED, 1 NEEDS_VERIFICATION, 39 NOT_STARTED** |
+| **Total** | **47** | **8 COMPLETED, 1 NEEDS_VERIFICATION, 38 NOT_STARTED** |
 
 ### V1 Feature Ideas
 
