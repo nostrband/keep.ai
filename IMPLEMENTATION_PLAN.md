@@ -267,10 +267,11 @@ This document prioritizes tasks for achieving a simple, lovable, and complete v1
 - **Resolution**: Replaced custom DEBUG_SW/debugLog pattern with standard `debug` module. Now uses `log = debug("keep:service-worker")` matching the pattern in worker.ts and shared-worker.ts. Debug output can be controlled at runtime via DEBUG env var.
 
 ### 36. shared-worker-enable-debug.md
-- **Status**: NOT_STARTED
+- **Status**: COMPLETED (2026-01-19)
 - **Effort**: S
 - **Description**: shared-worker uses debug() but has no `debug.enable()` call like worker.ts does.
 - **Files**: `apps/web/src/shared-worker.ts`
+- **Resolution**: Added the same debug enablement pattern from worker.ts to shared-worker.ts. Now enables `debug.enable("*")` in development mode when `__DEV__` is true.
 
 ### 37. standardize-dev-mode-check.md
 - **Status**: NOT_STARTED
@@ -395,9 +396,9 @@ These are documented FIXMEs in the codebase that need attention:
 |----------|-------|--------|
 | P0 (Critical) | 5 | 5 COMPLETED |
 | P1 (Important) | 13 | 13 COMPLETED, 0 NOT_STARTED |
-| P2 (Nice-to-have) | 26 | 14 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 NEEDS_VERIFICATION, 10 NOT_STARTED |
+| P2 (Nice-to-have) | 26 | 15 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 NEEDS_VERIFICATION, 9 NOT_STARTED |
 | P3 (Post-V1) | 3 | 3 NOT_STARTED |
-| **Total** | **47** | **32 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 NEEDS_VERIFICATION, 13 NOT_STARTED** |
+| **Total** | **47** | **33 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 NEEDS_VERIFICATION, 12 NOT_STARTED** |
 
 ### V1 Feature Ideas
 

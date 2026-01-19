@@ -3,6 +3,12 @@ import debug from "debug";
 import { API_ENDPOINT } from "./const";
 import { SyncWorker } from "./lib/worker";
 
+// Only enable debug logging in development mode
+declare const __DEV__: boolean;
+if (typeof __DEV__ !== "undefined" && __DEV__) {
+  debug.enable("*");
+}
+
 declare const self: SharedWorkerGlobalScope;
 
 const log = debug("keep:shared-worker");
