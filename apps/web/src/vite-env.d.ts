@@ -19,15 +19,19 @@ interface ElectronAPI {
   getVersion: () => Promise<string>;
   getPlatform: () => string;
   removeAllListeners: (channel: string) => void;
+  removeListener: (channel: string, callback: (...args: unknown[]) => void) => void;
   showNotification: (options: {
     title: string;
     body: string;
     workflowId?: string;
   }) => Promise<void>;
   updateTrayBadge: (count: number) => Promise<void>;
-  onNavigateTo: (callback: (path: string) => void) => void;
-  onFocusInput: (callback: () => void) => void;
-  onPauseAllAutomations: (callback: () => void) => void;
+  // Returns unsubscribe function to remove only this listener
+  onNavigateTo: (callback: (path: string) => void) => () => void;
+  // Returns unsubscribe function to remove only this listener
+  onFocusInput: (callback: () => void) => () => void;
+  // Returns unsubscribe function to remove only this listener
+  onPauseAllAutomations: (callback: () => void) => () => void;
 }
 
 // Extend Window interface with Electron API

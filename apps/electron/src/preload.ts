@@ -25,9 +25,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Platform information
   getPlatform: () => process.platform,
 
-  // Remove listeners
+  // Remove all listeners for a channel
   removeAllListeners: (channel: string) => {
     ipcRenderer.removeAllListeners(channel);
+  },
+
+  // Remove a specific listener for a channel
+  removeListener: (channel: string, callback: (...args: unknown[]) => void) => {
+    ipcRenderer.removeListener(channel, callback);
   },
 
   // OS-level notifications for workflow errors [Spec 09]
@@ -41,18 +46,27 @@ contextBridge.exposeInMainWorld('electronAPI', {
   updateTrayBadge: (count: number) => ipcRenderer.invoke('update-tray-badge', count),
 
   // Listen for navigation from notification clicks
+  // Returns unsubscribe function to remove only this listener
   onNavigateTo: (callback: (path: string) => void) => {
-    ipcRenderer.on('navigate-to', (_event: any, path: string) => callback(path));
+    const handler = (_event: unknown, path: string) => callback(path);
+    ipcRenderer.on('navigate-to', handler);
+    return () => ipcRenderer.removeListener('navigate-to', handler);
   },
 
   // Listen for focus-input message from tray menu "New automation..." [Spec 01]
+  // Returns unsubscribe function to remove only this listener
   onFocusInput: (callback: () => void) => {
-    ipcRenderer.on('focus-input', () => callback());
+    const handler = () => callback();
+    ipcRenderer.on('focus-input', handler);
+    return () => ipcRenderer.removeListener('focus-input', handler);
   },
 
   // Listen for pause-all-automations message from tray menu [Spec 11]
+  // Returns unsubscribe function to remove only this listener
   onPauseAllAutomations: (callback: () => void) => {
-    ipcRenderer.on('pause-all-automations', () => callback());
+    const handler = () => callback();
+    ipcRenderer.on('pause-all-automations', handler);
+    return () => ipcRenderer.removeListener('pause-all-automations', handler);
   },
 });
 

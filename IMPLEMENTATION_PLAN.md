@@ -23,10 +23,11 @@ This document prioritizes tasks for achieving a simple, lovable, and complete v1
 - **Resolution**: Added `MAX_NETWORK_RETRIES = 5` constant to `WorkflowScheduler`. Modified retry handler to check retry count and escalate to user attention when exceeded. Workflow is marked as 'error' status when max retries exceeded. Retry state is cleared when escalating.
 
 ### 3. fix-electron-navigation-handler-cleanup.md
-- **Status**: NOT_STARTED
+- **Status**: COMPLETED (2026-01-19)
 - **Effort**: S
 - **Description**: Memory leak in App.tsx - `navigate` in useEffect dependencies causes new IPC listeners on each render. Uses `removeAllListeners` pattern which removes all listeners not just component's own.
-- **Files**: `apps/web/src/App.tsx`
+- **Files**: `apps/web/src/App.tsx`, `apps/electron/src/preload.ts`, `apps/web/src/vite-env.d.ts`
+- **Resolution**: Used `useRef` to hold navigate function and empty dependency array so effect runs only once on mount. Updated preload.ts to return unsubscribe functions from `onNavigateTo`, `onFocusInput`, and `onPauseAllAutomations` instead of relying on `removeAllListeners`. Updated TypeScript types in vite-env.d.ts accordingly. This prevents multiple listeners accumulating and ensures proper cleanup of only this component's listener.
 
 ### 4. handle-get-autonomy-mode-error.md
 - **Status**: COMPLETED (2026-01-19)
@@ -357,11 +358,11 @@ These are documented FIXMEs in the codebase that need attention:
 
 | Priority | Count | Status |
 |----------|-------|--------|
-| P0 (Critical) | 5 | 4 COMPLETED, 1 NOT_STARTED |
+| P0 (Critical) | 5 | 5 COMPLETED |
 | P1 (Important) | 13 | 13 NOT_STARTED |
 | P2 (Nice-to-have) | 26 | 1 NEEDS_VERIFICATION, 25 NOT_STARTED |
 | P3 (Post-V1) | 3 | 3 NOT_STARTED |
-| **Total** | **47** | **4 COMPLETED, 1 NEEDS_VERIFICATION, 42 NOT_STARTED** |
+| **Total** | **47** | **5 COMPLETED, 1 NEEDS_VERIFICATION, 41 NOT_STARTED** |
 
 ### V1 Feature Ideas
 
