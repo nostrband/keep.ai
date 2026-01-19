@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   useWorkflow,
   useLatestScriptByWorkflowId,
@@ -15,10 +16,12 @@ import ScriptDiff from "./ScriptDiff";
 import { Badge, Button } from "../ui";
 import { workflowNotifications } from "../lib/WorkflowNotifications";
 import { WorkflowStatusBadge } from "./StatusBadge";
+import { API_ENDPOINT } from "../const";
 
 export default function WorkflowDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { data: workflow, isLoading } = useWorkflow(id!);
   const { data: task } = useTask(workflow?.task_id || "");
   const { data: chat } = useChat(task?.chat_id || "");
@@ -26,9 +29,12 @@ export default function WorkflowDetailPage() {
   const { data: scriptRuns = [], isLoading: isLoadingRuns } = useScriptRunsByWorkflowId(id!);
   const { data: scriptVersions = [], isLoading: isLoadingVersions } = useScriptVersionsByWorkflowId(id!);
   const [successMessage, setSuccessMessage] = useState<string>("");
+  const [warningMessage, setWarningMessage] = useState<string>("");
+  const [isTestRunning, setIsTestRunning] = useState(false);
   const [showVersionHistory, setShowVersionHistory] = useState(false);
   const [diffVersions, setDiffVersions] = useState<{ oldId: string; newId: string } | null>(null);
   const successTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const warningTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const updateWorkflowMutation = useUpdateWorkflow();
   const rollbackMutation = useRollbackScript();
@@ -41,11 +47,14 @@ export default function WorkflowDetailPage() {
     }
   }, [id]);
 
-  // Cleanup timeout on unmount
+  // Cleanup timeouts on unmount
   useEffect(() => {
     return () => {
       if (successTimeoutRef.current) {
         clearTimeout(successTimeoutRef.current);
+      }
+      if (warningTimeoutRef.current) {
+        clearTimeout(warningTimeoutRef.current);
       }
     };
   }, []);
@@ -60,6 +69,18 @@ export default function WorkflowDetailPage() {
       setSuccessMessage("");
       successTimeoutRef.current = null;
     }, 3000);
+  };
+
+  // Helper to show warning message with auto-clear
+  const showWarning = (message: string) => {
+    if (warningTimeoutRef.current) {
+      clearTimeout(warningTimeoutRef.current);
+    }
+    setWarningMessage(message);
+    warningTimeoutRef.current = setTimeout(() => {
+      setWarningMessage("");
+      warningTimeoutRef.current = null;
+    }, 5000);
   };
 
   // Get next run time from workflow.next_run_timestamp
@@ -130,6 +151,39 @@ export default function WorkflowDetailPage() {
         showSuccessMessage("Workflow scheduled to run now");
       },
     });
+  };
+
+  const handleTestRun = async () => {
+    if (!workflow || !latestScript) return;
+
+    setIsTestRunning(true);
+    setWarningMessage("");
+    setSuccessMessage("");
+
+    try {
+      const response = await fetch(`${API_ENDPOINT}/workflow/test-run`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ workflow_id: workflow.id }),
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        showSuccessMessage("Test completed successfully");
+      } else {
+        showWarning(`Test failed: ${result.error || 'Unknown error'}`);
+      }
+
+      // Refresh the script runs list to show the new test run
+      queryClient.invalidateQueries({ queryKey: ['scriptRuns', workflow.id] });
+    } catch (error) {
+      showWarning(`Test failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setIsTestRunning(false);
+    }
   };
 
   const handleChat = () => {
@@ -226,6 +280,18 @@ export default function WorkflowDetailPage() {
                         Run now
                       </Button>
                     )}
+                    {/* Show Test Run button for any workflow with a script - runs immediately without affecting workflow state */}
+                    {latestScript && (
+                      <Button
+                        onClick={handleTestRun}
+                        disabled={isTestRunning || updateWorkflowMutation.isPending}
+                        size="sm"
+                        variant="outline"
+                        className="cursor-pointer bg-amber-50 border-amber-300 text-amber-900 hover:bg-amber-100"
+                      >
+                        {isTestRunning ? "Testing..." : "Test run"}
+                      </Button>
+                    )}
                     {/* Show Pause button for Active workflows */}
                     {workflow.status === "active" && (
                       <Button
@@ -270,6 +336,11 @@ export default function WorkflowDetailPage() {
                   {successMessage && (
                     <div className="text-sm text-green-600 bg-green-50 px-2 py-1 rounded border border-green-200">
                       {successMessage}
+                    </div>
+                  )}
+                  {warningMessage && (
+                    <div className="text-sm text-amber-700 bg-amber-50 px-2 py-1 rounded border border-amber-200">
+                      {warningMessage}
                     </div>
                   )}
                 </div>
@@ -540,6 +611,12 @@ export default function WorkflowDetailPage() {
                             <Badge variant={run.error ? 'destructive' : run.end_timestamp ? 'default' : 'secondary'}>
                               {run.error ? 'error' : run.end_timestamp ? 'completed' : 'running'}
                             </Badge>
+                            {/* Show test badge if this is a test run */}
+                            {run.type === 'test' && (
+                              <Badge variant="outline" className="text-amber-700 border-amber-300 bg-amber-50 text-xs">
+                                Test
+                              </Badge>
+                            )}
                             {/* Show retry badge if this is a retry run */}
                             {run.retry_of && run.retry_count > 0 && (
                               <Badge variant="outline" className="text-orange-700 border-orange-300 bg-orange-50 text-xs">

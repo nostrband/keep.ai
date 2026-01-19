@@ -57,13 +57,15 @@ export class WorkflowWorker {
    * @param workflow - The workflow to execute
    * @param retryOf - ID of the original failed script run (for retry tracking)
    * @param retryCount - Which retry attempt this is (0 for first attempt)
+   * @param runType - Type of run: "workflow" for scheduled runs, "test" for test/dry runs
    */
   public async executeWorkflow(
     workflow: Workflow,
     retryOf: string = '',
-    retryCount: number = 0
+    retryCount: number = 0,
+    runType: string = 'workflow'
   ): Promise<void> {
-    this.debug("Execute workflow", workflow, "retryOf:", retryOf, "retryCount:", retryCount);
+    this.debug("Execute workflow", workflow, "retryOf:", retryOf, "retryCount:", retryCount, "runType:", runType);
 
     try {
       // Find scripts by workflow_id
@@ -81,7 +83,7 @@ export class WorkflowWorker {
       // Use the latest script (first one, since getScriptsByWorkflowId orders by version DESC)
       const script = scripts[0];
 
-      await this.processWorkflowScript(workflow, script, retryOf, retryCount);
+      await this.processWorkflowScript(workflow, script, retryOf, retryCount, runType);
     } catch (error) {
       this.debug("Workflow handling error:", error);
       throw error;
@@ -105,7 +107,8 @@ export class WorkflowWorker {
     workflow: Workflow,
     script: Script,
     retryOf: string = '',
-    retryCount: number = 0
+    retryCount: number = 0,
+    runType: string = 'workflow'
   ) {
     const scriptRunId = generateId();
     this.debug(
@@ -118,15 +121,20 @@ export class WorkflowWorker {
       "retryOf:",
       retryOf,
       "retryCount:",
-      retryCount
+      retryCount,
+      "runType:",
+      runType
     );
+
+    // For test runs, skip maintenance mode and auto-retry logic
+    const isTestRun = runType === 'test';
 
     await this.api.scriptStore.startScriptRun(
       scriptRunId,
       script.id,
       new Date().toISOString(),
       workflow.id,
-      "workflow",
+      runType,
       retryOf,
       retryCount
     );
@@ -175,29 +183,34 @@ export class WorkflowWorker {
         costMicrodollars
       );
 
-      // Update workflow timestamp to mark last successful run
-      // Use updateWorkflowFields for atomic update to prevent overwriting concurrent changes
-      await this.api.scriptStore.updateWorkflowFields(workflow.id, {
-        timestamp: new Date().toISOString(),
-      });
+      // For test runs, skip workflow timestamp update and scheduler signals
+      if (!isTestRun) {
+        // Update workflow timestamp to mark last successful run
+        // Use updateWorkflowFields for atomic update to prevent overwriting concurrent changes
+        await this.api.scriptStore.updateWorkflowFields(workflow.id, {
+          timestamp: new Date().toISOString(),
+        });
 
-      // Reset maintenance fix count on successful run (the fix worked!)
-      // This prevents old fix counts from persisting after issues are resolved
-      if (workflow.maintenance_fix_count > 0) {
-        await this.api.scriptStore.resetMaintenanceFixCount(workflow.id);
-        this.debug("Reset maintenance fix count for workflow", workflow.id);
+        // Reset maintenance fix count on successful run (the fix worked!)
+        // This prevents old fix counts from persisting after issues are resolved
+        if (workflow.maintenance_fix_count > 0) {
+          await this.api.scriptStore.resetMaintenanceFixCount(workflow.id);
+          this.debug("Reset maintenance fix count for workflow", workflow.id);
+        }
+
+        // Check for warnings or errors in logs and notify
+        await this.checkLogsAndNotify(workflow, scriptRunId, logs);
+
+        // Signal success to scheduler
+        this.emitSignal({
+          type: "done",
+          workflowId: workflow.id,
+          timestamp: Date.now(),
+          scriptRunId,
+        });
+      } else {
+        this.debug("Test run completed successfully, skipping workflow updates and signals");
       }
-
-      // Check for warnings or errors in logs and notify
-      await this.checkLogsAndNotify(workflow, scriptRunId, logs);
-
-      // Signal success to scheduler
-      this.emitSignal({
-        type: "done",
-        workflowId: workflow.id,
-        timestamp: Date.now(),
-        scriptRunId,
-      });
     } catch (error: any) {
       const errorMessage =
         error instanceof Error ? error.message : (error as string);
@@ -269,6 +282,13 @@ export class WorkflowWorker {
         await this.checkLogsAndNotify(workflow, scriptRunId, logs);
       } catch (e) {
         this.debug("checkLogsAndNotify error", e);
+      }
+
+      // For test runs, skip workflow status changes, maintenance mode, and scheduler signals
+      // Just record the error in script_runs and re-throw
+      if (isTestRun) {
+        this.debug("Test run error, skipping workflow status changes and signals:", errorMessage);
+        throw error;
       }
 
       // Handle different error types based on classification

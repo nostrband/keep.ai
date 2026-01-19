@@ -27,6 +27,7 @@ import {
   getEnv,
   TaskScheduler,
   WorkflowScheduler,
+  WorkflowWorker,
   Env,
   DEFAULT_AGENT_MODEL,
   setEnvFromProcess,
@@ -1581,6 +1582,87 @@ export async function createServer(config: ServerConfig = {}) {
       debugServer("Error in /api/id:", error);
       return reply.status(500).send({
         error: "Failed to get site_id",
+        message: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
+  // POST /api/workflow/test-run - Execute a test run for a workflow
+  // This runs the workflow script immediately without affecting the workflow state
+  // (no status changes, no maintenance mode, no scheduler signals)
+  app.post("/api/workflow/test-run", async (request, reply) => {
+    try {
+      const body = request.body as { workflow_id: string };
+
+      if (!body.workflow_id) {
+        return reply.status(400).send({ error: "workflow_id is required" });
+      }
+
+      // Get the workflow from the database
+      const workflow = await api.scriptStore.getWorkflow(body.workflow_id);
+      if (!workflow) {
+        return reply.status(404).send({ error: "Workflow not found" });
+      }
+
+      // Check if the workflow has scripts
+      const scripts = await api.scriptStore.getScriptsByWorkflowId(workflow.id);
+      if (scripts.length === 0) {
+        return reply.status(400).send({ error: "Workflow has no scripts to run" });
+      }
+
+      // Create a standalone WorkflowWorker for test execution
+      const gmailOAuth2Client = await createGmailOAuth2Client(userPath);
+      const testWorker = new WorkflowWorker({
+        api: new KeepDbApi(keepDB),
+        userPath,
+        gmailOAuth2Client,
+        // No onSignal - test runs don't emit signals to scheduler
+      });
+
+      debugServer("Starting test run for workflow:", workflow.id);
+
+      // Execute the workflow as a test run (type="test")
+      // This runs in the background - return immediately with confirmation
+      const executePromise = testWorker.executeWorkflow(
+        workflow,
+        '', // no retryOf
+        0,  // retryCount
+        'test' // runType
+      );
+
+      // Wait for execution to complete and return the result
+      // Test runs have a 5-minute timeout (same as regular runs)
+      try {
+        await executePromise;
+        debugServer("Test run completed successfully for workflow:", workflow.id);
+
+        // Get the latest script run to return details
+        const runs = await api.scriptStore.getScriptRunsByWorkflowId(workflow.id);
+        const latestRun = runs.length > 0 ? runs[0] : null;
+
+        return reply.send({
+          success: true,
+          message: "Test run completed successfully",
+          scriptRunId: latestRun?.id,
+        });
+      } catch (error) {
+        debugServer("Test run failed for workflow:", workflow.id, error);
+
+        // Get the latest script run to return error details
+        const runs = await api.scriptStore.getScriptRunsByWorkflowId(workflow.id);
+        const latestRun = runs.length > 0 ? runs[0] : null;
+
+        return reply.send({
+          success: false,
+          message: "Test run failed",
+          error: error instanceof Error ? error.message : "Unknown error",
+          scriptRunId: latestRun?.id,
+        });
+      }
+    } catch (error) {
+      debugServer("Error in /api/workflow/test-run:", error);
+      return reply.status(500).send({
+        error: "Failed to start test run",
         message: error instanceof Error ? error.message : "Unknown error",
       });
     }

@@ -397,6 +397,13 @@ These are documented FIXMEs in the codebase that need attention:
 - **Files**: `apps/web/src/lib/eventSignal.ts` (new), `apps/web/src/components/CollapsedEventSummary.tsx` (new), `apps/web/src/components/TaskEventGroup.tsx`, `apps/web/src/components/WorkflowEventGroup.tsx`
 - **Resolution**: Created SignalLevel classification ('high' | 'low') separate from EventSignificance for visual styling. Added getEventSignalLevel() for dynamic classification including Gmail read vs write detection. Created CollapsedEventSummary component showing event count, types, and aggregate cost. Updated both EventGroup components to partition events and show collapsible low-signal section. Error states auto-expand all events for debugging context.
 
+### 50. dry-run-testing.md
+- **Status**: IMPLEMENTED (2026-01-19)
+- **Effort**: M
+- **Description**: Safely test automation scripts before enabling scheduled runs. Add "Test run" button to WorkflowDetailPage that executes workflow immediately without affecting workflow state.
+- **Files**: `apps/web/src/components/WorkflowDetailPage.tsx`, `apps/server/src/server.ts`, `packages/agent/src/workflow-worker.ts`, `packages/db/src/script-store.ts`
+- **Resolution**: Added "Test run" button to WorkflowDetailPage that executes the workflow script immediately without affecting workflow state. Created `/api/workflow/test-run` endpoint that creates a standalone WorkflowWorker for test execution. Modified WorkflowWorker.executeWorkflow() to accept a runType parameter ("workflow" or "test"). Test runs are stored in script_runs with type="test", skip workflow status changes, don't trigger maintenance mode, and don't emit scheduler signals. UI shows "Test" badge on test runs in the runs list.
+
 ---
 
 ### Implemented
@@ -404,9 +411,7 @@ These are documented FIXMEs in the codebase that need attention:
 - **script-versioning.md**: Full UI implemented with diff view and rollback capability
 - **highlight-significant-events.md**: Color-coded event display for better visual scannability (see #48 above)
 - **collapse-low-signal-events.md**: Auto-collapse routine read operations, keep high-signal events visible (see #49 above)
-
-### High Priority for V1 UX (NOT_STARTED)
-- **dry-run-testing.md**: Safely test automation scripts before enabling scheduled runs
+- **dry-run-testing.md**: "Test run" button safely tests automation scripts without affecting workflow state (see #50 above)
 
 ### Future Enhancements (Post-V1)
 - **user-balance-and-payments.md**: Credit system, Stripe integration, low-balance notifications
@@ -424,13 +429,13 @@ These are documented FIXMEs in the codebase that need attention:
 | P1 (Important) | 13 | 13 COMPLETED, 0 NOT_STARTED |
 | P2 (Nice-to-have) | 26 | 23 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 VERIFIED_NO_ISSUE, 1 SKIPPED, 0 NOT_STARTED |
 | P3 (Post-V1) | 3 | 3 NOT_STARTED |
-| V1 Feature Ideas | 2 | 2 IMPLEMENTED |
-| **Total** | **49** | **43 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 VERIFIED_NO_ISSUE, 1 SKIPPED, 3 NOT_STARTED** |
+| V1 Feature Ideas | 3 | 3 IMPLEMENTED |
+| **Total** | **50** | **44 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 VERIFIED_NO_ISSUE, 1 SKIPPED, 3 NOT_STARTED** |
 
 ### V1 Feature Ideas
 
 | Status | Count |
 |--------|-------|
-| IMPLEMENTED | 4 |
-| NOT_STARTED (High Priority) | 1 |
+| IMPLEMENTED | 5 |
+| NOT_STARTED (High Priority) | 0 |
 | NOT_STARTED (Post-V1) | 4+ |
