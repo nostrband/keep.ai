@@ -1,6 +1,6 @@
 import React from "react";
 import { useParams, Link } from "react-router-dom";
-import { useScriptRun, useScript } from "../hooks/dbScriptReads";
+import { useScriptRun, useScript, useRetriesOfRun } from "../hooks/dbScriptReads";
 import SharedHeader from "./SharedHeader";
 import {
   Badge,
@@ -10,6 +10,7 @@ export default function ScriptRunDetailPage() {
   const { id, runId } = useParams<{ id: string; runId: string }>();
   const { data: run, isLoading } = useScriptRun(runId!);
   const { data: script, isLoading: isLoadingScript } = useScript(run?.script_id || "");
+  const { data: retries } = useRetriesOfRun(runId!);
 
   if (!id || !runId) {
     return <div>Script run ID not found</div>;
@@ -131,6 +132,37 @@ export default function ScriptRunDetailPage() {
                     <p className="text-xs text-gray-500 mt-1">
                       This is retry #{run.retry_count} of the original failed run
                     </p>
+                  </div>
+                )}
+
+                {/* Show links to retry runs if this run has been retried */}
+                {retries && retries.length > 0 && (
+                  <div>
+                    <h3 className="text-sm font-medium text-gray-700 mb-2">
+                      Retry Attempts ({retries.length})
+                    </h3>
+                    <div className="space-y-2">
+                      {retries.map((retry) => (
+                        <div key={retry.id} className="flex items-center gap-2">
+                          <Link
+                            to={`/scripts/${retry.script_id}/runs/${retry.id}`}
+                            className="text-blue-600 hover:text-blue-800 underline font-mono text-sm"
+                          >
+                            Retry #{retry.retry_count}
+                          </Link>
+                          {retry.error ? (
+                            <Badge variant="destructive" className="text-xs">Failed</Badge>
+                          ) : retry.end_timestamp ? (
+                            <Badge variant="default" className="bg-green-100 text-green-800 text-xs">Success</Badge>
+                          ) : (
+                            <Badge variant="secondary" className="text-xs">Running</Badge>
+                          )}
+                          <span className="text-xs text-gray-500">
+                            {new Date(retry.start_timestamp).toLocaleString()}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>

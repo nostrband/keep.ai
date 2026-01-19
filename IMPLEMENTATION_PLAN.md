@@ -349,10 +349,11 @@ This document prioritizes tasks for achieving a simple, lovable, and complete v1
 - **Files**: `apps/web/src/service-worker.ts`, `apps/web/src/App.tsx`
 
 ### 47. retry-reverse-navigation.md
-- **Status**: NOT_STARTED
+- **Status**: COMPLETED (2026-01-19)
 - **Effort**: M
 - **Description**: Can navigate from retry run to original run, but not vice versa. Add "View retry" link on runs that have been retried.
 - **Files**: `apps/web/src/components/ScriptRunDetailPage.tsx`, `packages/db/src/script-store.ts`
+- **Resolution**: Added `getRetriesOfRun(runId)` method to ScriptStore that queries runs where `retry_of = runId`. Added `useRetriesOfRun` React hook and `retriesOfRun` query key. Updated ScriptRunDetailPage to show "Retry Attempts" section with links to each retry, their status badge, and timestamp. Now users can navigate bidirectionally in retry chains.
 
 ---
 
@@ -441,9 +442,9 @@ These are documented FIXMEs in the codebase that need attention:
 | P0 (Critical) | 5 | 5 COMPLETED |
 | P1 (Important) | 13 | 13 COMPLETED, 0 NOT_STARTED |
 | P2 (Nice-to-have) | 26 | 23 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 VERIFIED_NO_ISSUE, 1 SKIPPED, 0 NOT_STARTED |
-| P3 (Post-V1) | 3 | 1 COMPLETED, 2 NOT_STARTED |
+| P3 (Post-V1) | 3 | 2 COMPLETED, 1 NOT_STARTED |
 | V1 Feature Ideas | 3 | 3 IMPLEMENTED |
-| **Total** | **50** | **45 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 VERIFIED_NO_ISSUE, 1 SKIPPED, 2 NOT_STARTED** |
+| **Total** | **50** | **46 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 VERIFIED_NO_ISSUE, 1 SKIPPED, 1 NOT_STARTED** |
 
 ### V1 Feature Ideas
 

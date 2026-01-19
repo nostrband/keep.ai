@@ -48,6 +48,7 @@ export const qk = {
   latestScript: (taskId: string) => [{ scope: "latestScript", taskId }] as const,
   scriptRuns: (scriptId: string) => [{ scope: "scriptRuns", scriptId }] as const,
   scriptRun: (runId: string) => [{ scope: "scriptRun", runId }] as const,
+  retriesOfRun: (runId: string) => [{ scope: "retriesOfRun", runId }] as const,
   
   // Workflow-related queries
   allWorkflows: () => [{ scope: "allWorkflows" }] as const,

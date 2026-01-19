@@ -403,6 +403,35 @@ export class ScriptStore {
     }));
   }
 
+  // Get retries of a specific run (runs where retry_of equals this run's ID)
+  async getRetriesOfRun(runId: string): Promise<ScriptRun[]> {
+    const results = await this.db.db.execO<Record<string, unknown>>(
+      `SELECT id, script_id, start_timestamp, end_timestamp, error, error_type, result, logs, workflow_id, type, retry_of, retry_count, cost
+       FROM script_runs
+       WHERE retry_of = ?
+       ORDER BY retry_count ASC`,
+      [runId]
+    );
+
+    if (!results) return [];
+
+    return results.map((row) => ({
+      id: row.id as string,
+      script_id: row.script_id as string,
+      start_timestamp: row.start_timestamp as string,
+      end_timestamp: row.end_timestamp as string,
+      error: row.error as string,
+      error_type: (row.error_type as string) || '',
+      result: row.result as string,
+      logs: row.logs as string,
+      workflow_id: row.workflow_id as string,
+      type: row.type as string,
+      retry_of: (row.retry_of as string) || '',
+      retry_count: (row.retry_count as number) || 0,
+      cost: (row.cost as number) || 0,
+    }));
+  }
+
   // Get script runs by workflow_id
   async getScriptRunsByWorkflowId(workflow_id: string): Promise<ScriptRun[]> {
     const results = await this.db.db.execO<Record<string, unknown>>(

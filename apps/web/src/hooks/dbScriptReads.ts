@@ -107,6 +107,24 @@ export function useScriptRun(runId: string) {
   });
 }
 
+export function useRetriesOfRun(runId: string) {
+  const { api } = useDbQuery();
+  return useQuery({
+    queryKey: qk.retriesOfRun(runId),
+    queryFn: async () => {
+      if (!api) return [];
+      try {
+        const retries = await api.scriptStore.getRetriesOfRun(runId);
+        return retries;
+      } catch (error) {
+        return [];
+      }
+    },
+    meta: { tables: ["script_runs"] },
+    enabled: !!api && !!runId,
+  });
+}
+
 export function useWorkflows() {
   const { api } = useDbQuery();
   return useQuery({
