@@ -213,10 +213,11 @@ This document prioritizes tasks for achieving a simple, lovable, and complete v1
 - **Resolution**: Removed duplicate `AutonomyMode` type definitions from `agent-env.ts` and `useAutonomyPreference.ts`. Both files now import `AutonomyMode` from `@app/proto`. Single source of truth is now `packages/proto/src/schemas.ts`.
 
 ### 29. remove-autonomy-localstorage.md
-- **Status**: NOT_STARTED
+- **Status**: COMPLETED (2026-01-19)
 - **Effort**: S
 - **Description**: useAutonomyPreference uses both localStorage and API for persistence - redundant. Rely solely on API/db cache.
 - **Files**: `apps/web/src/hooks/useAutonomyPreference.ts`
+- **Resolution**: Rewrote useAutonomyPreference hook to use only the database API for persistence. Removed localStorage usage, removed unused `getAutonomyPreference()` helper function. Now reads from `api.getAutonomyMode()` on mount (when dbStatus is ready) and writes via `api.setAutonomyMode()`. Single source of truth is now the database.
 
 ### 30. remove-unused-autonomy-metadata.md
 - **Status**: NOT_STARTED
@@ -383,9 +384,9 @@ These are documented FIXMEs in the codebase that need attention:
 |----------|-------|--------|
 | P0 (Critical) | 5 | 5 COMPLETED |
 | P1 (Important) | 13 | 13 COMPLETED, 0 NOT_STARTED |
-| P2 (Nice-to-have) | 26 | 9 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 NEEDS_VERIFICATION, 15 NOT_STARTED |
+| P2 (Nice-to-have) | 26 | 10 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 NEEDS_VERIFICATION, 14 NOT_STARTED |
 | P3 (Post-V1) | 3 | 3 NOT_STARTED |
-| **Total** | **47** | **27 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 NEEDS_VERIFICATION, 18 NOT_STARTED** |
+| **Total** | **47** | **28 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 NEEDS_VERIFICATION, 17 NOT_STARTED** |
 
 ### V1 Feature Ideas
 
