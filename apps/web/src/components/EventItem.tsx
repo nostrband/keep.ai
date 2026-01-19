@@ -75,31 +75,29 @@ export function EventItem({ type, content, timestamp, usage }: EventItemProps) {
         )}
       </div>
       
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button
-            onClick={(e) => e.stopPropagation()}
-            className="ml-2 px-2 py-1 text-gray-400 hover:text-gray-600 flex-shrink-0"
-            aria-label="Event actions"
-          >
-            ···
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          {hasNavigation && (
+      {/* Only show dropdown when there are actions available */}
+      {hasNavigation ? (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              onClick={(e) => e.stopPropagation()}
+              className="ml-2 px-2 py-1 text-gray-400 hover:text-gray-600 flex-shrink-0"
+              aria-label="Event actions"
+            >
+              ···
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
             <DropdownMenuItem onClick={handleViewEntity}>
               <span className="mr-2">👁️</span>
               View details
             </DropdownMenuItem>
-          )}
-          {!hasNavigation && (
-            <DropdownMenuItem disabled>
-              <span className="mr-2">ℹ️</span>
-              No actions available
-            </DropdownMenuItem>
-          )}
-        </DropdownMenuContent>
-      </DropdownMenu>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : (
+        /* Spacer to maintain consistent layout with items that have menus */
+        <div className="ml-2 px-2 py-1 flex-shrink-0 w-[34px]" />
+      )}
     </div>
   );
 }

@@ -164,10 +164,11 @@ This document prioritizes tasks for achieving a simple, lovable, and complete v1
 - **Resolution**: Extracted shared header content to inline `HeaderContent` component and factored out `headerBaseClass` CSS class string. Reduced code from ~120 duplicate lines to a single 50-line HeaderContent component. Link and div wrappers now both render the same HeaderContent, eliminating duplication risk.
 
 ### 22. hide-empty-event-dropdown.md
-- **Status**: NOT_STARTED
+- **Status**: COMPLETED (2026-01-19)
 - **Effort**: S
 - **Description**: EventItem shows dropdown button even when no actions available. Shows disabled "No actions available" option.
 - **Files**: `apps/web/src/components/EventItem.tsx`
+- **Resolution**: Conditionally render dropdown menu only when `hasNavigation` is true. Added spacer div with matching width (34px) when no actions available to maintain consistent layout alignment with other event items that have menus.
 
 ### 23. extract-event-helper-functions.md
 - **Status**: NOT_STARTED
@@ -376,9 +377,9 @@ These are documented FIXMEs in the codebase that need attention:
 |----------|-------|--------|
 | P0 (Critical) | 5 | 5 COMPLETED |
 | P1 (Important) | 13 | 13 COMPLETED, 0 NOT_STARTED |
-| P2 (Nice-to-have) | 26 | 3 COMPLETED, 1 NEEDS_VERIFICATION, 22 NOT_STARTED |
+| P2 (Nice-to-have) | 26 | 4 COMPLETED, 1 NEEDS_VERIFICATION, 21 NOT_STARTED |
 | P3 (Post-V1) | 3 | 3 NOT_STARTED |
-| **Total** | **47** | **21 COMPLETED, 1 NEEDS_VERIFICATION, 25 NOT_STARTED** |
+| **Total** | **47** | **22 COMPLETED, 1 NEEDS_VERIFICATION, 24 NOT_STARTED** |
 
 ### V1 Feature Ideas
 
