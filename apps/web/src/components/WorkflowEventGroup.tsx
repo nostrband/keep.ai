@@ -71,6 +71,13 @@ export function WorkflowEventGroup({ workflowId, scriptId, scriptRunId, events }
 
     if (!workflow) return;
 
+    // Only allow retry for active workflows - scheduler only executes where status === 'active'
+    if (workflow.status !== 'active') {
+      setSuccessMessage("Enable workflow first to retry");
+      setTimeout(() => setSuccessMessage(""), 3000);
+      return;
+    }
+
     // Set next_run_timestamp to current time to trigger immediate execution
     const now = new Date().toISOString();
 
@@ -195,9 +202,16 @@ export function WorkflowEventGroup({ workflowId, scriptId, scriptRunId, events }
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={handleRetry} disabled={updateWorkflowMutation.isPending}>
+            <DropdownMenuItem
+              onClick={handleRetry}
+              disabled={updateWorkflowMutation.isPending || !!(workflow && workflow.status !== 'active')}
+            >
               <span className="mr-2">🔄</span>
-              {updateWorkflowMutation.isPending ? "Retrying..." : "Retry"}
+              {updateWorkflowMutation.isPending
+                ? "Retrying..."
+                : (workflow && workflow.status !== 'active')
+                  ? "Enable to retry"
+                  : "Retry"}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={handleViewWorkflow}>

@@ -48,10 +48,11 @@ This document prioritizes tasks for achieving a simple, lovable, and complete v1
 ## Priority P1 - Important (Core UX, Error Handling)
 
 ### 6. validate-workflow-status-before-retry.md
-- **Status**: NOT_STARTED
+- **Status**: COMPLETED (2026-01-19)
 - **Effort**: S
 - **Description**: Retry handler only checks workflow exists, not if status is 'active'. Users get false "Retry scheduled" message for paused/disabled workflows.
 - **Files**: `apps/web/src/components/WorkflowEventGroup.tsx`
+- **Resolution**: Added status validation in `handleRetry` to check `workflow.status !== 'active'`. Shows "Enable workflow first to retry" message and disables the Retry menu item for non-active workflows. Prevents false positive feedback for retries that would never execute.
 
 ### 7. workflow-early-pause.md
 - **Status**: NOT_STARTED
@@ -359,10 +360,10 @@ These are documented FIXMEs in the codebase that need attention:
 | Priority | Count | Status |
 |----------|-------|--------|
 | P0 (Critical) | 5 | 5 COMPLETED |
-| P1 (Important) | 13 | 13 NOT_STARTED |
+| P1 (Important) | 13 | 1 COMPLETED, 12 NOT_STARTED |
 | P2 (Nice-to-have) | 26 | 1 NEEDS_VERIFICATION, 25 NOT_STARTED |
 | P3 (Post-V1) | 3 | 3 NOT_STARTED |
-| **Total** | **47** | **5 COMPLETED, 1 NEEDS_VERIFICATION, 41 NOT_STARTED** |
+| **Total** | **47** | **6 COMPLETED, 1 NEEDS_VERIFICATION, 40 NOT_STARTED** |
 
 ### V1 Feature Ideas
 
