@@ -55,10 +55,11 @@ This document prioritizes tasks for achieving a simple, lovable, and complete v1
 - **Resolution**: Added status validation in `handleRetry` to check `workflow.status !== 'active'`. Shows "Enable workflow first to retry" message and disables the Retry menu item for non-active workflows. Prevents false positive feedback for retries that would never execute.
 
 ### 7. workflow-early-pause.md
-- **Status**: NOT_STARTED
+- **Status**: COMPLETED (2026-01-19)
 - **Effort**: M
 - **Description**: When user pauses workflow, currently running execution continues until completion. No status check before each tool call - should abort if paused.
-- **Files**: `packages/agent/src/agent-env.ts`, `packages/agent/src/sandbox/api.ts`
+- **Files**: `packages/agent/src/sandbox/api.ts`, `packages/agent/src/workflow-worker.ts`, `packages/agent/src/errors.ts`
+- **Resolution**: Added `WorkflowPausedError` class in errors.ts for clean abort signaling. Extended `SandboxAPIConfig` to accept optional `workflowId`. Added `checkWorkflowActive()` method in SandboxAPI that checks workflow status before each tool call - throws `WorkflowPausedError` if workflow is no longer active. Updated WorkflowWorker to pass workflowId to SandboxAPI. Special handling for WorkflowPausedError in processWorkflowScript - records as clean "paused" result (not error), signals done to scheduler without retry or error status change.
 
 ### 8. fix-next-run-time-status-check.md
 - **Status**: COMPLETED (2026-01-19)
@@ -363,10 +364,10 @@ These are documented FIXMEs in the codebase that need attention:
 | Priority | Count | Status |
 |----------|-------|--------|
 | P0 (Critical) | 5 | 5 COMPLETED |
-| P1 (Important) | 13 | 4 COMPLETED, 9 NOT_STARTED |
+| P1 (Important) | 13 | 5 COMPLETED, 8 NOT_STARTED |
 | P2 (Nice-to-have) | 26 | 1 NEEDS_VERIFICATION, 25 NOT_STARTED |
 | P3 (Post-V1) | 3 | 3 NOT_STARTED |
-| **Total** | **47** | **9 COMPLETED, 1 NEEDS_VERIFICATION, 37 NOT_STARTED** |
+| **Total** | **47** | **10 COMPLETED, 1 NEEDS_VERIFICATION, 36 NOT_STARTED** |
 
 ### V1 Feature Ideas
 

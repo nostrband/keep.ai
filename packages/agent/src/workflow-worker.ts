@@ -14,6 +14,8 @@ import {
   NetworkError,
   LogicError,
   ErrorType,
+  WorkflowPausedError,
+  isWorkflowPausedError,
 } from "./errors";
 
 // Maximum number of consecutive fix attempts before escalating to user (spec 09b)
@@ -198,6 +200,41 @@ export class WorkflowWorker {
     } catch (error: any) {
       const errorMessage =
         error instanceof Error ? error.message : (error as string);
+
+      // Handle WorkflowPausedError specially - it's a clean abort, not a failure
+      if (isWorkflowPausedError(error)) {
+        this.debug("WORKFLOW_PAUSED: User paused workflow during execution", workflow.id);
+
+        try {
+          // Convert accumulated cost from dollars to microdollars for storage
+          const costMicrodollars = Math.ceil((sandbox?.context?.cost || 0) * 1000000);
+
+          // Record as a clean abort with result "paused" instead of error
+          await this.api.scriptStore.finishScriptRun(
+            scriptRunId,
+            new Date().toISOString(),
+            '"paused"', // Result indicating clean pause
+            "", // No error message
+            logs.join("\n"),
+            "", // No error type
+            costMicrodollars
+          );
+        } catch (e) {
+          this.debug("finishScriptRun error", e);
+        }
+
+        // Don't change workflow status - user already set it to disabled/paused
+        // Just signal done (no retry needed) and don't re-throw
+        this.emitSignal({
+          type: "done",
+          workflowId: workflow.id,
+          timestamp: Date.now(),
+          scriptRunId,
+        });
+
+        // Don't re-throw - this is a clean abort, not an error
+        return;
+      }
 
       // Determine error_type for storage and notification filtering
       let errorType: ErrorType | '' = '';
@@ -682,8 +719,9 @@ If you'd like me to try fixing it again, just ask and I'll give it another go wi
       getContext: () => sandbox.context!,
       userPath: this.userPath,
       gmailOAuth2Client: this.gmailOAuth2Client,
+      workflowId: workflow.id, // Enable pause checking during tool calls
     });
-    
+
     sandbox.setGlobal(await sandboxAPI.createGlobal());
 
     return sandboxAPI;

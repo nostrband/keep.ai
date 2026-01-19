@@ -41,7 +41,7 @@ import {
 import { z, ZodFirstPartyTypeKind as K } from "zod";
 import { EvalContext, EvalGlobal } from "./sandbox";
 import debug from "debug";
-import { ClassifiedError, isClassifiedError, LogicError } from "../errors";
+import { ClassifiedError, isClassifiedError, LogicError, WorkflowPausedError } from "../errors";
 
 export interface SandboxAPIConfig {
   api: KeepDbApi;
@@ -49,6 +49,8 @@ export interface SandboxAPIConfig {
   getContext: () => EvalContext;
   userPath?: string;
   gmailOAuth2Client?: any;
+  /** Workflow ID for pause checking. When set, tool calls will check if workflow is still active. */
+  workflowId?: string;
 }
 
 /**
@@ -62,6 +64,7 @@ export class SandboxAPI {
   private getContext: () => EvalContext;
   private userPath?: string;
   private gmailOAuth2Client?: any;
+  private workflowId?: string;
   private debug = debug("SandboxAPI");
   private toolDocs = new Map<string, string>();
 
@@ -71,6 +74,30 @@ export class SandboxAPI {
     this.getContext = config.getContext;
     this.userPath = config.userPath;
     this.gmailOAuth2Client = config.gmailOAuth2Client;
+    this.workflowId = config.workflowId;
+  }
+
+  /**
+   * Check if the workflow is still active. Throws WorkflowPausedError if paused.
+   * This is called before each tool execution to enable early abort when user pauses.
+   */
+  private async checkWorkflowActive(): Promise<void> {
+    if (!this.workflowId) return;
+
+    try {
+      const workflow = await this.api.scriptStore.getWorkflow(this.workflowId);
+      if (!workflow || workflow.status !== 'active') {
+        this.debug(`Workflow ${this.workflowId} is no longer active (status: ${workflow?.status}), aborting execution`);
+        throw new WorkflowPausedError(this.workflowId);
+      }
+    } catch (error) {
+      // If it's already a WorkflowPausedError, re-throw it
+      if (error instanceof WorkflowPausedError) {
+        throw error;
+      }
+      // For database errors, log but don't block execution
+      this.debug(`Error checking workflow status: ${error}`);
+    }
   }
 
   get tools() {
@@ -101,6 +128,10 @@ Example: await ${ns}.${name}(<input>)
 
       // Create a wrapper function that validates input and output
       global[ns][name] = async (input: any) => {
+        // Check if workflow is still active before each tool call
+        // This enables early abort when user pauses a running workflow
+        await this.checkWorkflowActive();
+
         // Validate input using inputSchema if present
         let validatedInput = input;
         if (tool.inputSchema) {

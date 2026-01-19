@@ -281,6 +281,31 @@ export function ensureClassified(err: unknown, source?: string): ClassifiedError
 }
 
 /**
+ * Workflow paused error - thrown when a workflow is paused during execution.
+ *
+ * This is NOT routed for retry or auto-fix - it's a clean abort signal.
+ * The workflow was intentionally stopped by the user.
+ */
+export class WorkflowPausedError extends Error {
+  constructor(workflowId: string) {
+    super(`Workflow ${workflowId} was paused`);
+    this.name = 'WorkflowPausedError';
+
+    // Maintain proper stack trace
+    if (Error.captureStackTrace) {
+      Error.captureStackTrace(this, this.constructor);
+    }
+  }
+}
+
+/**
+ * Check if an error is a WorkflowPausedError
+ */
+export function isWorkflowPausedError(error: unknown): error is WorkflowPausedError {
+  return error instanceof WorkflowPausedError;
+}
+
+/**
  * Create a classified error from Google API errors (Gmail, etc.)
  *
  * @param err The Google API error
