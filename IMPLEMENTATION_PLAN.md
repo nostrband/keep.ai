@@ -178,22 +178,25 @@ This document prioritizes tasks for achieving a simple, lovable, and complete v1
 - **Resolution**: Created `apps/web/src/lib/event-helpers.ts` with shared `transformGmailMethod()` and `formatDuration()` functions. Updated TaskEventGroup.tsx and WorkflowEventGroup.tsx to import from the shared location. Standardized `transformGmailMethod` to use descriptive labels like "read messages" instead of just "messages".
 
 ### 24. extract-quick-reply-hook.md
-- **Status**: NOT_STARTED
+- **Status**: NO_LONGER_APPLICABLE (2026-01-19)
 - **Effort**: S
 - **Description**: ~40 lines of quick reply code duplicated in ChatPage and MainPage. Create `useQuickReply(chatId)` hook.
 - **Files**: Create `apps/web/src/hooks/useQuickReply.ts`
+- **Note**: After removing dead code from MainPage.tsx (#25), the quick reply code now only exists in ChatPage.tsx - no duplication to extract.
 
 ### 25. remove-mainpage-quick-reply-dead-code.md
-- **Status**: NOT_STARTED
+- **Status**: COMPLETED (2026-01-19)
 - **Effort**: S
 - **Description**: MainPage uses `useTaskByChatId("main")` but no task with chat_id="main" exists. Dead code includes useTaskByChatId, useTaskState, quickReplyOptions, handleQuickReply, QuickReplyButtons.
 - **Files**: `apps/web/src/components/MainPage.tsx`
+- **Resolution**: Removed dead quick-reply code from MainPage.tsx: useTaskByChatId('main') hook, useTaskState hook, quickReplyOptions useMemo, handleQuickReply callback, QuickReplyButtons rendering, and related imports. This code never executed since no task has chat_id='main'.
 
 ### 26. validate-ask-options.md
-- **Status**: NOT_STARTED
+- **Status**: COMPLETED (2026-01-19)
 - **Effort**: S
 - **Description**: formatAsks accepts any string array without filtering empty strings or duplicates.
 - **Files**: `packages/agent/src/ai-tools/ask.ts`
+- **Resolution**: Updated formatAsks() in packages/agent/src/ai-tools/ask.ts to filter empty/whitespace-only strings and remove duplicates from options array using trim(), filter(), and Set.
 
 ### 27. remove-duplicate-parse-asks.md
 - **Status**: NOT_STARTED
@@ -378,9 +381,9 @@ These are documented FIXMEs in the codebase that need attention:
 |----------|-------|--------|
 | P0 (Critical) | 5 | 5 COMPLETED |
 | P1 (Important) | 13 | 13 COMPLETED, 0 NOT_STARTED |
-| P2 (Nice-to-have) | 26 | 5 COMPLETED, 1 NEEDS_VERIFICATION, 20 NOT_STARTED |
+| P2 (Nice-to-have) | 26 | 7 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 NEEDS_VERIFICATION, 17 NOT_STARTED |
 | P3 (Post-V1) | 3 | 3 NOT_STARTED |
-| **Total** | **47** | **23 COMPLETED, 1 NEEDS_VERIFICATION, 23 NOT_STARTED** |
+| **Total** | **47** | **25 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 NEEDS_VERIFICATION, 20 NOT_STARTED** |
 
 ### V1 Feature Ideas
 

@@ -52,10 +52,20 @@ export function parseAsks(asks: string): StructuredAsk {
 /**
  * Format the ask info for storage in task state.
  * If options are provided, stores as JSON; otherwise plain string.
+ * Filters empty strings and removes duplicates from options.
  */
 function formatAsks(asks: string, options?: string[]): string {
   if (options && options.length > 0) {
-    return JSON.stringify({ question: asks, options });
+    // Filter empty/whitespace-only strings and remove duplicates
+    const cleanedOptions = [...new Set(
+      options
+        .map(opt => opt.trim())
+        .filter(opt => opt.length > 0)
+    )];
+
+    if (cleanedOptions.length > 0) {
+      return JSON.stringify({ question: asks, options: cleanedOptions });
+    }
   }
   return asks;
 }

@@ -1,14 +1,12 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useWorkflows } from "../hooks/dbScriptReads";
-import { useTasks, useTaskByChatId, useTaskState } from "../hooks/dbTaskReads";
+import { useTasks } from "../hooks/dbTaskReads";
 import { useAddMessage } from "../hooks/dbWrites";
 import { useFileUpload } from "../hooks/useFileUpload";
 import { useDbQuery } from "../hooks/dbQuery";
 import { useAutonomyPreference } from "../hooks/useAutonomyPreference";
 import SharedHeader from "./SharedHeader";
-import { QuickReplyButtons } from "./QuickReplyButtons";
-import { parseAsks } from "../lib/parseAsks";
 import { FOCUS_INPUT_EVENT } from "../App";
 import { WorkflowStatusBadge } from "./StatusBadge";
 import {
@@ -165,21 +163,6 @@ export default function MainPage() {
   const addMessage = useAddMessage();
   const { uploadFiles, uploadState } = useFileUpload();
 
-  // Get task associated with main chat for quick-reply buttons
-  const { data: mainTask } = useTaskByChatId("main");
-  const { data: mainTaskState } = useTaskState(mainTask?.id || "");
-
-  // Parse quick-reply options from task.asks when task is waiting
-  const quickReplyOptions = useMemo(() => {
-    if (!mainTask || !mainTaskState) return [];
-    // Only show options when task is in wait or asks state
-    if (mainTask.state !== "wait" && mainTask.state !== "asks") return [];
-    if (!mainTaskState.asks) return [];
-
-    const parsed = parseAsks(mainTaskState.asks);
-    return parsed.options || [];
-  }, [mainTask, mainTaskState]);
-
   // Fetch latest run for each workflow using batch query
   useEffect(() => {
     if (!api || workflows.length === 0) return;
@@ -303,17 +286,6 @@ export default function MainPage() {
 
     setInput("");
   }, [addMessage, uploadFiles]);
-
-  // Handle quick-reply button selection
-  const handleQuickReply = useCallback((option: string) => {
-    // Send the selected option as a user message
-    addMessage.mutate({
-      chatId: "main",
-      role: "user",
-      content: option,
-      files: [],
-    });
-  }, [addMessage]);
 
   // Track prompt input height changes
   useEffect(() => {
@@ -470,15 +442,6 @@ export default function MainPage() {
             <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-lg">
               <p className="text-sm text-red-600">{uploadState.error}</p>
             </div>
-          )}
-
-          {/* Quick-reply buttons when agent is waiting for user input */}
-          {quickReplyOptions.length > 0 && (
-            <QuickReplyButtons
-              options={quickReplyOptions}
-              onSelect={handleQuickReply}
-              disabled={addMessage.isPending || uploadState.isUploading}
-            />
           )}
 
           <PromptInput
