@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useDbQuery } from './dbQuery';
-
-export type AutonomyMode = 'ai_decides' | 'coordinate';
+import { AutonomyMode } from '@app/proto';
 
 const STORAGE_KEY = 'keep-ai-autonomy-preference';
 

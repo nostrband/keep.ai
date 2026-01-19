@@ -2,10 +2,8 @@ import { KeepDbApi, Task, TaskType } from "@app/db";
 import { StepInput, TaskState } from "./agent-types";
 import debug from "debug";
 import { getEnv } from "./env";
-import { AssistantUIMessage, ChatEvent } from "@app/proto";
+import { AssistantUIMessage, ChatEvent, AutonomyMode } from "@app/proto";
 import { generateId } from "ai";
-
-export type AutonomyMode = 'ai_decides' | 'coordinate';
 
 export class AgentEnv {
   #api: KeepDbApi;

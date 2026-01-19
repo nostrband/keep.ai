@@ -206,10 +206,11 @@ This document prioritizes tasks for achieving a simple, lovable, and complete v1
 - **Resolution**: Added `@app/agent` dependency to apps/web/package.json. Updated ChatPage.tsx to import `parseAsks` from `@app/agent` instead of local duplicate. Deleted `apps/web/src/lib/parseAsks.ts`. Single source of truth now in packages/agent.
 
 ### 28. consolidate-autonomy-mode-type.md
-- **Status**: NOT_STARTED
+- **Status**: COMPLETED (2026-01-19)
 - **Effort**: S
 - **Description**: AutonomyMode type defined in 3 places: `packages/proto/src/schemas.ts` (source of truth), `packages/agent/src/agent-env.ts`, `apps/web/src/hooks/useAutonomyPreference.ts`.
 - **Files**: Multiple - use `@app/proto` as single source
+- **Resolution**: Removed duplicate `AutonomyMode` type definitions from `agent-env.ts` and `useAutonomyPreference.ts`. Both files now import `AutonomyMode` from `@app/proto`. Single source of truth is now `packages/proto/src/schemas.ts`.
 
 ### 29. remove-autonomy-localstorage.md
 - **Status**: NOT_STARTED
@@ -382,9 +383,9 @@ These are documented FIXMEs in the codebase that need attention:
 |----------|-------|--------|
 | P0 (Critical) | 5 | 5 COMPLETED |
 | P1 (Important) | 13 | 13 COMPLETED, 0 NOT_STARTED |
-| P2 (Nice-to-have) | 26 | 8 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 NEEDS_VERIFICATION, 16 NOT_STARTED |
+| P2 (Nice-to-have) | 26 | 9 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 NEEDS_VERIFICATION, 15 NOT_STARTED |
 | P3 (Post-V1) | 3 | 3 NOT_STARTED |
-| **Total** | **47** | **26 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 NEEDS_VERIFICATION, 19 NOT_STARTED** |
+| **Total** | **47** | **27 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 NEEDS_VERIFICATION, 18 NOT_STARTED** |
 
 ### V1 Feature Ideas
 
