@@ -228,12 +228,22 @@ export interface ChatEvent {
   // Add other fields that might exist based on your database schema
 }
 
+// Event significance levels for visual highlighting
+export type EventSignificance =
+  | 'normal'    // Routine operations (reads, analysis)
+  | 'write'     // Write/create actions (notes, files, tasks)
+  | 'error'     // Failures (reserved for future use)
+  | 'success'   // Fixes, resolutions (reserved for future use)
+  | 'user'      // User interactions (reserved for future use)
+  | 'state';    // State changes (reserved for future use)
+
 // Event display configuration
 export interface EventConfig {
   emoji: string;
   title: (payload: EventPayload) => string;
   hasId: boolean; // Whether this event type has an 'id' field for navigation
   getEntityPath?: (payload: EventPayload) => string; // Path for navigation if hasId is true
+  significance: EventSignificance; // Visual significance level for highlighting
 }
 
 export const EVENT_CONFIGS: Record<EventType, EventConfig> = {
@@ -244,6 +254,7 @@ export const EVENT_CONFIGS: Record<EventType, EventConfig> = {
     hasId: true,
     getEntityPath: (payload) =>
       `/notes/${(payload as CreateNoteEventPayload).id}`,
+    significance: 'write',
   },
   [EVENT_TYPES.UPDATE_NOTE]: {
     emoji: "✏️",
@@ -252,18 +263,21 @@ export const EVENT_CONFIGS: Record<EventType, EventConfig> = {
     hasId: true,
     getEntityPath: (payload) =>
       `/notes/${(payload as UpdateNoteEventPayload).id}`,
+    significance: 'write',
   },
   [EVENT_TYPES.DELETE_NOTE]: {
     emoji: "🗑️",
     title: (payload) =>
       `Deleted Note: ${(payload as DeleteNoteEventPayload).title}`,
     hasId: false, // Can't navigate to deleted note
+    significance: 'write',
   },
   [EVENT_TYPES.ADD_TASK]: {
     emoji: "➕",
     title: (payload) => `New Task: ${(payload as AddTaskEventPayload).title}`,
     hasId: true,
     getEntityPath: (payload) => `/tasks/${(payload as AddTaskEventPayload).id}`,
+    significance: 'write',
   },
   [EVENT_TYPES.ADD_TASK_CRON]: {
     emoji: "🔄",
@@ -272,11 +286,13 @@ export const EVENT_CONFIGS: Record<EventType, EventConfig> = {
     hasId: true,
     getEntityPath: (payload) =>
       `/tasks/${(payload as AddTaskCronEventPayload).id}`,
+    significance: 'write',
   },
   [EVENT_TYPES.CANCEL_THIS_TASK_CRON]: {
     emoji: "❌",
     title: () => "Cancelled Recurring Task",
     hasId: false,
+    significance: 'state',
   },
   [EVENT_TYPES.SEND_TO_TASK_INBOX]: {
     emoji: "📬",
@@ -293,6 +309,7 @@ export const EVENT_CONFIGS: Record<EventType, EventConfig> = {
         // deprecated
         (payload as any).id
       }`,
+    significance: 'write',
   },
   [EVENT_TYPES.TASK_UPDATE]: {
     emoji: "✏️",
@@ -301,22 +318,26 @@ export const EVENT_CONFIGS: Record<EventType, EventConfig> = {
     hasId: true,
     getEntityPath: (payload) =>
       `/tasks/${(payload as TaskUpdateEventPayload).task_id}`,
+    significance: 'write',
   },
   [EVENT_TYPES.WEB_SEARCH]: {
     emoji: "🔍",
     title: (payload) =>
       `Web Search: ${(payload as WebSearchEventPayload).query}`,
     hasId: false,
+    significance: 'normal',
   },
   [EVENT_TYPES.WEB_FETCH]: {
     emoji: "🌐",
     title: (payload) => `Fetched: ${(payload as WebFetchEventPayload).url}`,
     hasId: false,
+    significance: 'normal',
   },
   [EVENT_TYPES.GET_WEATHER]: {
     emoji: "🌤️",
     title: (payload) => `Weather: ${(payload as GetWeatherEventPayload).place}`,
     hasId: false,
+    significance: 'normal',
   },
   [EVENT_TYPES.IMAGES_GENERATE]: {
     emoji: "🎨",
@@ -328,6 +349,7 @@ export const EVENT_CONFIGS: Record<EventType, EventConfig> = {
       }`;
     },
     hasId: false,
+    significance: 'write',
   },
   [EVENT_TYPES.IMAGES_EXPLAIN]: {
     emoji: "🔍",
@@ -336,13 +358,14 @@ export const EVENT_CONFIGS: Record<EventType, EventConfig> = {
       return `Analyzed image: ${explainPayload.file}`;
     },
     hasId: false,
+    significance: 'normal',
   },
   [EVENT_TYPES.IMAGES_TRANSFORM]: {
     emoji: "🖼️",
     title: (payload) => {
       const transformPayload = payload as ImagesTransformEventPayload;
       const imageCount = transformPayload.count || transformPayload.files?.length || 1;
-      
+
       // Support both new source_files (array) and old source_file (string) for backward compatibility
       let sourceText: string;
       if (transformPayload.source_files && transformPayload.source_files.length > 0) {
@@ -356,10 +379,11 @@ export const EVENT_CONFIGS: Record<EventType, EventConfig> = {
       } else {
         sourceText = "image";
       }
-      
+
       return `Transformed ${sourceText} → ${imageCount} image${imageCount > 1 ? "s" : ""}`;
     },
     hasId: false,
+    significance: 'write',
   },
   [EVENT_TYPES.PDF_EXPLAIN]: {
     emoji: "📄",
@@ -368,6 +392,7 @@ export const EVENT_CONFIGS: Record<EventType, EventConfig> = {
       return `Analyzed PDF: ${pdfPayload.file}`;
     },
     hasId: false,
+    significance: 'normal',
   },
   [EVENT_TYPES.AUDIO_EXPLAIN]: {
     emoji: "🎵",
@@ -376,16 +401,19 @@ export const EVENT_CONFIGS: Record<EventType, EventConfig> = {
       return `Analyzed audio: ${audioPayload.file}`;
     },
     hasId: false,
+    significance: 'normal',
   },
   [EVENT_TYPES.TASK_RUN]: {
     emoji: "⚙️",
     title: () => "Task Run",
     hasId: false,
+    significance: 'normal',
   },
   [EVENT_TYPES.TASK_RUN_END]: {
     emoji: "✅",
     title: () => "Task Run End",
     hasId: false,
+    significance: 'normal',
   },
   [EVENT_TYPES.TEXT_EXTRACT]: {
     emoji: "📝",
@@ -394,6 +422,7 @@ export const EVENT_CONFIGS: Record<EventType, EventConfig> = {
       return `Extracted data of ${JSON.stringify(extractPayload?.output || {}).length} chars from ${extractPayload?.inputLength || 0} chars text`;
     },
     hasId: false,
+    significance: 'normal',
   },
   [EVENT_TYPES.TEXT_CLASSIFY]: {
     emoji: "🏷️",
@@ -402,6 +431,7 @@ export const EVENT_CONFIGS: Record<EventType, EventConfig> = {
       return `Classified ${classifyPayload.textLength} chars text → ${classifyPayload.selectedClass}`;
     },
     hasId: false,
+    significance: 'normal',
   },
   [EVENT_TYPES.TEXT_SUMMARIZE]: {
     emoji: "📋",
@@ -410,6 +440,7 @@ export const EVENT_CONFIGS: Record<EventType, EventConfig> = {
       return `Summarized ${summarizePayload.inputLength} chars → ${summarizePayload.summaryLength} chars`;
     },
     hasId: false,
+    significance: 'normal',
   },
   [EVENT_TYPES.TEXT_GENERATE]: {
     emoji: "✍️",
@@ -418,6 +449,7 @@ export const EVENT_CONFIGS: Record<EventType, EventConfig> = {
       return `Generated ${generatePayload.generatedLength} chars text (temp: ${generatePayload.temperature})`;
     },
     hasId: false,
+    significance: 'write',
   },
   [EVENT_TYPES.GMAIL_API_CALL]: {
     emoji: "📧",
@@ -426,6 +458,8 @@ export const EVENT_CONFIGS: Record<EventType, EventConfig> = {
       return `Gmail: ${gmailPayload.method}`;
     },
     hasId: false,
+    // Gmail significance is determined dynamically based on read vs write methods
+    significance: 'normal',
   },
   [EVENT_TYPES.WEB_DOWNLOAD]: {
     emoji: "💾",
@@ -435,6 +469,7 @@ export const EVENT_CONFIGS: Record<EventType, EventConfig> = {
       return `Downloaded: ${downloadPayload.filename} (${fileSizeKB}KB)`;
     },
     hasId: false,
+    significance: 'write',
   },
   [EVENT_TYPES.FILE_SAVE]: {
     emoji: "📁",
@@ -444,6 +479,7 @@ export const EVENT_CONFIGS: Record<EventType, EventConfig> = {
       return `Saved: ${savePayload.filename} (${fileSizeKB}KB)`;
     },
     hasId: false,
+    significance: 'write',
   },
   [EVENT_TYPES.ADD_SCRIPT]: {
     emoji: "📜",
@@ -454,5 +490,42 @@ export const EVENT_CONFIGS: Record<EventType, EventConfig> = {
     hasId: true,
     getEntityPath: (payload) =>
       `/scripts/${(payload as AddScriptEventPayload).script_id}`,
+    significance: 'write',
   },
 };
+
+// Gmail methods that write/modify data (for dynamic significance detection)
+export const GMAIL_WRITE_METHODS = [
+  'users.messages.send',
+  'users.messages.modify',
+  'users.messages.trash',
+  'users.messages.untrash',
+  'users.messages.delete',
+  'users.drafts.create',
+  'users.drafts.send',
+  'users.drafts.update',
+  'users.drafts.delete',
+  'users.labels.create',
+  'users.labels.update',
+  'users.labels.delete',
+];
+
+// Get the effective significance of an event, handling dynamic cases like Gmail
+export function getEventSignificance(
+  type: EventType,
+  payload: EventPayload
+): EventSignificance {
+  const config = EVENT_CONFIGS[type];
+  if (!config) return 'normal';
+
+  // Gmail API calls depend on the method
+  if (type === EVENT_TYPES.GMAIL_API_CALL) {
+    const gmailPayload = payload as GmailApiCallEventPayload;
+    const isWriteMethod = GMAIL_WRITE_METHODS.some(
+      method => gmailPayload.method?.includes(method)
+    );
+    return isWriteMethod ? 'write' : 'normal';
+  }
+
+  return config.significance;
+}

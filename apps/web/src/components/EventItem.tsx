@@ -1,12 +1,22 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { EVENT_CONFIGS, EventType, EventPayload } from '../types/events';
+import { EVENT_CONFIGS, EventType, EventPayload, EventSignificance, getEventSignificance } from '../types/events';
 import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
 } from '../ui';
+
+// Styling classes for each significance level
+const significanceStyles: Record<EventSignificance, string> = {
+  normal: 'border-gray-100 bg-gray-50 text-gray-500',
+  write: 'border-gray-200 bg-white text-gray-700',
+  error: 'border-red-200 bg-red-50 text-red-700',
+  success: 'border-green-200 bg-green-50 text-green-700',
+  user: 'border-blue-200 bg-blue-50 text-blue-700',
+  state: 'border-yellow-200 bg-yellow-50 text-yellow-700',
+};
 
 interface EventItemProps {
   type: EventType;
@@ -26,6 +36,8 @@ export function EventItem({ type, content, timestamp, usage }: EventItemProps) {
 
   const title = config.title(content);
   const hasNavigation = config.hasId && config.getEntityPath;
+  const significance = getEventSignificance(type, content);
+  const styleClass = significanceStyles[significance];
 
   const handleEventClick = () => {
     if (hasNavigation && config.getEntityPath) {
@@ -45,10 +57,9 @@ export function EventItem({ type, content, timestamp, usage }: EventItemProps) {
     <div
       className={`
         flex items-center justify-between px-2 py-1 my-1
-        border border-gray-100 rounded-full bg-gray-50
-        text-gray-500 text-sm
-        ${hasNavigation ? 'cursor-pointer hover:bg-gray-100' : ''}
-        ${/* Desktop: single line */ ''}
+        border rounded-full text-sm
+        ${styleClass}
+        ${hasNavigation ? 'cursor-pointer hover:brightness-95' : ''}
       `}
       onClick={handleEventClick}
     >

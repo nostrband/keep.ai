@@ -134,6 +134,9 @@ export function TaskEventGroup({ taskId, events }: TaskEventGroupProps) {
   // Check if this is an empty group (only task_run events)
   const isEmpty = finalEvents.length === 0;
 
+  // Determine if this run has an error (for header styling)
+  const hasError = run?.error && run.error.length > 0;
+
   // Shared header content component to avoid duplication
   const HeaderContent = () => (
     <>
@@ -191,16 +194,17 @@ export function TaskEventGroup({ taskId, events }: TaskEventGroupProps) {
     </>
   );
 
-  const headerBaseClass = `flex items-center justify-between px-2 py-0 bg-gray-50 ${
-    isEmpty ? "rounded-lg" : "border-b border-gray-200 rounded-t-lg"
+  // Error styling: red left border on container, error-tinted header
+  const containerClass = `mx-0 my-3 border bg-gray-50 rounded-lg ${
+    hasError ? "border-red-200 border-l-4 border-l-red-500" : "border-gray-200"
   }`;
 
+  const headerBaseClass = `flex items-center justify-between px-2 py-0 ${
+    hasError ? "bg-red-50" : "bg-gray-50"
+  } ${isEmpty ? "rounded-lg" : "border-b border-gray-200 rounded-t-lg"}`;
+
   return (
-    <div
-      className={`mx-0 my-3 border border-gray-200 bg-gray-50 ${
-        isEmpty ? "rounded-lg" : "rounded-lg"
-      }`}
-    >
+    <div className={containerClass}>
       {/* Task Title Header */}
       {taskRunId || scriptRunId ? (
         <Link

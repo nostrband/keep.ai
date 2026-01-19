@@ -383,13 +383,22 @@ These are documented FIXMEs in the codebase that need attention:
 
 ## V1 Feature Ideas (from ideas/)
 
+### 48. highlight-significant-events.md
+- **Status**: IMPLEMENTED (2026-01-19)
+- **Effort**: S
+- **Description**: Color-code errors, fixes, user interactions, and state changes to improve visual scannability in chat and workflow history.
+- **Files**: `apps/web/src/types/events.ts`, `apps/web/src/components/EventItem.tsx`, `apps/web/src/components/TaskEventGroup.tsx`, `apps/web/src/components/WorkflowEventGroup.tsx`
+- **Resolution**: Added EventSignificance type ('normal', 'write', 'error', 'success', 'user', 'state') to events.ts. Updated all EVENT_CONFIGS entries with significance field. Added getEventSignificance() function for dynamic Gmail method detection. Updated EventItem.tsx with significance-based styling (different border/background colors per significance level). Updated TaskEventGroup and WorkflowEventGroup to show red left border and error-tinted header for runs with errors.
+
+---
+
 ### Implemented
 - **simplify-question-answering.md**: QuickReplyButtons component implemented for answering agent questions
 - **script-versioning.md**: Full UI implemented with diff view and rollback capability
+- **highlight-significant-events.md**: Color-coded event display for better visual scannability (see #48 above)
 
 ### High Priority for V1 UX (NOT_STARTED)
 - **dry-run-testing.md**: Safely test automation scripts before enabling scheduled runs
-- **highlight-significant-events.md**: Color-code errors, fixes, user interactions, state changes
 - **collapse-low-signal-events.md**: Auto-collapse routine read operations, keep high-signal events visible
 
 ### Future Enhancements (Post-V1)
@@ -408,12 +417,13 @@ These are documented FIXMEs in the codebase that need attention:
 | P1 (Important) | 13 | 13 COMPLETED, 0 NOT_STARTED |
 | P2 (Nice-to-have) | 26 | 23 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 VERIFIED_NO_ISSUE, 1 SKIPPED, 0 NOT_STARTED |
 | P3 (Post-V1) | 3 | 3 NOT_STARTED |
-| **Total** | **47** | **41 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 VERIFIED_NO_ISSUE, 1 SKIPPED, 3 NOT_STARTED** |
+| V1 Feature Ideas | 1 | 1 IMPLEMENTED |
+| **Total** | **48** | **42 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 VERIFIED_NO_ISSUE, 1 SKIPPED, 3 NOT_STARTED** |
 
 ### V1 Feature Ideas
 
 | Status | Count |
 |--------|-------|
-| IMPLEMENTED | 2 |
-| NOT_STARTED (High Priority) | 3 |
+| IMPLEMENTED | 3 |
+| NOT_STARTED (High Priority) | 2 |
 | NOT_STARTED (Post-V1) | 4+ |

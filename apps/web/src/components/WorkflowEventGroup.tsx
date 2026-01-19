@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useWorkflow } from "../hooks/dbScriptReads";
+import { useWorkflow, useScriptRun } from "../hooks/dbScriptReads";
 import { useUpdateWorkflow } from "../hooks/dbWrites";
 import { EventItem } from "./EventItem";
 import {
@@ -35,6 +35,7 @@ interface WorkflowEventGroupProps {
 export function WorkflowEventGroup({ workflowId, scriptId, scriptRunId, events }: WorkflowEventGroupProps) {
   const navigate = useNavigate();
   const { data: workflow } = useWorkflow(workflowId);
+  const { data: scriptRun } = useScriptRun(scriptRunId || "");
   const updateWorkflowMutation = useUpdateWorkflow();
   const [successMessage, setSuccessMessage] = useState<string>("");
   const successTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -152,19 +153,22 @@ export function WorkflowEventGroup({ workflowId, scriptId, scriptRunId, events }
   // Check if this is an empty group (only workflow_run events)
   const isEmpty = finalEvents.length === 0;
 
+  // Determine if this run has an error (for header styling)
+  const hasError = scriptRun?.error && scriptRun.error.length > 0;
+
+  // Error styling: red left border on container, error-tinted header
+  const containerClass = `mx-0 my-3 border bg-gray-50 rounded-lg ${
+    hasError ? "border-red-200 border-l-4 border-l-red-500" : "border-gray-200"
+  }`;
+
+  const headerClass = `flex items-center justify-between px-2 py-0 ${
+    hasError ? "bg-red-50" : "bg-gray-50"
+  } ${isEmpty ? "rounded-lg" : "border-b border-gray-200 rounded-t-lg"} hover:brightness-95 cursor-pointer transition-colors duration-200`;
+
   return (
-    <div
-      className={`mx-0 my-3 border border-gray-200 bg-gray-50 ${
-        isEmpty ? "rounded-lg" : "rounded-lg"
-      }`}
-    >
+    <div className={containerClass}>
       {/* Workflow Title Header */}
-      <Link
-        to={linkUrl}
-        className={`flex items-center justify-between px-2 py-0 bg-gray-50 ${
-          isEmpty ? "rounded-lg" : "border-b border-gray-200 rounded-t-lg"
-        } hover:bg-gray-100 cursor-pointer transition-colors duration-200`}
-      >
+      <Link to={linkUrl} className={headerClass}>
         <div className="flex items-center flex-1 min-w-0 gap-2">
           <span className="text-sm text-gray-600">
             ⚙ Executing: <span className="text-gray-600">{workflowTitle}</span>
