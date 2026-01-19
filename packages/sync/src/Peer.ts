@@ -458,7 +458,7 @@ export class Peer extends EventEmitter<{
         } ms`
       );
     } catch (error) {
-      this.debug("Error applying changes to database:", error);
+      console.error("Error applying changes to database:", error);
       throw error;
     }
   }
@@ -493,7 +493,7 @@ export class Peer extends EventEmitter<{
       this.#schemaVersion = schemaVersion?.[0]?.user_version || 0;
       this.debug(`Initialized our schema version to ${this.schemaVersion}`);
     } catch (error) {
-      this.debug("Error initializing last db version:", error);
+      console.error("Error initializing last db version:", error);
       throw error;
     }
   }
@@ -543,7 +543,7 @@ export class Peer extends EventEmitter<{
 
       return cursor;
     } catch (error) {
-      this.debug("Error in readCursor:", error);
+      console.error("Error in readCursor:", error);
       throw error;
     }
   }
@@ -579,7 +579,7 @@ export class Peer extends EventEmitter<{
         } entries`
       );
     } catch (error) {
-      this.debug("Error in writeCursor:", error);
+      console.error("Error in writeCursor:", error);
       throw error;
     }
   }
@@ -644,7 +644,7 @@ export class Peer extends EventEmitter<{
         } entries`
       );
     } catch (error) {
-      this.debug("Error in writeChangesToHistory:", error);
+      console.error("Error in writeChangesToHistory:", error);
       throw error;
     }
   }
@@ -912,7 +912,7 @@ export class Peer extends EventEmitter<{
         })
         .catch((err) => {
           // Prevent the queue from staying in a rejected state.
-          this.debug("Error in queued callback:", err);
+          console.error("Error in queued callback:", err);
         });
 
       return resultPromise;

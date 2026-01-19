@@ -253,10 +253,11 @@ This document prioritizes tasks for achieving a simple, lovable, and complete v1
 - **Files**: `apps/web/src/components/MermaidDiagram.tsx`
 
 ### 34. restore-peer-error-logging.md
-- **Status**: NOT_STARTED
+- **Status**: COMPLETED (2026-01-19)
 - **Effort**: S
 - **Description**: Critical errors in Peer.ts use `this.debug()` instead of `console.error` - invisible in production since debug is disabled by default.
 - **Files**: `packages/sync/src/Peer.ts`
+- **Resolution**: Changed critical error logging from `this.debug()` to `console.error()` for database and cursor operations: applyChanges, initialize, readCursor, writeCursor, writeChangesToHistory, and queue callback errors. These errors are now visible in production logs without requiring DEBUG env var. Less critical errors (transport stop, sync errors) remain as debug logging.
 
 ### 35. service-worker-use-debug-module.md
 - **Status**: NOT_STARTED
@@ -393,9 +394,9 @@ These are documented FIXMEs in the codebase that need attention:
 |----------|-------|--------|
 | P0 (Critical) | 5 | 5 COMPLETED |
 | P1 (Important) | 13 | 13 COMPLETED, 0 NOT_STARTED |
-| P2 (Nice-to-have) | 26 | 12 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 NEEDS_VERIFICATION, 12 NOT_STARTED |
+| P2 (Nice-to-have) | 26 | 13 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 NEEDS_VERIFICATION, 11 NOT_STARTED |
 | P3 (Post-V1) | 3 | 3 NOT_STARTED |
-| **Total** | **47** | **30 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 NEEDS_VERIFICATION, 15 NOT_STARTED** |
+| **Total** | **47** | **31 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 NEEDS_VERIFICATION, 14 NOT_STARTED** |
 
 ### V1 Feature Ideas
 
