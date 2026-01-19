@@ -235,14 +235,8 @@ export default function MainPage() {
     ? sortedWorkflows.filter(w => w.needsAttention)
     : sortedWorkflows;
 
-  // Update tray badge when attention count changes (Electron only)
-  useEffect(() => {
-    if (window.electronAPI) {
-      window.electronAPI.updateTrayBadge(attentionCount).catch(() => {
-        // Ignore errors - this is optional functionality
-      });
-    }
-  }, [attentionCount]);
+  // Note: Tray badge updates are centralized in WorkflowNotifications.ts
+  // which reacts to database changes for consistent badge state
 
   const handleSubmit = useCallback(async (message: PromptInputMessage) => {
     const hasText = Boolean(message.text);

@@ -556,7 +556,7 @@ export default function WorkflowDetailPage() {
                             {run.cost > 0 && (
                               <span className="flex items-center gap-1">
                                 <span>💵</span>
-                                <span>${(run.cost / 1000000).toFixed(4)}</span>
+                                <span>{(run.cost / 1000000).toFixed(2)}</span>
                               </span>
                             )}
                           </div>

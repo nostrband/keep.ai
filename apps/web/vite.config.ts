@@ -23,7 +23,6 @@ export default defineConfig(({ mode }) => {
       __FRONTEND__: JSON.stringify(isFrontend),
       __SERVERLESS__: JSON.stringify(isServerless),
       __ELECTRON__: JSON.stringify(isElectron),
-      __DEV__: JSON.stringify(process.env.NODE_ENV !== "production"),
     },
     worker: {
       format: "es",

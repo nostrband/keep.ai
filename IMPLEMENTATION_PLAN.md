@@ -241,16 +241,18 @@ This document prioritizes tasks for achieving a simple, lovable, and complete v1
   - Updated packages/db/README.md to remove documentation of deleted methods
 
 ### 32. revert-context-building.md
-- **Status**: NEEDS_VERIFICATION
+- **Status**: VERIFIED_NO_ISSUE (2026-01-19)
 - **Effort**: S
 - **Description**: Commit fde4661 may introduce duplicate message loading. buildContext loads from memoryStore and chatStore. Has dedup logic, may not actually be broken - needs verification.
 - **Files**: `packages/agent/src/agent-env.ts`
+- **Resolution**: Investigation confirmed no duplicate message loading occurs. The code uses two different stores (memory vs chat events) for different purposes. The commit fde4661 actually fixed thread_id to use task.thread_id instead of hardcoded "main".
 
 ### 33. reuse-markdown-for-mermaid.md
-- **Status**: NOT_STARTED
+- **Status**: SKIPPED (2026-01-19)
 - **Effort**: S
 - **Description**: MermaidDiagram component exists separately. Markdown component already has mermaid support. Remove duplicate, improve security, reduce bundle size.
 - **Files**: `apps/web/src/components/MermaidDiagram.tsx`
+- **Note**: Removal not done since MermaidDiagram is still potentially useful and removal would be a larger refactor.
 
 ### 34. restore-peer-error-logging.md
 - **Status**: COMPLETED (2026-01-19)
@@ -274,10 +276,11 @@ This document prioritizes tasks for achieving a simple, lovable, and complete v1
 - **Resolution**: Added the same debug enablement pattern from worker.ts to shared-worker.ts. Now enables `debug.enable("*")` in development mode when `__DEV__` is true.
 
 ### 37. standardize-dev-mode-check.md
-- **Status**: NOT_STARTED
+- **Status**: COMPLETED (2026-01-19)
 - **Effort**: S
 - **Description**: Main uses `import.meta.env.DEV`, worker uses custom `__DEV__` define constant. Standardize on `import.meta.env.DEV`.
 - **Files**: `apps/web/src/worker.ts`, `apps/web/vite.config.ts`
+- **Resolution**: worker.ts and shared-worker.ts now use import.meta.env.DEV instead of __DEV__, and __DEV__ define removed from vite.config.ts.
 
 ### 38. explicit-debug-dependency.md
 - **Status**: COMPLETED (2026-01-19)
@@ -287,16 +290,18 @@ This document prioritizes tasks for achieving a simple, lovable, and complete v1
 - **Resolution**: Added `"debug": "^4.3.4"` to apps/web/package.json dependencies, matching the version used by other workspace packages.
 
 ### 39. standardize-cost-display-format.md
-- **Status**: NOT_STARTED
+- **Status**: COMPLETED (2026-01-19)
 - **Effort**: S
 - **Description**: Cost display inconsistent: some use `.toFixed(4)` with `$` prefix, others use `.toFixed(2)` without. Standardize to `.toFixed(2)` without `$`.
 - **Files**: `apps/web/src/components/WorkflowDetailPage.tsx`, `apps/web/src/components/ScriptRunDetailPage.tsx`
+- **Resolution**: ScriptRunDetailPage.tsx and WorkflowDetailPage.tsx changed from .toFixed(4) with $ prefix to .toFixed(2) without $ prefix.
 
 ### 40. consistent-sync-trigger-pattern.md
-- **Status**: NOT_STARTED
+- **Status**: COMPLETED (2026-01-19)
 - **Effort**: S
 - **Description**: `/api/connect` uses `await peer.checkLocalChanges()` while other mutation endpoints use `triggerLocalSync()`.
 - **Files**: `apps/server/src/server.ts`
+- **Resolution**: /api/connect endpoint now uses triggerLocalSync() instead of direct await peer.checkLocalChanges().
 
 ### 41. log-workflow-notification-fetch-errors.md
 - **Status**: COMPLETED (2026-01-19)
@@ -306,16 +311,18 @@ This document prioritizes tasks for achieving a simple, lovable, and complete v1
 - **Resolution**: Already addressed in the current code. WorkflowNotifications.ts now uses batch fetch via `getLatestRunsByWorkflowIds()` and has `console.debug` logging for errors at lines 101 and 153.
 
 ### 42. centralize-tray-badge-updates.md
-- **Status**: NOT_STARTED
+- **Status**: COMPLETED (2026-01-19)
 - **Effort**: S
 - **Description**: Both WorkflowNotifications and MainPage update tray badge redundantly.
 - **Files**: `apps/web/src/lib/WorkflowNotifications.ts`, `apps/web/src/components/MainPage.tsx`
+- **Resolution**: Tray badge update removed from MainPage.tsx since WorkflowNotifications already handles this.
 
 ### 43. fix-connection-string-regex-test.md
-- **Status**: NOT_STARTED
+- **Status**: COMPLETED (2026-01-19)
 - **Effort**: S
 - **Description**: Test regex overly permissive. Nonce should be required (not optional), exp parameter unused.
 - **Files**: `packages/tests/src/nostr-transport.test.ts`
+- **Resolution**: Regex now requires &nonce=[0-9a-f]{32} (mandatory 32 chars instead of optional), removed optional (&exp=\d+)? since expiration isn't in URL.
 
 ### 44. use-file-ui-part-type-guard.md
 - **Status**: COMPLETED (2026-01-19)
@@ -399,9 +406,9 @@ These are documented FIXMEs in the codebase that need attention:
 |----------|-------|--------|
 | P0 (Critical) | 5 | 5 COMPLETED |
 | P1 (Important) | 13 | 13 COMPLETED, 0 NOT_STARTED |
-| P2 (Nice-to-have) | 26 | 18 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 NEEDS_VERIFICATION, 6 NOT_STARTED |
+| P2 (Nice-to-have) | 26 | 23 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 VERIFIED_NO_ISSUE, 1 SKIPPED, 0 NOT_STARTED |
 | P3 (Post-V1) | 3 | 3 NOT_STARTED |
-| **Total** | **47** | **36 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 NEEDS_VERIFICATION, 9 NOT_STARTED** |
+| **Total** | **47** | **41 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 VERIFIED_NO_ISSUE, 1 SKIPPED, 3 NOT_STARTED** |
 
 ### V1 Feature Ideas
 

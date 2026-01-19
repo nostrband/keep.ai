@@ -1543,8 +1543,8 @@ export async function createServer(config: ServerConfig = {}) {
             timestamp: "",
           });
 
-          // Make sure peer is noticed
-          await peer.checkLocalChanges();
+          // Trigger sync to notify peers of new connection
+          triggerLocalSync();
         } catch (error) {
           debugServer("NostrConnector listen failed:", error);
         }

@@ -26,7 +26,8 @@ describe('NostrTransport', () => {
     expect(connInfo.relays).toEqual(relays);
     expect(connInfo.expiration).toBeGreaterThan(Date.now());
     // Match connection string format: nostr+keepai://pubkey?relay=...&secret=...&nonce=...
-    expect(connInfo.str).toMatch(/^nostr\+keepai:\/\/[0-9a-f]{64}\?relay=wss%3A%2F%2Frelay\.damus\.io&secret=[0-9a-f]{32}(&nonce=[0-9a-f]+)?(&exp=\d+)?$/);
+    // nonce is always present (32 hex chars from 16 random bytes), expiration is not included in URL
+    expect(connInfo.str).toMatch(/^nostr\+keepai:\/\/[0-9a-f]{64}\?relay=wss%3A%2F%2Frelay\.damus\.io&secret=[0-9a-f]{32}&nonce=[0-9a-f]{32}$/);
   });
 
   // Skip: Requires WebSocket which isn't available in Node.js test environment

@@ -113,7 +113,7 @@ export default function ScriptRunDetailPage() {
                     <h3 className="text-sm font-medium text-gray-700 mb-2">Cost</h3>
                     <p className="text-gray-900 flex items-center gap-1">
                       <span>💵</span>
-                      <span>${(run.cost / 1000000).toFixed(4)}</span>
+                      <span>{(run.cost / 1000000).toFixed(2)}</span>
                     </p>
                   </div>
                 )}

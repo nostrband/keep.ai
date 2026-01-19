@@ -4,8 +4,7 @@ import { API_ENDPOINT } from "./const";
 import { SyncWorker } from "./lib/worker";
 
 // Only enable debug logging in development mode
-declare const __DEV__: boolean;
-if (typeof __DEV__ !== "undefined" && __DEV__) {
+if (import.meta.env.DEV) {
   debug.enable("*");
 }
 
