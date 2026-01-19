@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useScript, useScriptVersions, useScriptRuns } from "../hooks/dbScriptReads";
 import { useTaskRuns } from "../hooks/dbTaskReads";
@@ -17,27 +17,64 @@ export default function ScriptDetailPage() {
   const { data: taskRuns = [] } = useTaskRuns(script?.task_id || "");
   const [warning, setWarning] = useState<string>("");
   const [successMessage, setSuccessMessage] = useState<string>("");
-  
+  const warningTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const successTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const updateTaskMutation = useUpdateTask();
+
+  // Cleanup timeouts on unmount
+  useEffect(() => {
+    return () => {
+      if (warningTimeoutRef.current) {
+        clearTimeout(warningTimeoutRef.current);
+      }
+      if (successTimeoutRef.current) {
+        clearTimeout(successTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  // Helper to show warning with auto-clear
+  const showWarning = (message: string) => {
+    if (warningTimeoutRef.current) {
+      clearTimeout(warningTimeoutRef.current);
+    }
+    setWarning(message);
+    setSuccessMessage("");
+    warningTimeoutRef.current = setTimeout(() => {
+      setWarning("");
+      warningTimeoutRef.current = null;
+    }, 3000);
+  };
+
+  // Helper to show success message with auto-clear
+  const showSuccessMessage = (message: string) => {
+    if (successTimeoutRef.current) {
+      clearTimeout(successTimeoutRef.current);
+    }
+    setSuccessMessage(message);
+    successTimeoutRef.current = setTimeout(() => {
+      setSuccessMessage("");
+      successTimeoutRef.current = null;
+    }, 3000);
+  };
 
   const handleRunNow = async () => {
     if (!script) return;
-    
+
     // Check if the latest run is active
     if (taskRuns.length > 0) {
-      const latestRun = taskRuns[0]; // taskRuns are ordered by start_timestamp DESC      
+      const latestRun = taskRuns[0]; // taskRuns are ordered by start_timestamp DESC
       if (!latestRun.end_timestamp) {
-        setWarning("Already working");
-        setSuccessMessage("");
-        setTimeout(() => setWarning(""), 3000); // Clear warning after 3 seconds
+        showWarning("Already working");
         return;
       }
     }
-    
+
     // Clear any previous messages
     setWarning("");
     setSuccessMessage("");
-    
+
     // Update task timestamp to now (in seconds)
     const nowTimestamp = Math.floor(Date.now() / 1000);
     updateTaskMutation.mutate({
@@ -45,12 +82,10 @@ export default function ScriptDetailPage() {
       timestamp: nowTimestamp,
     }, {
       onSuccess: () => {
-        setSuccessMessage("Task will run soon");
-        setTimeout(() => setSuccessMessage(""), 3000); // Clear success message after 3 seconds
+        showSuccessMessage("Task will run soon");
       },
       onError: () => {
-        setWarning("Failed to restart task");
-        setTimeout(() => setWarning(""), 3000);
+        showWarning("Failed to restart task");
       }
     });
   };

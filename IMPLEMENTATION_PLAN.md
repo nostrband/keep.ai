@@ -143,10 +143,11 @@ This document prioritizes tasks for achieving a simple, lovable, and complete v1
 ## Priority P2 - Nice-to-Have (Cleanup, Polish)
 
 ### 19. cleanup-success-message-timeout.md
-- **Status**: NOT_STARTED
+- **Status**: COMPLETED (2026-01-19)
 - **Effort**: S
 - **Description**: setTimeout in WorkflowEventGroup onSuccess callback not cleaned up on unmount. Use useEffect with proper cleanup.
 - **Files**: `apps/web/src/components/WorkflowEventGroup.tsx`
+- **Resolution**: Added `useRef` for timeout tracking and cleanup `useEffect` in WorkflowEventGroup.tsx, ScriptDetailPage.tsx, TaskDetailPage.tsx, WorkflowDetailPage.tsx, and CodeBlockCopyButton in code-block.tsx. Created helper functions (`showSuccessMessage`, `showWarning`) that clear existing timeouts before setting new ones, and cleanup effects that clear timeouts on unmount. This prevents React warnings about setting state on unmounted components.
 
 ### 20. workflow-status-badge-component.md
 - **Status**: NOT_STARTED
@@ -373,9 +374,9 @@ These are documented FIXMEs in the codebase that need attention:
 |----------|-------|--------|
 | P0 (Critical) | 5 | 5 COMPLETED |
 | P1 (Important) | 13 | 13 COMPLETED, 0 NOT_STARTED |
-| P2 (Nice-to-have) | 26 | 1 NEEDS_VERIFICATION, 25 NOT_STARTED |
+| P2 (Nice-to-have) | 26 | 1 COMPLETED, 1 NEEDS_VERIFICATION, 24 NOT_STARTED |
 | P3 (Post-V1) | 3 | 3 NOT_STARTED |
-| **Total** | **47** | **18 COMPLETED, 1 NEEDS_VERIFICATION, 28 NOT_STARTED** |
+| **Total** | **47** | **19 COMPLETED, 1 NEEDS_VERIFICATION, 27 NOT_STARTED** |
 
 ### V1 Feature Ideas
 

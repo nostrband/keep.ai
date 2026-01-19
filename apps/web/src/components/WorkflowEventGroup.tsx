@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useWorkflow } from "../hooks/dbScriptReads";
 import { useUpdateWorkflow } from "../hooks/dbWrites";
@@ -64,6 +64,29 @@ export function WorkflowEventGroup({ workflowId, scriptId, scriptRunId, events }
   const { data: workflow } = useWorkflow(workflowId);
   const updateWorkflowMutation = useUpdateWorkflow();
   const [successMessage, setSuccessMessage] = useState<string>("");
+  const successTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (successTimeoutRef.current) {
+        clearTimeout(successTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  // Helper to show success message with auto-clear
+  const showSuccessMessage = (message: string) => {
+    // Clear any existing timeout
+    if (successTimeoutRef.current) {
+      clearTimeout(successTimeoutRef.current);
+    }
+    setSuccessMessage(message);
+    successTimeoutRef.current = setTimeout(() => {
+      setSuccessMessage("");
+      successTimeoutRef.current = null;
+    }, 3000);
+  };
 
   const handleRetry = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -73,8 +96,7 @@ export function WorkflowEventGroup({ workflowId, scriptId, scriptRunId, events }
 
     // Only allow retry for active workflows - scheduler only executes where status === 'active'
     if (workflow.status !== 'active') {
-      setSuccessMessage("Enable workflow first to retry");
-      setTimeout(() => setSuccessMessage(""), 3000);
+      showSuccessMessage("Enable workflow first to retry");
       return;
     }
 
@@ -86,8 +108,7 @@ export function WorkflowEventGroup({ workflowId, scriptId, scriptRunId, events }
       next_run_timestamp: now,
     }, {
       onSuccess: () => {
-        setSuccessMessage("Retry scheduled");
-        setTimeout(() => setSuccessMessage(""), 3000);
+        showSuccessMessage("Retry scheduled");
       },
     });
   };

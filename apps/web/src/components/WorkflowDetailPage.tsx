@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import {
   useWorkflow,
@@ -37,6 +37,7 @@ export default function WorkflowDetailPage() {
   const [successMessage, setSuccessMessage] = useState<string>("");
   const [showVersionHistory, setShowVersionHistory] = useState(false);
   const [diffVersions, setDiffVersions] = useState<{ oldId: string; newId: string } | null>(null);
+  const successTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const updateWorkflowMutation = useUpdateWorkflow();
   const rollbackMutation = useRollbackScript();
@@ -48,6 +49,27 @@ export default function WorkflowDetailPage() {
       workflowNotifications.clearWorkflowNotifications(id);
     }
   }, [id]);
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (successTimeoutRef.current) {
+        clearTimeout(successTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  // Helper to show success message with auto-clear
+  const showSuccessMessage = (message: string) => {
+    if (successTimeoutRef.current) {
+      clearTimeout(successTimeoutRef.current);
+    }
+    setSuccessMessage(message);
+    successTimeoutRef.current = setTimeout(() => {
+      setSuccessMessage("");
+      successTimeoutRef.current = null;
+    }, 3000);
+  };
 
   // Get next run time from workflow.next_run_timestamp
   // Only show for active workflows - scheduler only executes where status === 'active'
@@ -72,8 +94,7 @@ export default function WorkflowDetailPage() {
       status: "active",
     }, {
       onSuccess: () => {
-        setSuccessMessage("Automation activated!");
-        setTimeout(() => setSuccessMessage(""), 3000);
+        showSuccessMessage("Automation activated!");
       },
     });
   };
@@ -86,8 +107,7 @@ export default function WorkflowDetailPage() {
       status: "disabled",
     }, {
       onSuccess: () => {
-        setSuccessMessage("Automation paused");
-        setTimeout(() => setSuccessMessage(""), 3000);
+        showSuccessMessage("Automation paused");
       },
     });
   };
@@ -100,25 +120,23 @@ export default function WorkflowDetailPage() {
       status: "active",
     }, {
       onSuccess: () => {
-        setSuccessMessage("Automation resumed");
-        setTimeout(() => setSuccessMessage(""), 3000);
+        showSuccessMessage("Automation resumed");
       },
     });
   };
 
   const handleRunNow = () => {
     if (!workflow) return;
-    
+
     // Set next_run_timestamp to current time to trigger immediate execution
     const now = new Date().toISOString();
-    
+
     updateWorkflowMutation.mutate({
       workflowId: workflow.id,
       next_run_timestamp: now,
     }, {
       onSuccess: () => {
-        setSuccessMessage("Workflow scheduled to run now");
-        setTimeout(() => setSuccessMessage(""), 3000);
+        showSuccessMessage("Workflow scheduled to run now");
       },
     });
   };
@@ -137,10 +155,9 @@ export default function WorkflowDetailPage() {
       targetScriptId: scriptId,
     }, {
       onSuccess: () => {
-        setSuccessMessage(`Rolled back to v${version}`);
+        showSuccessMessage(`Rolled back to v${version}`);
         setShowVersionHistory(false);
         setDiffVersions(null);
-        setTimeout(() => setSuccessMessage(""), 3000);
       },
     });
   };
