@@ -125,10 +125,11 @@ This document prioritizes tasks for achieving a simple, lovable, and complete v1
 - **Resolution**: Added import of `workflowNotifications` singleton to WorkflowDetailPage.tsx. Added `useEffect` to call `clearWorkflowNotifications(id)` when viewing a workflow, preventing re-notifications for errors user has already seen. Removed unused `checkIntervalMs` property from WorkflowNotifications class. The `reset()` method remains available for future logout flow integration.
 
 ### 17. fix-chat-pin-to-bottom.md
-- **Status**: NOT_STARTED
+- **Status**: COMPLETED (2026-01-19)
 - **Effort**: M
 - **Description**: Pin-to-bottom doesn't react to content size changes (images loading, markdown expanding). Three separate scroll event listeners could be consolidated. Need ResizeObserver or MutationObserver.
 - **Files**: `apps/web/src/components/ChatInterface.tsx`
+- **Resolution**: Added ResizeObserver to ChatInterface.tsx that observes the container element. When content expands (images loading, markdown rendering) and user was at bottom, automatically scrolls to maintain bottom position. The three existing scroll listeners are kept separate as they serve distinct purposes: `ScrollToBottomDetector` marks chat as read, scroll position tracking detects user intent, and infinite scroll loads older messages.
 
 ### 18. restore-chat-scroll-position.md
 - **Status**: NOT_STARTED
@@ -370,10 +371,10 @@ These are documented FIXMEs in the codebase that need attention:
 | Priority | Count | Status |
 |----------|-------|--------|
 | P0 (Critical) | 5 | 5 COMPLETED |
-| P1 (Important) | 13 | 11 COMPLETED, 2 NOT_STARTED |
+| P1 (Important) | 13 | 12 COMPLETED, 1 NOT_STARTED |
 | P2 (Nice-to-have) | 26 | 1 NEEDS_VERIFICATION, 25 NOT_STARTED |
 | P3 (Post-V1) | 3 | 3 NOT_STARTED |
-| **Total** | **47** | **16 COMPLETED, 1 NEEDS_VERIFICATION, 30 NOT_STARTED** |
+| **Total** | **47** | **17 COMPLETED, 1 NEEDS_VERIFICATION, 29 NOT_STARTED** |
 
 ### V1 Feature Ideas
 

@@ -191,6 +191,35 @@ export default function ChatInterface({
     // scrollToBottom dependency
   }, [hasData, lastMessageTimestamp, rows.length, isFetching]);
 
+  // Pin-to-bottom using ResizeObserver - keeps user at bottom when content expands
+  // (images loading, markdown rendering, etc.) without relying on scroll events
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    // Track the last height so we can detect growth vs shrinkage
+    let lastHeight = container.scrollHeight;
+
+    const observer = new ResizeObserver(() => {
+      // Only act if user was already at bottom before content changed
+      if (!wasAtBottomRef.current) return;
+
+      const el = document.documentElement;
+      const newHeight = el.scrollHeight;
+
+      // Content grew - scroll to stay at bottom
+      if (newHeight > lastHeight) {
+        scrollToBottom("auto");
+      }
+
+      lastHeight = newHeight;
+    });
+
+    observer.observe(container);
+
+    return () => observer.disconnect();
+  }, [scrollToBottom]);
+
   // Reset first load flag when chatId changes
   useEffect(() => {
     isFirstLoadRef.current = true;
