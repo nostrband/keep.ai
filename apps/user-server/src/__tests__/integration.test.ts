@@ -26,11 +26,14 @@ describe('Database Integration Tests', () => {
     const keyString = 'integration-test-key';
     const keyHash = crypto.createHash('sha256').update(keyString).digest('hex');
     
-    await (database as any).db.run(
-      'UPDATE api_keys SET key_hash = ? WHERE id = ?',
-      [keyHash, apiKey.id]
-    );
-    
+    await new Promise<void>((resolve, reject) => {
+      (database as any).db.run(
+        'UPDATE api_keys SET key_hash = ? WHERE id = ?',
+        [keyHash, apiKey.id],
+        (err: Error | null) => err ? reject(err) : resolve()
+      );
+    });
+
     const foundKey = await database.findApiKey(keyHash);
     expect(foundKey).not.toBeNull();
     expect(foundKey!.user.id).toBe(user.id);
@@ -97,11 +100,14 @@ it('should handle multiple users correctly', async () => {
     const keyString = 'valid-key-string';
     const keyHash = crypto.createHash('sha256').update(keyString).digest('hex');
     
-    await (database as any).db.run(
-      'UPDATE api_keys SET key_hash = ? WHERE id = ?',
-      [keyHash, validKey.id]
-    );
-    
+    await new Promise<void>((resolve, reject) => {
+      (database as any).db.run(
+        'UPDATE api_keys SET key_hash = ? WHERE id = ?',
+        [keyHash, validKey.id],
+        (err: Error | null) => err ? reject(err) : resolve()
+      );
+    });
+
     const foundValid = await database.findApiKey(keyHash);
     expect(foundValid).not.toBeNull();
     expect(foundValid!.name).toBe('Valid Key');
