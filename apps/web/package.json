@@ -43,6 +43,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "croner": "^9.1.0",
+    "debug": "^4.3.4",
     "embla-carousel-react": "^8.6.0",
     "html5-qrcode": "^2.3.8",
     "lowlight": "^1.20.0",

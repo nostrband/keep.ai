@@ -280,10 +280,11 @@ This document prioritizes tasks for achieving a simple, lovable, and complete v1
 - **Files**: `apps/web/src/worker.ts`, `apps/web/vite.config.ts`
 
 ### 38. explicit-debug-dependency.md
-- **Status**: NOT_STARTED
+- **Status**: COMPLETED (2026-01-19)
 - **Effort**: S
 - **Description**: `debug` not in apps/web/package.json - works only as transitive dependency. Add explicit dependency.
 - **Files**: `apps/web/package.json`
+- **Resolution**: Added `"debug": "^4.3.4"` to apps/web/package.json dependencies, matching the version used by other workspace packages.
 
 ### 39. standardize-cost-display-format.md
 - **Status**: NOT_STARTED
@@ -396,9 +397,9 @@ These are documented FIXMEs in the codebase that need attention:
 |----------|-------|--------|
 | P0 (Critical) | 5 | 5 COMPLETED |
 | P1 (Important) | 13 | 13 COMPLETED, 0 NOT_STARTED |
-| P2 (Nice-to-have) | 26 | 15 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 NEEDS_VERIFICATION, 9 NOT_STARTED |
+| P2 (Nice-to-have) | 26 | 16 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 NEEDS_VERIFICATION, 8 NOT_STARTED |
 | P3 (Post-V1) | 3 | 3 NOT_STARTED |
-| **Total** | **47** | **33 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 NEEDS_VERIFICATION, 12 NOT_STARTED** |
+| **Total** | **47** | **34 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 NEEDS_VERIFICATION, 11 NOT_STARTED** |
 
 ### V1 Feature Ideas
 
