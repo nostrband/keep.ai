@@ -220,10 +220,11 @@ This document prioritizes tasks for achieving a simple, lovable, and complete v1
 - **Resolution**: Rewrote useAutonomyPreference hook to use only the database API for persistence. Removed localStorage usage, removed unused `getAutonomyPreference()` helper function. Now reads from `api.getAutonomyMode()` on mount (when dbStatus is ready) and writes via `api.setAutonomyMode()`. Single source of truth is now the database.
 
 ### 30. remove-unused-autonomy-metadata.md
-- **Status**: NOT_STARTED
+- **Status**: COMPLETED (2026-01-19)
 - **Effort**: S
 - **Description**: `autonomy` field in message metadata schema never read or written anywhere.
 - **Files**: `packages/proto/src/schemas.ts`
+- **Resolution**: Removed unused `autonomy` field from metadataSchema in schemas.ts. The field was added but never read or written anywhere in the codebase.
 
 ### 31. remove-orphaned-agent-status.md
 - **Status**: NOT_STARTED
@@ -384,9 +385,9 @@ These are documented FIXMEs in the codebase that need attention:
 |----------|-------|--------|
 | P0 (Critical) | 5 | 5 COMPLETED |
 | P1 (Important) | 13 | 13 COMPLETED, 0 NOT_STARTED |
-| P2 (Nice-to-have) | 26 | 10 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 NEEDS_VERIFICATION, 14 NOT_STARTED |
+| P2 (Nice-to-have) | 26 | 11 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 NEEDS_VERIFICATION, 13 NOT_STARTED |
 | P3 (Post-V1) | 3 | 3 NOT_STARTED |
-| **Total** | **47** | **28 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 NEEDS_VERIFICATION, 17 NOT_STARTED** |
+| **Total** | **47** | **29 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 NEEDS_VERIFICATION, 16 NOT_STARTED** |
 
 ### V1 Feature Ideas
 

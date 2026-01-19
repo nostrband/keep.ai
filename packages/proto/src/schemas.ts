@@ -7,7 +7,6 @@ const metadataSchema = z.object({
   createdAt: z.string().datetime(),
   threadId: z.string().optional(),
   volatile: z.boolean().optional(),
-  autonomy: z.enum(['ai_decides', 'coordinate']).optional(),
 });
 export type MessageMetadata = z.infer<typeof metadataSchema>;
 
