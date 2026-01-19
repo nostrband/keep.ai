@@ -11,8 +11,6 @@ import { InboxItem, InboxStore } from "./inbox-store";
 import { File, FileStore } from "./file-store";
 import { ScriptStore, Workflow } from "./script-store";
 
-export const MAX_STATUS_TTL = 60 * 1000; // 1 minute in milliseconds
-
 export class KeepDbApi {
   public readonly db: KeepDb;
   public readonly memoryStore: MemoryStore;
@@ -193,39 +191,6 @@ export class KeepDbApi {
       })
       .filter((m) => !!m)
       .filter((m) => !!m.role);
-  }
-
-  async setAgentStatus(value: string): Promise<void> {
-    const timestamp = new Date().toISOString();
-    const sql = `
-      INSERT OR REPLACE INTO agent_state (key, value, timestamp)
-      VALUES ('status', ?, ?)
-    `;
-    await this.db.db.exec(sql, [value, timestamp]);
-  }
-
-  async getAgentStatus(): Promise<string> {
-    const sql = `
-      SELECT value, timestamp FROM agent_state WHERE key = 'status'
-    `;
-    const result = await this.db.db.execO<{ value: string; timestamp: string }>(
-      sql
-    );
-
-    if (!result || result.length === 0) {
-      return "";
-    }
-
-    const row = result[0];
-    const timestampMs = new Date(row.timestamp).getTime();
-    const nowMs = Date.now();
-
-    // Check if timestamp is older than MAX_STATUS_TTL (1 minute)
-    if (nowMs - timestampMs > MAX_STATUS_TTL) {
-      return "";
-    }
-
-    return row.value;
   }
 
   /**

@@ -3,7 +3,6 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   Button,
 } from "../ui";
-import { useAgentStatus } from "../hooks/dbApiReads";
 
 // Access build-time constants
 declare const __SERVERLESS__: boolean;
@@ -23,7 +22,6 @@ interface SharedHeaderProps {
 export default function SharedHeader({ title, subtitle }: SharedHeaderProps) {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
-  const { data: agentStatus } = useAgentStatus();
   const location = useLocation();
   const navigate = useNavigate();
   const isServerless = __SERVERLESS__;
@@ -84,9 +82,6 @@ export default function SharedHeader({ title, subtitle }: SharedHeaderProps) {
             <AssistantIcon />
             <div>
               <h1 className="text-lg font-bold text-gray-900">{title}</h1>
-              {title === "Assistant" && agentStatus && (
-                <p className="text-xs text-gray-500">{agentStatus}</p>
-              )}
               {subtitle && (
                 <p className="text-sm text-gray-600">{subtitle}</p>
               )}

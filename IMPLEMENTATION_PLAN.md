@@ -227,10 +227,18 @@ This document prioritizes tasks for achieving a simple, lovable, and complete v1
 - **Resolution**: Removed unused `autonomy` field from metadataSchema in schemas.ts. The field was added but never read or written anywhere in the codebase.
 
 ### 31. remove-orphaned-agent-status.md
-- **Status**: NOT_STARTED
+- **Status**: COMPLETED (2026-01-19)
 - **Effort**: S
 - **Description**: Agent status infrastructure orphaned - setAgentStatus/getAgentStatus in api.ts, useAgentStatus hook (polling every 5s for nothing), status display in SharedHeader exist but startStatusUpdater removed. Also `packages/agent/src/interfaces.ts` only has unused Memory interface.
 - **Files**: Multiple files - remove dead code
+- **Resolution**: Removed all orphaned agent status infrastructure:
+  - Deleted setAgentStatus/getAgentStatus from api.ts and MAX_STATUS_TTL constant
+  - Deleted useAgentStatus hook and dbApiReads.ts file entirely
+  - Removed agentStatus query key from queryKeys.ts
+  - Removed agentStatus display from SharedHeader.tsx
+  - Removed commented status updater code from task-worker.ts
+  - Deleted interfaces.ts (only contained unused Memory interface)
+  - Updated packages/db/README.md to remove documentation of deleted methods
 
 ### 32. revert-context-building.md
 - **Status**: NEEDS_VERIFICATION
@@ -385,9 +393,9 @@ These are documented FIXMEs in the codebase that need attention:
 |----------|-------|--------|
 | P0 (Critical) | 5 | 5 COMPLETED |
 | P1 (Important) | 13 | 13 COMPLETED, 0 NOT_STARTED |
-| P2 (Nice-to-have) | 26 | 11 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 NEEDS_VERIFICATION, 13 NOT_STARTED |
+| P2 (Nice-to-have) | 26 | 12 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 NEEDS_VERIFICATION, 12 NOT_STARTED |
 | P3 (Post-V1) | 3 | 3 NOT_STARTED |
-| **Total** | **47** | **29 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 NEEDS_VERIFICATION, 16 NOT_STARTED** |
+| **Total** | **47** | **30 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 NEEDS_VERIFICATION, 15 NOT_STARTED** |
 
 ### V1 Feature Ideas
 

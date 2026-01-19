@@ -374,8 +374,6 @@ class KeepDbApi {
   
   // Utility methods
   async addMessage(input: AddMessageInput): Promise<AssistantUIMessage>
-  async setAgentStatus(value: string): Promise<void>
-  async getAgentStatus(): Promise<string>
 }
 ```
 

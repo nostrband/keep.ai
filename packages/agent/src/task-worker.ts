@@ -106,7 +106,6 @@ export class TaskWorker {
   public async executeTask(task: Task): Promise<void> {
     this.debug("Execute task", task);
 
-    // let statusUpdaterInterval: ReturnType<typeof setInterval> | undefined;
     try {
       // Type check to cast to TaskType safely
       if (task.type !== "worker" && task.type !== "planner") {
@@ -133,9 +132,6 @@ export class TaskWorker {
       // Initialize logs array for this task run
       const logs: string[] = [];
       const lastStepLogs: string[] = [];
-
-      // Set agent status in db
-      // statusUpdaterInterval = await this.startStatusUpdater(taskType);
 
       // We restore existing session on 'input' reason for worker,
       // bcs that generally means user is supplying
@@ -399,10 +395,6 @@ export class TaskWorker {
     } catch (error) {
       this.debug("Task handling error:", error);
       throw error;
-    } finally {
-      // if (statusUpdaterInterval) clearInterval(statusUpdaterInterval);
-      // this.debug(`Clear agent status`);
-      // await this.api.setAgentStatus("");
     }
   }
 
