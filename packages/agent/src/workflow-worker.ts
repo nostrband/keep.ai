@@ -13,6 +13,7 @@ import {
   PermissionError,
   NetworkError,
   LogicError,
+  InternalError,
   ErrorType,
   WorkflowPausedError,
   isWorkflowPausedError,
@@ -239,7 +240,7 @@ export class WorkflowWorker {
       // Determine error_type for storage and notification filtering
       let errorType: ErrorType | '' = '';
       if (error === ERROR_BAD_REQUEST) {
-        errorType = ''; // BAD_REQUEST is not a classified error type
+        errorType = 'internal'; // BAD_REQUEST indicates a bug in our code
       } else if (error === ERROR_PAYMENT_REQUIRED) {
         errorType = ''; // PAYMENT_REQUIRED is not a classified error type
       } else if (isClassifiedError(error)) {
@@ -272,7 +273,7 @@ export class WorkflowWorker {
 
       // Handle different error types based on classification
       if (error === ERROR_BAD_REQUEST) {
-        this.debug("BAD_REQUEST: will not retry the workflow", workflow.id);
+        this.debug("BAD_REQUEST (internal error): will not retry the workflow", workflow.id);
 
         // Mark workflow as error status
         // Use updateWorkflowFields for atomic update to prevent overwriting concurrent changes
@@ -284,11 +285,13 @@ export class WorkflowWorker {
           this.debug("updateWorkflow error", e);
         }
 
-        // Signal success (no retry) to scheduler
+        // Signal that user needs attention - this is an internal bug, can't be auto-fixed
         this.emitSignal({
-          type: "done",
+          type: "needs_attention",
           workflowId: workflow.id,
           timestamp: Date.now(),
+          error: errorMessage,
+          errorType: "internal",
           scriptRunId,
         });
       } else if (error === ERROR_PAYMENT_REQUIRED) {

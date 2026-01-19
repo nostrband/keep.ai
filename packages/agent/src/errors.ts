@@ -11,7 +11,7 @@
  */
 
 /** Error type enum for classification */
-export type ErrorType = 'auth' | 'permission' | 'network' | 'logic';
+export type ErrorType = 'auth' | 'permission' | 'network' | 'logic' | 'internal';
 
 /** Base class for classified errors */
 export abstract class ClassifiedError extends Error {
@@ -118,6 +118,23 @@ export class NetworkError extends ClassifiedError {
  */
 export class LogicError extends ClassifiedError {
   readonly type = 'logic' as const;
+
+  constructor(message: string, options?: { cause?: Error; source?: string }) {
+    super(message, options);
+  }
+}
+
+/**
+ * Internal error - Bugs in our code, bad requests from our side.
+ *
+ * Routed to: User (must contact support)
+ * Auto-retry: No (can't be auto-fixed)
+ *
+ * Triggers: ERROR_BAD_REQUEST (400 from AI API due to invalid input),
+ * unexpected internal state, coding bugs in the system itself.
+ */
+export class InternalError extends ClassifiedError {
+  readonly type = 'internal' as const;
 
   constructor(message: string, options?: { cause?: Error; source?: string }) {
     super(message, options);

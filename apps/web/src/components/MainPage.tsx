@@ -49,7 +49,7 @@ const getStatusBadge = (workflow: any) => {
 
 // Error types that require user attention (non-fixable)
 // Logic errors are handled silently by the agent via maintenance mode
-const ATTENTION_ERROR_TYPES = ['auth', 'permission', 'network'];
+const ATTENTION_ERROR_TYPES = ['auth', 'permission', 'network', 'internal'];
 
 // Example automation suggestions for first-time users
 const EXAMPLE_SUGGESTIONS = [
@@ -92,6 +92,8 @@ function getSecondaryLine(workflow: any, latestRun: any, task: any): { text: str
           return { text: `⚠ Permission denied ${ago}`, isAttention: true };
         } else if (errorType === 'network') {
           return { text: `⚠ Network error ${ago}`, isAttention: true };
+        } else if (errorType === 'internal') {
+          return { text: `⚠ Something went wrong ${ago} - contact support`, isAttention: true };
         }
         return { text: `⚠ Failed ${ago} - needs attention`, isAttention: true };
       } else {

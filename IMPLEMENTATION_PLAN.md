@@ -69,10 +69,11 @@ This document prioritizes tasks for achieving a simple, lovable, and complete v1
 - **Resolution**: Changed condition from `workflow.status === 'disabled' || workflow.status === 'error'` to `workflow.status !== 'active'`. This aligns UI with scheduler logic - only active workflows show next run time since scheduler only executes where `status === 'active'`.
 
 ### 9. internal-error-classification.md
-- **Status**: NOT_STARTED
+- **Status**: COMPLETED (2026-01-19)
 - **Effort**: S
 - **Description**: ERROR_BAD_REQUEST gets empty error_type. Need new 'internal' error type for bugs, with "Something went wrong. Please contact support" guidance.
-- **Files**: `packages/agent/src/workflow-worker.ts`, `packages/agent/src/errors.ts`
+- **Files**: `packages/agent/src/workflow-worker.ts`, `packages/agent/src/errors.ts`, `apps/web/src/components/MainPage.tsx`
+- **Resolution**: Added 'internal' to ErrorType union and created InternalError class. Updated workflow-worker.ts to classify ERROR_BAD_REQUEST as 'internal' and emit 'needs_attention' signal. Added 'internal' to ATTENTION_ERROR_TYPES in MainPage.tsx with user-friendly message "Something went wrong - contact support".
 
 ### 10. fix-audio-explain-cost-tracking.md
 - **Status**: COMPLETED (2026-01-19)
@@ -364,10 +365,10 @@ These are documented FIXMEs in the codebase that need attention:
 | Priority | Count | Status |
 |----------|-------|--------|
 | P0 (Critical) | 5 | 5 COMPLETED |
-| P1 (Important) | 13 | 5 COMPLETED, 8 NOT_STARTED |
+| P1 (Important) | 13 | 6 COMPLETED, 7 NOT_STARTED |
 | P2 (Nice-to-have) | 26 | 1 NEEDS_VERIFICATION, 25 NOT_STARTED |
 | P3 (Post-V1) | 3 | 3 NOT_STARTED |
-| **Total** | **47** | **10 COMPLETED, 1 NEEDS_VERIFICATION, 36 NOT_STARTED** |
+| **Total** | **47** | **11 COMPLETED, 1 NEEDS_VERIFICATION, 35 NOT_STARTED** |
 
 ### V1 Feature Ideas
 
