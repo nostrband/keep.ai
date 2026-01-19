@@ -5,8 +5,9 @@ import {
   Route,
   Navigate,
   useNavigate,
+  useLocation,
 } from "react-router-dom";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import MainPage from "./components/MainPage";
 import ChatPage from "./components/ChatPage";
 import NewPage from "./components/NewPage";
@@ -38,33 +39,101 @@ import { CLERK_PUBLISHABLE_KEY } from "./constants/auth";
 declare const __SERVERLESS__: boolean;
 declare const __ELECTRON__: boolean;
 
-// Component to handle electron-specific navigation events (notification clicks, etc.)
-function ElectronNavigationHandler() {
-  const navigate = useNavigate();
-  // Use ref to hold navigate function so the effect doesn't re-run on every render.
-  // navigate from useNavigate() returns a new function reference on each render.
-  const navigateRef = useRef(navigate);
+// Custom event for focus-input - MainPage listens for this
+const FOCUS_INPUT_EVENT = 'keep-ai-focus-input';
 
-  // Keep ref updated with current navigate function
+// Component to handle electron-specific IPC events (navigation, focus-input, pause-all)
+function ElectronIPCHandler() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { api } = useDbQuery();
+
+  // Use refs to hold current values so the effect doesn't re-run on every render
+  const navigateRef = useRef(navigate);
+  const locationRef = useRef(location);
+  const apiRef = useRef(api);
+
+  // Keep refs updated with current values
   useEffect(() => {
     navigateRef.current = navigate;
   });
+  useEffect(() => {
+    locationRef.current = location;
+  });
+  useEffect(() => {
+    apiRef.current = api;
+  });
+
+  // Handle focus-input from tray menu "New automation..."
+  const handleFocusInput = useCallback(() => {
+    // Navigate to main page if not already there
+    if (locationRef.current.pathname !== '/') {
+      navigateRef.current('/');
+    }
+    // Dispatch custom event for MainPage to focus the input
+    // Small delay to allow navigation to complete
+    setTimeout(() => {
+      window.dispatchEvent(new CustomEvent(FOCUS_INPUT_EVENT));
+    }, 100);
+  }, []);
+
+  // Handle pause-all-automations from tray menu
+  const handlePauseAllAutomations = useCallback(async () => {
+    if (!apiRef.current) return;
+
+    try {
+      // Get all workflows (default limit of 100 should be sufficient)
+      const workflows = await apiRef.current.scriptStore.listWorkflows();
+
+      // Filter to active workflows only
+      const activeWorkflows = workflows.filter((w: { status: string }) => w.status === 'active');
+
+      if (activeWorkflows.length === 0) {
+        console.debug('No active workflows to pause');
+        return;
+      }
+
+      // Pause each active workflow
+      for (const workflow of activeWorkflows) {
+        await apiRef.current.scriptStore.updateWorkflow({
+          ...workflow,
+          status: 'disabled',
+        });
+      }
+
+      console.debug(`Paused ${activeWorkflows.length} workflows`);
+    } catch (error) {
+      console.error('Failed to pause all automations:', error);
+    }
+  }, []);
 
   useEffect(() => {
     if (!window.electronAPI) return;
 
     // Set up listener for navigation from notification clicks
-    // onNavigateTo returns an unsubscribe function
-    const unsubscribe = window.electronAPI.onNavigateTo((path: string) => {
+    const unsubNavigate = window.electronAPI.onNavigateTo((path: string) => {
       navigateRef.current(path);
     });
 
-    // Clean up only this component's listener on unmount
-    return unsubscribe;
-  }, []); // Empty dependency array - run only once on mount
+    // Set up listener for focus-input from tray menu
+    const unsubFocusInput = window.electronAPI.onFocusInput(handleFocusInput);
+
+    // Set up listener for pause-all-automations from tray menu
+    const unsubPauseAll = window.electronAPI.onPauseAllAutomations(handlePauseAllAutomations);
+
+    // Clean up all listeners on unmount
+    return () => {
+      unsubNavigate();
+      unsubFocusInput();
+      unsubPauseAll();
+    };
+  }, [handleFocusInput, handlePauseAllAutomations]);
 
   return null;
 }
+
+// Export the custom event name for MainPage to use
+export { FOCUS_INPUT_EVENT };
 
 function SyncingStatus({ isServerless, isInitializing }: { isServerless: boolean; isInitializing: boolean }) {
   const [showTroubleOptions, setShowTroubleOptions] = useState(false);
@@ -244,8 +313,8 @@ function App() {
 
   return (
     <Router>
-      {/* Handle electron-specific navigation events */}
-      {isElectron && <ElectronNavigationHandler />}
+      {/* Handle electron-specific IPC events (navigation, focus-input, pause-all) */}
+      {isElectron && <ElectronIPCHandler />}
       <Routes>
         <Route path="/" element={<MainPage />} />
         <Route path="/chat" element={<ChatPage />} />

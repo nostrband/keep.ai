@@ -9,6 +9,7 @@ import { useAutonomyPreference } from "../hooks/useAutonomyPreference";
 import SharedHeader from "./SharedHeader";
 import { QuickReplyButtons } from "./QuickReplyButtons";
 import { parseAsks } from "../lib/parseAsks";
+import { FOCUS_INPUT_EVENT } from "../App";
 import {
   Badge,
   PromptInput,
@@ -341,6 +342,22 @@ export default function MainPage() {
 
     return () => {
       resizeObserver.disconnect();
+    };
+  }, []);
+
+  // Listen for focus-input event from Electron tray menu (via App.tsx)
+  useEffect(() => {
+    const handleFocusInput = () => {
+      // Find the textarea by its name attribute (set by PromptInputTextarea)
+      const textarea = document.querySelector('textarea[name="message"]') as HTMLTextAreaElement;
+      if (textarea) {
+        textarea.focus();
+      }
+    };
+
+    window.addEventListener(FOCUS_INPUT_EVENT, handleFocusInput);
+    return () => {
+      window.removeEventListener(FOCUS_INPUT_EVENT, handleFocusInput);
     };
   }, []);
 

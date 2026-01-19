@@ -111,10 +111,11 @@ This document prioritizes tasks for achieving a simple, lovable, and complete v1
 - **Resolution**: Added `getAppIcon()` helper function in main.ts that first tries to load from `assets/icon.png` file, then falls back to an embedded SVG icon matching the "K in square" design (golden border #D6A642, white background, black K). Updated createWindow(), Notification, and Tray to use this helper. Removed hardcoded icon paths. Created empty `apps/electron/assets/` directory for future custom icon file.
 
 ### 15. tray-menu-ipc-handlers.md
-- **Status**: NOT_STARTED
+- **Status**: COMPLETED (2026-01-19)
 - **Effort**: M
 - **Description**: Tray menu sends `focus-input` and `pause-all-automations` IPC messages but no React component registers handlers. Also preload pattern doesn't return unsubscribe function (memory leak).
 - **Files**: `apps/web/src/App.tsx`, `apps/electron/src/preload.ts`
+- **Resolution**: Added `ElectronIPCHandler` component in App.tsx that handles all three IPC events (navigate-to, focus-input, pause-all-automations). For focus-input: dispatches custom event to MainPage which focuses the textarea. For pause-all-automations: iterates over active workflows and sets their status to 'disabled'. Added event listener in MainPage.tsx to handle focus-input custom event. All listeners properly return unsubscribe functions and clean up on unmount. Removed the old `ElectronNavigationHandler` component.
 
 ### 16. wire-up-workflow-notifications-methods.md
 - **Status**: COMPLETED (2026-01-19)
@@ -369,10 +370,10 @@ These are documented FIXMEs in the codebase that need attention:
 | Priority | Count | Status |
 |----------|-------|--------|
 | P0 (Critical) | 5 | 5 COMPLETED |
-| P1 (Important) | 13 | 10 COMPLETED, 3 NOT_STARTED |
+| P1 (Important) | 13 | 11 COMPLETED, 2 NOT_STARTED |
 | P2 (Nice-to-have) | 26 | 1 NEEDS_VERIFICATION, 25 NOT_STARTED |
 | P3 (Post-V1) | 3 | 3 NOT_STARTED |
-| **Total** | **47** | **15 COMPLETED, 1 NEEDS_VERIFICATION, 31 NOT_STARTED** |
+| **Total** | **47** | **16 COMPLETED, 1 NEEDS_VERIFICATION, 30 NOT_STARTED** |
 
 ### V1 Feature Ideas
 
