@@ -150,10 +150,11 @@ This document prioritizes tasks for achieving a simple, lovable, and complete v1
 - **Resolution**: Added `useRef` for timeout tracking and cleanup `useEffect` in WorkflowEventGroup.tsx, ScriptDetailPage.tsx, TaskDetailPage.tsx, WorkflowDetailPage.tsx, and CodeBlockCopyButton in code-block.tsx. Created helper functions (`showSuccessMessage`, `showWarning`) that clear existing timeouts before setting new ones, and cleanup effects that clear timeouts on unmount. This prevents React warnings about setting state on unmounted components.
 
 ### 20. workflow-status-badge-component.md
-- **Status**: NOT_STARTED
+- **Status**: COMPLETED (2026-01-19)
 - **Effort**: S
 - **Description**: `getStatusBadge` function duplicated in 6+ files (MainPage, WorkflowDetailPage, TaskDetailPage, WorkflowsPage, TaskRunDetailPage, TasksPage). Extract to shared component.
 - **Files**: Create `apps/web/src/components/StatusBadge.tsx`
+- **Resolution**: Created `StatusBadge.tsx` with three shared components: `WorkflowStatusBadge`, `TaskStatusBadge` (with optional defaultLabel prop), and `TaskRunStatusBadge`. Updated MainPage.tsx, WorkflowsPage.tsx, WorkflowDetailPage.tsx, TaskDetailPage.tsx, TasksPage.tsx, and TaskRunDetailPage.tsx to use the shared components, eliminating 6 duplicate `getStatusBadge` function definitions.
 
 ### 21. deduplicate-task-event-group-header.md
 - **Status**: NOT_STARTED
@@ -374,9 +375,9 @@ These are documented FIXMEs in the codebase that need attention:
 |----------|-------|--------|
 | P0 (Critical) | 5 | 5 COMPLETED |
 | P1 (Important) | 13 | 13 COMPLETED, 0 NOT_STARTED |
-| P2 (Nice-to-have) | 26 | 1 COMPLETED, 1 NEEDS_VERIFICATION, 24 NOT_STARTED |
+| P2 (Nice-to-have) | 26 | 2 COMPLETED, 1 NEEDS_VERIFICATION, 23 NOT_STARTED |
 | P3 (Post-V1) | 3 | 3 NOT_STARTED |
-| **Total** | **47** | **19 COMPLETED, 1 NEEDS_VERIFICATION, 27 NOT_STARTED** |
+| **Total** | **47** | **20 COMPLETED, 1 NEEDS_VERIFICATION, 26 NOT_STARTED** |
 
 ### V1 Feature Ideas
 

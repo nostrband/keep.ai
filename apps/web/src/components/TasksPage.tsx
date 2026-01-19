@@ -2,23 +2,7 @@ import React from "react";
 import { Link } from "react-router-dom";
 import { useTasks } from "../hooks/dbTaskReads";
 import SharedHeader from "./SharedHeader";
-import {
-  Badge,
-} from "../ui";
-
-const getStatusBadge = (task: any) => {
-  if (task.state === "finished") {
-    return <Badge variant="default" className="bg-green-100 text-green-800">Finished</Badge>;
-  } else if (task.state === "error") {
-    return <Badge variant="destructive">Error</Badge>;
-  } else if (task.state === "wait") {
-    return <Badge variant="secondary">Waiting</Badge>;
-  } else if (task.state === "asks") {
-    return <Badge variant="secondary">Asking</Badge>;
-  } else {
-    return <Badge variant="outline">Pending</Badge>;
-  }
-};
+import { TaskStatusBadge } from "./StatusBadge";
 
 export default function TasksPage() {
   const { data: tasks = [], isLoading } = useTasks(true); // Include finished tasks
@@ -51,7 +35,7 @@ export default function TasksPage() {
                       <h3 className="font-medium text-gray-900">
                         {task.title || (task.type === 'planner' ? 'Planner' : `Task ${task.id.slice(0, 8)}`)}
                       </h3>
-                      {getStatusBadge(task)}
+                      <TaskStatusBadge state={task.state} defaultLabel="Pending" />
                     </div>
                     <div className="flex items-center gap-4 text-xs text-gray-500">
                       <span>

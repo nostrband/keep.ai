@@ -2,17 +2,8 @@ import React from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useWorkflows } from "../hooks/dbScriptReads";
 import SharedHeader from "./SharedHeader";
-import { Badge, Button } from "../ui";
-
-const getStatusBadge = (workflow: any) => {
-  if (workflow.status === "disabled") {
-    return <Badge className="bg-yellow-100 text-yellow-800">Paused</Badge>;
-  } else if (workflow.status === "active") {
-    return <Badge className="bg-green-100 text-green-800">Running</Badge>;
-  } else {
-    return <Badge variant="outline">Draft</Badge>;
-  }
-};
+import { Button } from "../ui";
+import { WorkflowStatusBadge } from "./StatusBadge";
 
 export default function WorkflowsPage() {
   const { data: workflows = [], isLoading } = useWorkflows();
@@ -58,7 +49,7 @@ export default function WorkflowsPage() {
                       <h3 className="font-medium text-gray-900">
                         {workflow.title || `Workflow ${workflow.id.slice(0, 8)}`}
                       </h3>
-                      {getStatusBadge(workflow)}
+                      <WorkflowStatusBadge status={workflow.status} />
                     </div>
                     <div className="flex items-center gap-4 text-xs text-gray-500">
                       {workflow.cron && <span>Schedule: {workflow.cron}</span>}

@@ -10,8 +10,8 @@ import SharedHeader from "./SharedHeader";
 import { QuickReplyButtons } from "./QuickReplyButtons";
 import { parseAsks } from "../lib/parseAsks";
 import { FOCUS_INPUT_EVENT } from "../App";
+import { WorkflowStatusBadge } from "./StatusBadge";
 import {
-  Badge,
   PromptInput,
   PromptInputAttachment,
   PromptInputAttachments,
@@ -35,17 +35,6 @@ import type { File as DbFile } from "@app/db";
 type PromptInputMessage = {
   text?: string;
   files?: FileUIPart[];
-};
-
-// Status badge component for workflows
-const getStatusBadge = (workflow: any) => {
-  if (workflow.status === "disabled") {
-    return <Badge className="bg-yellow-100 text-yellow-800">Paused</Badge>;
-  } else if (workflow.status === "active") {
-    return <Badge className="bg-green-100 text-green-800">Running</Badge>;
-  } else {
-    return <Badge variant="outline">Draft</Badge>;
-  }
 };
 
 // Error types that require user attention (non-fixable)
@@ -441,7 +430,7 @@ export default function MainPage() {
                         <h3 className="font-medium text-gray-900">
                           {workflow.title || `Workflow ${workflow.id.slice(0, 8)}`}
                         </h3>
-                        {getStatusBadge(workflow)}
+                        <WorkflowStatusBadge status={workflow.status} />
                       </div>
                       <div className={`text-sm ${
                         workflow.needsAttention ? "text-red-600" : "text-gray-500"

@@ -2,24 +2,8 @@ import React from "react";
 import { useParams, Link } from "react-router-dom";
 import { useTask, useTaskRun } from "../hooks/dbTaskReads";
 import SharedHeader from "./SharedHeader";
-import { Badge } from "../ui";
 import { Response } from "../ui/components/ai-elements/response";
-
-const getStatusBadge = (run: any) => {
-  if (run.state === "done") {
-    return (
-      <Badge variant="default" className="bg-green-100 text-green-800">
-        Done
-      </Badge>
-    );
-  } else if (run.state === "error") {
-    return <Badge variant="destructive">Error</Badge>;
-  } else if (run.state === "wait") {
-    return <Badge variant="secondary">Wait</Badge>;
-  } else {
-    return <Badge variant="outline">Pending</Badge>;
-  }
-};
+import { TaskRunStatusBadge } from "./StatusBadge";
 
 export default function TaskRunDetailPage() {
   const { id, runId } = useParams<{ id: string; runId: string }>();
@@ -83,7 +67,7 @@ export default function TaskRunDetailPage() {
                   <h2 className="text-xl font-semibold text-gray-900 mb-2">
                     Task Run {taskRun.id.slice(0, 8)}
                   </h2>
-                  {getStatusBadge(taskRun)}
+                  <TaskRunStatusBadge state={taskRun.state} />
                 </div>
               </div>
 

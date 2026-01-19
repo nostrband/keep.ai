@@ -5,25 +5,9 @@ import { useLatestScriptByTaskId, useWorkflowByTaskId } from "../hooks/dbScriptR
 import { useChat } from "../hooks/dbChatReads";
 import { useUpdateTask, usePauseTask } from "../hooks/dbWrites";
 import SharedHeader from "./SharedHeader";
-import {
-  Badge,
-  Button,
-} from "../ui";
+import { Badge, Button } from "../ui";
 import { Response } from "../ui/components/ai-elements/response";
-
-const getStatusBadge = (task: any) => {
-  if (task.state === "finished") {
-    return <Badge variant="default" className="bg-green-100 text-green-800">Finished</Badge>;
-  } else if (task.state === "error") {
-    return <Badge variant="destructive">Error</Badge>;
-  } else if (task.state === "wait") {
-    return <Badge variant="secondary">Waiting</Badge>;
-  } else if (task.state === "asks") {
-    return <Badge variant="secondary">Asking</Badge>;
-  } else {
-    return <Badge variant="outline">Unknown</Badge>;
-  }
-};
+import { TaskStatusBadge } from "./StatusBadge";
 
 export default function TaskDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -157,7 +141,7 @@ export default function TaskDetailPage() {
                   <h2 className="text-xl font-semibold text-gray-900 mb-2">
                     {task.title || (task.type === 'planner' ? 'Planner' : `Task ${task.id.slice(0, 8)}`)}
                   </h2>
-                  {getStatusBadge(task)}
+                  <TaskStatusBadge state={task.state} />
                 </div>
                 <div className="flex flex-col items-end gap-2">
                   <Button

@@ -14,16 +14,7 @@ import MermaidDiagram from "./MermaidDiagram";
 import ScriptDiff from "./ScriptDiff";
 import { Badge, Button } from "../ui";
 import { workflowNotifications } from "../lib/WorkflowNotifications";
-
-const getStatusBadge = (workflow: any) => {
-  if (workflow.status === "disabled") {
-    return <Badge className="bg-yellow-100 text-yellow-800">Paused</Badge>;
-  } else if (workflow.status === "active") {
-    return <Badge className="bg-green-100 text-green-800">Running</Badge>;
-  } else {
-    return <Badge variant="outline">Draft</Badge>;
-  }
-};
+import { WorkflowStatusBadge } from "./StatusBadge";
 
 export default function WorkflowDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -208,7 +199,7 @@ export default function WorkflowDetailPage() {
                   <h2 className="text-xl font-semibold text-gray-900 mb-2">
                     {workflow.title || `Workflow ${workflow.id.slice(0, 8)}`}
                   </h2>
-                  {getStatusBadge(workflow)}
+                  <WorkflowStatusBadge status={workflow.status} />
                 </div>
                 <div className="flex flex-col items-end gap-2">
                   <div className="flex gap-2">
