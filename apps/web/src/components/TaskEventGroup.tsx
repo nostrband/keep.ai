@@ -161,6 +161,67 @@ export function TaskEventGroup({ taskId, events }: TaskEventGroupProps) {
   // Check if this is an empty group (only task_run events)
   const isEmpty = finalEvents.length === 0;
 
+  // Shared header content component to avoid duplication
+  const HeaderContent = () => (
+    <>
+      <div className="flex items-center flex-1 min-w-0 gap-2">
+        <span className="text-sm text-gray-600">
+          {task?.type === "worker" || task?.type === "planner" ? (
+            <>
+              ⚙ {task?.type === "worker" ? "Working" : "Planning"}:{" "}
+              <span className="text-gray-600">{taskTitle}</span>
+            </>
+          ) : (
+            <>💭 Replying</>
+          )}
+        </span>
+        {/* Metadata: time, steps, cost */}
+        <div className="flex items-center gap-2 text-xs text-gray-400">
+          {duration && (
+            <span className="flex items-center gap-1">
+              <span>🕐</span>
+              <span>{duration}</span>
+            </span>
+          )}
+          {steps != null && (
+            <span className="flex items-center gap-1">
+              <span>📈</span>
+              <span>{steps}</span>
+            </span>
+          )}
+          {totalCost > 0 && (
+            <span className="flex items-center gap-1">
+              <span>💵</span>
+              <span>{totalCost.toFixed(2)}</span>
+            </span>
+          )}
+        </div>
+      </div>
+
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            onClick={(e) => e.stopPropagation()}
+            className="ml-2 px-2 py-1 text-gray-400 hover:text-gray-600 flex-shrink-0"
+            aria-label="Task actions"
+          >
+            ···
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem onClick={handleViewTask}>
+            <span className="mr-2">👁️</span>
+            View task
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </>
+  );
+
+  const headerBaseClass = `flex items-center justify-between px-2 py-0 bg-gray-50 ${
+    isEmpty ? "rounded-lg" : "border-b border-gray-200 rounded-t-lg"
+  }`;
+
   return (
     <div
       className={`mx-0 my-3 border border-gray-200 bg-gray-50 ${
@@ -175,119 +236,13 @@ export function TaskEventGroup({ taskId, events }: TaskEventGroupProps) {
               ? `/tasks/${taskId}/run/${taskRunId}`
               : `/scripts/${scriptRun?.script_id}/runs/${scriptRunId}`
           }
-          className={`flex items-center justify-between px-2 py-0 bg-gray-50 ${
-            isEmpty ? "rounded-lg" : "border-b border-gray-200 rounded-t-lg"
-          } hover:bg-gray-100 cursor-pointer transition-colors duration-200`}
+          className={`${headerBaseClass} hover:bg-gray-100 cursor-pointer transition-colors duration-200`}
         >
-          <div className="flex items-center flex-1 min-w-0 gap-2">
-            <span className="text-sm text-gray-600">
-              {task?.type === "worker" || task?.type === "planner" ? (
-                <>
-                  ⚙ {task?.type === "worker" ? "Working" : "Planning"}:{" "}
-                  <span className="text-gray-600">{taskTitle}</span>
-                </>
-              ) : (
-                <>💭 Replying</>
-              )}
-            </span>
-            {/* Metadata: time, steps, cost */}
-            <div className="flex items-center gap-2 text-xs text-gray-400">
-              {duration && (
-                <span className="flex items-center gap-1">
-                  <span>🕐</span>
-                  <span>{duration}</span>
-                </span>
-              )}
-              {steps != null && (
-                <span className="flex items-center gap-1">
-                  <span>📈</span>
-                  <span>{steps}</span>
-                </span>
-              )}
-              {totalCost > 0 && (
-                <span className="flex items-center gap-1">
-                  <span>💵</span>
-                  <span>{totalCost.toFixed(2)}</span>
-                </span>
-              )}
-            </div>
-          </div>
-
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                onClick={(e) => e.stopPropagation()}
-                className="ml-2 px-2 py-1 text-gray-400 hover:text-gray-600 flex-shrink-0"
-                aria-label="Task actions"
-              >
-                ···
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={handleViewTask}>
-                <span className="mr-2">👁️</span>
-                View task
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <HeaderContent />
         </Link>
       ) : (
-        <div
-          className={`flex items-center justify-between px-2 py-0 bg-gray-50 ${
-            isEmpty ? "rounded-lg" : "border-b border-gray-200 rounded-t-lg"
-          }`}
-        >
-          <div className="flex items-center flex-1 min-w-0 gap-2">
-            <span className="text-sm text-gray-600">
-              {task?.type === "worker" || task?.type === "planner" ? (
-                <>
-                  ⚙ {task?.type === "worker" ? "Working" : "Planning"}:{" "}
-                  <span className="text-gray-600">{taskTitle}</span>
-                </>
-              ) : (
-                <>💭 Replying</>
-              )}
-            </span>
-            {/* Metadata: time, steps, cost */}
-            <div className="flex items-center gap-2 text-xs text-gray-400">
-              {duration && (
-                <span className="flex items-center gap-1">
-                  <span>🕐</span>
-                  <span>{duration}</span>
-                </span>
-              )}
-              {steps != null && (
-                <span className="flex items-center gap-1">
-                  <span>📈</span>
-                  <span>{steps}</span>
-                </span>
-              )}
-              {totalCost > 0 && (
-                <span className="flex items-center gap-1">
-                  <span>💵</span>
-                  <span>{totalCost.toFixed(2)}</span>
-                </span>
-              )}
-            </div>
-          </div>
-
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                onClick={(e) => e.stopPropagation()}
-                className="ml-2 px-2 py-1 text-gray-400 hover:text-gray-600 flex-shrink-0"
-                aria-label="Task actions"
-              >
-                ···
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={handleViewTask}>
-                <span className="mr-2">👁️</span>
-                View task
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+        <div className={headerBaseClass}>
+          <HeaderContent />
         </div>
       )}
 

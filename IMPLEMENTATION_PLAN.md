@@ -157,10 +157,11 @@ This document prioritizes tasks for achieving a simple, lovable, and complete v1
 - **Resolution**: Created `StatusBadge.tsx` with three shared components: `WorkflowStatusBadge`, `TaskStatusBadge` (with optional defaultLabel prop), and `TaskRunStatusBadge`. Updated MainPage.tsx, WorkflowsPage.tsx, WorkflowDetailPage.tsx, TaskDetailPage.tsx, TasksPage.tsx, and TaskRunDetailPage.tsx to use the shared components, eliminating 6 duplicate `getStatusBadge` function definitions.
 
 ### 21. deduplicate-task-event-group-header.md
-- **Status**: NOT_STARTED
+- **Status**: COMPLETED (2026-01-19)
 - **Effort**: S
 - **Description**: TaskEventGroup renders header twice (~120 lines duplicated) - once in Link, once in div. Extract common header content.
 - **Files**: `apps/web/src/components/TaskEventGroup.tsx`
+- **Resolution**: Extracted shared header content to inline `HeaderContent` component and factored out `headerBaseClass` CSS class string. Reduced code from ~120 duplicate lines to a single 50-line HeaderContent component. Link and div wrappers now both render the same HeaderContent, eliminating duplication risk.
 
 ### 22. hide-empty-event-dropdown.md
 - **Status**: NOT_STARTED
@@ -375,9 +376,9 @@ These are documented FIXMEs in the codebase that need attention:
 |----------|-------|--------|
 | P0 (Critical) | 5 | 5 COMPLETED |
 | P1 (Important) | 13 | 13 COMPLETED, 0 NOT_STARTED |
-| P2 (Nice-to-have) | 26 | 2 COMPLETED, 1 NEEDS_VERIFICATION, 23 NOT_STARTED |
+| P2 (Nice-to-have) | 26 | 3 COMPLETED, 1 NEEDS_VERIFICATION, 22 NOT_STARTED |
 | P3 (Post-V1) | 3 | 3 NOT_STARTED |
-| **Total** | **47** | **20 COMPLETED, 1 NEEDS_VERIFICATION, 26 NOT_STARTED** |
+| **Total** | **47** | **21 COMPLETED, 1 NEEDS_VERIFICATION, 25 NOT_STARTED** |
 
 ### V1 Feature Ideas
 
