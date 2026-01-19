@@ -299,10 +299,11 @@ This document prioritizes tasks for achieving a simple, lovable, and complete v1
 - **Files**: `apps/server/src/server.ts`
 
 ### 41. log-workflow-notification-fetch-errors.md
-- **Status**: NOT_STARTED
+- **Status**: COMPLETED (2026-01-19)
 - **Effort**: S
 - **Description**: Empty catch block in WorkflowNotifications silently ignores errors. Add console.debug logging.
 - **Files**: `apps/web/src/lib/WorkflowNotifications.ts`
+- **Resolution**: Already addressed in the current code. WorkflowNotifications.ts now uses batch fetch via `getLatestRunsByWorkflowIds()` and has `console.debug` logging for errors at lines 101 and 153.
 
 ### 42. centralize-tray-badge-updates.md
 - **Status**: NOT_STARTED
@@ -397,9 +398,9 @@ These are documented FIXMEs in the codebase that need attention:
 |----------|-------|--------|
 | P0 (Critical) | 5 | 5 COMPLETED |
 | P1 (Important) | 13 | 13 COMPLETED, 0 NOT_STARTED |
-| P2 (Nice-to-have) | 26 | 16 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 NEEDS_VERIFICATION, 8 NOT_STARTED |
+| P2 (Nice-to-have) | 26 | 17 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 NEEDS_VERIFICATION, 7 NOT_STARTED |
 | P3 (Post-V1) | 3 | 3 NOT_STARTED |
-| **Total** | **47** | **34 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 NEEDS_VERIFICATION, 11 NOT_STARTED** |
+| **Total** | **47** | **35 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 NEEDS_VERIFICATION, 10 NOT_STARTED** |
 
 ### V1 Feature Ideas
 
