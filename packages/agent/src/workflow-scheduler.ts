@@ -27,6 +27,10 @@ export class WorkflowScheduler {
   // Global pause for PAYMENT_REQUIRED errors
   private globalPauseUntil: number = 0;
 
+  // Maximum number of consecutive network error retries before escalating to user
+  // After this many retries, the workflow needs user attention
+  private static readonly MAX_NETWORK_RETRIES = 5;
+
   private debug = debug("agent:WorkflowScheduler");
 
   constructor(config: WorkflowSchedulerConfig) {
@@ -67,6 +71,21 @@ export class WorkflowScheduler {
           currentState.originalRunId = signal.scriptRunId;
         }
 
+        // Check if max retries exceeded - escalate to user attention
+        if (currentState.retryCount > WorkflowScheduler.MAX_NETWORK_RETRIES) {
+          this.debug(
+            `Workflow ${signal.workflowId} exceeded max retries (${currentState.retryCount}/${WorkflowScheduler.MAX_NETWORK_RETRIES}), escalating to user attention`
+          );
+          // Clear retry state and mark as needing attention
+          this.workflowRetryState.delete(signal.workflowId);
+          // Mark workflow as error status so user can see it needs attention
+          this.api.scriptStore.updateWorkflow({
+            id: signal.workflowId,
+            status: 'error',
+          } as any).catch(err => this.debug('Failed to update workflow status:', err));
+          break;
+        }
+
         // Calculate exponential backoff
         const baseDelayMs = 10 * 1000; // 10 seconds in milliseconds
         const exponentialDelayMs = baseDelayMs * Math.pow(2, currentState.retryCount - 1);
@@ -78,7 +97,7 @@ export class WorkflowScheduler {
         this.workflowRetryState.set(signal.workflowId, currentState);
 
         this.debug(
-          `Workflow ${signal.workflowId} retry scheduled in ${actualDelayMs}ms (attempt ${currentState.retryCount}, originalRunId: ${currentState.originalRunId})`
+          `Workflow ${signal.workflowId} retry scheduled in ${actualDelayMs}ms (attempt ${currentState.retryCount}/${WorkflowScheduler.MAX_NETWORK_RETRIES}, originalRunId: ${currentState.originalRunId})`
         );
         break;
 
@@ -243,14 +262,15 @@ export class WorkflowScheduler {
           );
           
           // After execution, calculate and update next_run_timestamp from cron if available
+          // Use updateWorkflowFields to only update specific fields atomically,
+          // preventing concurrent updates (e.g., user pause) from being overwritten
           if (workflow.cron && workflow.cron.trim() !== '') {
             try {
               const cronJob = new Cron(workflow.cron);
               const nextRun = cronJob.nextRun();
-              
+
               if (nextRun) {
-                await this.api.scriptStore.updateWorkflow({
-                  ...workflow,
+                await this.api.scriptStore.updateWorkflowFields(workflow.id, {
                   next_run_timestamp: nextRun.toISOString(),
                   timestamp: currentTimeISO, // Update last run timestamp
                 });
@@ -259,17 +279,15 @@ export class WorkflowScheduler {
                 );
               } else {
                 // Clear next_run_timestamp if cron has no next run
-                await this.api.scriptStore.updateWorkflow({
-                  ...workflow,
+                await this.api.scriptStore.updateWorkflowFields(workflow.id, {
                   next_run_timestamp: '',
                   timestamp: currentTimeISO,
                 });
               }
             } catch (error) {
               this.debug(`Error calculating next run for workflow ${workflow.id}:`, error);
-              // Mark workflow as error
-              await this.api.scriptStore.updateWorkflow({
-                ...workflow,
+              // Mark workflow as error - only update the error-related fields
+              await this.api.scriptStore.updateWorkflowFields(workflow.id, {
                 status: 'error',
                 next_run_timestamp: '',
                 timestamp: currentTimeISO,
@@ -277,8 +295,7 @@ export class WorkflowScheduler {
             }
           } else {
             // No cron expression, clear next_run_timestamp
-            await this.api.scriptStore.updateWorkflow({
-              ...workflow,
+            await this.api.scriptStore.updateWorkflowFields(workflow.id, {
               next_run_timestamp: '',
               timestamp: currentTimeISO,
             });

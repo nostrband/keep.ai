@@ -601,4 +601,50 @@ export class ScriptStore {
       [workflowId]
     );
   }
+
+  // Update only specific fields of a workflow atomically
+  // This prevents concurrent update issues where stale workflow objects overwrite concurrent changes
+  async updateWorkflowFields(
+    workflowId: string,
+    fields: Partial<Pick<Workflow, 'timestamp' | 'next_run_timestamp' | 'status' | 'cron' | 'maintenance' | 'maintenance_fix_count'>>,
+    tx?: DBInterface
+  ): Promise<void> {
+    const db = tx || this.db.db;
+
+    const setClauses: string[] = [];
+    const values: (string | number)[] = [];
+
+    if (fields.timestamp !== undefined) {
+      setClauses.push('timestamp = ?');
+      values.push(fields.timestamp);
+    }
+    if (fields.next_run_timestamp !== undefined) {
+      setClauses.push('next_run_timestamp = ?');
+      values.push(fields.next_run_timestamp);
+    }
+    if (fields.status !== undefined) {
+      setClauses.push('status = ?');
+      values.push(fields.status);
+    }
+    if (fields.cron !== undefined) {
+      setClauses.push('cron = ?');
+      values.push(fields.cron);
+    }
+    if (fields.maintenance !== undefined) {
+      setClauses.push('maintenance = ?');
+      values.push(fields.maintenance ? 1 : 0);
+    }
+    if (fields.maintenance_fix_count !== undefined) {
+      setClauses.push('maintenance_fix_count = ?');
+      values.push(fields.maintenance_fix_count);
+    }
+
+    if (setClauses.length === 0) return;
+
+    values.push(workflowId);
+    await db.exec(
+      `UPDATE workflows SET ${setClauses.join(', ')} WHERE id = ?`,
+      values
+    );
+  }
 }

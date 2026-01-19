@@ -173,8 +173,8 @@ export class WorkflowWorker {
       );
 
       // Update workflow timestamp to mark last successful run
-      await this.api.scriptStore.updateWorkflow({
-        ...workflow,
+      // Use updateWorkflowFields for atomic update to prevent overwriting concurrent changes
+      await this.api.scriptStore.updateWorkflowFields(workflow.id, {
         timestamp: new Date().toISOString(),
       });
 
@@ -238,9 +238,9 @@ export class WorkflowWorker {
         this.debug("BAD_REQUEST: will not retry the workflow", workflow.id);
 
         // Mark workflow as error status
+        // Use updateWorkflowFields for atomic update to prevent overwriting concurrent changes
         try {
-          await this.api.scriptStore.updateWorkflow({
-            ...workflow,
+          await this.api.scriptStore.updateWorkflowFields(workflow.id, {
             status: "error",
           });
         } catch (e) {
@@ -283,9 +283,9 @@ export class WorkflowWorker {
             this.debug(`${classifiedError.type.toUpperCase()}: User action required, not retrying workflow`, workflow.id);
 
             // Mark workflow as needing attention (error status)
+            // Use updateWorkflowFields for atomic update to prevent overwriting concurrent changes
             try {
-              await this.api.scriptStore.updateWorkflow({
-                ...workflow,
+              await this.api.scriptStore.updateWorkflowFields(workflow.id, {
                 status: "error",
               });
             } catch (e) {
@@ -588,8 +588,8 @@ After saving the fix, the workflow will automatically exit maintenance mode and 
     fixAttempts: number
   ): Promise<void> {
     // 1. Pause the workflow and reset fix count (gives user a fresh start)
-    await this.api.scriptStore.updateWorkflow({
-      ...workflow,
+    // Use updateWorkflowFields for atomic update to prevent overwriting concurrent changes
+    await this.api.scriptStore.updateWorkflowFields(workflow.id, {
       status: "disabled",
       maintenance: false, // Clear maintenance since we're not auto-fixing
       maintenance_fix_count: 0, // Reset so user gets fresh fix attempts when re-enabled

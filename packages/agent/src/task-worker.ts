@@ -277,6 +277,7 @@ export class TaskWorker {
           agent,
           chatId: task.chat_id,
           logs,
+          toolCost: sandbox.context?.cost || 0,
         });
 
         // Update task in wait status
@@ -529,9 +530,13 @@ export class TaskWorker {
     agent: ReplAgent;
     chatId: string;
     logs: string[];
+    toolCost: number; // Tool execution cost in dollars from sandbox.context.cost
   }) {
     const runEndTime = new Date();
     const usage = opts.agent.usage;
+    // Combine agent LLM orchestration costs with tool execution costs
+    const agentCostDollars = opts.agent.openRouterUsage.cost || 0;
+    const totalCostDollars = agentCostDollars + opts.toolCost;
     await this.api.taskStore.finishTaskRun({
       id: opts.taskRunId,
       run_sec: Math.floor(
@@ -548,7 +553,7 @@ export class TaskWorker {
       input_tokens: usage.inputTokens || 0,
       cached_tokens: usage.cachedInputTokens || 0,
       output_tokens: (usage.outputTokens || 0) + (usage.reasoningTokens || 0),
-      cost: Math.ceil((opts.agent.openRouterUsage.cost || 0) * 1000000),
+      cost: Math.ceil(totalCostDollars * 1000000),
       logs: opts.logs.join("\n"),
     });
 
@@ -578,7 +583,13 @@ export class TaskWorker {
     sandbox.setGlobal(await sandboxAPI.createGlobal());
 
     // Get user's autonomy preference for agent behavior
-    const autonomyMode = await this.api.getAutonomyMode();
+    // Fallback to 'ai_decides' if DB query fails - autonomy mode is a preference, not critical
+    let autonomyMode: 'ai_decides' | 'coordinate' = 'ai_decides';
+    try {
+      autonomyMode = await this.api.getAutonomyMode();
+    } catch (error) {
+      this.debug('Failed to get autonomy mode, using default ai_decides:', error);
+    }
 
     // Still create AgentEnv for system prompts, context building, etc.
     const env = new AgentEnv(

@@ -108,18 +108,11 @@ export function TaskEventGroup({ taskId, events }: TaskEventGroupProps) {
   // Get steps count (only for task runs)
   const steps = taskRun?.steps;
 
-  // Get cost from task_run or from events with usage.cost
+  // Get cost from task_run - this already includes both agent LLM costs and tool costs
+  // Do NOT sum event costs separately to avoid double-counting
   let totalCost = 0;
-  
-  // Cost of the task run itself
   if (taskRun?.cost != null && taskRun.cost > 0) {
-    totalCost += taskRun.cost / 1000000; // It's stored as integer w/ increased precision
-  }
-
-  // Cost of tools
-  const eventsWithCost = events.filter((e: any) => e.content?.usage?.cost != null);
-  if (eventsWithCost.length > 0) {
-    totalCost += eventsWithCost.reduce((sum: number, e: any) => sum + (e.content.usage.cost || 0), 0);
+    totalCost = taskRun.cost / 1000000; // It's stored as integer w/ increased precision
   }
 
   // Filter out task_run and task_run_end events (they are invisible markers for grouping)
