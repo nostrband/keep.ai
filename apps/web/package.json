@@ -48,7 +48,6 @@
     "html5-qrcode": "^2.3.8",
     "lowlight": "^1.20.0",
     "lucide-react": "^0.546.0",
-    "mermaid": "^11.12.2",
     "nostr-tools": "^2.17.2",
     "qrcode": "^1.5.4",
     "react": "^18.2.0",

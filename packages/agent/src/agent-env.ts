@@ -2,7 +2,7 @@ import { KeepDbApi, Task, TaskType } from "@app/db";
 import { StepInput, TaskState } from "./agent-types";
 import debug from "debug";
 import { getEnv } from "./env";
-import { AssistantUIMessage, ChatEvent, AutonomyMode } from "@app/proto";
+import { AssistantUIMessage, AutonomyMode } from "@app/proto";
 import { generateId, isFileUIPart } from "ai";
 
 export class AgentEnv {
@@ -88,119 +88,9 @@ ${systemPrompt}
   }
 
   async buildContext(input: StepInput): Promise<AssistantUIMessage[]> {
-    let tokens = 0;
-    const history: ChatEvent[] = [];
-
-    // Parse inbox to check for duplicates
-    const inbox: any[] = input.inbox
-      .map((i) => {
-        try {
-          return JSON.parse(i);
-        } catch {
-          return undefined;
-        }
-      })
-      .filter(Boolean);
-
-    const MAX_TOKENS = this.type === "worker" ? 1000 : 5000;
-    let before: string | undefined;
-    let since: string | undefined;
-    if (this.type === "worker" && inbox.length) {
-      // Gap before last inbox item
-      before = inbox.at(-1)?.timestamp;
-
-      // And after latest task run
-      const runs = await this.#api.taskStore.listTaskRuns(this.task.id);
-      // Ordered by timestamp desc
-      since = runs.filter((r) => !!r.end_timestamp)[0]?.start_timestamp;
-      this.debug(
-        "Build context for worker",
-        this.task.id,
-        "from",
-        since,
-        "till",
-        before
-      );
-    }
-
-    while (tokens < MAX_TOKENS) {
-      const events = await this.#api.chatStore.getChatEvents({
-        chatId: this.task.thread_id || "main",
-        limit: 100,
-        before,
-        since,
-      });
-
-      if (!events.length) break;
-
-      before = events.at(-1)!.timestamp;
-
-      for (const e of events) {
-        // Skip messages that we're putting to inbox
-        if (e.type === "message") {
-          const isInInbox = inbox.find((i) => i.id === e.id);
-          if (isInInbox) continue;
-        }
-
-        // rough token estimate
-        tokens += Math.ceil(JSON.stringify(e).length / 2);
-        history.push(e);
-
-        if (tokens >= MAX_TOKENS) break;
-      }
-
-      if (tokens >= MAX_TOKENS) break;
-    }
-
-    // Re-sort in ASC order
-    history.sort(
-      (a, b) =>
-        new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-    );
-
-    const context: AssistantUIMessage[] = [];
-    for (const e of history) {
-      if (e.type === "message") {
-        context.push(this.prepareUserMessage(e.content as AssistantUIMessage));
-      } else {
-        // Include action events as context (but strip timestamp from content since it's in metadata)
-        const { timestamp, ...eventContent } = e;
-        context.push({
-          id: generateId(),
-          role: "assistant",
-          parts: [{ type: "text", text: "Action Event: " + JSON.stringify(eventContent) }],
-          metadata: {
-            createdAt: e.timestamp,
-          },
-        });
-      }
-    }
-
-    let currentState = "";
-
-    // Stats
-    currentState += `
-===STATS===
-- Current ISO time: ${new Date().toISOString()}
-- Current local time: ${new Date().toString()}
-- Messages: ${await this.#api.chatStore.countMessages("main")}
-- Notes: ${await this.#api.noteStore.countNotes()}
-- Files: ${await this.#api.fileStore.countFiles()}
-`;
-
-    if (currentState) {
-      context.push({
-        id: generateId(),
-        role: "assistant",
-        parts: [{ type: "text", text: currentState }],
-        metadata: {
-          createdAt: new Date().toISOString(),
-          volatile: true,
-        },
-      });
-    }
-
-    return context;
+    // Context building disabled - agents receive only inbox messages
+    // See: revert-context-building.md spec
+    return [];
   }
 
   async buildUser(taskId: string, input: StepInput, state?: TaskState) {

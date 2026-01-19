@@ -241,18 +241,18 @@ This document prioritizes tasks for achieving a simple, lovable, and complete v1
   - Updated packages/db/README.md to remove documentation of deleted methods
 
 ### 32. revert-context-building.md
-- **Status**: VERIFIED_NO_ISSUE (2026-01-19)
+- **Status**: COMPLETED (2026-01-19)
 - **Effort**: S
-- **Description**: Commit fde4661 may introduce duplicate message loading. buildContext loads from memoryStore and chatStore. Has dedup logic, may not actually be broken - needs verification.
+- **Description**: Commit fde4661 was produced by mistake, revert entirely.
 - **Files**: `packages/agent/src/agent-env.ts`
-- **Resolution**: Investigation confirmed no duplicate message loading occurs. The code uses two different stores (memory vs chat events) for different purposes. The commit fde4661 actually fixed thread_id to use task.thread_id instead of hardcoded "main".
+- **Resolution**: Reverted buildContext() method to return empty array. Removed ChatEvent import. Agents now receive only inbox messages without chat history context.
 
 ### 33. reuse-markdown-for-mermaid.md
-- **Status**: SKIPPED (2026-01-19)
+- **Status**: COMPLETED (2026-01-19)
 - **Effort**: S
-- **Description**: MermaidDiagram component exists separately. Markdown component already has mermaid support. Remove duplicate, improve security, reduce bundle size.
+- **Description**: MermaidDiagram component exists separately and uses mermaid package. Markdown component already has mermaid support and should be reused for mermaid diagram. Remove duplicate, reduce bundle size.
 - **Files**: `apps/web/src/components/MermaidDiagram.tsx`
-- **Note**: Removal not done since MermaidDiagram is still potentially useful and removal would be a larger refactor.
+- **Resolution**: Deleted MermaidDiagram.tsx component. WorkflowDetailPage now uses the Response component (which uses Streamdown) to render mermaid diagrams via markdown code fence syntax. Removed direct mermaid dependency from apps/web/package.json (still available via streamdown transitive dependency). This provides consistent, secure mermaid rendering across the app.
 
 ### 34. restore-peer-error-logging.md
 - **Status**: COMPLETED (2026-01-19)
@@ -441,11 +441,11 @@ These are documented FIXMEs in the codebase that need attention:
 | Priority | Count | Status |
 |----------|-------|--------|
 | P0 (Critical) | 5 | 5 COMPLETED |
-| P1 (Important) | 13 | 13 COMPLETED, 0 NOT_STARTED |
-| P2 (Nice-to-have) | 26 | 23 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 VERIFIED_NO_ISSUE, 1 SKIPPED, 0 NOT_STARTED |
-| P3 (Post-V1) | 3 | 3 COMPLETED, 0 NOT_STARTED |
+| P1 (Important) | 13 | 13 COMPLETED |
+| P2 (Nice-to-have) | 26 | 25 COMPLETED, 1 NO_LONGER_APPLICABLE |
+| P3 (Post-V1) | 3 | 3 COMPLETED |
 | V1 Feature Ideas | 3 | 3 IMPLEMENTED |
-| **Total** | **50** | **47 COMPLETED, 1 NO_LONGER_APPLICABLE, 1 VERIFIED_NO_ISSUE, 1 SKIPPED, 0 NOT_STARTED** |
+| **Total** | **50** | **49 COMPLETED, 1 NO_LONGER_APPLICABLE** |
 
 ### V1 Feature Ideas
 

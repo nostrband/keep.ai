@@ -11,7 +11,7 @@ import { useTask } from "../hooks/dbTaskReads";
 import { useChat } from "../hooks/dbChatReads";
 import { useUpdateWorkflow, useRollbackScript } from "../hooks/dbWrites";
 import SharedHeader from "./SharedHeader";
-import MermaidDiagram from "./MermaidDiagram";
+import { Response } from "../ui";
 import ScriptDiff from "./ScriptDiff";
 import { Badge, Button } from "../ui";
 import { workflowNotifications } from "../lib/WorkflowNotifications";
@@ -576,10 +576,10 @@ export default function WorkflowDetailPage() {
                   <p className="text-gray-700 mb-4">{latestScript.summary}</p>
                 )}
 
-                {/* Mermaid Diagram */}
+                {/* Mermaid Diagram - rendered via markdown code fence */}
                 {latestScript.diagram && (
                   <div className="mt-4 p-4 bg-gray-50 rounded-lg">
-                    <MermaidDiagram diagram={latestScript.diagram} />
+                    <Response>{`\`\`\`mermaid\n${latestScript.diagram}\n\`\`\``}</Response>
                   </div>
                 )}
               </div>
