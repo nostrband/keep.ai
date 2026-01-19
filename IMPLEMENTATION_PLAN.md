@@ -61,10 +61,11 @@ This document prioritizes tasks for achieving a simple, lovable, and complete v1
 - **Files**: `packages/agent/src/agent-env.ts`, `packages/agent/src/sandbox/api.ts`
 
 ### 8. fix-next-run-time-status-check.md
-- **Status**: NOT_STARTED
+- **Status**: COMPLETED (2026-01-19)
 - **Effort**: S
 - **Description**: Uses negative logic (`disabled || error`) instead of positive (`status === 'active'`) to determine if next run time should display. Edge cases may show incorrect next run time.
 - **Files**: `apps/web/src/components/WorkflowDetailPage.tsx`
+- **Resolution**: Changed condition from `workflow.status === 'disabled' || workflow.status === 'error'` to `workflow.status !== 'active'`. This aligns UI with scheduler logic - only active workflows show next run time since scheduler only executes where `status === 'active'`.
 
 ### 9. internal-error-classification.md
 - **Status**: NOT_STARTED
@@ -360,10 +361,10 @@ These are documented FIXMEs in the codebase that need attention:
 | Priority | Count | Status |
 |----------|-------|--------|
 | P0 (Critical) | 5 | 5 COMPLETED |
-| P1 (Important) | 13 | 1 COMPLETED, 12 NOT_STARTED |
+| P1 (Important) | 13 | 2 COMPLETED, 11 NOT_STARTED |
 | P2 (Nice-to-have) | 26 | 1 NEEDS_VERIFICATION, 25 NOT_STARTED |
 | P3 (Post-V1) | 3 | 3 NOT_STARTED |
-| **Total** | **47** | **6 COMPLETED, 1 NEEDS_VERIFICATION, 40 NOT_STARTED** |
+| **Total** | **47** | **7 COMPLETED, 1 NEEDS_VERIFICATION, 39 NOT_STARTED** |
 
 ### V1 Feature Ideas
 

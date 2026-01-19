@@ -41,11 +41,12 @@ export default function WorkflowDetailPage() {
   const rollbackMutation = useRollbackScript();
 
   // Get next run time from workflow.next_run_timestamp
+  // Only show for active workflows - scheduler only executes where status === 'active'
   const nextRunTime = useMemo(() => {
-    if (!workflow?.next_run_timestamp || workflow.status === 'disabled' || workflow.status === 'error') {
+    if (!workflow?.next_run_timestamp || workflow.status !== 'active') {
       return null;
     }
-    
+
     try {
       return new Date(workflow.next_run_timestamp);
     } catch (error) {
