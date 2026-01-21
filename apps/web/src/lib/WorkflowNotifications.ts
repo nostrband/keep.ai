@@ -103,7 +103,19 @@ export class WorkflowNotifications {
         console.debug("Failed to update tray badge:", e);
       }
 
-      // Show notifications for new errors that we haven't notified about yet
+      // Only show notifications if tab is not visible
+      if (globalThis.document?.visibilityState === 'visible') {
+        return;
+      }
+
+      // Group workflows by error type for batch notifications
+      // This prevents notification spam when multiple workflows fail with the same error type
+      const errorTypeGroups = new Map<string, Array<{
+        workflow: Workflow;
+        latestRun: ScriptRun;
+        notificationKey: string;
+      }>>();
+
       for (const { workflow, latestRun, shouldNotify } of workflowsNeedingAttention) {
         if (!shouldNotify || !latestRun) continue;
 
@@ -115,34 +127,35 @@ export class WorkflowNotifications {
           continue;
         }
 
-        // Only show notification if tab is not visible
-        if (globalThis.document?.visibilityState === 'visible') {
-          continue;
-        }
+        // Group by error type
+        const errorType = latestRun.error_type || '';
+        const group = errorTypeGroups.get(errorType) || [];
+        group.push({ workflow, latestRun, notificationKey });
+        errorTypeGroups.set(errorType, group);
+      }
 
-        // Show the notification
+      // Send one notification per error type group
+      for (const [errorType, workflows] of errorTypeGroups) {
+        if (workflows.length === 0) continue;
+
         try {
-          const errorType = latestRun.error_type || 'error';
-          const title = `${workflow.title || 'Workflow'} needs attention`;
-          let body = latestRun.error || 'An error occurred';
+          const { title, body } = this.buildGroupedNotificationContent(errorType, workflows);
 
-          // Make the message more user-friendly based on error type
-          if (errorType === 'auth') {
-            body = 'Authentication expired. Please reconnect.';
-          } else if (errorType === 'permission') {
-            body = 'Permission denied. Please check access settings.';
-          } else if (errorType === 'network') {
-            body = 'Network error. The service may be temporarily unavailable.';
-          }
+          // For click navigation:
+          // - If single workflow, navigate to that workflow's detail page
+          // - If multiple workflows, navigate to workflows list page
+          const workflowId = workflows.length === 1 ? workflows[0].workflow.id : undefined;
 
           await window.electronAPI.showNotification({
             title,
             body,
-            workflowId: workflow.id,
+            workflowId,
           });
 
-          // Mark as notified
-          this.notifiedWorkflows.add(notificationKey);
+          // Mark all workflows in this group as notified
+          for (const { notificationKey } of workflows) {
+            this.notifiedWorkflows.add(notificationKey);
+          }
 
           // Clean up old notification keys (keep last 100)
           if (this.notifiedWorkflows.size > 100) {
@@ -158,6 +171,80 @@ export class WorkflowNotifications {
     } finally {
       this.isRunning = false;
     }
+  }
+
+  /**
+   * Build notification title and body for a group of workflows with the same error type.
+   * Groups errors to reduce notification spam (e.g., "3 workflows need authentication").
+   */
+  private buildGroupedNotificationContent(
+    errorType: string,
+    workflows: Array<{ workflow: Workflow; latestRun: ScriptRun }>
+  ): { title: string; body: string } {
+    const count = workflows.length;
+
+    // Single workflow - use workflow-specific title and message
+    if (count === 1) {
+      const { workflow, latestRun } = workflows[0];
+      const title = `${workflow.title || 'Workflow'} needs attention`;
+      let body = latestRun.error || 'An error occurred';
+
+      // Make the message more user-friendly based on error type
+      if (errorType === 'auth') {
+        body = 'Authentication expired. Please reconnect.';
+      } else if (errorType === 'permission') {
+        body = 'Permission denied. Please check access settings.';
+      } else if (errorType === 'network') {
+        body = 'Network error. The service may be temporarily unavailable.';
+      } else if (errorType === 'internal') {
+        body = 'An internal error occurred.';
+      }
+
+      return { title, body };
+    }
+
+    // Multiple workflows - use grouped title and include workflow names
+    let title: string;
+    let actionHint: string;
+
+    switch (errorType) {
+      case 'auth':
+        title = `${count} workflows need authentication`;
+        actionHint = 'Please reconnect to continue.';
+        break;
+      case 'permission':
+        title = `${count} workflows have permission errors`;
+        actionHint = 'Please check access settings.';
+        break;
+      case 'network':
+        title = `${count} workflows have network errors`;
+        actionHint = 'Services may be temporarily unavailable.';
+        break;
+      case 'internal':
+        title = `${count} workflows have internal errors`;
+        actionHint = 'An unexpected error occurred.';
+        break;
+      default:
+        title = `${count} workflows need attention`;
+        actionHint = 'Please review the errors.';
+    }
+
+    // Build body with workflow names (truncate if too many)
+    const MAX_NAMES_IN_BODY = 3;
+    const workflowNames = workflows
+      .slice(0, MAX_NAMES_IN_BODY)
+      .map(w => w.workflow.title || 'Untitled')
+      .join(', ');
+
+    let body: string;
+    if (count <= MAX_NAMES_IN_BODY) {
+      body = `${workflowNames}. ${actionHint}`;
+    } else {
+      const remaining = count - MAX_NAMES_IN_BODY;
+      body = `${workflowNames} and ${remaining} more. ${actionHint}`;
+    }
+
+    return { title, body };
   }
 
   /**

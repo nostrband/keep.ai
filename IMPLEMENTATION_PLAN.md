@@ -440,16 +440,28 @@ This document tracks remaining work for a simple, lovable, and complete v1 relea
 
 ### 20. Notification Grouping for Batch Errors
 **Spec**: `notification-grouping-batch-errors.md`
-**Status**: NOT IMPLEMENTED
+**Status**: FIXED (2026-01-21)
 **Problem**: Each workflow error produces individual OS notification = notification spam.
 
-**Action Items**:
-1. Collect errors per check interval (e.g., 30 seconds)
-2. Group by error type: "3 workflows need authentication"
-3. Single notification per type, not per workflow
-4. Include workflow names in notification body
+**Fix Applied**:
+1. Modified `checkWorkflowsNeedingAttention()` to group workflows by error type before sending notifications
+2. Added `buildGroupedNotificationContent()` helper method to generate appropriate title/body:
+   - Single workflow: Shows workflow title and specific error message
+   - Multiple workflows: Shows count (e.g., "3 workflows need authentication") and lists up to 3 workflow names with "and X more" suffix
+3. Updated click navigation behavior:
+   - Single workflow in group: Navigate to that workflow's detail page
+   - Multiple workflows: Navigate to `/workflows` list page
+4. Updated Electron main.ts to navigate to `/workflows` when no workflowId provided
 
-**Files**: `apps/web/src/lib/WorkflowNotifications.ts`
+**Benefits**:
+- Reduces notification spam when multiple workflows fail with same error type (e.g., after token expiry)
+- Users receive at most one notification per error type per check cycle
+- Grouped notifications include workflow count and names for context
+
+**Files**:
+- `apps/web/src/lib/WorkflowNotifications.ts` (grouping logic)
+- `apps/electron/src/main.ts` (click navigation)
+
 **Complexity**: High (6-8 hours)
 
 ---

@@ -235,9 +235,13 @@ function setupIpcHandlers(): void {
           mainWindow?.show();
           mainWindow?.focus();
 
-          // If workflowId provided, navigate to workflow detail page
+          // Navigate to appropriate page based on notification type
+          // - If workflowId provided, navigate to that workflow's detail page
+          // - Otherwise, navigate to workflows list page (for grouped notifications)
           if (options.workflowId) {
             mainWindow?.webContents.send('navigate-to', `/workflows/${options.workflowId}`);
+          } else {
+            mainWindow?.webContents.send('navigate-to', '/workflows');
           }
         } catch (error) {
           debugMain('Failed to handle notification click:', error);
