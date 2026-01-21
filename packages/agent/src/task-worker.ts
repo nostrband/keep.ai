@@ -165,6 +165,7 @@ export class TaskWorker {
       const agentTask: AgentTask = {
         id: task.id,
         type: taskType,
+        chat_id: task.chat_id,
         state: {
           ...state,
         },

@@ -10,7 +10,9 @@
 import { KeepDbApi, Workflow, ScriptRun } from "@app/db";
 
 // Error types that should trigger user notifications (non-fixable, require user action)
-const NOTIFY_ERROR_TYPES = ['auth', 'permission', 'network'];
+// - 'internal' errors are bugs in our code that users should be aware of
+// - Empty string ('') handles legacy/unclassified errors for consistency with MainPage attention indicators
+const NOTIFY_ERROR_TYPES = ['auth', 'permission', 'network', 'internal', ''];
 
 // Error types that should NOT trigger notifications (agent handles via maintenance)
 const SILENT_ERROR_TYPES = ['logic'];
@@ -163,12 +165,11 @@ export class WorkflowNotifications {
    * Call this when user views the workflow
    */
   clearWorkflowNotifications(workflowId: string): void {
-    // Remove all notification keys for this workflow
-    for (const key of this.notifiedWorkflows) {
-      if (key.startsWith(`${workflowId}:`)) {
-        this.notifiedWorkflows.delete(key);
-      }
-    }
+    // Collect keys to delete first to avoid modifying Set during iteration
+    // Deleting from a Set while iterating is undefined behavior and can skip entries
+    const prefix = `${workflowId}:`;
+    const keysToDelete = [...this.notifiedWorkflows].filter(key => key.startsWith(prefix));
+    keysToDelete.forEach(key => this.notifiedWorkflows.delete(key));
   }
 
   /**

@@ -48,4 +48,5 @@ export type AgentTask = {
   id: string;
   type: TaskType;
   state?: TaskState;
+  chat_id: string;
 };

@@ -23,6 +23,7 @@ export type SaveInfo = z.infer<typeof SaveInfoSchema>;
 export function makeSaveTool(opts: {
   taskId: string;
   taskRunId: string;
+  chatId: string;
   scriptStore: ScriptStore;
   chatStore: ChatStore;
 }) {
@@ -56,7 +57,7 @@ export function makeSaveTool(opts: {
       };
       await opts.scriptStore.addScript(newScript);
 
-      await opts.chatStore.saveChatEvent(generateId(), "main", "add_script", {
+      await opts.chatStore.saveChatEvent(generateId(), opts.chatId, "add_script", {
         task_id: opts.taskId,
         task_run_id: opts.taskRunId,
         script_id: newScript.id,
@@ -66,14 +67,15 @@ export function makeSaveTool(opts: {
       // If workflow was in maintenance mode, clear it and trigger immediate re-run
       if (wasInMaintenance) {
         // Clear maintenance flag and set next_run_timestamp to now for immediate re-run
-        await opts.scriptStore.updateWorkflow({
-          ...workflow,
+        // Use updateWorkflowFields for atomic partial update to avoid overwriting concurrent changes
+        await opts.scriptStore.updateWorkflowFields(workflow.id, {
           maintenance: false,
           next_run_timestamp: new Date().toISOString(),
         });
 
         // Create a chat event to show the fix was applied
-        await opts.chatStore.saveChatEvent(generateId(), "main", "maintenance_fixed", {
+        // Per spec 34: use task's chat_id, not hardcoded "main"
+        await opts.chatStore.saveChatEvent(generateId(), opts.chatId, "maintenance_fixed", {
           task_id: opts.taskId,
           task_run_id: opts.taskRunId,
           script_id: newScript.id,

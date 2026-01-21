@@ -205,6 +205,7 @@ export class Agent {
     tools.save = makeSaveTool({
       taskId: this.task.id,
       taskRunId: this.taskRunId,
+      chatId: this.task.chat_id,
       scriptStore: this.env.api.scriptStore,
       chatStore: this.env.api.chatStore,
     });

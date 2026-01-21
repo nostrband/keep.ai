@@ -207,6 +207,7 @@ async function runAgentCommand(modelName: string): Promise<void> {
         id: bytesToHex(randomBytes(8)),
         type: "worker" as const,
         state: { id: "", goal: "", notes: "", plan: "", asks: "" },
+        chat_id: "cli",
       };
       const agent = new ReplAgent(model, env, sandbox, agentTask, "");
 

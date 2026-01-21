@@ -45,7 +45,8 @@
     "mime-types": "^3.0.2",
     "quickjs-emscripten": "^0.31.0",
     "quickjs-emscripten-core": "^0.31.0",
-    "sqlite3": "^5.1.7"
+    "sqlite3": "^5.1.7",
+    "svix": "^1.84.1"
   },
   "packageManager": "npm@11.4.2",
   "homepage": "https://github.com/nostrband/keep.ai",

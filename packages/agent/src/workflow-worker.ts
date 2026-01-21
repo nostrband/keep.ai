@@ -63,9 +63,10 @@ export class WorkflowWorker {
     workflow: Workflow,
     retryOf: string = '',
     retryCount: number = 0,
-    runType: string = 'workflow'
+    runType: string = 'workflow',
+    scriptRunId?: string
   ): Promise<void> {
-    this.debug("Execute workflow", workflow, "retryOf:", retryOf, "retryCount:", retryCount, "runType:", runType);
+    this.debug("Execute workflow", workflow, "retryOf:", retryOf, "retryCount:", retryCount, "runType:", runType, "scriptRunId:", scriptRunId);
 
     try {
       // Find scripts by workflow_id
@@ -83,7 +84,7 @@ export class WorkflowWorker {
       // Use the latest script (first one, since getScriptsByWorkflowId orders by version DESC)
       const script = scripts[0];
 
-      await this.processWorkflowScript(workflow, script, retryOf, retryCount, runType);
+      await this.processWorkflowScript(workflow, script, retryOf, retryCount, runType, scriptRunId);
     } catch (error) {
       this.debug("Workflow handling error:", error);
       throw error;
@@ -108,9 +109,11 @@ export class WorkflowWorker {
     script: Script,
     retryOf: string = '',
     retryCount: number = 0,
-    runType: string = 'workflow'
+    runType: string = 'workflow',
+    providedScriptRunId?: string
   ) {
-    const scriptRunId = generateId();
+    // Use provided ID or generate a new one (allows caller to know the run ID upfront)
+    const scriptRunId = providedScriptRunId || generateId();
     this.debug(
       "Running script run",
       scriptRunId,

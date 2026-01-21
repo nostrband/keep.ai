@@ -1610,6 +1610,11 @@ export async function createServer(config: ServerConfig = {}) {
         return reply.status(400).send({ error: "Workflow has no scripts to run" });
       }
 
+      // Generate script run ID upfront so we can return it immediately
+      // This avoids race conditions when querying for "latest" run after execution
+      const { generateId } = await import("ai");
+      const scriptRunId = generateId();
+
       // Create a standalone WorkflowWorker for test execution
       const gmailOAuth2Client = await createGmailOAuth2Client(userPath);
       const testWorker = new WorkflowWorker({
@@ -1619,46 +1624,29 @@ export async function createServer(config: ServerConfig = {}) {
         // No onSignal - test runs don't emit signals to scheduler
       });
 
-      debugServer("Starting test run for workflow:", workflow.id);
+      debugServer("Starting test run for workflow:", workflow.id, "with scriptRunId:", scriptRunId);
 
       // Execute the workflow as a test run (type="test")
-      // This runs in the background - return immediately with confirmation
-      const executePromise = testWorker.executeWorkflow(
+      // Run in background - don't await, return immediately with the run ID
+      testWorker.executeWorkflow(
         workflow,
         '', // no retryOf
         0,  // retryCount
-        'test' // runType
-      );
+        'test', // runType
+        scriptRunId // pass the pre-generated ID
+      ).then(() => {
+        debugServer("Test run completed successfully for workflow:", workflow.id, "scriptRunId:", scriptRunId);
+      }).catch((error) => {
+        debugServer("Test run failed for workflow:", workflow.id, "scriptRunId:", scriptRunId, error);
+      });
 
-      // Wait for execution to complete and return the result
-      // Test runs have a 5-minute timeout (same as regular runs)
-      try {
-        await executePromise;
-        debugServer("Test run completed successfully for workflow:", workflow.id);
-
-        // Get the latest script run to return details
-        const runs = await api.scriptStore.getScriptRunsByWorkflowId(workflow.id);
-        const latestRun = runs.length > 0 ? runs[0] : null;
-
-        return reply.send({
-          success: true,
-          message: "Test run completed successfully",
-          scriptRunId: latestRun?.id,
-        });
-      } catch (error) {
-        debugServer("Test run failed for workflow:", workflow.id, error);
-
-        // Get the latest script run to return error details
-        const runs = await api.scriptStore.getScriptRunsByWorkflowId(workflow.id);
-        const latestRun = runs.length > 0 ? runs[0] : null;
-
-        return reply.send({
-          success: false,
-          message: "Test run failed",
-          error: error instanceof Error ? error.message : "Unknown error",
-          scriptRunId: latestRun?.id,
-        });
-      }
+      // Return immediately with HTTP 202 (Accepted) and the run ID
+      // Client can poll /api/script-run/{id} to check status
+      return reply.status(202).send({
+        success: true,
+        message: "Test run started",
+        scriptRunId: scriptRunId,
+      });
     } catch (error) {
       debugServer("Error in /api/workflow/test-run:", error);
       return reply.status(500).send({

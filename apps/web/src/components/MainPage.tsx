@@ -2,7 +2,6 @@ import React, { useState, useCallback, useRef, useEffect, useMemo } from "react"
 import { Link, useNavigate } from "react-router-dom";
 import { useWorkflows } from "../hooks/dbScriptReads";
 import { useTasks } from "../hooks/dbTaskReads";
-import { useAddMessage } from "../hooks/dbWrites";
 import { useFileUpload } from "../hooks/useFileUpload";
 import { useDbQuery } from "../hooks/dbQuery";
 import { useAutonomyPreference } from "../hooks/useAutonomyPreference";
@@ -159,8 +158,8 @@ export default function MainPage() {
   const [promptHeight, setPromptHeight] = useState(0);
   const [latestRuns, setLatestRuns] = useState<Record<string, any>>({});
   const [showAttentionOnly, setShowAttentionOnly] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const promptContainerRef = useRef<HTMLDivElement>(null);
-  const addMessage = useAddMessage();
   const { uploadFiles, uploadState } = useFileUpload();
 
   // Fetch latest run for each workflow using batch query
@@ -242,44 +241,51 @@ export default function MainPage() {
     const hasText = Boolean(message.text);
     const hasAttachments = Boolean(message.files?.length);
 
-    if (!(hasText || hasAttachments)) {
+    if (!(hasText || hasAttachments) || !api) {
       return;
     }
 
-    const messageContent = message.text || "";
-    let attachedFiles: DbFile[] = [];
+    setIsSubmitting(true);
 
-    // Upload files if any are attached
-    if (hasAttachments && message.files) {
-      try {
-        const files: File[] = [];
-        for (const fileUIPart of message.files) {
-          if (fileUIPart.url) {
-            const response = await fetch(fileUIPart.url);
-            const blob = await response.blob();
-            const file = new File([blob], fileUIPart.filename || 'unknown', {
-              type: fileUIPart.mediaType || 'application/octet-stream'
-            });
-            files.push(file);
+    try {
+      const messageContent = message.text || "";
+      let attachedFiles: DbFile[] = [];
+
+      // Upload files if any are attached
+      if (hasAttachments && message.files) {
+        try {
+          const files: File[] = [];
+          for (const fileUIPart of message.files) {
+            if (fileUIPart.url) {
+              const response = await fetch(fileUIPart.url);
+              const blob = await response.blob();
+              const file = new File([blob], fileUIPart.filename || 'unknown', {
+                type: fileUIPart.mediaType || 'application/octet-stream'
+              });
+              files.push(file);
+            }
           }
+          const uploadResults = await uploadFiles(files);
+          attachedFiles = uploadResults;
+        } catch (error) {
+          console.error('File upload failed:', error);
+          // Still proceed with task creation without file attachments
         }
-        const uploadResults = await uploadFiles(files);
-        attachedFiles = uploadResults;
-      } catch (error) {
-        console.error('File upload failed:', error);
       }
+
+      // Create task and navigate to chat (same pattern as NewPage)
+      const result = await api.createTask({
+        content: messageContent,
+        files: attachedFiles,
+      });
+
+      // Navigate to the new chat
+      navigate(`/chats/${result.chatId}`);
+    } catch (error) {
+      console.error('Failed to create task:', error);
+      setIsSubmitting(false);
     }
-
-    // Send the message to the main chat
-    addMessage.mutate({
-      chatId: "main",
-      role: "user",
-      content: messageContent,
-      files: attachedFiles,
-    });
-
-    setInput("");
-  }, [addMessage, uploadFiles]);
+  }, [api, navigate, uploadFiles]);
 
   // Track prompt input height changes
   useEffect(() => {
@@ -466,14 +472,14 @@ export default function MainPage() {
                 </PromptInputButton>
               </PromptInputTools>
               <PromptInputSubmit
-                disabled={(!input && !uploadState.isUploading) || uploadState.isUploading}
-                status={uploadState.isUploading ? "submitted" : undefined}
+                disabled={(!input && !uploadState.isUploading) || uploadState.isUploading || isSubmitting}
+                status={uploadState.isUploading || isSubmitting ? "submitted" : undefined}
               />
             </PromptInputToolbar>
           </PromptInput>
 
           {/* Press Enter hint - shown when user has typed something */}
-          {input.trim() && !uploadState.isUploading && (
+          {input.trim() && !uploadState.isUploading && !isSubmitting && (
             <div className="text-center text-xs text-gray-400 mt-2">
               Press <kbd className="px-1.5 py-0.5 bg-gray-100 rounded border border-gray-200 font-mono">Enter</kbd> to create automation
             </div>

@@ -73,16 +73,21 @@ export class WorkflowScheduler {
 
         // Check if max retries exceeded - escalate to user attention
         if (currentState.retryCount > WorkflowScheduler.MAX_NETWORK_RETRIES) {
+          // Log with error context like 'needs_attention' case for consistency
           this.debug(
-            `Workflow ${signal.workflowId} exceeded max retries (${currentState.retryCount}/${WorkflowScheduler.MAX_NETWORK_RETRIES}), escalating to user attention`
+            `Workflow ${signal.workflowId} exceeded max retries (${currentState.retryCount}/${WorkflowScheduler.MAX_NETWORK_RETRIES}), escalating to user attention (${signal.errorType || 'network'}): ${signal.error || 'Max retries exceeded'}`
           );
-          // Clear retry state and mark as needing attention
-          this.workflowRetryState.delete(signal.workflowId);
+
           // Mark workflow as error status so user can see it needs attention
-          this.api.scriptStore.updateWorkflow({
-            id: signal.workflowId,
+          // Use updateWorkflowFields to only update status, preserving all other fields
+          // Note: The script_run already has error_type='network' from the last failed attempt,
+          // which triggers WorkflowNotifications when the workflows table changes
+          this.api.scriptStore.updateWorkflowFields(signal.workflowId, {
             status: 'error',
-          } as any).catch(err => this.debug('Failed to update workflow status:', err));
+          }).then(() => {
+            // Clear retry state only after successful DB update
+            this.workflowRetryState.delete(signal.workflowId);
+          }).catch(err => this.debug('Failed to update workflow status:', err));
           break;
         }
 

@@ -28,7 +28,12 @@
       "Bash(then)",
       "Bash(for:*)",
       "Bash(echo:*)",
-      "Bash(if grep -qi \"issue\\\\|severity\\\\|bug\" \"$f\")"
+      "Bash(if grep -qi \"issue\\\\|severity\\\\|bug\" \"$f\")",
+      "Bash(npm:*)",
+      "Bash(node --version:*)",
+      "Bash(cat:*)",
+      "Bash(curl:*)",
+      "Bash(tar:*)"
     ]
   }
 }
