@@ -146,11 +146,18 @@ export class WorkflowNotifications {
           // - If multiple workflows, navigate to workflows list page
           const workflowId = workflows.length === 1 ? workflows[0].workflow.id : undefined;
 
-          await window.electronAPI.showNotification({
+          const success = await window.electronAPI.showNotification({
             title,
             body,
             workflowId,
           });
+
+          // Only mark as notified if the notification was successfully shown
+          // This ensures we'll retry on the next check cycle if notification failed
+          if (!success) {
+            console.debug("Notification creation failed, will retry on next check");
+            continue;
+          }
 
           // Mark all workflows in this group as notified
           for (const { notificationKey } of workflows) {

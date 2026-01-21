@@ -1334,6 +1334,25 @@ Based on analysis of `ideas/*`, these should become formal specs for v1:
 
 ---
 
+### 73. Electron Notification Return Type Fix
+**Spec**: `electron-notification-return-type.md`
+**Status**: FIXED (2026-01-21)
+**Problem**: The `showNotification` IPC handler returns `Promise<boolean>` but type definition declared `Promise<void>`.
+
+**Fix Applied**:
+1. Updated `apps/web/src/vite-env.d.ts` line 27 to return `Promise<boolean>` instead of `Promise<void>`
+2. Updated `apps/web/src/lib/WorkflowNotifications.ts` to check the return value
+3. Only marks workflows as notified when notification was successfully shown
+4. Debug logging added for failed notifications
+
+**Files**:
+- `apps/web/src/vite-env.d.ts`
+- `apps/web/src/lib/WorkflowNotifications.ts`
+
+**Complexity**: Low (30 min)
+
+---
+
 ## Summary Statistics
 
 | Priority | Status | Count | Est. Hours |
@@ -1342,8 +1361,8 @@ Based on analysis of `ideas/*`, these should become formal specs for v1:
 | P1 High | Completed | 14 | 0 |
 | P2 Medium | Completed | 47 | 0 |
 | P3 Low | Completed | 21 | 0 |
-| Ideas->Specs | Implemented | 4 | 0 |
-| **Total** | **All items complete** | **72 of 72** | **0** |
+| Ideas->Specs | Implemented | 5 | 0 |
+| **Total** | **All items complete** | **73 of 73** | **0** |
 
 **ALL ITEMS ARE NOW COMPLETE!**
 

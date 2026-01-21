@@ -24,7 +24,7 @@ interface ElectronAPI {
     title: string;
     body: string;
     workflowId?: string;
-  }) => Promise<void>;
+  }) => Promise<boolean>;
   updateTrayBadge: (count: number) => Promise<void>;
   // Returns unsubscribe function to remove only this listener
   onNavigateTo: (callback: (path: string) => void) => () => void;
