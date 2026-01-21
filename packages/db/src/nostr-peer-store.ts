@@ -1,4 +1,5 @@
 import { CRSqliteDB } from "./database";
+import { validateInClauseLength } from "./interfaces";
 
 export interface NostrPeer {
   peer_pubkey: string;
@@ -76,6 +77,7 @@ export class NostrPeerStore {
 
   async deletePeers(peerPubkeys: string[]): Promise<void> {
     if (peerPubkeys.length === 0) return;
+    validateInClauseLength(peerPubkeys, 'deletePeers');
 
     const placeholders = peerPubkeys.map(() => "?").join(",");
     await this.db.db.exec(

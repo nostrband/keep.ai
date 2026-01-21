@@ -1,4 +1,5 @@
 import { CRSqliteDB } from "./database";
+import { validateInClauseLength } from "./interfaces";
 
 export interface File {
   id: string;
@@ -74,6 +75,7 @@ export class FileStore {
     if (ids.length === 0) {
       return [];
     }
+    validateInClauseLength(ids, 'getFiles');
 
     // Create placeholders for the IN clause (?, ?, ?, ...)
     const placeholders = ids.map(() => '?').join(', ');

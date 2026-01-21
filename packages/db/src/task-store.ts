@@ -1,5 +1,5 @@
 import { CRSqliteDB } from "./database";
-import { DBInterface } from "./interfaces";
+import { DBInterface, validateInClauseLength } from "./interfaces";
 
 export type TaskType = "worker" | "planner";
 
@@ -250,6 +250,7 @@ export class TaskStore {
     if (ids.length === 0) {
       return [];
     }
+    validateInClauseLength(ids, 'getTasks');
 
     // Create placeholders for the IN clause (?, ?, ?, ...)
     const placeholders = ids.map(() => "?").join(", ");
@@ -373,6 +374,7 @@ export class TaskStore {
     if (ids.length === 0) {
       return [];
     }
+    validateInClauseLength(ids, 'getStates');
 
     // Create placeholders for the IN clause (?, ?, ?, ...)
     const placeholders = ids.map(() => "?").join(", ");

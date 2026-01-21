@@ -1,5 +1,5 @@
 import { CRSqliteDB } from "./database";
-import { DBInterface } from "./interfaces";
+import { DBInterface, validateInClauseLength } from "./interfaces";
 
 export interface Script {
   id: string;
@@ -468,6 +468,7 @@ export class ScriptStore {
     if (workflowIds.length === 0) {
       return new Map();
     }
+    validateInClauseLength(workflowIds, 'getLatestRunsByWorkflowIds');
 
     // Build placeholders for the IN clause
     const placeholders = workflowIds.map(() => '?').join(', ');

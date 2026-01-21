@@ -379,13 +379,13 @@ This document tracks remaining work for a simple, lovable, and complete v1 relea
 
 ### 18. Electron Window Ready Promise Rejection
 **Spec**: `electron-window-ready-promise-rejection.md`
-**Status**: NOT IMPLEMENTED
+**Status**: FIXED (2026-01-21)
 **Problem**: `ensureWindowReady()` at lines 100-119 creates promise that hangs forever if window closes.
 
-**Action Items**:
-1. Store reject function when creating promise at line 114
-2. Reject promise in window close handler
-3. Callers should handle rejection gracefully
+**Fix Applied**:
+1. Added windowReadyReject alongside windowReadyResolve
+2. Promise now rejects with "Window was closed" error when window closes
+3. Added try-catch to all ensureWindowReady() callers
 
 **Files**: `apps/electron/src/main.ts`
 **Complexity**: Medium (2 hours)
@@ -426,16 +426,21 @@ This document tracks remaining work for a simple, lovable, and complete v1 relea
 
 ### 21. IN Clause Length Limits
 **Spec**: `in-clause-length-limits.md`
-**Status**: NOT IMPLEMENTED
+**Status**: FIXED (2026-01-21)
 **Problem**: Array inputs to SQL IN clauses not validated for length. Could cause resource exhaustion.
 
-**Action Items**:
-1. Add MAX_IN_CLAUSE_LENGTH = 1000 constant
-2. Add validation to methods accepting arrays for IN clauses
-3. Throw descriptive error if limit exceeded
-4. Document the limit
+**Fix Applied**:
+1. Added MAX_IN_CLAUSE_LENGTH = 1000 constant in interfaces.ts
+2. Added validateInClauseLength() helper function
+3. Updated all 5 affected methods:
+   - script-store.ts: getLatestRunsByWorkflowIds()
+   - task-store.ts: getTasks(), getStates()
+   - file-store.ts: getFiles()
+   - nostr-peer-store.ts: deletePeers()
+4. Clear error messages when limit exceeded
 
 **Files**:
+- `packages/db/src/interfaces.ts`
 - `packages/db/src/script-store.ts`
 - `packages/db/src/task-store.ts`
 - `packages/db/src/file-store.ts`
@@ -635,13 +640,12 @@ This document tracks remaining work for a simple, lovable, and complete v1 relea
 
 ### 35. Electron IPC Error Handling
 **Spec**: `electron-ipc-error-handling.md`
-**Status**: CONFIRMED INCONSISTENT (only 1 handler has try-catch)
+**Status**: FIXED (2026-01-21)
 
-**Action Items**:
-1. Audit all IPC handlers in main.ts
-2. Add consistent try-catch wrappers
-3. Return structured error responses
-4. Log errors with debug module
+**Fix Applied**:
+1. Added consistent try-catch to all IPC handlers (app:getVersion, open-external, update-tray-badge)
+2. Handlers now return success/failure indicators
+3. Errors are logged via debugMain
 
 **Files**: `apps/electron/src/main.ts`
 **Complexity**: Medium (2-3 hours)
@@ -650,11 +654,11 @@ This document tracks remaining work for a simple, lovable, and complete v1 relea
 
 ### 36. Electron Notification Click Error Handling
 **Spec**: `electron-notification-click-error-handling.md`
-**Status**: NO TRY-CATCH at lines 208-217
+**Status**: FIXED (2026-01-21)
 
-**Action Items**:
-1. Wrap ensureWindowReady call in try-catch
-2. Log errors, don't crash on notification click
+**Fix Applied**:
+1. Added try-catch around ensureWindowReady() in notification click handler
+2. Errors are logged and don't crash the app
 
 **Files**: `apps/electron/src/main.ts`
 **Complexity**: Low (15 min)
@@ -663,11 +667,12 @@ This document tracks remaining work for a simple, lovable, and complete v1 relea
 
 ### 37. Electron Icon Creation Error Handling
 **Spec**: `electron-icon-creation-error-handling.md`
-**Status**: PARTIAL
+**Status**: FIXED (2026-01-21)
 
-**Action Items**:
-1. Wrap getAppIcon() SVG creation in try-catch
-2. Provide fallback icon on failure
+**Fix Applied**:
+1. Wrapped SVG icon creation in try-catch
+2. Returns nativeImage.createEmpty() on failure
+3. Errors are logged for debugging
 
 **Files**: `apps/electron/src/main.ts`
 **Complexity**: Low (15 min)
@@ -690,11 +695,11 @@ This document tracks remaining work for a simple, lovable, and complete v1 relea
 
 ### 39. Pause All Ensure Window Ready
 **Spec**: `pause-all-ensure-window-ready.md`
-**Status**: CONFIRMED MISSING (lines 300-308)
+**Status**: FIXED (2026-01-21)
 
-**Action Items**:
-1. Add `ensureWindowReady()` call to pause-all tray menu handler
-2. Prevents IPC failure if window not ready
+**Fix Applied**:
+1. Added ensureWindowReady() call before sending pause-all IPC message
+2. Wrapped in try-catch like other tray menu handlers
 
 **Files**: `apps/electron/src/main.ts`
 **Complexity**: Low (15 min)

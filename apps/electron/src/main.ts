@@ -69,15 +69,20 @@ function getAppIcon(): Electron.NativeImage {
 
   // Fallback: create from embedded SVG (matches the "K in square" design)
   // Golden border: #D6A642, white background, black K
-  const svgIcon = `
-    <svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
-      <rect x="8" y="8" width="240" height="240" rx="24" ry="24" fill="white" stroke="#D6A642" stroke-width="16"/>
-      <text x="128" y="168" font-family="Arial, sans-serif" font-size="160" font-weight="bold" text-anchor="middle" fill="black">K</text>
-    </svg>
-  `;
-  const dataUrl = `data:image/svg+xml;base64,${Buffer.from(svgIcon).toString('base64')}`;
-
-  return nativeImage.createFromDataURL(dataUrl);
+  try {
+    const svgIcon = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+        <rect x="8" y="8" width="240" height="240" rx="24" ry="24" fill="white" stroke="#D6A642" stroke-width="16"/>
+        <text x="128" y="168" font-family="Arial, sans-serif" font-size="160" font-weight="bold" text-anchor="middle" fill="black">K</text>
+      </svg>
+    `;
+    const dataUrl = `data:image/svg+xml;base64,${Buffer.from(svgIcon).toString('base64')}`;
+    return nativeImage.createFromDataURL(dataUrl);
+  } catch (error) {
+    debugMain('Could not create icon from SVG:', error);
+    // Return empty image as last resort - app continues to function
+    return nativeImage.createEmpty();
+  }
 }
 
 // Keep a global reference of the window object
@@ -91,6 +96,7 @@ let isQuiting = false;
 let windowReady = false;
 let windowReadyPromise: Promise<void> | null = null;
 let windowReadyResolve: (() => void) | null = null;
+let windowReadyReject: ((reason: Error) => void) | null = null;
 
 /**
  * Wait for the window to be ready to receive IPC messages.
@@ -111,8 +117,9 @@ async function ensureWindowReady(): Promise<void> {
   }
 
   // Window exists but not yet ready - wait for it
-  windowReadyPromise = new Promise((resolve) => {
+  windowReadyPromise = new Promise((resolve, reject) => {
     windowReadyResolve = resolve;
+    windowReadyReject = reject;
   });
 
   return windowReadyPromise;
@@ -161,10 +168,16 @@ function createWindow(): void {
 
   // Handle window closed
   mainWindow.on("closed", () => {
+    // Reject any pending promise before clearing references
+    // This prevents callers from hanging indefinitely
+    if (windowReadyReject) {
+      windowReadyReject(new Error('Window was closed'));
+    }
     mainWindow = null;
     windowReady = false;
     windowReadyPromise = null;
     windowReadyResolve = null;
+    windowReadyReject = null;
   });
 
   // Optional: minimize to tray instead
@@ -178,12 +191,23 @@ function createWindow(): void {
 function setupIpcHandlers(): void {
   // Handle app version request
   ipcMain.handle("app:getVersion", () => {
-    return app.getVersion();
+    try {
+      return app.getVersion();
+    } catch (error) {
+      debugMain('Failed to get app version:', error);
+      return 'unknown';
+    }
   });
 
   // Handle external URL opening
   ipcMain.handle('open-external', async (_event, url: string) => {
-    await shell.openExternal(url);
+    try {
+      await shell.openExternal(url);
+      return true;
+    } catch (error) {
+      debugMain('Failed to open external URL:', error);
+      return false;
+    }
   });
 
   // Handle OS-level notifications for workflow errors [Spec 09]
@@ -206,13 +230,17 @@ function setupIpcHandlers(): void {
 
       // When user clicks the notification, open the app
       notification.on('click', async () => {
-        await ensureWindowReady();
-        mainWindow?.show();
-        mainWindow?.focus();
+        try {
+          await ensureWindowReady();
+          mainWindow?.show();
+          mainWindow?.focus();
 
-        // If workflowId provided, navigate to workflow detail page
-        if (options.workflowId) {
-          mainWindow?.webContents.send('navigate-to', `/workflows/${options.workflowId}`);
+          // If workflowId provided, navigate to workflow detail page
+          if (options.workflowId) {
+            mainWindow?.webContents.send('navigate-to', `/workflows/${options.workflowId}`);
+          }
+        } catch (error) {
+          debugMain('Failed to handle notification click:', error);
         }
       });
 
@@ -226,22 +254,28 @@ function setupIpcHandlers(): void {
 
   // Handle tray badge update for attention items [Spec 00, 09]
   ipcMain.handle('update-tray-badge', async (_event, count: number) => {
-    if (!tray) return;
+    try {
+      if (!tray) return false;
 
-    // On macOS, show badge count in tray title
-    if (process.platform === 'darwin') {
-      if (count > 0) {
-        tray.setTitle(` ${count}`);
-      } else {
-        tray.setTitle('');
+      // On macOS, show badge count in tray title
+      if (process.platform === 'darwin') {
+        if (count > 0) {
+          tray.setTitle(` ${count}`);
+        } else {
+          tray.setTitle('');
+        }
       }
-    }
 
-    // Update tooltip to reflect attention items
-    if (count > 0) {
-      tray.setToolTip(`Keep.AI - ${count} automation${count > 1 ? 's' : ''} need attention`);
-    } else {
-      tray.setToolTip('Keep.AI - Your Private AI Assistant');
+      // Update tooltip to reflect attention items
+      if (count > 0) {
+        tray.setToolTip(`Keep.AI - ${count} automation${count > 1 ? 's' : ''} need attention`);
+      } else {
+        tray.setToolTip('Keep.AI - Your Private AI Assistant');
+      }
+      return true;
+    } catch (error) {
+      debugMain('Failed to update tray badge:', error);
+      return false;
     }
   });
 
@@ -279,9 +313,13 @@ function createTray(): void {
     {
       label: "Open Keep.AI",
       click: async () => {
-        await ensureWindowReady();
-        mainWindow?.show();
-        mainWindow?.focus();
+        try {
+          await ensureWindowReady();
+          mainWindow?.show();
+          mainWindow?.focus();
+        } catch (error) {
+          debugMain('Failed to open window from tray:', error);
+        }
       },
     },
     { type: "separator" },
@@ -289,21 +327,30 @@ function createTray(): void {
       label: "New automation...",
       accelerator: "CmdOrCtrl+N",
       click: async () => {
-        await ensureWindowReady();
-        mainWindow?.show();
-        mainWindow?.focus();
-        // Send message to renderer to focus the input
-        mainWindow?.webContents.send('focus-input');
+        try {
+          await ensureWindowReady();
+          mainWindow?.show();
+          mainWindow?.focus();
+          // Send message to renderer to focus the input
+          mainWindow?.webContents.send('focus-input');
+        } catch (error) {
+          debugMain('Failed to open new automation from tray:', error);
+        }
       },
     },
     {
       label: "Pause all automations",
-      click: () => {
-        // Send message to renderer to pause all workflows
-        if (mainWindow) {
-          mainWindow.webContents.send('pause-all-automations');
+      click: async () => {
+        try {
+          await ensureWindowReady();
+          // Send message to renderer to pause all workflows
+          if (mainWindow) {
+            mainWindow.webContents.send('pause-all-automations');
+          }
+          debugMain('Pause all automations requested');
+        } catch (error) {
+          debugMain('Failed to pause all automations:', error);
         }
-        debugMain('Pause all automations requested');
       },
     },
     { type: "separator" },
@@ -320,12 +367,16 @@ function createTray(): void {
 
   // Single-click on tray restores window
   tray.on("click", async () => {
-    await ensureWindowReady();
-    if (mainWindow?.isVisible()) {
-      mainWindow.hide();
-    } else {
-      mainWindow?.show();
-      mainWindow?.focus();
+    try {
+      await ensureWindowReady();
+      if (mainWindow?.isVisible()) {
+        mainWindow.hide();
+      } else {
+        mainWindow?.show();
+        mainWindow?.focus();
+      }
+    } catch (error) {
+      debugMain('Failed to handle tray click:', error);
     }
   });
 }
@@ -385,11 +436,15 @@ function registerGlobalShortcuts(): void {
   // Cmd/Ctrl+N: Open app and focus input for new automation
   const registered = globalShortcut.register('CmdOrCtrl+N', async () => {
     debugMain('Global shortcut CmdOrCtrl+N triggered');
-    await ensureWindowReady();
-    mainWindow?.show();
-    mainWindow?.focus();
-    // Send message to renderer to focus the input
-    mainWindow?.webContents.send('focus-input');
+    try {
+      await ensureWindowReady();
+      mainWindow?.show();
+      mainWindow?.focus();
+      // Send message to renderer to focus the input
+      mainWindow?.webContents.send('focus-input');
+    } catch (error) {
+      debugMain('Failed to handle global shortcut:', error);
+    }
   });
 
   if (!registered) {
