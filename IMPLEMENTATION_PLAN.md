@@ -1142,13 +1142,21 @@ Verified that copyTimeoutRef.current = null is already present in the timeout ca
 
 ### 64. Quick Reply Option Length Validation
 **Spec**: `quick-reply-option-length-validation.md`
-**Status**: NOT VERIFIED
+**Status**: FIXED (2026-01-21)
+**Problem**: Long quick-reply options could break UI layout.
 
-**Action Items**:
-1. Truncate option text to max length (50-100 chars)
-2. Add ellipsis if truncated
+**Fix Applied**:
+1. Added `MAX_OPTION_LENGTH = 60` constant in QuickReplyButtons.tsx
+2. Options longer than max are truncated with "..." suffix
+3. Truncated options show full text via tooltip on hover
+4. Uses existing Tooltip components from UI library
 
-**Files**: `packages/agent/src/ai-tools/ask.ts` or UI component
+**Benefits**:
+- Quick-reply buttons maintain consistent sizing
+- Users can still see full option text by hovering
+- UI layout remains stable with any option content
+
+**Files**: `apps/web/src/components/QuickReplyButtons.tsx`
 **Complexity**: Low (1 hour)
 
 ---
