@@ -1,15 +1,8 @@
-import React, { useState } from "react";
+import React from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useWorkflow, useScriptRun } from "../hooks/dbScriptReads";
 import { useUpdateWorkflow } from "../hooks/dbWrites";
-import { EventItem } from "./EventItem";
-import { CollapsedEventSummary } from "./CollapsedEventSummary";
-import {
-  EventType,
-  EventPayload,
-  GmailApiCallEventPayload,
-  EVENT_TYPES,
-} from "../types/events";
+import { EventListWithCollapse } from "./EventListWithCollapse";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -17,8 +10,8 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "../ui";
-import { transformGmailMethod } from "../lib/event-helpers";
-import { partitionEventsBySignal } from "../lib/eventSignal";
+import { processEventsForDisplay } from "../lib/event-helpers";
+import { calculateEventsCost } from "../lib/eventSignal";
 import { useAutoHidingMessage } from "../hooks/useAutoHidingMessage";
 
 interface WorkflowEvent {
@@ -41,7 +34,6 @@ export function WorkflowEventGroup({ workflowId, scriptId, scriptRunId, events }
   const { data: scriptRun } = useScriptRun(scriptRunId || "");
   const updateWorkflowMutation = useUpdateWorkflow();
   const success = useAutoHidingMessage({ duration: 3000 });
-  const [isLowSignalCollapsed, setIsLowSignalCollapsed] = useState(true);
 
   const handleRetry = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -82,62 +74,13 @@ export function WorkflowEventGroup({ workflowId, scriptId, scriptRunId, events }
     : `/workflows/${workflowId}`;
 
   // Get cost from events with usage.cost
-  let totalCost = 0;
-  const eventsWithCost = events.filter((e: any) => e.content?.usage?.cost != null);
-  if (eventsWithCost.length > 0) {
-    totalCost += eventsWithCost.reduce((sum: number, e: any) => sum + (e.content.usage.cost || 0), 0);
-  }
+  const totalCost = calculateEventsCost(events);
 
-  // Filter out workflow_run and workflow_run_end events (they are invisible markers for grouping)
-  const visibleEvents = events.filter((event) => event.type !== "workflow_run" && event.type !== "workflow_run_end");
-
-  // Separate gmail_api_call events from other events
-  const gmailEvents = visibleEvents.filter(
-    (event) => event.type === EVENT_TYPES.GMAIL_API_CALL
-  );
-  const nonGmailEvents = visibleEvents.filter(
-    (event) => event.type !== EVENT_TYPES.GMAIL_API_CALL
-  );
-
-  // Create consolidated gmail event if there are gmail events
-  let consolidatedGmailEvent = null;
-  if (gmailEvents.length > 0) {
-    // Extract unique methods from all gmail events
-    const uniqueMethods = Array.from(
-      new Set(
-        gmailEvents.map((event) =>
-          transformGmailMethod(
-            (event.content as GmailApiCallEventPayload).method
-          )
-        )
-      )
-    );
-
-    // Create a consolidated event
-    consolidatedGmailEvent = {
-      id: `gmail-consolidated-${gmailEvents[0].id}`,
-      type: EVENT_TYPES.GMAIL_API_CALL,
-      content: {
-        ...gmailEvents[0].content,
-        method: `${uniqueMethods.join(", ")}`,
-      } as GmailApiCallEventPayload,
-      timestamp: gmailEvents[0].timestamp,
-    };
-  }
-
-  // Combine non-gmail events with consolidated gmail event
-  const allVisibleEvents = [
-    ...nonGmailEvents,
-    ...(consolidatedGmailEvent ? [consolidatedGmailEvent] : []),
-  ];
+  // Process events: filter out markers and consolidate Gmail events
+  const allVisibleEvents = processEventsForDisplay(events, ["workflow_run", "workflow_run_end"]);
 
   // Determine if this run has an error (for header styling)
-  const hasError = scriptRun?.error && scriptRun.error.length > 0;
-
-  // Partition events by signal level for collapsing behavior
-  // When there's an error, show all events for debugging context
-  const { highSignal, lowSignal } = partitionEventsBySignal(allVisibleEvents);
-  const shouldCollapseEvents = !hasError && lowSignal.length > 0;
+  const hasError = !!(scriptRun?.error && scriptRun.error.length > 0);
 
   // Check if this is an empty group (only workflow_run events)
   const isEmpty = allVisibleEvents.length === 0;
@@ -208,52 +151,7 @@ export function WorkflowEventGroup({ workflowId, scriptId, scriptRunId, events }
 
       {/* Events List - only show if there are visible events */}
       {!isEmpty && (
-        <div className="p-2 space-y-1">
-          {/* High-signal events are always visible */}
-          {highSignal.map((event) => (
-            <EventItem
-              key={event.id}
-              type={event.type as EventType}
-              content={event.content as EventPayload}
-              timestamp={event.timestamp}
-              usage={(event.content as any)?.usage}
-            />
-          ))}
-
-          {/* Low-signal events can be collapsed */}
-          {shouldCollapseEvents && (
-            <>
-              <CollapsedEventSummary
-                events={lowSignal}
-                isExpanded={!isLowSignalCollapsed}
-                onToggle={() => setIsLowSignalCollapsed(!isLowSignalCollapsed)}
-              />
-              {/* Show expanded low-signal events when not collapsed */}
-              {!isLowSignalCollapsed &&
-                lowSignal.map((event) => (
-                  <EventItem
-                    key={event.id}
-                    type={event.type as EventType}
-                    content={event.content as EventPayload}
-                    timestamp={event.timestamp}
-                    usage={(event.content as any)?.usage}
-                  />
-                ))}
-            </>
-          )}
-
-          {/* When there's an error, show all low-signal events without collapse */}
-          {hasError &&
-            lowSignal.map((event) => (
-              <EventItem
-                key={event.id}
-                type={event.type as EventType}
-                content={event.content as EventPayload}
-                timestamp={event.timestamp}
-                usage={(event.content as any)?.usage}
-              />
-            ))}
-        </div>
+        <EventListWithCollapse events={allVisibleEvents} hasError={hasError} />
       )}
     </div>
   );

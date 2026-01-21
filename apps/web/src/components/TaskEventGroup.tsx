@@ -1,23 +1,15 @@
-import React, { useState, useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useTask, useTaskRun } from "../hooks/dbTaskReads";
 import { useScriptRun } from "../hooks/dbScriptReads";
-import { EventItem } from "./EventItem";
-import { CollapsedEventSummary } from "./CollapsedEventSummary";
-import {
-  EventType,
-  EventPayload,
-  GmailApiCallEventPayload,
-  EVENT_TYPES,
-} from "../types/events";
+import { EventListWithCollapse } from "./EventListWithCollapse";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
 } from "../ui";
-import { transformGmailMethod, formatDuration } from "../lib/event-helpers";
-import { partitionEventsBySignal } from "../lib/eventSignal";
+import { formatDuration, processEventsForDisplay } from "../lib/event-helpers";
 
 interface TaskEvent {
   id: string;
@@ -110,7 +102,6 @@ function TaskHeaderContent({
 export function TaskEventGroup({ taskId, events }: TaskEventGroupProps) {
   const navigate = useNavigate();
   const { data: task } = useTask(taskId);
-  const [isLowSignalCollapsed, setIsLowSignalCollapsed] = useState(true);
 
   // Get task_run_id or script_run_id from any event
   const taskRunId = events.length > 0 ? events[0].content?.task_run_id : null;
@@ -167,56 +158,11 @@ export function TaskEventGroup({ taskId, events }: TaskEventGroupProps) {
     totalCost = taskRun.cost / 1000000; // It's stored as integer w/ increased precision
   }
 
-  // Filter out task_run and task_run_end events (they are invisible markers for grouping)
-  const visibleEvents = events.filter((event) => event.type !== "task_run" && event.type !== "task_run_end");
-
-  // Separate gmail_api_call events from other events
-  const gmailEvents = visibleEvents.filter(
-    (event) => event.type === EVENT_TYPES.GMAIL_API_CALL
-  );
-  const nonGmailEvents = visibleEvents.filter(
-    (event) => event.type !== EVENT_TYPES.GMAIL_API_CALL
-  );
-
-  // Create consolidated gmail event if there are gmail events
-  let consolidatedGmailEvent = null;
-  if (gmailEvents.length > 0) {
-    // Extract unique methods from all gmail events
-    const uniqueMethods = Array.from(
-      new Set(
-        gmailEvents.map((event) =>
-          transformGmailMethod(
-            (event.content as GmailApiCallEventPayload).method
-          )
-        )
-      )
-    );
-
-    // Create a consolidated event
-    consolidatedGmailEvent = {
-      id: `gmail-consolidated-${gmailEvents[0].id}`,
-      type: EVENT_TYPES.GMAIL_API_CALL,
-      content: {
-        ...gmailEvents[0].content,
-        method: `${uniqueMethods.join(", ")}`,
-      } as GmailApiCallEventPayload,
-      timestamp: gmailEvents[0].timestamp,
-    };
-  }
-
-  // Combine non-gmail events with consolidated gmail event
-  const allVisibleEvents = [
-    ...nonGmailEvents,
-    ...(consolidatedGmailEvent ? [consolidatedGmailEvent] : []),
-  ];
+  // Process events: filter out markers and consolidate Gmail events
+  const allVisibleEvents = processEventsForDisplay(events, ["task_run", "task_run_end"]);
 
   // Determine if this run has an error (for header styling)
-  const hasError = run?.error && run.error.length > 0;
-
-  // Partition events by signal level for collapsing behavior
-  // When there's an error, show all events for debugging context
-  const { highSignal, lowSignal } = partitionEventsBySignal(allVisibleEvents);
-  const shouldCollapseEvents = !hasError && lowSignal.length > 0;
+  const hasError = !!(run?.error && run.error.length > 0);
 
   // Check if this is an empty group (only task_run events)
   const isEmpty = allVisibleEvents.length === 0;
@@ -266,52 +212,7 @@ export function TaskEventGroup({ taskId, events }: TaskEventGroupProps) {
 
       {/* Events List - only show if there are visible events */}
       {!isEmpty && (
-        <div className="p-2 space-y-1">
-          {/* High-signal events are always visible */}
-          {highSignal.map((event) => (
-            <EventItem
-              key={event.id}
-              type={event.type as EventType}
-              content={event.content as EventPayload}
-              timestamp={event.timestamp}
-              usage={(event.content as any)?.usage}
-            />
-          ))}
-
-          {/* Low-signal events can be collapsed */}
-          {shouldCollapseEvents && (
-            <>
-              <CollapsedEventSummary
-                events={lowSignal}
-                isExpanded={!isLowSignalCollapsed}
-                onToggle={() => setIsLowSignalCollapsed(!isLowSignalCollapsed)}
-              />
-              {/* Show expanded low-signal events when not collapsed */}
-              {!isLowSignalCollapsed &&
-                lowSignal.map((event) => (
-                  <EventItem
-                    key={event.id}
-                    type={event.type as EventType}
-                    content={event.content as EventPayload}
-                    timestamp={event.timestamp}
-                    usage={(event.content as any)?.usage}
-                  />
-                ))}
-            </>
-          )}
-
-          {/* When there's an error, show all low-signal events without collapse */}
-          {hasError &&
-            lowSignal.map((event) => (
-              <EventItem
-                key={event.id}
-                type={event.type as EventType}
-                content={event.content as EventPayload}
-                timestamp={event.timestamp}
-                usage={(event.content as any)?.usage}
-              />
-            ))}
-        </div>
+        <EventListWithCollapse events={allVisibleEvents} hasError={hasError} />
       )}
     </div>
   );

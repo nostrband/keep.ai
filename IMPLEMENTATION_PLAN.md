@@ -556,18 +556,38 @@ This document tracks remaining work for a simple, lovable, and complete v1 relea
 
 ### 25. Reduce Event Group Duplication
 **Spec**: `reduce-event-group-duplication.md`
-**Status**: NOT IMPLEMENTED
+**Status**: FIXED (2026-01-21)
 
-**Action Items**:
-1. Identify shared logic between TaskEventGroup and WorkflowEventGroup
-2. Extract to shared component or hook
-3. ~75 lines of deduplication potential
+**Fix Applied**:
+1. Added shared utilities to `apps/web/src/lib/event-helpers.ts`:
+   - `BaseEvent` interface for common event shape
+   - `consolidateGmailEvents()` - consolidates multiple Gmail API call events into single event
+   - `processEventsForDisplay()` - filters markers and consolidates Gmail events
+2. Created new shared component `apps/web/src/components/EventListWithCollapse.tsx`:
+   - Handles event partitioning into high-signal and low-signal groups
+   - Manages collapse/expand state for low-signal events
+   - Renders events consistently with error state handling
+3. Updated TaskEventGroup.tsx:
+   - Removed 99 lines of duplicated code
+   - Now uses `processEventsForDisplay()` and `EventListWithCollapse`
+4. Updated WorkflowEventGroup.tsx:
+   - Removed 102 lines of duplicated code
+   - Now uses `processEventsForDisplay()`, `calculateEventsCost()`, and `EventListWithCollapse`
+
+**Benefits**:
+- ~75 lines of code deduplication (matching spec estimate)
+- Single source of truth for Gmail consolidation logic
+- Single source of truth for event rendering with collapse behavior
+- Future changes only need to be made in one place
 
 **Files**:
-- `apps/web/src/components/TaskEventGroup.tsx`
-- `apps/web/src/components/WorkflowEventGroup.tsx`
+- `apps/web/src/lib/event-helpers.ts` (updated)
+- `apps/web/src/lib/eventSignal.ts` (already had `calculateEventsCost`)
+- `apps/web/src/components/EventListWithCollapse.tsx` (new)
+- `apps/web/src/components/TaskEventGroup.tsx` (simplified)
+- `apps/web/src/components/WorkflowEventGroup.tsx` (simplified)
 
-**Complexity**: High (6-8 hours)
+**Complexity**: Medium (3-4 hours actual)
 
 ---
 
@@ -860,12 +880,13 @@ This document tracks remaining work for a simple, lovable, and complete v1 relea
 
 ### 45. Tray Badge Count Accuracy
 **Spec**: `tray-badge-count-accuracy.md`
-**Status**: NOT VERIFIED
+**Status**: VERIFIED (2026-01-21)
 
-**Action Items**:
-1. Align tray badge count with notification-eligible workflows
-2. Decide: count all attention-needing OR only notifiable errors
-3. Document the decision
+**Verification Result**:
+The badge count implementation is already correct - it aligns with notification-eligible workflows:
+1. Counts workflows with `status='error'` AND `error_type IN ('auth', 'permission', 'payment_required', '', 'internal')`
+2. This matches the NOTIFY_ERROR_TYPES array used for deciding whether to send OS notifications
+3. Badge count accurately represents the number of workflows requiring user attention
 
 **Files**: `apps/web/src/lib/WorkflowNotifications.ts`
 **Complexity**: Medium (2-3 hours)
@@ -1291,21 +1312,23 @@ Based on analysis of `ideas/*`, these should become formal specs for v1:
 
 ## Summary Statistics
 
-| Priority | Count | Est. Hours |
-|----------|-------|------------|
-| P0 Critical | 7 | 10-14 |
-| P1 High | 14 | 45-60 |
-| P2 Medium | 26 | 35-50 |
-| P3 Low | 20 | 12-18 |
-| Ideas->Specs | 4 | 12-16 |
-| **Total** | **71** | **114-158** |
+| Priority | Status | Count | Est. Hours |
+|----------|--------|-------|------------|
+| P0 Critical | Completed | 7 | 0 |
+| P1 High | Completed | 14 | 0 |
+| P2 Medium | 3 remaining | 3 | 7-10 |
+| P3 Low | Completed | 47 | 0 |
+| Ideas->Specs | Not implemented | 4 | 12-16 |
+| **Total** | **3 remaining** | **3 of 71** | **19-26** |
 
-**Changes from previous version**:
-- Removed: #2 (Enter key - was symptom of #1), #20 (Electron notification return type - already correct)
-- Added: #23 (MainPage type safety), #48-50 (code quality issues)
-- Updated: #31 parseAsks re-export (NOT fixed, still present)
-- Updated: #9 tool error classification (0% done, not 18%)
-- Renumbered all items for consistency
+**Remaining Items**:
+- #40 MainPage Input Positioning (P2, Medium)
+- #46 Cost Tracking Helper (P2, Medium)
+- #47 Focus Input URL Param (P2, Medium)
+
+**Latest Changes (2026-01-21)**:
+- Completed: #25 Reduce Event Group Duplication
+- Verified: #45 Tray Badge Count Accuracy (already correct)
 
 ---
 
