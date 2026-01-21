@@ -1,0 +1,215 @@
+# Code Review: cf543ae
+
+## Commit: Complete tray menu with new automation, pause all, and global shortcut
+
+**Author:** Claude Agent <claude@anthropic.com>
+**Date:** Fri Jan 16 17:51:03 2026 +0000
+
+---
+
+## Summary of Changes
+
+This commit enhances the Electron tray menu with three key features per Specs 00, 01, and 11:
+
+1. **"New automation..." menu item** - Opens the app and focuses the input field for creating a new automation. Includes CmdOrCtrl+N accelerator display.
+
+2. **"Pause all automations" menu item** - Sends IPC message to renderer to pause all workflows.
+
+3. **Global keyboard shortcut (CmdOrCtrl+N)** - Registers a system-wide shortcut to show the app window and focus the input field. Properly unregisters on app quit.
+
+### Files Modified:
+- `IMPLEMENTATION_PLAN.md` - Updated task status to completed
+- `apps/electron/src/main.ts` - Added menu items, global shortcut registration, and cleanup
+- `apps/electron/src/preload.ts` - Exposed `onFocusInput` and `onPauseAllAutomations` listeners
+
+---
+
+## Detailed Analysis
+
+### main.ts Changes (lines 224-252, 319-343, 407, 491-503)
+
+**Menu Items Added:**
+- "New automation..." with CmdOrCtrl+N accelerator
+- "Pause all automations"
+- Proper separator between menu sections
+
+**Global Shortcut Registration:**
+- Uses `globalShortcut.register('CmdOrCtrl+N', ...)` correctly
+- Creates window if not exists, shows, focuses, sends IPC
+- Basic success/failure logging via debug()
+- Cleanup via `globalShortcut.unregisterAll()` in will-quit handler
+
+### preload.ts Changes (lines 47-56)
+
+**New IPC Listeners:**
+- `onFocusInput`: Listens for 'focus-input' channel
+- `onPauseAllAutomations`: Listens for 'pause-all-automations' channel
+
+---
+
+## Issues Identified
+
+### Issue 1: Race Condition in IPC Message Delivery (HIGH)
+
+**Location:** `apps/electron/src/main.ts:335` and `apps/electron/src/main.ts:232`
+
+**Problem:** When `createWindow()` is called, the IPC message `focus-input` is sent immediately after, but:
+- `mainWindow.loadFile()` is async (line 74 in createWindow)
+- The React app hasn't initialized yet
+- The `onFocusInput` listener in the renderer may not be registered
+- The IPC message will be LOST
+
+**Code:**
+```typescript
+if (!mainWindow) {
+  createWindow();
+}
+mainWindow?.show();
+mainWindow?.focus();
+mainWindow?.webContents.send('focus-input'); // May arrive before renderer is ready
+```
+
+**Impact:** First use of CmdOrCtrl+N when app is closed won't focus the input field.
+
+**Proposal:** Wait for `did-finish-load` event before sending IPC:
+```typescript
+if (!mainWindow) {
+  createWindow();
+  mainWindow?.webContents.once('did-finish-load', () => {
+    mainWindow?.webContents.send('focus-input');
+  });
+} else {
+  mainWindow?.show();
+  mainWindow?.focus();
+  mainWindow?.webContents.send('focus-input');
+}
+```
+
+---
+
+### Issue 2: Unused IPC Listeners (MEDIUM)
+
+**Location:** `apps/electron/src/preload.ts:48-56`
+
+**Problem:** The `onFocusInput` and `onPauseAllAutomations` listeners are exposed in preload.ts but **never used** in the renderer (web app). No component calls `window.electronAPI.onFocusInput()` or `window.electronAPI.onPauseAllAutomations()`.
+
+**Impact:**
+- The "New automation..." menu item doesn't actually focus the input
+- The "Pause all automations" menu item does nothing
+
+**Proposal:** Implement the listeners in the React app, likely in `App.tsx` or a dedicated component:
+```typescript
+useEffect(() => {
+  if (!window.electronAPI) return;
+
+  window.electronAPI.onFocusInput(() => {
+    // Navigate to main page and focus input
+    navigate('/');
+    // Focus the input element
+    document.getElementById('prompt-input')?.focus();
+  });
+
+  window.electronAPI.onPauseAllAutomations(async () => {
+    // Pause all active workflows
+    const workflows = await api.scriptStore.listWorkflows();
+    for (const w of workflows.filter(w => w.status === 'active')) {
+      await api.scriptStore.updateWorkflow({ ...w, status: 'disabled' });
+    }
+  });
+
+  return () => {
+    window.electronAPI?.removeAllListeners('focus-input');
+    window.electronAPI?.removeAllListeners('pause-all-automations');
+  };
+}, []);
+```
+
+---
+
+### Issue 3: Memory Leak Risk in IPC Listeners (MEDIUM)
+
+**Location:** `apps/electron/src/preload.ts:48-56`
+
+**Problem:** The pattern used for registering IPC listeners doesn't return an unsubscribe function:
+```typescript
+onFocusInput: (callback: () => void) => {
+  ipcRenderer.on('focus-input', () => callback());
+}
+```
+
+Each call to `onFocusInput()` adds a NEW listener. If a React component mounts/unmounts multiple times, listeners accumulate.
+
+**Impact:** Memory leak and potential multiple handler executions.
+
+**Proposal:** Return the listener for proper cleanup:
+```typescript
+onFocusInput: (callback: () => void) => {
+  const listener = () => callback();
+  ipcRenderer.on('focus-input', listener);
+  return () => ipcRenderer.removeListener('focus-input', listener);
+}
+```
+
+---
+
+### Issue 4: Global Shortcut Conflicts (LOW)
+
+**Location:** `apps/electron/src/main.ts:327`
+
+**Problem:** CmdOrCtrl+N is a very common shortcut used by browsers, IDEs, editors, etc. While Electron's globalShortcut only works when the app has focus (it's not truly "global" in the sense of intercepting from other apps), this can cause user confusion.
+
+**Impact:**
+- Users may expect CmdOrCtrl+N to work when the app is minimized to tray, but it won't
+- The accelerator display in menu may set incorrect expectations
+
+**Proposal:**
+1. Consider a less common shortcut (e.g., CmdOrCtrl+Shift+N)
+2. Or document this limitation
+3. Or use a true global shortcut service (though this has privacy/security implications)
+
+---
+
+### Issue 5: Minimal Error Handling for Shortcut Registration (LOW)
+
+**Location:** `apps/electron/src/main.ts:338-342`
+
+**Problem:** When shortcut registration fails, the code only logs to debug:
+```typescript
+if (!registered) {
+  debugMain('Failed to register global shortcut CmdOrCtrl+N');
+}
+```
+
+**Impact:** Users never know the shortcut won't work.
+
+**Proposal:** Add more context and consider user notification:
+```typescript
+if (!registered) {
+  const isAlreadyRegistered = globalShortcut.isRegistered('CmdOrCtrl+N');
+  debugMain(`Failed to register CmdOrCtrl+N: ${isAlreadyRegistered ? 'already registered by another app' : 'unknown reason'}`);
+  // Consider showing a one-time warning to user
+}
+```
+
+---
+
+## Summary
+
+| Issue | Severity | Category |
+|-------|----------|----------|
+| Race condition in IPC message delivery | HIGH | Bug |
+| Unused IPC listeners | MEDIUM | Incomplete Feature |
+| Memory leak risk in IPC listeners | MEDIUM | Architecture |
+| Global shortcut conflicts | LOW | UX |
+| Minimal error handling for shortcuts | LOW | Error Handling |
+
+**Overall Assessment:** The commit correctly sets up the infrastructure for tray menu enhancements, but the feature is incomplete - the renderer-side handlers for `focus-input` and `pause-all-automations` are missing, so the menu items don't actually work yet. The race condition for newly-created windows should be fixed before this ships.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Race condition in IPC message delivery) - covered by specs/electron-window-ready-before-ipc.md
+- Issue #2 (Unused IPC listeners - feature incomplete) - created specs/tray-menu-ipc-handlers.md
+- Issue #3 (Memory leak risk in IPC listeners) - included in specs/tray-menu-ipc-handlers.md
+- Issue #4 (Global shortcut conflicts) - skipped
+- Issue #5 (Minimal error handling for shortcuts) - skipped

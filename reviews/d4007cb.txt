@@ -1,0 +1,257 @@
+# Review: d4007cb70680199e205154eb1a4bf5e67d48dd36
+
+**Commit Message:** Fix 4 P0 critical bugs: state consistency, retry limits, error handling, cost tracking
+
+**Date:** Mon Jan 19 10:15:01 2026 +0000
+
+**Files Changed:**
+- IMPLEMENTATION_PLAN.md (major rewrite)
+- apps/web/src/components/TaskEventGroup.tsx
+- packages/agent/src/task-worker.ts
+- packages/agent/src/workflow-scheduler.ts
+- packages/agent/src/workflow-worker.ts
+- packages/db/src/script-store.ts
+
+---
+
+## Summary of Changes
+
+This commit addresses four P0 critical bugs:
+
+### 1. Workflow State Consistency
+Added `updateWorkflowFields()` method in script-store.ts for atomic partial updates, preventing concurrent changes from being overwritten when using stale workflow objects with spread pattern.
+
+### 2. Network Error Max Retries
+Added `MAX_NETWORK_RETRIES = 5` constant to WorkflowScheduler. When exceeded, workflows are escalated to user attention instead of retrying indefinitely.
+
+### 3. Handle getAutonomyMode Error
+Added try-catch around `getAutonomyMode()` in task-worker.ts with fallback to 'ai_decides' if DB query fails.
+
+### 4. Task Worker Include Tool Costs
+Combined agent LLM costs with tool execution costs in `finishTaskRun()`. Fixed TaskEventGroup to use only `taskRun.cost` to avoid double-counting.
+
+---
+
+## Potential Issues
+
+### ISSUE 1: Wrong Database Method in Max Retry Escalation (CRITICAL SEVERITY)
+**File:** packages/agent/src/workflow-scheduler.ts:82-85
+**Problem:** Uses `updateWorkflow()` with partial object instead of `updateWorkflowFields()`:
+```typescript
+this.api.scriptStore.updateWorkflow({
+  id: signal.workflowId,
+  status: 'error',
+} as any).catch(err => this.debug('Failed to update workflow status:', err));
+```
+The `updateWorkflow()` method expects a complete Workflow object with all fields. Passing only `id` and `status` will set all other fields (title, cron, next_run_timestamp, etc.) to undefined.
+
+**Evidence:** The `as any` type cast is a red flag indicating TypeScript type checking was bypassed.
+
+**Impact:** Data corruption - workflow metadata (title, cron, task_id, etc.) will be lost when max retries are exceeded.
+
+### ISSUE 2: Fire-and-Forget Without Recovery (HIGH SEVERITY)
+**File:** packages/agent/src/workflow-scheduler.ts:80-85
+**Problem:** Retry state is deleted BEFORE the database update succeeds:
+```typescript
+this.workflowRetryState.delete(signal.workflowId);  // Deleted first
+// Mark workflow as error status so user can see it needs attention
+this.api.scriptStore.updateWorkflow({...}).catch(err => this.debug(...));  // Then update
+```
+If the DB update fails:
+- Retry state is already gone (won't retry)
+- Workflow doesn't show as error (user won't see it needs attention)
+- The workflow is silently lost in a limbo state
+**Impact:** Workflow could be permanently invisible after max retries if DB update fails.
+
+### ISSUE 3: Missing Signal Emission on Max Retry Escalation (MEDIUM SEVERITY)
+**File:** packages/agent/src/workflow-scheduler.ts:74-87
+**Problem:** When max retries are exceeded, no signal is emitted:
+```typescript
+if (currentState.retryCount > WorkflowScheduler.MAX_NETWORK_RETRIES) {
+  // ... logs, deletes state, updates workflow
+  break;  // No signal emitted!
+}
+```
+Compare with auth/permission errors in workflow-worker.ts which emit `'needs_attention'` signal with error type and context.
+**Impact:** No system-wide notification of escalation; error context and original run ID are lost.
+
+### ISSUE 4: Inconsistent Timestamp Updates (LOW SEVERITY)
+**File:** packages/agent/src/workflow-worker.ts (multiple locations)
+**Problem:** Success cases update timestamp but error cases don't:
+- Line 190-192: Success - timestamp updated ✓
+- Line 301-303: ERROR_BAD_REQUEST - NO timestamp
+- Line 348-350: Auth/Permission error - NO timestamp
+- Line 652-656: Escalation to user - NO timestamp
+**Impact:** "Last modified" semantics are inconsistent; UI may show stale times for error workflows.
+
+### ISSUE 5: Application-Level Race Conditions Still Possible (MEDIUM SEVERITY)
+**File:** packages/agent/src/workflow-scheduler.ts:258-276
+**Problem:** While `updateWorkflowFields()` is atomic at SQL level, the application sequence is not:
+```typescript
+await this.worker.executeWorkflow(workflow, ...);  // Uses stale workflow object
+// ... time passes during execution ...
+await this.api.scriptStore.updateWorkflowFields(workflow.id, {
+  next_run_timestamp: nextRun.toISOString(),
+});  // User could have paused in between
+```
+If user pauses workflow during execution, the atomic update still overwrites just those fields, which is better but not perfect.
+**Impact:** Lower risk than before, but edge cases remain where user intent could be partially overwritten.
+
+### ISSUE 6: updateWorkflowFields Missing Transaction Usage (LOW SEVERITY)
+**File:** packages/db/src/script-store.ts:687-729
+**Problem:** While the method accepts optional `tx?: DBInterface`, none of the callers use it:
+```typescript
+// All callers use default (no transaction):
+await this.api.scriptStore.updateWorkflowFields(workflow.id, {...});
+```
+The method design supports transactions but they're not utilized.
+**Impact:** Multiple sequential updates aren't atomic; intermediate states visible to other queries.
+
+---
+
+## Correctly Implemented Areas
+
+### GOOD: updateWorkflowFields SQL Injection Protection
+The method uses parameterized queries correctly:
+```typescript
+values.push(workflowId);
+await db.exec(
+  `UPDATE workflows SET ${setClauses.join(', ')} WHERE id = ?`,
+  values
+);
+```
+Field names are hardcoded; values go through parameters.
+
+### GOOD: Empty Fields Object Handling
+```typescript
+if (setClauses.length === 0) return;
+```
+Safe early return prevents unnecessary DB calls.
+
+### GOOD: Boolean Field Conversion
+```typescript
+values.push(fields.maintenance ? 1 : 0);
+```
+Proper TypeScript boolean to SQLite integer conversion.
+
+### GOOD: Autonomy Mode Fallback
+```typescript
+let autonomyMode: 'ai_decides' | 'coordinate' = 'ai_decides';
+try {
+  autonomyMode = await this.api.getAutonomyMode();
+} catch (error) {
+  this.debug('Failed to get autonomy mode, using default ai_decides:', error);
+}
+```
+Correctly scoped try-catch with sensible default.
+
+### GOOD: Cost Tracking Combination
+```typescript
+const agentCostDollars = opts.agent.openRouterUsage.cost || 0;
+const totalCostDollars = agentCostDollars + opts.toolCost;
+cost: Math.ceil(totalCostDollars * 1000000),
+```
+Properly combines agent + tool costs; stores as microdollars.
+
+### GOOD: TaskEventGroup Double-Count Prevention
+```typescript
+// Do NOT sum event costs separately to avoid double-counting
+if (taskRun?.cost != null && taskRun.cost > 0) {
+  totalCost = taskRun.cost / 1000000;
+}
+```
+Correctly uses only the combined cost from taskRun.
+
+---
+
+## Proposals
+
+### PROPOSAL 1: Use updateWorkflowFields for Max Retry Escalation (CRITICAL)
+Replace line 82-85:
+```typescript
+// Before (BROKEN):
+this.api.scriptStore.updateWorkflow({
+  id: signal.workflowId,
+  status: 'error',
+} as any).catch(err => this.debug('Failed to update workflow status:', err));
+
+// After (CORRECT):
+this.api.scriptStore.updateWorkflowFields(signal.workflowId, {
+  status: 'error',
+}).catch(err => this.debug('Failed to update workflow status:', err));
+```
+
+### PROPOSAL 2: Delay State Deletion Until After DB Update
+```typescript
+// Option A: Wait for DB update before deleting state
+try {
+  await this.api.scriptStore.updateWorkflowFields(signal.workflowId, {
+    status: 'error',
+  });
+  this.workflowRetryState.delete(signal.workflowId);  // Only delete on success
+} catch (err) {
+  this.debug('Failed to update workflow status, keeping retry state:', err);
+  // Retry state preserved; will retry on next signal
+}
+
+// Option B: Move deletion after break (not possible with current structure)
+```
+
+### PROPOSAL 3: Emit needs_attention Signal on Max Retries
+Add before the `break`:
+```typescript
+if (currentState.retryCount > WorkflowScheduler.MAX_NETWORK_RETRIES) {
+  // ... existing code ...
+
+  // Emit signal for system-wide notification
+  this.emitSignal?.({
+    type: "needs_attention",
+    workflowId: signal.workflowId,
+    timestamp: Date.now(),
+    error: "Maximum network retries exceeded",
+    errorType: "network",
+    scriptRunId: currentState.originalRunId,
+  });
+
+  break;
+}
+```
+
+### PROPOSAL 4: Add Timestamp to Error Status Updates
+Update all error cases to include timestamp:
+```typescript
+await this.api.scriptStore.updateWorkflowFields(workflow.id, {
+  status: "error",
+  timestamp: new Date().toISOString(),  // Add this
+});
+```
+
+### PROPOSAL 5: Remove `as any` Type Cast
+After fixing to use `updateWorkflowFields()`, the cast is unnecessary. Remove it to restore type safety.
+
+---
+
+## Summary
+
+| Issue | Severity | Complexity to Fix |
+|-------|----------|-------------------|
+| Wrong DB method (updateWorkflow vs Fields) | CRITICAL | Simple |
+| Fire-and-forget without recovery | HIGH | Medium |
+| Missing signal emission | MEDIUM | Simple |
+| Inconsistent timestamp updates | LOW | Simple |
+| Application-level race conditions | MEDIUM | Complex |
+| Transaction not used | LOW | Medium |
+
+The commit successfully addresses the four P0 bugs it claims to fix, but introduces a new critical bug in the max retry escalation path (Issue #1). This should be fixed immediately as it can cause data corruption.
+
+Priority: Fix Issue #1 (wrong method) and Issue #2 (fire-and-forget) before this code reaches production.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Wrong Database Method in Max Retry Escalation) - created specs/fix-max-retry-updateworkflow-method.md
+- Issue #2 (Fire-and-Forget Without Recovery) - created specs/fix-max-retry-state-deletion-order.md
+- Issue #3 (Missing Signal Emission on Max Retry Escalation) - created specs/emit-signal-on-max-retry-escalation.md
+- Issue #4 (Inconsistent Timestamp Updates) - created specs/workflow-timestamp-as-creation-time.md
+- Issue #5 (Application-Level Race Conditions Still Possible) - skipped (not a real issue - fields are independent)
+- Issue #6 (updateWorkflowFields Missing Transaction Usage) - skipped

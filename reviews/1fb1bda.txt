@@ -1,0 +1,315 @@
+COMMIT REVIEW: 1fb1bda
+=======================
+Title: Add autonomy toggle UI for controlling AI behavior preference
+Author: Claude Agent
+Date: Fri Jan 16 14:45:33 2026 +0000
+
+FILES CHANGED:
+- apps/web/src/components/MainPage.tsx (38 lines added)
+- apps/web/src/hooks/useAutonomyPreference.ts (new file, 73 lines)
+- IMPLEMENTATION_PLAN.md
+
+================================================================================
+CHANGE DESCRIPTION
+================================================================================
+
+1. NEW HOOK: useAutonomyPreference (apps/web/src/hooks/useAutonomyPreference.ts)
+
+   Creates a React hook for managing user's autonomy preference:
+
+   a) TWO MODES
+      - 'ai_decides': Agent minimizes questions, uses safe defaults
+      - 'coordinate': Agent asks more clarifying questions before proceeding
+
+   b) PERSISTENCE
+      - Saves to localStorage for immediate UI response on page refresh
+      - Syncs to backend database for agent access during task execution
+
+   c) API
+      - mode: current AutonomyMode value
+      - setMode(mode): update preference
+      - toggleMode(): switch between modes
+      - isLoaded: boolean for hydration state
+      - isAiDecides / isCoordinate: convenience booleans
+
+   d) UTILITY FUNCTION
+      - getAutonomyPreference(): non-React function for direct localStorage access
+
+2. UI INTEGRATION (apps/web/src/components/MainPage.tsx)
+
+   Added autonomy toggle below the prompt input:
+
+   a) TOGGLE BUTTON
+      - Displays current mode: "AI decides details" or "Coordinate with me"
+      - Includes Info icon to indicate tooltip availability
+      - Subtle styling that doesn't distract from main interface
+
+   b) TOOLTIP
+      - Explains current mode in detail
+      - Shows mode name as bold header
+      - Describes behavioral differences
+      - Includes "Click to switch" hint
+
+   c) CONDITIONAL RENDERING
+      - Only shows after isLoaded is true to prevent hydration mismatch
+
+================================================================================
+ISSUES IDENTIFIED
+================================================================================
+
+ISSUE #1: COMMIT MESSAGE SAYS "BACKEND INTEGRATION PENDING" BUT IT'S COMPLETE (LOW)
+------------------------------------------------------------------------------------
+Location: Commit message
+
+The commit message states:
+"Backend integration pending - UI preference needs to be passed to
+agent-env.ts system prompts to affect actual agent behavior."
+
+However, investigation shows the backend integration is already complete:
+
+1. packages/agent/src/agent-env.ts has:
+   - autonomyPrompt() method (lines 385-407) with mode-specific instructions
+   - Integration into workerSystemPrompt() and plannerSystemPrompt()
+
+2. packages/agent/src/task-worker.ts has:
+   - getAutonomyMode() call when creating AgentEnv (line 581)
+
+3. packages/db/src/api.ts has:
+   - getAutonomyMode() and setAutonomyMode() methods
+
+4. useAutonomyPreference hook has:
+   - Backend sync via api.setAutonomyMode() (line 57)
+
+Impact: The commit message may confuse future developers or reviewers.
+
+PROPOSAL: This is just documentation/commit message issue. Could add a
+follow-up commit that updates IMPLEMENTATION_PLAN.md to clarify the
+backend integration is complete, or note this was already done.
+
+
+ISSUE #2: DUAL STORAGE SYNC EDGE CASE (LOW)
+-------------------------------------------
+Location: useAutonomyPreference.ts:21-41
+
+The hook syncs localStorage to backend on mount:
+```typescript
+useEffect(() => {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored === 'coordinate' || stored === 'ai_decides') {
+      setModeState(stored);
+    }
+  } catch (error) {
+    console.warn('Could not load autonomy preference:', error);
+  }
+  setIsLoaded(true);
+}, []);
+
+// Sync preference to backend when api becomes available
+useEffect(() => {
+  if (!api || !isLoaded) return;
+  api.setAutonomyMode(mode).catch((error) => {
+    console.warn('Could not sync autonomy preference to backend:', error);
+  });
+}, [api, isLoaded]);  // Note: 'mode' is not in dependency array
+```
+
+Potential issue: The sync effect depends on api and isLoaded but NOT mode.
+This means it only syncs once when api becomes available, with whatever
+mode value exists at that time.
+
+If the user changed modes BEFORE api was available (unlikely but possible),
+and then api becomes available later, the sync happens with whatever mode
+is current at that moment - which is correct. But the dependency array
+intentionally excludes 'mode' to avoid syncing on every toggle.
+
+This is actually intentional design - setMode() handles its own backend sync.
+
+VERDICT: Not actually an issue - the design is correct. The initial sync
+handles the case where localStorage has a value that needs to sync to a
+fresh backend. Regular toggles are handled by setMode().
+
+
+ISSUE #3: UTILITY FUNCTION MAY HAVE RACE CONDITION WITH HOOK (TRIVIAL)
+----------------------------------------------------------------------
+Location: useAutonomyPreference.ts:62-73
+
+The getAutonomyPreference() utility function reads directly from localStorage:
+```typescript
+export function getAutonomyPreference(): AutonomyMode {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored === 'coordinate') {
+      return 'coordinate';
+    }
+  } catch {
+    // Ignore errors
+  }
+  return 'ai_decides';
+}
+```
+
+If code uses this function immediately after the hook's setMode() is called,
+there's a small window where localStorage might not yet be updated.
+
+Impact: Very unlikely to cause issues in practice.
+
+PROPOSAL: No action needed, but document that the hook is the source of
+truth for React components, and this utility is for non-React contexts only.
+
+
+ISSUE #4: NO ERROR FEEDBACK TO USER ON BACKEND SYNC FAILURE (LOW)
+-----------------------------------------------------------------
+Location: useAutonomyPreference.ts:48-53
+
+When backend sync fails, it's only logged as a warning:
+```typescript
+const setMode = useCallback((newMode: AutonomyMode) => {
+  setModeState(newMode);
+  try {
+    localStorage.setItem(STORAGE_KEY, newMode);
+  } catch (error) {
+    console.warn('Could not save autonomy preference:', error);
+  }
+  api?.setAutonomyMode(newMode).catch((error) => {
+    console.warn('Could not sync autonomy preference to backend:', error);
+  });
+}, [api]);
+```
+
+If the backend sync fails, the UI shows the new mode but the agent won't
+actually use it (it reads from backend database, not localStorage).
+
+Impact: User thinks they changed to "Coordinate with me" but agent still
+uses "AI decides" behavior. Mismatch between UI and actual behavior.
+
+PROPOSAL: Add error state and user feedback:
+```typescript
+const [syncError, setSyncError] = useState<string | null>(null);
+
+const setMode = useCallback((newMode: AutonomyMode) => {
+  setModeState(newMode);
+  setSyncError(null);
+  try {
+    localStorage.setItem(STORAGE_KEY, newMode);
+  } catch (error) {
+    console.warn('Could not save autonomy preference:', error);
+  }
+  api?.setAutonomyMode(newMode).catch((error) => {
+    console.warn('Could not sync autonomy preference to backend:', error);
+    setSyncError('Failed to save preference. Please try again.');
+  });
+}, [api]);
+
+return { mode, setMode, toggleMode, isLoaded, syncError, ... };
+```
+
+And show error in UI if syncError is set.
+
+
+================================================================================
+POSITIVE OBSERVATIONS
+================================================================================
+
+1. CLEAN HOOK API
+   The useAutonomyPreference hook has a well-designed API:
+   - Clear naming (isAiDecides, isCoordinate helper booleans)
+   - Proper hydration handling with isLoaded flag
+   - Graceful degradation on localStorage errors
+
+2. THOUGHTFUL UI DESIGN
+   - Toggle is subtle and doesn't distract from main purpose
+   - Info icon signals additional information is available
+   - Tooltip provides clear explanation of each mode
+   - "Click to switch" hint improves discoverability
+
+3. PROPER LOADING STATE HANDLING
+   The UI only renders the toggle after isLoaded is true:
+   ```typescript
+   {isAutonomyLoaded && (
+     <div className="mt-2 flex justify-center">
+   ```
+   This prevents hydration mismatches and flickering.
+
+4. DEFENSIVE ERROR HANDLING
+   All localStorage and API operations are wrapped in try-catch
+   with graceful fallbacks to default values.
+
+5. TOOLTIP CONTENT QUALITY
+   The tooltip content is well-structured:
+   - Bold mode name header
+   - Clear behavioral description
+   - Subtle action hint
+   This helps users make informed choices.
+
+6. GOOD DEFAULT CHOICE
+   Defaulting to 'ai_decides' is the right choice for a local automation
+   product - users generally want things to "just work" with minimal
+   interruption. Power users can switch to 'coordinate' mode.
+
+
+================================================================================
+ARCHITECTURAL OBSERVATIONS
+================================================================================
+
+1. FULL STACK INTEGRATION
+   Despite the commit message, the integration is complete:
+
+   Frontend (this commit):
+   └── useAutonomyPreference hook
+       └── localStorage (for UI persistence)
+       └── api.setAutonomyMode() (for backend sync)
+
+   Backend (already existed):
+   └── api.getAutonomyMode() / setAutonomyMode()
+       └── agent_state table in database
+
+   Agent (already existed):
+   └── task-worker.ts calls getAutonomyMode()
+       └── AgentEnv receives mode in constructor
+           └── autonomyPrompt() generates mode-specific instructions
+               └── Included in worker and planner system prompts
+
+2. PROMPT ENGINEERING
+   The autonomyPrompt() in agent-env.ts provides clear behavioral guidelines:
+
+   AI_DECIDES mode:
+   - Minimize clarifying questions
+   - Use safe, sensible defaults
+   - Only ask when truly necessary
+   - State assumptions when using defaults
+   - Use eval tool to explore before asking
+   - Aim for zero clarifying questions
+
+   COORDINATE mode:
+   - Ask clarifying questions BEFORE acting
+   - Present options and wait for confirmation
+   - Confirm key decisions before proceeding
+   - Be more conservative with assumptions
+   - Wait for user response after asking
+   - Maximum 3 clarifying questions before defaulting
+
+
+================================================================================
+RISK ASSESSMENT
+================================================================================
+
+Overall Risk: LOW
+
+- The feature is opt-in (default behavior unchanged)
+- Graceful fallback on errors
+- No breaking changes
+- UI is subtle and non-intrusive
+- Backend integration was already prepared
+
+The main concern is the silent failure case where backend sync fails but
+UI shows the new mode. This could cause user confusion but doesn't break
+functionality.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Commit message says backend pending) - skipped (documentation only)
+- Issue #2 (Dual storage sync) - not an issue after investigation
+- Issue #3 (Utility function race condition) - skipped
+- Issue #4 (No error feedback on sync failure) - created specs/remove-autonomy-localstorage.md (removes localStorage entirely)

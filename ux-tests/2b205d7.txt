@@ -1,0 +1,149 @@
+UX Test Report: 2b205d7 - Fix next run time display to show only for active workflows
+=====================================================================================
+
+Commit: 2b205d7eea04dd17d99ce8dcbb36918190aed818
+Date: Mon Jan 19 10:40:12 2026 +0000
+Files Changed:
+  - IMPLEMENTATION_PLAN.md
+  - apps/web/src/components/WorkflowDetailPage.tsx
+
+TEST ENVIRONMENT
+----------------
+- Server: Running on localhost:3001
+- Database: Empty (no existing workflows)
+- Test Method: Code analysis + Playwright UI verification where applicable
+
+FEATURE DESCRIPTION
+-------------------
+This commit changes from negative logic to positive logic for displaying next run time.
+
+BEFORE (incorrect):
+```typescript
+if (!workflow?.next_run_timestamp || workflow.status === 'disabled' || workflow.status === 'error') {
+  return null;
+}
+```
+
+AFTER (correct):
+```typescript
+if (!workflow?.next_run_timestamp || workflow.status !== 'active') {
+  return null;
+}
+```
+
+The change ensures the UI matches scheduler behavior, which only executes
+workflows where status === 'active'.
+
+CODE ANALYSIS
+-------------
+WorkflowDetailPage.tsx implementation verified:
+
+1. NEXT RUN TIME COMPUTED VALUE (lines 88-99):
+   ```typescript
+   const nextRunTime = useMemo(() => {
+     if (!workflow?.next_run_timestamp || workflow.status !== 'active') {
+       return null;
+     }
+     try {
+       return new Date(workflow.next_run_timestamp);
+     } catch (error) {
+       console.error('Invalid next_run_timestamp:', error);
+       return null;
+     }
+   }, [workflow?.next_run_timestamp, workflow?.status]);
+   ```
+
+   Analysis:
+   - Returns null if no timestamp OR if status is not 'active'
+   - Properly handles invalid timestamps with try-catch
+   - Memo dependencies include both timestamp and status (correct)
+
+2. DISPLAY LOGIC (lines 367-371):
+   ```typescript
+   {nextRunTime && (
+     <p className="text-sm text-gray-600 mt-1">
+       Next run at: {nextRunTime.toLocaleString()}
+     </p>
+   )}
+   ```
+
+   Analysis:
+   - Only renders when nextRunTime is truthy (non-null Date)
+   - Displays in user's locale format
+   - Styled as secondary text (gray-600)
+
+3. CONDITION LOGIC FOR ALL STATUSES:
+   | Status      | nextRunTime Value | Display?  |
+   |-------------|------------------|-----------|
+   | "active"    | Date object      | YES       |
+   | "disabled"  | null             | NO        |
+   | "error"     | null             | NO        |
+   | "" (draft)  | null             | NO        |
+   | any other   | null             | NO        |
+
+   This correctly matches scheduler behavior which filters:
+   ```typescript
+   const activeWorkflows = allWorkflows.filter(
+     (w) => w.status === 'active' && !w.maintenance
+   );
+   ```
+
+UX VERIFICATION STATUS
+----------------------
+[NOT TESTABLE - NO DATA] Active workflow with cron schedule
+  - Expected: "Next run at: [date]" visible under Schedule section
+  - Reason: No active workflows with cron in database
+
+[NOT TESTABLE - NO DATA] Paused workflow with cron schedule
+  - Expected: "Next run at:" NOT visible
+  - Reason: No paused workflows in database
+
+[NOT TESTABLE - NO DATA] Draft workflow
+  - Expected: "Next run at:" NOT visible
+  - Reason: No draft workflows in database
+
+[NOT TESTABLE - NO DATA] Active workflow without schedule
+  - Expected: No Schedule section rendered (workflow.cron check)
+  - Reason: No workflows in database
+
+[VERIFIED - CODE] Conditional rendering logic is correct
+  - Uses positive logic (=== 'active') matching scheduler
+  - Falls through to null for all non-active states
+  - Handles missing timestamp gracefully
+  - Handles invalid timestamp with error logging
+
+CROSS-REFERENCE: MainPage.tsx
+-----------------------------
+Checked MainPage.tsx (lines 103-109) for consistency:
+```typescript
+if (workflow.next_run_timestamp && workflow.status === "active") {
+  const nextRun = new Date(workflow.next_run_timestamp);
+  if (nextRun > new Date()) {
+    return { text: `Next run: ${formatNextRun(nextRun)}`, isAttention: false };
+  }
+}
+```
+- Already uses correct positive logic
+- Additional check for future timestamp (nextRun > new Date())
+- Consistent with WorkflowDetailPage change
+
+ISSUES FOUND
+------------
+None. The code implementation is correct:
+- Positive logic matches scheduler behavior
+- All non-active statuses correctly hide next run time
+- Dependencies in useMemo are correct
+- Error handling for invalid timestamps is present
+
+RECOMMENDATIONS
+---------------
+1. WorkflowDetailPage could add the future timestamp check that MainPage has
+   (showing stale past timestamps might confuse users)
+2. Consider adding unit tests for the nextRunTime computed value
+
+RESULT: PASS (code analysis only - no runtime UX testing possible due to empty database)
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+No issues found in this review.

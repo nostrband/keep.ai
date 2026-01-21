@@ -321,16 +321,20 @@ export function AuthDialog({ onAuthenticated, clerkPublishableKey }: AuthDialogP
           <SignedOut>
             {authMode === 'signin' ? (
               <div>
-                <h2 className="text-lg font-medium text-gray-900 mb-4">Sign In</h2>
+                {/* <h2 className="text-lg font-medium text-gray-900 mb-4">Sign In</h2> */}
                 <SignIn 
                   routing="hash"
+                  signUpUrl="/signup"
+                  oauthFlow="auto"
                 />
               </div>
             ) : (
               <div>
-                <h2 className="text-lg font-medium text-gray-900 mb-4">Sign Up</h2>
+                {/* <h2 className="text-lg font-medium text-gray-900 mb-4">Sign Up</h2> */}
                 <SignUp 
                   routing="hash"
+                  signInUrl="/signin"
+                  oauthFlow="auto"
                 />
               </div>
             )}

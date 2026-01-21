@@ -1,0 +1,217 @@
+# Code Review: Commit eaf4c4e
+# "Implement early abort when user pauses running workflow"
+# Date: 2026-01-20
+
+## Summary of Changes
+
+This commit enables workflows to abort cleanly when a user pauses them mid-execution.
+Previously, a running workflow would continue until completion even after the user
+clicked "pause". Now, execution stops at the next tool invocation.
+
+Files changed:
+- packages/agent/src/errors.ts (new WorkflowPausedError class)
+- packages/agent/src/index.ts (exports for new error types)
+- packages/agent/src/sandbox/api.ts (pause check before each tool)
+- packages/agent/src/workflow-worker.ts (special handling for paused state)
+- IMPLEMENTATION_PLAN.md (status update)
+
+## Detailed Changes
+
+1. **WorkflowPausedError class**: New error type specifically for clean abort signaling.
+   Deliberately NOT a ClassifiedError - pause is not a failure requiring retry/fix logic.
+
+2. **checkWorkflowActive() method**: Added to SandboxAPI, called before each tool execution.
+   Fetches workflow status from database and throws WorkflowPausedError if not 'active'.
+
+3. **workflowId config**: SandboxAPI now accepts optional workflowId in config. Only
+   WorkflowWorker passes this (TaskWorker and CLI tools don't need pause checking).
+
+4. **Special error handling**: WorkflowPausedError caught separately in workflow-worker.ts.
+   Records as "paused" result (not error), emits "done" signal (no retry), doesn't change
+   workflow status (user already set it to disabled).
+
+## Potential Issues
+
+### Issue 1: Database Query on Every Tool Call (MEDIUM)
+
+**Location**: packages/agent/src/sandbox/api.ts, checkWorkflowActive()
+
+**Description**: The implementation calls getWorkflow() before EVERY tool execution:
+```typescript
+global[ns][name] = async (input: any) => {
+  await this.checkWorkflowActive();  // DB query here
+  // ... tool execution
+}
+```
+
+For a 10-tool workflow with 5ms DB latency = 50ms added overhead per run.
+For complex loops with 50+ tool calls = 250ms+ overhead.
+
+**Assessment**: Acceptable for most workflows (5-20 tools), but could accumulate for
+complex scripts with loops.
+
+**Proposal (optional enhancement)**: If performance becomes an issue, consider:
+- Short TTL cache (5 seconds) between status checks
+- Check every Nth tool instead of every tool
+- Move to async/background check thread
+
+### Issue 2: No Timeout on Status Check (LOW-MEDIUM)
+
+**Location**: packages/agent/src/sandbox/api.ts, line 88
+
+**Description**: The getWorkflow() call has no timeout:
+```typescript
+const workflow = await this.api.scriptStore.getWorkflow(this.workflowId);
+```
+
+If database is slow or unresponsive:
+- Every tool call waits indefinitely for DB response
+- No circuit breaker or timeout
+- Could cascade: slow DB -> slow tools -> workflow timeout
+
+**Proposal**: Add timeout to prevent stalls:
+```typescript
+const workflow = await Promise.race([
+  this.api.scriptStore.getWorkflow(this.workflowId),
+  new Promise((_, reject) =>
+    setTimeout(() => reject(new Error('Status check timeout')), 1000)
+  )
+]).catch(error => {
+  this.debug('Status check timeout/error:', error);
+  return null;  // Continue execution on timeout
+});
+```
+
+### Issue 3: One Tool May Execute After Pause (LOW, BY DESIGN)
+
+**Location**: Race window between status check and tool execution
+
+**Description**: There's an inherent race condition:
+```typescript
+// Window A: Status checked - still active
+const workflow = await this.api.scriptStore.getWorkflow(this.workflowId);
+
+// User clicks pause right here (external async event)
+
+// Window B: Tool executes despite pause
+result = await tool.execute(validatedInput);
+```
+
+**Assessment**: This is unavoidable without async cancellation tokens (not available in
+the sandbox model). At most one tool will execute after pause is requested.
+
+**User impact**: Minimal - they'll see one additional result from the in-flight tool.
+The next tool call will properly abort.
+
+**Proposal**: Document this behavior. Add debug log when detecting pause:
+"Workflow paused after [tool_name] completed, aborting further execution"
+
+### Issue 4: Database Failure During Check Silently Continues (LOW)
+
+**Location**: packages/agent/src/sandbox/api.ts, catch block
+
+**Description**: If database fails during status check, execution continues:
+```typescript
+catch (error) {
+  if (error instanceof WorkflowPausedError) {
+    throw error;
+  }
+  // For database errors, log but don't block execution
+  this.debug(`Error checking workflow status: ${error}`);
+}
+```
+
+**Assessment**: This is a reasonable trade-off - continuing execution is better than
+blocking all tools due to transient DB issues. The workflow will eventually complete
+or time out normally.
+
+**Minor concern**: If DB is persistently down, pause requests are completely ignored.
+
+**Proposal (optional)**: After N consecutive DB failures, consider stopping execution:
+```typescript
+private dbCheckFailures = 0;
+// In catch block:
+this.dbCheckFailures++;
+if (this.dbCheckFailures >= 5) {
+  this.debug('Too many DB failures, aborting workflow');
+  throw new WorkflowPausedError(this.workflowId);
+}
+```
+
+### Issue 5: No Test Coverage (MEDIUM)
+
+**Description**: No test files found covering WorkflowPausedError or pause detection
+scenarios. The following should be tested:
+- Normal pause during execution
+- Pause at tool boundaries
+- Database failure during check
+- Concurrent pause requests
+
+**Proposal**: Add integration tests for pause functionality in packages/tests/.
+
+### Issue 6: "paused" Result Format (LOW)
+
+**Location**: packages/agent/src/workflow-worker.ts, line 230
+
+**Description**: Paused runs store result as `'"paused"'` (JSON string):
+```typescript
+await this.api.scriptStore.finishScriptRun(
+  scriptRunId,
+  new Date().toISOString(),
+  '"paused"',  // Result JSON string
+  "",          // No error message
+  ...
+);
+```
+
+**Assessment**: This works but is slightly inconsistent - other results are typically
+the actual return value from the script. Downstream consumers using JSON.parse will
+get string "paused".
+
+**Proposal**: Consider using object format for clarity:
+`'{"status":"paused","reason":"user_requested"}'`
+
+## Positive Aspects
+
+1. **Clean error type separation**: WorkflowPausedError is not a ClassifiedError,
+   correctly treating pause as a clean abort rather than a failure.
+
+2. **Proper routing**: Paused runs don't trigger retry logic, don't escalate to
+   maintenance mode, and don't change workflow status (user already did that).
+
+3. **Minimal scope**: The check is placed only where tools execute, not scattered
+   throughout the codebase.
+
+4. **Cost tracking preserved**: Even on pause, accumulated costs are recorded
+   (line 224 in workflow-worker.ts).
+
+5. **All instantiation sites correct**: Verified that:
+   - WorkflowWorker passes workflowId (correct)
+   - TaskWorker does NOT pass workflowId (correct - tasks don't pause)
+   - CLI tools do NOT pass workflowId (correct - dev tools don't pause)
+
+6. **Graceful degradation**: Database errors don't block execution (line 98-99).
+
+## Risk Assessment
+
+**Overall Risk**: LOW-MEDIUM
+
+The implementation is straightforward and doesn't modify core execution logic. Main
+concerns are around edge cases (DB failures, performance) and lack of test coverage.
+
+## Recommendations
+
+1. **HIGH priority**: Add test coverage for pause scenarios
+2. **MEDIUM priority**: Add timeout to getWorkflow() call
+3. **LOW priority**: Document the one-tool grace period behavior
+4. **LOW priority**: Consider DB failure threshold for automatic abort
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Database Query on Every Tool Call) - skipped
+- Issue #2 (No Timeout on Status Check) - skipped
+- Issue #3 (One Tool May Execute After Pause) - skipped (by design)
+- Issue #4 (Database Failure During Check Silently Continues) - skipped
+- Issue #5 (No Test Coverage) - skipped
+- Issue #6 ("paused" Result Format) - skipped

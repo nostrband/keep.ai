@@ -1,0 +1,137 @@
+Commit: 15862c4 - Add test run feature for workflow scripts
+Date: Mon Jan 19 13:21:12 2026 +0000
+Author: Claude Agent
+
+================================================================================
+UX TEST REPORT
+================================================================================
+
+SUMMARY: PASS (via code review)
+The Test Run feature is fully implemented. UX testing was limited because
+workflow creation requires AI API keys not available in test environment.
+Comprehensive code review confirms the feature is correctly implemented.
+
+--------------------------------------------------------------------------------
+TESTS PERFORMED
+--------------------------------------------------------------------------------
+
+1. Test Run Button UI (Code Review)
+   - Location: WorkflowDetailPage.tsx lines 284-294
+   - Button text: "Test run" / "Testing..." during execution
+   - Styling: bg-amber-50 border-amber-300 text-amber-900 hover:bg-amber-100
+   - Conditionally shown: Only when latestScript exists
+   - Disabled during: isTestRunning || updateWorkflowMutation.isPending
+   - STATUS: PASS
+
+2. Test Run Handler (Code Review)
+   - Location: WorkflowDetailPage.tsx lines 156-187
+   - Makes POST to /api/workflow/test-run with workflow_id
+   - Shows success message: "Test completed successfully"
+   - Shows error message: "Test failed: {error}"
+   - Invalidates queries after completion for UI refresh
+   - STATUS: PASS
+
+3. API Endpoint (Code Review)
+   - Location: server.ts lines 1590-1669
+   - Endpoint: POST /api/workflow/test-run
+   - Validates workflow exists and has scripts
+   - Creates WorkflowWorker without signal handler
+   - Calls executeWorkflow with runType='test'
+   - Returns success/error with scriptRunId
+   - STATUS: PASS
+
+4. Workflow Worker Test Mode (Code Review)
+   - Location: workflow-worker.ts
+   - Accepts runType parameter (default: 'workflow')
+   - isTestRun = (runType === 'test')
+   - Test runs skip:
+     - Workflow timestamp update
+     - Maintenance fix count reset
+     - Log notification checking
+     - Scheduler signal emission
+   - Test runs are recorded in script_runs with type='test'
+   - STATUS: PASS
+
+5. Test Badge Display (Code Review)
+   - Location: WorkflowDetailPage.tsx lines 614-619
+   - Renders Badge when run.type === 'test'
+   - Styling: text-amber-700 border-amber-300 bg-amber-50
+   - Appears in workflow's runs list
+   - STATUS: PASS
+
+--------------------------------------------------------------------------------
+AUTOMATED TEST RESULTS
+--------------------------------------------------------------------------------
+
+Could not perform live UI test because:
+- Test environment lacks OPENROUTER_API_KEY for AI processing
+- Workflow creation requires AI to generate scripts
+- Without workflows, cannot test the Test Run button
+
+Manual verification steps for future testing:
+1. Create a workflow with an AI-generated script
+2. Navigate to /workflows/{id}
+3. Verify "Test run" button appears (amber styling)
+4. Click "Test run"
+5. Verify button shows "Testing..." state
+6. Wait for completion
+7. Verify success/error message appears
+8. Verify "Test" badge appears on the new run
+9. Click into run detail to view logs
+
+--------------------------------------------------------------------------------
+ISSUES FOUND
+--------------------------------------------------------------------------------
+
+MINOR: Test badge NOT displayed in ScriptRunDetailPage
+
+Description:
+The Test badge is shown correctly in the WorkflowDetailPage runs list,
+but when viewing the detail of a test run (ScriptRunDetailPage.tsx),
+the test badge is not displayed.
+
+Location: apps/web/src/components/ScriptRunDetailPage.tsx lines 43-57
+
+Impact: Low - cosmetic inconsistency only. Users can still identify
+test runs from the list view.
+
+Reproduction:
+1. Create a workflow with a script
+2. Run "Test run"
+3. Click on the test run in the list
+4. Notice the "Test" badge is missing in the detail view header
+
+Expected: Test badge should appear alongside status badge in detail view
+Actual: Only status badge shown
+
+Recommendation: Add same badge display logic as in WorkflowDetailPage:
+```tsx
+{run.type === 'test' && (
+  <Badge variant="outline" className="text-amber-700 border-amber-300 bg-amber-50 text-xs">
+    Test
+  </Badge>
+)}
+```
+
+--------------------------------------------------------------------------------
+NOTES
+--------------------------------------------------------------------------------
+
+1. The API endpoint blocks for up to 5 minutes during test execution.
+   Spec file specs/test-run-async-response.md flags this as needing
+   improvement to return immediately with async execution.
+
+2. No concurrency protection - user could click "Test run" multiple
+   times starting concurrent test runs. See specs/test-run-single-concurrent.md
+
+3. Run ID retrieval uses query for "latest" after execution which could
+   have race condition with concurrent runs. See specs/test-run-id-upfront.md
+
+================================================================================
+TEST COMPLETED: 2026-01-20
+================================================================================
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue (Test badge NOT displayed in ScriptRunDetailPage) - created specs/script-run-detail-test-badge.md

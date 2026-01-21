@@ -1,0 +1,203 @@
+COMMIT REVIEW: be063e5
+========================
+Title: Implement activation flow for workflow security boundary
+Date: Fri Jan 16 17:38:14 2026 +0000
+Author: Claude Agent
+
+FILES CHANGED:
+- IMPLEMENTATION_PLAN.md (+30/-21 lines)
+- apps/web/src/components/WorkflowDetailPage.tsx (+108/-35 lines)
+- packages/agent/src/workflow-scheduler.ts (+5/-4 lines)
+
+================================================================================
+SUMMARY OF CHANGES
+================================================================================
+
+This commit implements a security boundary between AI-created draft workflows
+and user-approved running automations, per Spec 06 (Enable Automation).
+
+1. SCHEDULER CHANGE (workflow-scheduler.ts)
+   - Changed filter from `w.status !== 'disabled' && w.status !== 'error' && !w.maintenance`
+   - To: `w.status === 'active' && !w.maintenance`
+   - Effect: Only explicitly activated workflows now run on schedule
+   - Draft ("") and Paused ("disabled") workflows no longer execute automatically
+
+2. UI CHANGES (WorkflowDetailPage.tsx)
+   - Split single "Disable" handler into three separate handlers:
+     * handleActivate(): Sets status to "active"
+     * handlePause(): Sets status to "disabled"
+     * handleResume(): Sets status to "active"
+
+   - Added conditional button rendering:
+     * Draft + script exists: Shows green "Activate" button + "Run now"
+     * Active: Shows "Run now" + "Pause"
+     * Paused (disabled): Shows "Resume"
+
+   - Added hint text: "Script required to activate" when draft has no script
+
+3. DOCUMENTATION (IMPLEMENTATION_PLAN.md)
+   - Updated section 7 to mark Activation Flow as COMPLETED
+   - Added details about what was implemented
+
+================================================================================
+POTENTIAL ISSUES
+================================================================================
+
+ISSUE 1: Inconsistent Status Check in nextRunTime Calculation
+Severity: LOW
+Location: apps/web/src/components/WorkflowDetailPage.tsx:45
+
+The useEffect calculating nextRunTime checks:
+```typescript
+if (!workflow?.next_run_timestamp || workflow.status === 'disabled' || workflow.status === 'error') {
+  return null;
+}
+```
+
+This is inconsistent with the scheduler's logic which only runs workflows where
+`status === 'active'`. The current check assumes that ANY status except 'disabled'
+and 'error' should show the next run time, which would include drafts ("").
+
+However, draft workflows should NOT show next_run_timestamp because:
+- They are not scheduled to run automatically
+- The scheduler explicitly filters them out
+- Showing a "next run" time for drafts would be misleading
+
+The check should be:
+```typescript
+if (!workflow?.next_run_timestamp || workflow.status !== 'active') {
+  return null;
+}
+```
+
+IMPACT: A draft workflow that somehow has a next_run_timestamp set (e.g., from
+"Run now" button before activation) would incorrectly show the countdown timer.
+The scheduler won't execute it, but the UI would suggest it will run.
+
+--------------------------------------------------------------------------------
+
+ISSUE 2: Code Duplication of getStatusBadge Function
+Severity: LOW (Technical Debt)
+Location: Multiple files
+
+The getStatusBadge() function is duplicated identically in 4 files:
+- WorkflowsPage.tsx (lines 8-14)
+- WorkflowDetailPage.tsx (lines 18-24)
+- TaskDetailPage.tsx (lines 236-242)
+- MainPage.tsx (lines 41-45)
+
+This was already present before this commit but is reinforced by the changes.
+Each copy must be updated independently when badge behavior changes.
+
+--------------------------------------------------------------------------------
+
+ISSUE 3: No TypeScript Enum for Workflow Status
+Severity: LOW (Technical Debt)
+Location: packages/db/src/script-store.ts:40
+
+The workflow status is typed as generic `string`:
+```typescript
+status: string;
+```
+
+With four valid values ("", "active", "disabled", "error"), this could benefit
+from a TypeScript union type or enum for compile-time validation:
+```typescript
+type WorkflowStatus = '' | 'active' | 'disabled' | 'error';
+```
+
+--------------------------------------------------------------------------------
+
+ISSUE 4: Success Message Not Cleared on Error
+Severity: VERY LOW
+Location: apps/web/src/components/WorkflowDetailPage.tsx:55-80
+
+The handlers set successMessage and use setTimeout to clear it, but there's no
+onError callback. If the mutation fails, the previous success message could
+remain visible. This is minor since the mutation likely shows its own error.
+
+================================================================================
+PROPOSALS
+================================================================================
+
+PROPOSAL 1: Fix nextRunTime Status Check
+Simplicity: Very Simple (1 line change)
+
+Change line 45 from:
+```typescript
+if (!workflow?.next_run_timestamp || workflow.status === 'disabled' || workflow.status === 'error') {
+```
+To:
+```typescript
+if (!workflow?.next_run_timestamp || workflow.status !== 'active') {
+```
+
+This aligns UI behavior with scheduler logic - only active workflows display
+next run countdown.
+
+--------------------------------------------------------------------------------
+
+PROPOSAL 2: Extract getStatusBadge to Shared Utility
+Simplicity: Simple (create new file, update imports)
+
+Create /apps/web/src/lib/workflow-utils.ts:
+```typescript
+import { Badge } from "@/components/ui/badge";
+
+export function getStatusBadge(status: string) {
+  if (status === "disabled") {
+    return <Badge variant="secondary" className="bg-yellow-100 text-yellow-800">Paused</Badge>;
+  } else if (status === "active") {
+    return <Badge variant="default" className="bg-green-100 text-green-800">Running</Badge>;
+  }
+  return <Badge variant="outline">Draft</Badge>;
+}
+```
+
+Then update all 4 components to import from this shared location.
+
+--------------------------------------------------------------------------------
+
+PROPOSAL 3: Add WorkflowStatus Type
+Simplicity: Simple (add type, update interface)
+
+In packages/db/src/script-store.ts, add:
+```typescript
+export type WorkflowStatus = '' | 'active' | 'disabled' | 'error';
+
+export interface Workflow {
+  // ...
+  status: WorkflowStatus;
+  // ...
+}
+```
+
+This provides compile-time validation for status comparisons.
+
+================================================================================
+OVERALL ASSESSMENT
+================================================================================
+
+This is a well-implemented commit that properly establishes the security
+boundary between drafts and running automations. The scheduler change is the
+critical security fix - ensuring AI-generated workflows don't run until
+explicitly approved by the user.
+
+The UI changes provide clear visual feedback and proper state transitions.
+The button visibility logic correctly gates activation on having a script.
+
+The identified issues are minor and don't affect the core security goals.
+The nextRunTime inconsistency is the most actionable item but has low impact
+since drafts typically don't have next_run_timestamp set.
+
+Quality: GOOD
+Security: SOLID
+Completeness: HIGH
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Inconsistent status check in nextRunTime) - created specs/fix-next-run-time-status-check.md
+- Issue #2 (Code duplication getStatusBadge) - covered by specs/workflow-status-badge-component.md
+- Issue #3 (No TypeScript enum for workflow status) - skipped
+- Issue #4 (Success message not cleared on error) - skipped

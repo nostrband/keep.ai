@@ -1,0 +1,109 @@
+COMMIT REVIEW: 89e9794 - Extract StatusBadge components to eliminate duplicate getStatusBadge functions
+=================================================================================================
+
+SUMMARY OF CHANGES
+------------------
+This commit creates a new StatusBadge.tsx file with three shared components:
+- WorkflowStatusBadge: for workflow.status field (active → Running, disabled → Paused, else → Draft)
+- TaskStatusBadge: for task.state field (finished, error, wait, asks) with optional defaultLabel
+- TaskRunStatusBadge: for taskRun.state field (done, error, wait, else → Pending)
+
+Updated 6 files to use the shared components:
+- MainPage.tsx
+- WorkflowsPage.tsx
+- WorkflowDetailPage.tsx
+- TaskDetailPage.tsx
+- TasksPage.tsx
+- TaskRunDetailPage.tsx
+
+Net result: -34 lines (94 lines removed, 60 lines added per stats). Eliminated 6 duplicate
+function definitions.
+
+POSITIVE ASPECTS
+----------------
+1. Clean separation by entity type (workflow vs task vs task run)
+2. Consistent color scheme across badge types (green for success, red for errors, yellow for paused)
+3. Good use of optional defaultLabel parameter in TaskStatusBadge for context-specific labeling
+4. All 6 stated files were correctly updated with proper imports
+
+ISSUES IDENTIFIED
+-----------------
+
+### ISSUE 1: Incomplete consolidation - Duplicate WorkflowStatusBadge logic remains
+**Severity**: Medium
+**Location**: TaskDetailPage.tsx (lines 253-259 approximately)
+**Description**: In the Workflow section of TaskDetailPage, there's inline badge logic that
+duplicates WorkflowStatusBadge:
+```tsx
+{workflow.status === 'active' ? (
+  <Badge className="bg-green-100 text-green-800">Running</Badge>
+) : workflow.status === 'disabled' ? (
+  <Badge className="bg-yellow-100 text-yellow-800">Paused</Badge>
+) : (
+  <Badge variant="outline">Draft</Badge>
+)}
+```
+The file correctly imports TaskStatusBadge for the task itself but missed this workflow badge.
+**Proposal**: Import WorkflowStatusBadge and replace inline logic with:
+`<WorkflowStatusBadge status={workflow.status} />`
+
+### ISSUE 2: Missing ScriptRunStatusBadge component
+**Severity**: Medium
+**Description**: The codebase has WorkflowStatusBadge, TaskStatusBadge, TaskRunStatusBadge but
+NO ScriptRunStatusBadge. Script runs are displayed in 3 files with inline ternary logic:
+- WorkflowDetailPage.tsx (script runs list)
+- ScriptDetailPage.tsx (script runs list)
+- ScriptRunDetailPage.tsx (run detail header)
+
+All three use inline logic showing Error/Completed/Running badges based on run.error and
+run.end_timestamp. This represents duplicate badge logic that should have been included.
+**Proposal**: Create ScriptRunStatusBadge component:
+```tsx
+export function ScriptRunStatusBadge({ error, endTimestamp }: { error?: string; endTimestamp?: string }) {
+  if (error) {
+    return <Badge variant="destructive">Error</Badge>;
+  } else if (endTimestamp) {
+    return <Badge variant="default" className="bg-green-100 text-green-800">Completed</Badge>;
+  } else {
+    return <Badge variant="secondary">Running</Badge>;
+  }
+}
+```
+Then update the 3 files to use it.
+
+### ISSUE 3: Inconsistent task run badge in TaskDetailPage.tsx
+**Severity**: Low
+**Location**: TaskDetailPage.tsx (line 350 approximately)
+**Description**: In the task runs list, there's inline badge logic:
+```tsx
+<Badge variant={run.state === 'done' ? 'default' : run.error ? 'destructive' : 'secondary'}>
+  {run.state || run.error || 'pending'}
+</Badge>
+```
+This differs from TaskRunStatusBadge which shows capitalized labels ("Done", "Error", "Wait",
+"Pending"). The inline version could display raw state values, error messages (potentially long),
+or lowercase "pending".
+**Proposal**: Replace with `<TaskRunStatusBadge state={run.state} />`
+
+### ISSUE 4: Minor naming inconsistency
+**Severity**: Low
+**Description**: TaskRunStatusBadge shows "Done" while inline script run badges use "Completed".
+This creates inconsistent user-facing labels for similar success states.
+**Proposal**: When creating ScriptRunStatusBadge, consider using "Done" for consistency, or
+document the intentional difference between task runs and script runs.
+
+CONCLUSION
+----------
+The extraction was well-executed for the components that were created. The code is clean,
+follows good React patterns, and successfully eliminates 6 duplicate functions. However, the
+consolidation is approximately 84% complete - there are still ~5 instances of duplicate badge
+logic remaining in the codebase. The most impactful improvement would be creating
+ScriptRunStatusBadge and updating the 3 files that display script run status.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Duplicate WorkflowStatusBadge logic remains) - created specs/complete-statusbadge-consolidation.md
+- Issue #2 (Missing ScriptRunStatusBadge component) - covered by specs/complete-statusbadge-consolidation.md
+- Issue #3 (Inconsistent task run badge in TaskDetailPage) - covered by specs/complete-statusbadge-consolidation.md
+- Issue #4 (Minor naming inconsistency) - covered by specs/complete-statusbadge-consolidation.md

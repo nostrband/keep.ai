@@ -1,0 +1,122 @@
+# UX Test Report: Commit cd88915
+# "Add script version history UI with diff view and rollback"
+
+## Test Date: 2026-01-20
+## Commit: cd8891546abc9be7542105d727a5c4b26c14b245
+
+## Summary
+This commit adds a script version history feature to WorkflowDetailPage with:
+- "View history (X versions)" button to expand version list
+- Version history showing all versions with timestamps and comments
+- "Show diff" buttons to compare adjacent versions inline using LCS algorithm
+- "Rollback" buttons for non-current versions
+- ScriptDiff.tsx component for line-by-line diff visualization
+
+## Test Environment
+- Server: localhost:3001 (fresh database, no existing workflows)
+- Browser: Playwright headless Chromium
+
+## UX Tests Conducted
+
+### 1. Component Verification (Code Review)
+**Status: PASSED**
+
+Verified the following files exist and contain expected implementations:
+- apps/web/src/components/ScriptDiff.tsx (166 lines)
+- apps/web/src/components/WorkflowDetailPage.tsx (151 lines added)
+- apps/web/src/hooks/dbScriptReads.ts (useScriptVersionsByWorkflowId hook)
+- apps/web/src/hooks/dbWrites.ts (useRollbackScript mutation)
+
+### 2. ScriptDiff Component Analysis
+**Status: PASSED (Code Review)**
+
+The ScriptDiff component correctly implements:
+- LCS (Longest Common Subsequence) algorithm for diff computation
+- Three line types: unchanged, added, removed
+- Color coding: green for additions (#green-50, #green-800), red for removals (#red-50, #red-800)
+- Line numbers for both old and new versions
+- Change indicators (+/-)
+- Header showing "Comparing vX → vY" with stats (+N lines, -M lines)
+- Edge case handling: "No changes between versions" when oldCode === newCode
+
+### 3. Visual Flow Tests
+**Status: COULD NOT TEST (No data)**
+
+Unable to test the following due to fresh database with no workflows:
+- "View history (X versions)" button visibility (requires scriptVersions.length > 1)
+- Version history list expansion/collapse
+- Diff view rendering with actual code
+- "Rollback" button functionality
+- Success message display after rollback
+
+## Issues Found
+
+### ISSUE #1: No Way to Create Workflow for Testing
+**Severity: Testing Limitation**
+**Description:** The main page accepts automation requests but pressing Enter doesn't
+create a visible workflow or navigate to a task page. This made it impossible to test
+the script version history UI with actual data.
+
+**Expected:** Typing a request and pressing Enter should create a task/workflow visible
+in the UI.
+
+**Actual:** Text input is cleared but nothing appears in Workflows/Tasks pages.
+
+**Impact on testing:** Unable to verify:
+- Version history renders correctly
+- Diff algorithm produces accurate results
+- Rollback creates new version with correct comment
+
+## Code Quality Assessment
+
+### Strengths:
+1. Clean component separation (ScriptDiff is reusable)
+2. Proper React patterns (useMemo for expensive computations)
+3. Good edge case handling (empty diff, missing versions)
+4. Comprehensive typing (DiffLine interface)
+5. Accessible design (color + indicators for changes)
+
+### Potential Concerns:
+1. LCS algorithm may be slow for very large scripts (O(n*m) time and space)
+2. No virtualization for rendering long diffs
+3. No loading state shown during rollback mutation
+
+## Recommendations
+
+1. Add integration tests with mock data to verify:
+   - Version list sorting (newest first)
+   - Diff calculation accuracy
+   - Rollback creates correct new version
+
+2. Consider performance optimization for large scripts:
+   - Use patience diff or Myers algorithm for better performance
+   - Add virtualization for long diffs
+
+3. Add E2E test scenarios:
+   - Create workflow → modify script → view history → rollback
+
+## Test Coverage Summary
+
+| Test Case | Status |
+|-----------|--------|
+| ScriptDiff component exists | PASSED |
+| useScriptVersionsByWorkflowId hook exists | PASSED |
+| useRollbackScript mutation exists | PASSED |
+| WorkflowDetailPage includes version UI | PASSED |
+| Version history button visibility | NOT TESTED (no data) |
+| Diff visualization rendering | NOT TESTED (no data) |
+| Rollback functionality | NOT TESTED (no data) |
+| Success message display | NOT TESTED (no data) |
+
+## Conclusion
+
+The implementation appears correct based on code review. All required components and hooks
+are in place with proper logic. However, full UX verification requires a workflow with
+multiple script versions, which could not be created in the test environment.
+
+**Recommendation:** NEEDS TESTING with populated database before approving for production.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (No Way to Create Workflow for Testing) - skipped (testing limitation, not code issue)

@@ -1,0 +1,99 @@
+COMMIT REVIEW: 2b205d7 - Fix next run time display to show only for active workflows
+
+============================================================
+SUMMARY OF CHANGES
+============================================================
+
+This commit fixes a logic bug where the next run time was displayed for workflows
+that wouldn't actually execute. The scheduler only runs workflows with
+status === 'active', but the UI was using negative logic that allowed display
+for draft workflows.
+
+Files Changed:
+- IMPLEMENTATION_PLAN.md - Marked task as completed
+- apps/web/src/components/WorkflowDetailPage.tsx - Fixed status check logic
+
+Change in WorkflowDetailPage.tsx:
+
+Before (incorrect negative logic):
+  if (!workflow?.next_run_timestamp || workflow.status === 'disabled' || workflow.status === 'error') {
+    return null;
+  }
+
+After (correct positive logic):
+  if (!workflow?.next_run_timestamp || workflow.status !== 'active') {
+    return null;
+  }
+
+Also added a comment explaining the rationale:
+  // Only show for active workflows - scheduler only executes where status === 'active'
+
+============================================================
+ISSUES IDENTIFIED
+============================================================
+
+No significant issues identified.
+
+This is a clean, minimal fix that addresses a real bug with the simplest
+possible change.
+
+============================================================
+POSITIVE OBSERVATIONS
+============================================================
+
+1. Correct fix: The change from negative to positive logic is the right approach.
+   The old code `status === 'disabled' || status === 'error'` would still allow
+   display for draft workflows (status === ''), which the scheduler never runs.
+
+2. Matches scheduler behavior: The fix aligns perfectly with the scheduler's
+   filter in workflow-scheduler.ts line 201:
+   `allWorkflows.filter((w) => w.status === 'active' && !w.maintenance)`
+
+3. Future-proof: Positive logic automatically handles any new status values
+   that might be added in the future. Negative logic would need explicit
+   updates for each new status.
+
+4. Proper comment added: Explains why the check is needed and references
+   the scheduler behavior.
+
+5. Isolated fix: Only changes the one place where this bug existed. No
+   unnecessary scope creep.
+
+6. Consistency verified: Other status checks in the codebase (MainPage.tsx,
+   WorkflowEventGroup.tsx, sandbox/api.ts) already use correct positive logic.
+   This fix brings WorkflowDetailPage in line with the rest.
+
+============================================================
+CODE QUALITY NOTES
+============================================================
+
+The change also removes an empty line inside the function, which is a minor
+whitespace cleanup. This is fine and doesn't affect behavior.
+
+The workflow status type is defined as `string` rather than an enum, which
+could be a future improvement for type safety, but is out of scope for this fix.
+
+============================================================
+PROPOSALS FOR RESOLUTION
+============================================================
+
+No proposals needed. This commit is clean and correct as-is.
+
+============================================================
+OVERALL ASSESSMENT
+============================================================
+
+Quality: EXCELLENT
+This is a textbook minimal fix. It identifies a specific bug (wrong logic
+for checking when to display next run time), applies the correct solution
+(switch to positive logic matching scheduler behavior), adds appropriate
+documentation (comment explaining the why), and doesn't introduce any
+unnecessary changes.
+
+Recommendation: APPROVE
+No issues. This commit demonstrates good engineering practices.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+No issues to address - review approved.

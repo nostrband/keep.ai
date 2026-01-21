@@ -5,6 +5,11 @@
 - Apps: web, server, cli, electron, user-server, push
 - Packages: agent, browser, db, node, sync, proto
 
+# UX Tests
+- `cd apps/server && DEBUG="*" PORT=3001 npm start` - launches the local server
+- open `http://localhost:3001` to view the app
+- to create a new clean user - stop the server, erase `/home/artur/.keep.ai/current_user.txt`, restart the server
+
 # Validation
 Run these after implementing to get immediate feedback:
 

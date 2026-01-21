@@ -1,0 +1,72 @@
+UX TEST REPORT - Commit 1fb1bda
+================================
+Add autonomy toggle UI for controlling AI behavior preference
+
+Test Date: 2026-01-20
+Test Environment: Local server (http://localhost:3001)
+Test Tool: Playwright
+
+COMMIT SUMMARY:
+- Create useAutonomyPreference hook with localStorage persistence
+- Add autonomy toggle to MainPage below prompt input
+- Toggle between "AI decides details" and "Coordinate with me" modes
+- Include tooltip explaining the behavioral differences
+
+TEST RESULTS:
+
+1. AUTONOMY TOGGLE VISIBILITY
+   PASS: Toggle button visible below prompt input
+   Default state: "AI decides details"
+   Evidence: Screenshot /tmp/test-1fb1bda-autonomy-default.png
+
+2. TOGGLE CLICK FUNCTIONALITY
+   PASS: Clicking toggle changes mode
+   - Initial state: "AI decides details"
+   - After click: "Coordinate with me"
+   - After second click: "AI decides details" (reverted)
+   Evidence: Console output from ux-test-toggle.mjs
+   Screenshot: /tmp/test-toggle-after-click.png shows "Coordinate with me"
+
+3. TOOLTIP ON HOVER
+   PASS: Tooltip appears when hovering over toggle
+   Content verified:
+   - Title: "AI Decides Details"
+   - Description: "The AI will minimize questions and use safe defaults
+     to complete tasks quickly."
+   - Hint: "Click to switch"
+   Evidence: Screenshot /tmp/test-1fb1bda-autonomy-hover.png
+
+4. COORDINATE MODE TOOLTIP (Code Inspection)
+   VERIFIED via MainPage.tsx:
+   - Title: "Coordinate With Me"
+   - Description: "The AI will ask clarifying questions before proceeding
+     with significant actions."
+
+5. TOGGLE POSITIONING
+   PASS: Toggle positioned below the prompt input, centered
+   Evidence: Screenshot shows toggle at very bottom of page, below input box
+
+6. PERSISTENCE (Code Inspection)
+   VERIFIED: useAutonomyPreference hook stores preference to database
+   - Uses api.getAutonomyMode() on mount
+   - Uses api.setAutonomyMode() on change
+   - Stored in agent_state table with key 'autonomy_mode'
+   Note: Original commit used localStorage, but later commit (cc5ccad)
+   migrated to database persistence
+
+ISSUES FOUND: None
+
+NOTES:
+- All toggle functionality works correctly
+- Tooltip displays proper explanatory text for both modes
+- Toggle state persists across page reloads (verified via code inspection)
+- Backend integration confirmed: autonomy mode affects agent system prompts
+  via autonomyPrompt() in agent-env.ts
+
+VERDICT: PASS
+All UX changes from commit 1fb1bda work as intended.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+No issues found in this review.

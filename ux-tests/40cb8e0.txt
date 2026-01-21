@@ -1,0 +1,154 @@
+# UX Test Report: Commit 40cb8e0
+# "Simplify ChatInterface ScrollToBottomDetector component"
+
+## Test Date: 2026-01-20
+## Commit: 40cb8e0371ab92a4a9ac4f99a5e6473c921e79c5
+
+## Summary
+This commit refactors the ScrollToBottomDetector component in ChatInterface.tsx to reduce complexity. It is a pure refactoring commit that should NOT change any user-facing behavior. The changes consolidate 5 useEffect hooks into 1, combine 4 separate refs into 1 ref object, and merge scroll/visibility event listeners into a single cleanup block.
+
+## Testing Methodology
+Due to authentication requirements (OpenRouter API key needed), direct Playwright testing of the live application was not possible. This report is based on thorough code review and analysis of the refactored behavior compared to the original implementation.
+
+## Features That Should Be Unchanged
+
+### 1. Chat Read Marking on Scroll to Bottom
+**Expected Behavior:** When user scrolls to within 30px of the bottom of a chat page, the chat should be marked as read.
+
+**Code Analysis (PASS - No Change):**
+- Original: `if (isAtBottom && chatIdRef.current && !pendingRef.current)`
+- Refactored: `if (isAtBottom && chatId && !isPending)` where values come from `stateRef.current`
+- The logic is identical, only the ref access pattern changed
+
+### 2. Chat Read Marking on Tab Visibility Change
+**Expected Behavior:** When user returns to a previously hidden tab, the chat should be marked as read.
+
+**Code Analysis (PASS - No Change):**
+- Original: `if (!document.hidden && chatIdRef.current && !pendingRef.current)`
+- Refactored: `if (!document.hidden && chatId && !isPending)` where values come from `stateRef.current`
+- The logic is identical, only the ref access pattern changed
+
+### 3. Scroll Throttling via requestAnimationFrame
+**Expected Behavior:** Scroll events should be throttled using requestAnimationFrame to prevent excessive function calls.
+
+**Code Analysis (PASS - No Change):**
+- The rAF throttling mechanism is preserved:
+  ```typescript
+  const onScroll = () => {
+    if (rafRef.current != null) return;  // Skip if already scheduled
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null;
+      checkBottomAndMarkRead();
+    });
+  };
+  ```
+- Identical throttling behavior as before
+
+### 4. Event Listener Cleanup
+**Expected Behavior:** All event listeners should be properly removed on component unmount to prevent memory leaks.
+
+**Code Analysis (PASS - No Change):**
+- Original: Separate cleanup in multiple useEffect hooks
+- Refactored: Combined cleanup in single return block:
+  ```typescript
+  return () => {
+    if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+    window.removeEventListener("scroll", onScroll);
+    document.removeEventListener("visibilitychange", onVisibilityChange);
+  };
+  ```
+- All cleanup is preserved, now in one place
+
+### 5. Initial Bottom Check on Mount
+**Expected Behavior:** Chat should be marked as read immediately on mount if user is already at the bottom.
+
+**Code Analysis (PASS - No Change):**
+- `checkBottomAndMarkRead(); // Run once on mount` is called after setting up event listeners
+- Identical to original behavior
+
+## UX Testing Checklist
+
+### Scenarios That Need Manual Testing (When Auth Available)
+
+1. **Scroll to Bottom Test**
+   - [ ] Open a chat with messages
+   - [ ] Scroll up so not at bottom
+   - [ ] Verify chat is NOT marked as read
+   - [ ] Scroll to bottom (within 30px)
+   - [ ] Verify chat IS marked as read (unread indicator disappears)
+
+2. **Tab Visibility Test**
+   - [ ] Open a chat
+   - [ ] Switch to another browser tab
+   - [ ] Switch back to the app tab
+   - [ ] Verify chat is marked as read
+
+3. **Rapid Scroll Test (Throttling)**
+   - [ ] Open a chat with many messages
+   - [ ] Rapidly scroll up and down
+   - [ ] Verify no performance issues (smooth scrolling)
+   - [ ] Verify chat is marked as read when settling at bottom
+
+4. **Component Unmount Test**
+   - [ ] Open a chat
+   - [ ] Navigate away from the chat
+   - [ ] Navigate back
+   - [ ] Verify no memory leaks (check DevTools > Performance > Memory)
+
+## Potential UX Issues (Code Review Findings)
+
+### Issue 1: Visibility Change Marks Read Without Bottom Check (PRE-EXISTING)
+**Severity: Low**
+**Status: NOT A BUG (Intentional Behavior)**
+
+The visibility change handler marks the chat as read when the tab becomes visible, regardless of scroll position:
+```typescript
+const onVisibilityChange = () => {
+  if (!document.hidden && chatId && !isPending) {
+    mutate({ chatId });
+  }
+};
+```
+
+This is intentional behavior preserved from the original implementation. When a user returns to the app tab, the chat is marked as read to clear notification badges. This is reasonable UX because:
+1. User deliberately returned to the app
+2. The chat content is visible to them
+3. Marking as read prevents persistent notification badges
+
+### Issue 2: Object Allocation on Every Render (PERFORMANCE - NEGLIGIBLE)
+**Severity: Very Low**
+**Not User-Facing**
+
+The new pattern creates a new object on every render:
+```typescript
+stateRef.current = { chatId, mutate: readChat.mutate, isPending: readChat.isPending };
+```
+
+This is a micro-optimization concern. The performance impact is negligible in practice because:
+1. Object is small (3 properties)
+2. Modern JS engines optimize this well
+3. Chat re-renders are infrequent
+
+No user would notice any difference.
+
+## Conclusion
+
+**VERDICT: REFACTORING SAFE - NO UX REGRESSION EXPECTED**
+
+This commit is a pure code simplification that preserves all existing behavior:
+- All scroll detection logic is unchanged
+- All visibility change logic is unchanged
+- All cleanup logic is unchanged
+- Only the internal implementation structure changed (refs consolidated, effects merged)
+
+The changes reduce code from ~58 lines to ~45 lines while maintaining identical functionality. The refactoring improves maintainability without affecting the user experience.
+
+## Files Changed
+- apps/web/src/components/ChatInterface.tsx (ScrollToBottomDetector component)
+- IMPLEMENTATION_PLAN.md (documentation update)
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Visibility Change Marks Read Without Bottom Check) - skipped (intentional behavior)
+- Issue #2 (Object Allocation on Every Render) - skipped (negligible performance impact)

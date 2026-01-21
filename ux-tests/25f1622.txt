@@ -1,0 +1,94 @@
+UX TEST REPORT: Commit 25f1622
+================================
+"Highlight significant events with visual distinction"
+
+TEST DATE: 2026-01-20
+TEST METHOD: Code Review + Static Analysis
+RUNTIME TEST: Limited (app requires valid API key for full automation flow)
+
+COMMIT SUMMARY
+--------------
+Introduces EventSignificance type system to visually distinguish events by
+their importance level. Events are now styled differently based on whether
+they represent reads, writes, errors, state changes, etc.
+
+CHANGES REVIEWED
+----------------
+1. apps/web/src/types/events.ts
+   - Added EventSignificance type: 'normal' | 'write' | 'error' | 'success' | 'user' | 'state'
+   - Added significance field to all EVENT_CONFIGS entries
+   - Added GMAIL_WRITE_METHODS array for dynamic Gmail classification
+   - Added getEventSignificance() function
+
+2. apps/web/src/components/EventItem.tsx
+   - Added significanceStyles record with Tailwind classes per significance
+   - Applied significance-based styling to event items
+   - Changed hover effect from bg-gray-100 to brightness-95
+
+3. apps/web/src/components/TaskEventGroup.tsx
+   - Added error highlighting: red left border + red tinted header
+   - Error detection via run?.error?.length > 0
+
+4. apps/web/src/components/WorkflowEventGroup.tsx
+   - Added same error highlighting pattern as TaskEventGroup
+
+EXPECTED UX CHANGES
+-------------------
+1. Event Item Styling:
+   - Normal events (reads, searches): Light gray background (bg-gray-50)
+   - Write events (notes, tasks, file saves): White background, darker border
+   - State events (cancel cron): Yellow tinted background
+   - Error/success/user: Reserved colors (red/green/blue) for future use
+
+2. Error Group Highlighting:
+   - Failed task/workflow runs get 4px red left border
+   - Header background changes to light red (bg-red-50)
+   - All events auto-expand (no collapse) on error
+
+3. Gmail Dynamic Classification:
+   - Send/modify/delete operations: Highlighted as write (white bg)
+   - List/get operations: Muted as normal (gray bg)
+
+ISSUES FOUND
+------------
+NONE
+
+CODE QUALITY ASSESSMENT
+-----------------------
+- Complete EventSignificance type coverage for all 24 event types
+- All Tailwind CSS classes are valid
+- Consistent styling patterns across components
+- Type-safe Record<EventSignificance, string> ensures exhaustive styles
+- getEventSignificance() correctly handles dynamic Gmail detection
+- Proper null checks for error detection
+
+VISUAL DESIGN ASSESSMENT
+------------------------
+- Good contrast hierarchy: write events "pop out", normal events recede
+- Error states clearly visible with red left border
+- Consistent color scheme across all components
+- Proper hover states maintained
+
+VERIFICATION CHECKLIST
+----------------------
+[x] All event types have assigned significance
+[x] Tailwind classes are valid
+[x] Significance-based styling applies correctly
+[x] Gmail write methods correctly identified
+[x] Error highlighting works on both TaskEventGroup and WorkflowEventGroup
+[x] getEventSignificance fallback to 'normal' works
+[x] Type safety maintained throughout
+
+CONCLUSION
+----------
+PASS - No UX issues found.
+
+This commit correctly implements visual significance for events. The design
+creates a clear visual hierarchy that helps users quickly identify important
+actions (writes) vs routine operations (reads). Error highlighting is
+prominent and consistent.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+No issues found in this review.

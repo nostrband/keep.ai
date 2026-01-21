@@ -1,0 +1,304 @@
+COMMIT REVIEW: 7047644
+=======================
+Title: Implement error classification system for routing errors to users or agent
+Date: Fri Jan 16 16:42:20 2026 +0000
+Author: Claude Agent
+
+================================================================================
+CHANGES SUMMARY
+================================================================================
+
+This commit implements a typed error classification system to route errors based
+on their root cause. The key changes are:
+
+1. NEW FILE: packages/agent/src/errors.ts (309 lines)
+   - Created ClassifiedError abstract base class with type, cause, source fields
+   - Defined 4 error types: AuthError, PermissionError, NetworkError, LogicError
+   - Added helper functions: classifyHttpError(), classifyFileError(),
+     classifyGenericError(), classifyGoogleApiError(), ensureClassified()
+   - Type guards: isClassifiedError(), isErrorType()
+
+2. MODIFIED: packages/agent/src/sandbox/api.ts
+   - Updated try-catch to preserve ClassifiedError types when re-throwing
+   - Unclassified errors now wrapped as LogicError with source tracking
+   - Added context message enhancement while preserving error type
+
+3. MODIFIED TOOLS (7 files):
+   - gmail.ts: Throws AuthError for missing OAuth, uses classifyGoogleApiError()
+   - web-fetch.ts: Throws AuthError for missing API key, LogicError for invalid URL
+   - web-download.ts: Uses classifyHttpError(), LogicError for size limits
+   - text-extract.ts: Throws AuthError for missing key, uses classifyHttpError()
+   - web-search.ts: Throws AuthError for missing API key, uses classifyGenericError()
+   - read-file.ts: Uses classifyFileError(), PermissionError, LogicError
+   - save-file.ts: Throws PermissionError for unconfigured path, LogicError
+
+4. MODIFIED: packages/agent/src/workflow-worker.ts
+   - Added error routing logic based on classified error type
+   - Auth/Permission errors: set workflow status to "error", emit needs_attention
+   - Network errors: emit retry signal for exponential backoff
+   - Logic errors: emit retry signal (maintenance mode placeholder)
+
+5. MODIFIED: packages/agent/src/workflow-worker-signal.ts
+   - Added 'needs_attention' signal type
+   - Added errorType field to WorkflowExecutionSignal interface
+
+6. MODIFIED: packages/agent/src/index.ts
+   - Exported all error classification types and functions
+
+================================================================================
+POTENTIAL ISSUES
+================================================================================
+
+ISSUE 1: Incomplete Tool Migration [MEDIUM]
+---------------------------------------------------------------------------
+Problem: Only 7 of ~30+ tools throw classified errors. Remaining tools still
+throw generic Error objects.
+
+Location: Various tools in packages/agent/src/tools/
+
+Evidence: The following tools were NOT updated:
+- get-weather.ts - throws generic Error
+- images-generate.ts - wraps all errors in generic Error
+- task-update.ts - throws generic Error
+- send-email.ts - may have auth errors not classified
+- And many others...
+
+Impact: The sandbox/api.ts wrapper automatically classifies ALL unclassified
+errors as LogicError:
+
+  throw new LogicError(message, {
+    cause: e instanceof Error ? e : undefined,
+    source: `${ns}.${name}`
+  });
+
+This means:
+- A network timeout in images-generate.ts becomes LogicError instead of NetworkError
+- Authentication failures in unmodified tools become LogicError
+- These errors won't get proper retry/escalation behavior
+
+Proposal: Either:
+A) Update all remaining tools to use classified errors (comprehensive but tedious)
+B) Improve ensureClassified() to better detect error types from message content
+   and use it in the sandbox/api.ts wrapper instead of defaulting to LogicError
+
+--------------------------------------------------------------------------------
+
+ISSUE 2: Error Re-wrapping Loses Intermediate Stack Trace [LOW-MEDIUM]
+---------------------------------------------------------------------------
+Problem: When sandbox/api.ts catches and re-throws classified errors, it uses
+the original error's cause instead of the caught error itself.
+
+Location: packages/agent/src/sandbox/api.ts lines 139-147
+
+Code:
+  const EnhancedError = e.constructor as new (...) => ClassifiedError;
+  throw new EnhancedError(contextMessage, {
+    cause: e.cause,  // <-- BUG: Should be e, not e.cause
+    source: e.source || `${ns}.${name}`
+  });
+
+Impact:
+- If gmail.ts throws: AuthError("Token expired", { cause: originalGoogleError })
+- Wrapper creates: AuthError("Failed at Gmail.api: Token expired", { cause: originalGoogleError })
+- The intermediate AuthError from gmail.ts is lost from the stack
+- Debugging becomes harder as the error chain is broken
+
+Proposal: Change `cause: e.cause` to `cause: e` to preserve the full error chain.
+
+--------------------------------------------------------------------------------
+
+ISSUE 3: Unsafe Constructor Type Assertion [LOW]
+---------------------------------------------------------------------------
+Problem: The code uses TypeScript `as` assertion to cast constructors.
+
+Location: packages/agent/src/sandbox/api.ts lines 141-143
+
+Code:
+  const EnhancedError = e.constructor as new (
+    message: string,
+    options?: { cause?: Error; source?: string }
+  ) => ClassifiedError;
+
+Impact:
+- TypeScript doesn't verify the constructor signature at compile time
+- If a future ClassifiedError subclass has different constructor parameters,
+  this will fail at runtime with confusing errors
+- No validation that e.constructor is actually a ClassifiedError constructor
+
+Proposal: Add a runtime check or use a factory pattern:
+
+  function recreateClassifiedError(e: ClassifiedError, newMessage: string): ClassifiedError {
+    switch (e.type) {
+      case 'auth': return new AuthError(newMessage, { cause: e, source: e.source });
+      case 'permission': return new PermissionError(newMessage, { cause: e, source: e.source });
+      case 'network': return new NetworkError(newMessage, { cause: e, source: e.source });
+      case 'logic': return new LogicError(newMessage, { cause: e, source: e.source });
+    }
+  }
+
+--------------------------------------------------------------------------------
+
+ISSUE 4: Network Errors Retry Forever Without Escalation [HIGH]
+---------------------------------------------------------------------------
+Problem: Network errors trigger infinite retry with exponential backoff but
+no maximum retry count or escalation path.
+
+Location: packages/agent/src/workflow-scheduler.ts lines 71-83
+
+Code:
+  const baseDelayMs = 10 * 1000;
+  const exponentialDelayMs = baseDelayMs * Math.pow(2, currentState.retryCount - 1);
+  const maxDelayMs = 10 * 60 * 1000; // 10 minutes max
+  const actualDelayMs = Math.min(exponentialDelayMs, maxDelayMs);
+
+Impact:
+- A permanently unavailable external service causes infinite retries
+- After cap, workflow retries every 10 minutes forever
+- Workflow never transitions to error state for user attention
+- User is never notified of persistent network issues
+- Resource waste from endless retry attempts
+
+Proposal: Add max retry count for network errors (e.g., 10 attempts over ~3 hours),
+then escalate to 'needs_attention' signal:
+
+  if (signal.errorType === 'network' && currentState.retryCount >= MAX_NETWORK_RETRIES) {
+    // Escalate instead of retry
+    this.emitSignal({ type: 'needs_attention', ... });
+  }
+
+--------------------------------------------------------------------------------
+
+ISSUE 5: Unclassified Errors Also Retry Forever [MEDIUM]
+---------------------------------------------------------------------------
+Problem: Errors that don't match the classification system default to retry.
+
+Location: packages/agent/src/workflow-worker.ts lines 348-358
+
+Code:
+  } else {
+    // Unclassified error - signal retry to scheduler (fallback)
+    this.debug("Unclassified error, scheduling retry:", errorMessage);
+    this.emitSignal({
+      type: "retry",
+      ...
+    });
+  }
+
+Impact:
+- JavaScript runtime errors (ReferenceError, TypeError) will retry forever
+- Out-of-memory errors, syntax errors all retry infinitely
+- No circuit breaker exists for truly unrecoverable errors
+
+Proposal: Consider treating unclassified errors as LogicError (since they're
+likely script bugs) or add a separate circuit breaker for unclassified errors.
+
+--------------------------------------------------------------------------------
+
+ISSUE 6: error_type Not Saved for All Error Paths [LOW]
+---------------------------------------------------------------------------
+Problem: The errorType field is not populated for sentinel error types.
+
+Location: packages/agent/src/workflow-worker.ts
+
+Code (approximately):
+  let errorType: ErrorType | '' = '';
+  if (error === ERROR_BAD_REQUEST) {
+    errorType = ''; // Not classified
+  } else if (error === ERROR_PAYMENT_REQUIRED) {
+    errorType = ''; // Not classified
+  } else if (isClassifiedError(error)) {
+    errorType = (error as ClassifiedError).type;
+  }
+
+Impact:
+- ERROR_BAD_REQUEST and ERROR_PAYMENT_REQUIRED don't get error_type saved
+- Database records are inconsistent (sometimes has type, sometimes empty)
+- Makes querying/filtering by error type unreliable
+
+Proposal: Define error types for these sentinel values or use a different
+field strategy (e.g., separate 'error_category' field).
+
+--------------------------------------------------------------------------------
+
+ISSUE 7: Logic Errors Use Retry Instead of Maintenance Mode [LOW - by design]
+---------------------------------------------------------------------------
+Note: The commit message mentions this is intentional - maintenance mode is
+implemented separately. This is documented in the code with TODO comments.
+
+Location: packages/agent/src/workflow-worker.ts lines 280-295
+
+The code emits 'retry' signal for logic errors with a TODO comment about
+implementing maintenance mode. This was addressed in commit b2c99ac.
+
+--------------------------------------------------------------------------------
+
+ISSUE 8: Double Error Wrapping in Some Tools [LOW]
+---------------------------------------------------------------------------
+Problem: Some tools have their own try-catch that re-throws classified errors,
+then sandbox/api.ts also catches and re-wraps.
+
+Location: packages/agent/src/tools/text-extract.ts lines 119-127
+
+Code:
+  } catch (error) {
+    if (error instanceof AuthError || error instanceof NetworkError || ...) {
+      throw error;  // Re-throw as-is
+    }
+    throw classifyGenericError(error instanceof Error ? error : new Error(String(error)), "Text.extract");
+  }
+
+Then sandbox/api.ts catches it and wraps again with enhanced message.
+
+Impact:
+- Error message becomes: "Failed at Text.extract: OpenRouter API error: 401 - ..."
+- Could be wrapped multiple times if there are nested tool calls
+- Message becomes overly verbose
+
+Proposal: This is minor since functionality is correct. Could consider moving
+all classification to sandbox/api.ts and keeping tools simple.
+
+================================================================================
+PROPOSALS SUMMARY
+================================================================================
+
+Priority HIGH:
+1. Add maximum retry count for network errors (10 retries max), then escalate
+
+Priority MEDIUM:
+2. Migrate remaining tools to use classified errors, or improve fallback
+   classification to use ensureClassified() instead of defaulting to LogicError
+3. Add circuit breaker for unclassified errors
+
+Priority LOW:
+4. Fix error re-wrapping to preserve full error chain (cause: e instead of e.cause)
+5. Use factory pattern instead of constructor assertion for type safety
+6. Consider standardizing error_type field for all error paths
+
+================================================================================
+POSITIVE ASPECTS
+================================================================================
+
+1. Clean class hierarchy with ClassifiedError base class
+2. Comprehensive helper functions for different error sources
+3. Good separation of concerns (classification vs routing)
+4. Proper stack trace handling with Error.captureStackTrace
+5. toJSON() method for serialization
+6. Type-safe error type enum
+7. Clear documentation in errors.ts explaining routing behavior
+8. Signal system extensibility with new 'needs_attention' type
+
+================================================================================
+END OF REVIEW
+================================================================================
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Incomplete tool migration) - skipped
+- Issue #2 (Error re-wrapping loses stack trace) - skipped
+- Issue #3 (Unsafe constructor type assertion) - skipped
+- Issue #4 (Network errors retry forever) - created specs/network-error-max-retries.md
+- Issue #5 (Unclassified errors retry forever) - skipped
+- Issue #6 (error_type not saved for all paths) - skipped
+- Issue #7 (Logic errors use retry) - skipped (by design)
+- Issue #8 (Double error wrapping) - skipped

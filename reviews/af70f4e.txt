@@ -1,0 +1,120 @@
+COMMIT REVIEW: af70f4e - Enable debug logging in shared-worker for dev mode
+
+================================================================================
+CHANGES SUMMARY
+================================================================================
+
+This commit adds debug logging enablement to shared-worker.ts to match the
+pattern used in worker.ts. The change adds:
+
+```typescript
+declare const __DEV__: boolean;
+if (typeof __DEV__ !== "undefined" && __DEV__) {
+  debug.enable("*");
+}
+```
+
+This enables all debug namespaces (via "*") during development mode.
+
+Files changed:
+- apps/web/src/shared-worker.ts (6 lines added)
+- IMPLEMENTATION_PLAN.md (status updates)
+
+================================================================================
+ISSUES IDENTIFIED
+================================================================================
+
+ISSUE 1: Pattern Superseded [LOW - INFORMATIONAL]
+-------------------------------------------------
+The commit uses `__DEV__` with a typeof check, but subsequent work (spec #37
+standardize-dev-mode-check) has already replaced this pattern with
+`import.meta.env.DEV` across the codebase. The current shared-worker.ts
+correctly uses `import.meta.env.DEV` now.
+
+This is not a bug - just means the commit's specific implementation has been
+updated by later work.
+
+ISSUE 2: service-worker.ts Missing debug.enable() [HIGH]
+--------------------------------------------------------
+Location: apps/web/src/service-worker.ts
+
+While this commit correctly adds debug enablement to shared-worker.ts, the
+service-worker.ts file STILL lacks the same pattern despite having:
+  - `import debug from "debug"` (line 10)
+  - `const log = debug("keep:service-worker")` (line 16)
+
+Without `debug.enable()`, the service-worker debug logs are completely
+inaccessible even in development mode.
+
+This was previously identified in review 04d0576.txt but remains unfixed.
+
+Service workers have special constraints:
+  - Cannot access localStorage
+  - Run in a separate context
+  - Must call debug.enable() programmatically
+
+Impact: Service worker debugging (file streaming, push notifications, cache
+operations) is impossible.
+
+ISSUE 3: Broad debug.enable("*") Scope [LOW - ACCEPTABLE]
+---------------------------------------------------------
+Using `debug.enable("*")` enables ALL debug namespaces, including third-party
+libraries. However, this is:
+  - Intentional for development
+  - Properly gated by DEV check (no production impact)
+  - Consistent with worker.ts pattern
+  - Performance impact is negligible
+
+No action needed - this is acceptable for development debugging.
+
+================================================================================
+PROPOSALS
+================================================================================
+
+PROPOSAL 1: Add debug.enable() to service-worker.ts [CRITICAL]
+--------------------------------------------------------------
+Add the same pattern to complete consistency across all workers:
+
+```typescript
+// At top of service-worker.ts, after debug import
+if (import.meta.env.DEV) {
+  debug.enable("*");
+}
+```
+
+This should be done as a follow-up to complete the fix started by this commit.
+
+PROPOSAL 2: Consider Selective Debug Namespaces [OPTIONAL - POST-V1]
+--------------------------------------------------------------------
+Instead of enabling ALL namespaces with "*", could use:
+  debug.enable("keep:*")
+
+This would filter out third-party library noise while keeping app debug logs.
+However, this is a polish item - the current approach works fine for V1.
+
+================================================================================
+OVERALL ASSESSMENT
+================================================================================
+
+The commit successfully achieves its stated goal of enabling debug logging in
+shared-worker.ts for development mode. The implementation is correct and the
+approach is sound.
+
+Rating: ACCEPTABLE with one important follow-up needed
+
+Key points:
++ Adds consistent debug enablement to shared-worker
++ Properly guards with DEV mode check
++ No performance or security concerns
+- service-worker.ts still missing the same fix (HIGH priority follow-up)
+- Pattern has since been updated by spec #37 (informational only)
+
+The most important action item is adding the same pattern to service-worker.ts
+to complete debug logging consistency across all workers.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Pattern Superseded) - skipped (informational, already updated by later work)
+- Issue #2 (service-worker.ts Missing debug.enable()) - skipped
+- Issue #3 (Broad debug.enable("*") Scope) - skipped (acceptable for dev)

@@ -1,0 +1,75 @@
+# Review: Commit c777456
+
+**Commit**: c777456ca6c478f3be28f3355d5925e7c96cbf1a
+**Title**: Consolidate AutonomyMode type to @app/proto
+**Date**: Mon Jan 19 12:07:26 2026 +0000
+**Files Changed**: 3 (IMPLEMENTATION_PLAN.md, useAutonomyPreference.ts, agent-env.ts)
+
+## Summary of Changes
+
+This commit removes duplicate `AutonomyMode` type definitions from two locations:
+1. `packages/agent/src/agent-env.ts` - removed local type definition, now imports from `@app/proto`
+2. `apps/web/src/hooks/useAutonomyPreference.ts` - removed local type definition, now imports from `@app/proto`
+
+The canonical source of truth is now `packages/proto/src/schemas.ts`:
+```typescript
+export type AutonomyMode = 'ai_decides' | 'coordinate';
+```
+
+The IMPLEMENTATION_PLAN.md was updated to mark task #28 as completed.
+
+## Positive Aspects
+
+1. **Single source of truth**: The type is now defined in one place (`@app/proto`), reducing maintenance burden and potential for inconsistency.
+2. **Correct import locations**: Both `@app/agent` and `apps/web` properly depend on `@app/proto` in their package.json files.
+3. **Clean implementation**: The changes are minimal and focused - just swapping local types for imports.
+
+## Issues Found
+
+### Issue 1: Incomplete Type Consolidation (Medium Severity)
+
+The consolidation is incomplete. Two files still use inline type definitions instead of importing `AutonomyMode`:
+
+**Location 1**: `packages/agent/src/task-worker.ts` (Line 579)
+```typescript
+let autonomyMode: 'ai_decides' | 'coordinate' = 'ai_decides';
+```
+
+**Location 2**: `packages/db/src/api.ts` (Lines 200, 213)
+```typescript
+async setAutonomyMode(mode: 'ai_decides' | 'coordinate'): Promise<void>
+async getAutonomyMode(): Promise<'ai_decides' | 'coordinate'>
+```
+
+Note: `packages/db/src/api.ts` already imports from `@app/proto` (line 1), so adding `AutonomyMode` to the import would be trivial.
+
+**Impact**: Maintenance risk - if the type definition changes in `@app/proto`, these inline definitions won't update automatically. This could lead to type mismatches if someone extends the enum in the future.
+
+### Proposal 1: Complete the Type Consolidation
+
+**task-worker.ts** - Add AutonomyMode to existing imports:
+```typescript
+// Add to existing imports from @app/proto
+import { AutonomyMode } from "@app/proto";
+// ...
+let autonomyMode: AutonomyMode = 'ai_decides';
+```
+
+**api.ts** - Add AutonomyMode to existing imports:
+```typescript
+import { AssistantUIMessage, AutonomyMode } from "@app/proto";
+// ...
+async setAutonomyMode(mode: AutonomyMode): Promise<void>
+async getAutonomyMode(): Promise<AutonomyMode>
+```
+
+## Overall Assessment
+
+The commit is **good** and accomplishes its stated goal. The consolidation pattern is correct, but was applied incompletely, leaving two files with inline type definitions. This is a minor oversight that should be addressed in a follow-up commit to achieve true single-source-of-truth.
+
+**Verdict**: ACCEPTABLE with minor follow-up needed
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Incomplete Type Consolidation) - created specs/complete-autonomymode-consolidation.md

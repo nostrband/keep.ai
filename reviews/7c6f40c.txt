@@ -1,0 +1,206 @@
+# Review: 7c6f40c1d7d8afafab252cd7f98125d580bfd9c1
+
+**Commit Message:** Fix ElectronNavigationHandler memory leak in IPC listener management
+
+**Date:** Mon Jan 19 10:21:37 2026 +0000
+
+**Files Changed:**
+- IMPLEMENTATION_PLAN.md
+- apps/electron/src/preload.ts
+- apps/web/src/App.tsx
+- apps/web/src/vite-env.d.ts
+
+---
+
+## Summary of Changes
+
+This commit fixes a memory leak in the Electron IPC listener management. The original implementation had two problems:
+
+1. **Re-registering listeners on every render**: The `navigate` function from `useNavigate()` returns a new reference on each render, causing the useEffect to re-run and register new IPC listeners without cleaning up old ones.
+
+2. **Using `removeAllListeners` pattern**: The cleanup was using `removeAllListeners('navigate-to')` which removed ALL listeners on that channel, not just the component's own listener.
+
+### Changes Made:
+
+**preload.ts:**
+- Modified `onNavigateTo`, `onFocusInput`, and `onPauseAllAutomations` to return unsubscribe functions
+- Each function now wraps the callback in a handler and returns a cleanup function that calls `ipcRenderer.removeListener()` with the exact handler reference
+
+**App.tsx:**
+- Added `useRef` to hold the navigate function stably
+- Changed useEffect to run only once on mount (empty dependency array)
+- Cleanup now calls the returned unsubscribe functions
+
+**vite-env.d.ts:**
+- Updated type definitions to reflect that listener methods return `() => void` unsubscribe functions
+
+---
+
+## Potential Issues
+
+### ISSUE 1: None Found - Implementation is Correct
+
+After thorough analysis, the implementation follows React and Electron best practices correctly:
+
+**preload.ts Pattern is Correct:**
+```typescript
+onNavigateTo: (callback: (path: string) => void) => {
+  const handler = (_event: unknown, path: string) => callback(path);
+  ipcRenderer.on('navigate-to', handler);
+  return () => ipcRenderer.removeListener('navigate-to', handler);
+},
+```
+- Handler reference is preserved in closure
+- Same reference passed to both `on()` and `removeListener()`
+- Returns cleanup function
+
+**App.tsx Pattern is Correct:**
+```typescript
+const navigateRef = useRef(navigate);
+useEffect(() => {
+  navigateRef.current = navigate;
+});
+
+useEffect(() => {
+  if (!window.electronAPI) return;
+  const unsubscribe = window.electronAPI.onNavigateTo((path: string) => {
+    navigateRef.current(path);
+  });
+  return unsubscribe;
+}, []);
+```
+- `navigateRef` holds stable reference to current navigate function
+- Second effect (with empty deps) runs only once on mount
+- First effect (no deps) keeps ref updated after every render
+- Cleanup function properly returned
+
+**Type Definitions Match:**
+```typescript
+onNavigateTo: (callback: (path: string) => void) => () => void;
+```
+Correctly declares the return type as unsubscribe function.
+
+---
+
+## Minor Observations (Not Issues)
+
+### OBSERVATION 1: Three Separate Ref-Update Effects
+**File:** apps/web/src/App.tsx:58-66
+**Pattern:**
+```typescript
+useEffect(() => { navigateRef.current = navigate; });
+useEffect(() => { locationRef.current = location; });
+useEffect(() => { apiRef.current = api; });
+```
+These could be combined into a single effect, but separating them is not wrong and may be clearer for maintainability. This is stylistic, not a bug.
+
+### OBSERVATION 2: Unused `removeAllListeners` Method
+**File:** apps/electron/src/preload.ts:30-32
+The `removeAllListeners` method is still exposed but no longer used after this fix:
+```typescript
+removeAllListeners: (channel: string) => {
+  ipcRenderer.removeAllListeners(channel);
+},
+```
+It could be removed to clean up the API, but keeping it doesn't cause harm and might be useful for debugging.
+
+### OBSERVATION 3: Handler Event Parameter Typed as `unknown`
+**File:** apps/electron/src/preload.ts:51
+```typescript
+const handler = (_event: unknown, path: string) => callback(path);
+```
+Using `unknown` is safe but `Electron.IpcRendererEvent` would be more precise. This is a minor typing preference, not a bug.
+
+---
+
+## Correctly Implemented Areas
+
+### GOOD: Consistent Pattern Across All Three Listeners
+All three listener registration methods (onNavigateTo, onFocusInput, onPauseAllAutomations) follow identical patterns, making the code predictable and maintainable.
+
+### GOOD: Empty Dependency Array Justified
+The useEffect that sets up IPC listeners has an empty dependency array `[]`, which is correct because:
+- The effect should run only once on mount
+- The callbacks use refs to access current values without triggering re-runs
+- Cleanup properly removes the specific listener on unmount
+
+### GOOD: Guard for Non-Electron Environments
+```typescript
+if (!window.electronAPI) return;
+```
+Prevents errors when running in browser without Electron.
+
+### GOOD: Type Safety Maintained
+The vite-env.d.ts updates properly reflect the new return types, providing TypeScript type checking for consumers of the API.
+
+### GOOD: Handler Reference Preservation
+The key to the fix is preserving the exact handler function reference:
+```typescript
+const handler = () => callback();  // Stored in closure
+ipcRenderer.on('channel', handler);  // Registered
+return () => ipcRenderer.removeListener('channel', handler);  // Same reference
+```
+This is the correct pattern for Electron IPC listener management.
+
+---
+
+## Proposals
+
+### PROPOSAL 1: Consider Removing Unused removeAllListeners
+Since the fix moves to specific listener removal, `removeAllListeners` is no longer needed. Consider removing it to reduce API surface:
+```typescript
+// Remove from preload.ts:
+// removeAllListeners: (channel: string) => { ... },
+
+// Remove from vite-env.d.ts:
+// removeAllListeners: (channel: string) => void;
+```
+
+### PROPOSAL 2: Add JSDoc Comments to IPC Methods
+For better developer experience, consider adding JSDoc:
+```typescript
+/**
+ * Register a listener for navigation events from Electron main process.
+ * @param callback Function called with the target path when navigation is triggered
+ * @returns Unsubscribe function - call this in useEffect cleanup to prevent memory leaks
+ */
+onNavigateTo: (callback: (path: string) => void) => () => void;
+```
+
+### PROPOSAL 3: Consider Combining Ref Update Effects
+The three separate effects could be one:
+```typescript
+useEffect(() => {
+  navigateRef.current = navigate;
+  locationRef.current = location;
+  apiRef.current = api;
+});
+```
+This is optional and mostly stylistic.
+
+---
+
+## Summary
+
+| Aspect | Status |
+|--------|--------|
+| Memory leak fixed | ✓ Correct |
+| Handler reference preserved | ✓ Correct |
+| Unsubscribe functions returned | ✓ Correct |
+| Type definitions updated | ✓ Correct |
+| useRef pattern correct | ✓ Correct |
+| useEffect dependencies correct | ✓ Correct |
+| Cleanup function correct | ✓ Correct |
+
+**Overall Assessment:** This is a well-implemented fix. The memory leak is properly addressed by:
+1. Returning unsubscribe functions from IPC registration
+2. Using useRef to stabilize callback references
+3. Running listener setup only once on mount
+4. Properly cleaning up with specific listener removal
+
+No bugs found. The implementation follows React and Electron best practices. The optional proposals above are minor improvements for code cleanliness, not bug fixes.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+No issues to address - review approved.

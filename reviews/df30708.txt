@@ -1,0 +1,93 @@
+# Review: df30708 - Remove duplicate parseAsks, import from @app/agent
+
+## Summary of Changes
+
+This commit consolidates the `parseAsks` function and `StructuredAsk` interface from a local web app file to the `@app/agent` package.
+
+**Files Changed:**
+- Added `@app/agent` dependency to `apps/web/package.json`
+- Modified `apps/web/src/components/ChatPage.tsx` (import changed from local to `@app/agent`)
+- Deleted `apps/web/src/lib/parseAsks.ts` (-36 lines)
+- Updated `IMPLEMENTATION_PLAN.md` (status tracking)
+
+**Intent:** Remove duplicate code by having a single source of truth for parseAsks in the agent package.
+
+---
+
+## Potential Issues
+
+### Issue 1: Build failure due to Node.js dependencies (CRITICAL - Later Fixed)
+
+**Description:** This commit changed ChatPage.tsx to import parseAsks from `@app/agent`. However, `@app/agent` has Node.js-only dependencies (`@app/node`, crypto, etc.) that cause the web frontend build to fail.
+
+**Evidence:** A subsequent commit `09824d0` ("Fix web build by moving parseAsks to @app/proto") was required to fix this:
+- Moved parseAsks and StructuredAsk to `@app/proto` (browser-compatible)
+- Changed ChatPage.tsx import back to `@app/proto`
+- Added re-export from `@app/agent` for backward compatibility
+
+**Root Cause:** The commit didn't account for the bundling implications. Importing anything from `@app/agent` causes Vite to pull in the entire agent bundle, including Node.js-specific code.
+
+**Resolution:** Fixed in commit 09824d0 by putting parseAsks in `@app/proto` (which is browser-safe) and re-exporting from `@app/agent`.
+
+### Issue 2: Incomplete verification before merge
+
+**Description:** The commit should have run the web build (`cd apps/web && npm run build:frontend`) to verify no bundling issues occurred.
+
+**Lesson:** When adding new package dependencies to apps/web, always verify the build works since the web app runs in browser context where Node.js APIs are unavailable.
+
+---
+
+## Analysis of Consolidation Approach
+
+### Original Approach (This Commit)
+```
+apps/web/src/lib/parseAsks.ts (deleted)
+         ↓
+@app/agent (single source of truth)
+         ↓
+ChatPage.tsx imports from @app/agent
+```
+
+**Problem:** `@app/agent` transitively depends on Node.js-only packages.
+
+### Fixed Approach (Commit 09824d0)
+```
+@app/proto/src/ask-parser.ts (browser-safe)
+         ↓
+Re-exported from @app/agent (for server-side code)
+         ↓
+ChatPage.tsx imports from @app/proto (for browser code)
+```
+
+**Solution:** Put shared browser+server code in `@app/proto`, which has no dependencies.
+
+---
+
+## Verification of Code Correctness
+
+Ignoring the build issue, the consolidation logic is correct:
+
+1. **parseAsks function:** Identical implementation to the deleted local copy
+2. **StructuredAsk interface:** Identical type definition
+3. **Export chain:** Properly exported from @app/agent/index.ts
+
+---
+
+## Assessment
+
+**Quality:** Needs improvement (caused build break)
+**Risk:** High (broke the build until fixed)
+
+The intent of this commit (consolidating duplicate code) is good, but it missed a critical validation step: testing the web build. The package dependency architecture requires browser-compatible code to be in `@app/proto`, not `@app/agent`.
+
+**Key Takeaway:** When modifying imports in `apps/web` to use internal packages, always verify:
+1. The web build succeeds: `cd apps/web && npm run build:frontend`
+2. The imported package doesn't transitively pull in Node.js-only code
+
+The issue was fixed in commit 09824d0, which is the correct resolution.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Build failure due to Node.js dependencies) - already fixed in commit 09824d0
+- Issue #2 (Incomplete verification before merge) - skipped (lesson learned, not actionable)

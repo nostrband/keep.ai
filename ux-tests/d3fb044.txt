@@ -1,0 +1,186 @@
+# UX Test Report: Commit d3fb044
+# "Add empty state example suggestions and Press Enter hint"
+
+## Test Date: 2026-01-20
+## Commit: d3fb0441c701096a0c94865bfe8c60f07805dd51
+
+## Summary
+This commit adds example automation suggestions to the empty state and a "Press Enter" hint when typing.
+
+## Features Tested
+
+### 1. Empty State Display
+**Status: PASS**
+- Sparkles icon displays correctly
+- "No automations yet" text shows
+- "Type below or try one of these examples" text shows
+
+### 2. Example Suggestion Buttons
+**Status: PASS**
+- All 4 suggestions display:
+  - "Send me a daily summary of my unread emails"
+  - "Alert me when a website changes"
+  - "Remind me to drink water every 2 hours"
+  - "Save interesting tweets to a note"
+- Buttons are clickable with cursor pointer
+
+### 3. Suggestion Click Populates Input
+**Status: PASS**
+- Clicking a suggestion button correctly populates the textarea with the suggestion text
+- Submit button enables when input has content
+
+### 4. "Press Enter to create automation" Hint
+**Status: PASS**
+- Hint appears when input field has content
+- Hint disappears when input is empty
+- Styled with kbd element for keyboard shortcut appearance
+
+### 5. Form Submission via Enter Key
+**Status: PASS (with caveat)**
+- Pressing Enter when textarea is focused submits the form
+- Input is cleared after submission
+
+## BUGS FOUND
+
+### BUG 1: Textarea Not Focused After Suggestion Click (MEDIUM SEVERITY)
+**Issue:** After clicking a suggestion button, the input textarea is NOT automatically focused. The focus remains on the button.
+
+**How to Reproduce:**
+1. Navigate to main page with no automations
+2. Click any suggestion button (e.g., "Send me a daily summary...")
+3. Text appears in textarea
+4. Press Enter immediately
+
+**Expected Behavior:**
+- Textarea should receive focus after suggestion is clicked
+- User can immediately press Enter to submit
+
+**Actual Behavior:**
+- Focus remains on the clicked button (verified: `document.activeElement.tagName === "BUTTON"`)
+- User must manually click textarea before pressing Enter
+- This breaks the expected flow: click suggestion → press Enter → create automation
+
+**Technical Details:**
+- In MainPage.tsx line 373: `onClick={() => setInput(suggestion)}`
+- Missing: `inputRef.current?.focus()` or similar focus management
+
+**Impact:**
+- Confusing UX where the "Press Enter to create automation" hint is visible but Enter doesn't work
+- Requires extra click to focus textarea before submission
+
+**Recommended Fix:**
+Add focus management to the suggestion click handler:
+```tsx
+onClick={() => {
+  setInput(suggestion);
+  // Focus the textarea after populating
+  textareaRef.current?.focus();
+}}
+```
+
+### BUG 2: MainPage Submissions Do Not Create Workflows (CRITICAL SEVERITY)
+**Issue:** Submitting from the MainPage form does NOT create any workflow/automation. The form appears to submit (input clears, network returns 200 OK), but no workflow is actually created.
+
+**How to Reproduce:**
+1. Navigate to main page (with or without existing automations)
+2. Type an automation request (e.g., "Remind me to check email at 9am")
+3. Submit the form (press Enter or click submit button)
+4. Observe: Input clears, appears successful
+5. Check workflow list: No new workflow was created
+
+**Expected Behavior:**
+- A new workflow should be created with the user's request
+- User should see the new workflow in the list or be navigated to it
+- The AI agent should start processing the request
+
+**Actual Behavior:**
+- Form submission clears input (appears successful)
+- Network request returns 200 OK
+- NO workflow is created
+- Message disappears into void - no processing occurs
+
+**Technical Analysis:**
+
+Root cause found in code comparison:
+
+**NewPage.tsx (line 74-81) - WORKS:**
+```tsx
+// Call api.createTask
+const result = await api.createTask({
+  content: messageContent,
+  files: attachedFiles,
+});
+// Redirect to /chats/<id>
+navigate(`/chats/${result.chatId}`);
+```
+
+**MainPage.tsx (line 274-279) - BROKEN:**
+```tsx
+addMessage.mutate({
+  chatId: "main",
+  role: "user",
+  content: messageContent,
+  files: attachedFiles,
+});
+```
+
+**Why this fails:**
+
+1. **MainPage uses `addMessage.mutate()` with `chatId: "main"`**
+   - This creates an inbox item with `target: "worker"` and empty `target_id`
+   - File: packages/db/src/api.ts lines 94-102
+
+2. **TaskScheduler ignores items with empty target_id:**
+   - File: packages/agent/src/task-scheduler.ts lines 170-176
+   ```typescript
+   const receiverIds = inboxItems
+     .map((i) => i.target_id)
+     .filter((id) => !!id);  // <-- Empty IDs filtered out!
+   const receiverTasks = receiverIds.length > 0
+     ? await this.api.taskStore.getTasks(receiverIds)
+     : [];
+   ```
+   - Since `target_id` is empty for "main" chat, the inbox item is filtered out
+   - No task is found, nothing is processed
+
+3. **NewPage uses `api.createTask()` which:**
+   - Creates a new task record
+   - Creates a chat associated with the task
+   - Sends message to the task's inbox with proper target_id
+   - Everything works correctly
+
+**Impact:**
+- **Critical**: The main user flow of creating automations from the home page is completely broken
+- Users who type automation requests on MainPage will have their requests silently discarded
+- Only the `/new` page route works for creating workflows
+- The empty state suggestions are essentially dead-ends that lead nowhere
+
+**Recommended Fix:**
+MainPage.tsx `handleSubmit` should use `api.createTask()` like NewPage does:
+```tsx
+// Replace addMessage.mutate() with:
+const result = await api.createTask({
+  content: messageContent,
+  files: attachedFiles,
+});
+navigate(`/chats/${result.chatId}`);
+```
+
+## Files Changed in Commit
+- apps/web/src/components/MainPage.tsx
+- IMPLEMENTATION_PLAN.md
+
+## Conclusion
+This commit has two significant bugs:
+
+1. **Medium Severity**: Suggestion clicks don't transfer focus to textarea, making the "Press Enter" hint misleading.
+
+2. **Critical Severity**: The MainPage form submission is fundamentally broken - it uses `addMessage.mutate()` instead of `api.createTask()`. Submitted automation requests are silently discarded because the TaskScheduler filters out inbox items with empty `target_id`. The entire feature of creating automations from the main page does not work.
+
+The empty state UI looks correct, but the core functionality is broken. Users attempting to create automations from the main page will have their requests disappear without any visible error or feedback.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Bug #1 (Textarea Not Focused After Suggestion Click) - created specs/mainpage-suggestion-focus-textarea.md
+- Bug #2 (MainPage Submissions Do Not Create Workflows) - created specs/mainpage-submission-creates-task.md

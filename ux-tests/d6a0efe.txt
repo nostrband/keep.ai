@@ -1,0 +1,137 @@
+# UX Test Report: Commit d6a0efe
+## "Revert context building and consolidate mermaid rendering"
+
+**Date**: 2026-01-20
+**Tester**: Claude Opus 4.5
+**Method**: Code analysis (build constraints prevented live Playwright testing)
+
+## Summary
+
+This commit makes two changes:
+1. Reverts `buildContext()` in `agent-env.ts` to return empty array (removes chat history context from agents)
+2. Removes `MermaidDiagram` component and uses Streamdown's built-in mermaid support via `Response` component
+
+## Changes Analyzed
+
+1. `packages/agent/src/agent-env.ts` - buildContext() now returns empty array
+2. `apps/web/src/components/MermaidDiagram.tsx` - DELETED
+3. `apps/web/src/components/WorkflowDetailPage.tsx` - Uses Response for mermaid
+4. `apps/web/package.json` - Removed direct mermaid dependency
+
+## Issues Found
+
+### MEDIUM: Loss of Agent Chat History Context (Architectural)
+
+**Location**: `packages/agent/src/agent-env.ts:90-94`
+
+**Change**:
+```typescript
+async buildContext(input: StepInput): Promise<AssistantUIMessage[]> {
+  // Context building disabled - agents receive only inbox messages
+  return [];
+}
+```
+
+**Impact**:
+- Worker agents no longer receive ~1000 tokens of chat history
+- Planner agents no longer receive ~5000 tokens of chat history
+- Agents only get inbox messages and buildUser() context
+- May affect agent decision-making quality based on historical patterns
+
+**Status**: This is an intentional architectural decision (per spec). Monitor agent performance.
+
+### MEDIUM: Error Handling Regression for Mermaid Diagrams
+
+**Location**: `apps/web/src/components/WorkflowDetailPage.tsx:582`
+
+**Previous MermaidDiagram.tsx had**:
+```typescript
+if (error) {
+  return (
+    <div className="p-4 border border-red-200 bg-red-50 rounded-lg">
+      <p className="text-sm text-red-600">Failed to render diagram: {error}</p>
+      <pre className="mt-2 text-xs text-gray-600 overflow-auto">{diagram}</pre>
+    </div>
+  );
+}
+```
+
+**Now**: No explicit error handling. Relies on Streamdown's internal handling.
+
+**Impact**: If mermaid rendering fails:
+- No user-friendly error message
+- No display of raw diagram source as fallback
+- Silent failure possible
+
+**Recommendation**: Add error boundary or fallback UI around mermaid rendering.
+
+### LOW: Memoization Inefficiency
+
+**Location**: `apps/web/src/components/WorkflowDetailPage.tsx:582`
+
+**Code**:
+```typescript
+<Response>{`\`\`\`mermaid\n${latestScript.diagram}\n\`\`\``}</Response>
+```
+
+**Problem**: Template literal creates new string each render. The Response component's memoization (`prevProps.children === nextProps.children`) uses reference equality, so memo doesn't prevent re-renders.
+
+**Impact**: Minor performance - unnecessary re-renders when parent updates.
+
+**Fix**: Use `useMemo` for the markdown string.
+
+### VERIFIED: Null/Undefined Diagram Handling - OK
+
+**Location**: `apps/web/src/components/WorkflowDetailPage.tsx:580`
+
+```typescript
+{latestScript.diagram && (
+  <div className="mt-4 p-4 bg-gray-50 rounded-lg">
+    <Response>{`\`\`\`mermaid\n${latestScript.diagram}\n\`\`\``}</Response>
+  </div>
+)}
+```
+
+The conditional `latestScript.diagram &&` properly guards against null/undefined/empty string.
+
+### VERIFIED: Mermaid Dependency - OK
+
+Mermaid was removed from `apps/web/package.json` but is still available as a transitive dependency of Streamdown (^11.11.0). No missing dependency issues.
+
+### VERIFIED: Template Literal Syntax - OK
+
+The markdown code fence syntax is correct:
+- Backticks properly escaped
+- Newlines correctly placed
+- Format: `` ```mermaid\n<diagram>\n``` ``
+
+### VERIFIED: No Orphaned Imports
+
+The deleted MermaidDiagram component is not imported anywhere. Clean removal.
+
+## Test Verification
+
+Due to build memory constraints, live Playwright testing was not possible. Analysis based on code review.
+
+## Recommendation
+
+**OK TO SHIP** with awareness of:
+1. Agent context reduction is intentional but should be monitored for quality impact
+2. Consider adding error handling for mermaid rendering failures
+3. Minor performance optimization opportunity with useMemo
+
+The mermaid consolidation is clean and uses proper patterns. The buildContext revert is architectural and may need observation.
+
+## Files Affected
+
+- `/home/artur/src/nostr.band/keep.ai/packages/agent/src/agent-env.ts`
+- `/home/artur/src/nostr.band/keep.ai/apps/web/src/components/WorkflowDetailPage.tsx`
+- `/home/artur/src/nostr.band/keep.ai/apps/web/src/components/MermaidDiagram.tsx` (deleted)
+- `/home/artur/src/nostr.band/keep.ai/apps/web/package.json`
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Loss of Agent Chat History Context) - skipped (intentional design decision)
+- Issue #2 (Error Handling Regression for Mermaid Diagrams) - skipped
+- Issue #3 (Memoization Inefficiency) - created specs/mermaid-diagram-usememo.md

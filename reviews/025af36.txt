@@ -1,0 +1,178 @@
+# Code Review: Commit 025af36
+# "Add error handling for Electron notification creation"
+# Date: 2026-01-20
+
+## Summary of Changes
+
+This commit wraps the Electron Notification constructor and show() call in a try-catch
+block in apps/electron/src/main.ts. The handler now:
+- Returns false if notification creation fails (instead of crashing)
+- Logs errors via debugMain for production debugging
+- Maintains the existing click handler and navigation functionality
+
+Files changed:
+- apps/electron/src/main.ts (error handling around Notification creation)
+- IMPLEMENTATION_PLAN.md (status update)
+
+## Detailed Changes
+
+1. **Try-catch wrapper**: The Notification constructor and show() are now wrapped in a
+   try-catch block that catches any exceptions and returns false instead of throwing.
+
+2. **Boolean return value**: Handler returns true on success, false on failure (previously
+   would throw on failure).
+
+3. **Debug logging**: Uses debugMain() to log notification creation failures with the
+   error details.
+
+## Potential Issues
+
+### Issue 1: Type Definition Mismatch (HIGH)
+
+**Location**: apps/electron/src/vite-env.d.ts line 27
+
+**Description**: The TypeScript type definition declares `showNotification` as returning
+`Promise<void>`, but the actual handler now returns `Promise<boolean>`. This type mismatch
+means:
+- Callers cannot type-safely check the return value
+- TypeScript won't warn if the return value is ignored
+
+**Current caller behavior** (WorkflowNotifications.ts:136):
+```typescript
+await window.electronAPI.showNotification({...});
+// Return value ignored - caller won't know notification failed
+```
+
+**Proposal**: Update the type definition:
+```typescript
+// vite-env.d.ts
+showNotification: (options: {...}) => Promise<boolean>;
+```
+Then update WorkflowNotifications.ts to check the return value and handle failures
+(e.g., debug log "notification failed, user may not be notified").
+
+### Issue 2: Inconsistent Error Handling Across IPC Handlers (MEDIUM)
+
+**Location**: apps/electron/src/main.ts, setupIpcHandlers()
+
+**Description**: Other IPC handlers lack similar error protection:
+
+- `open-external` (line 185-187): shell.openExternal() can throw if URL is invalid or
+  system cannot handle it - no try-catch
+- `update-tray-badge` (line 228-246): tray.setTitle() and setToolTip() could fail -
+  no try-catch
+
+If these handlers throw, IPC communication fails and the error propagates to the renderer.
+
+**Proposal**: Apply consistent error handling pattern across all IPC handlers:
+```typescript
+ipcMain.handle('open-external', async (_event, url: string) => {
+  try {
+    await shell.openExternal(url);
+    return true;
+  } catch (error) {
+    debugMain('Failed to open external URL:', error);
+    return false;
+  }
+});
+```
+
+### Issue 3: Click Handler Has No Error Boundary (LOW-MEDIUM)
+
+**Location**: apps/electron/src/main.ts, lines 208-217
+
+**Description**: The notification click handler is async but has no try-catch:
+```typescript
+notification.on('click', async () => {
+  await ensureWindowReady();  // Could throw
+  mainWindow?.show();
+  mainWindow?.focus();
+  // ...
+});
+```
+
+If ensureWindowReady() throws, the error is silently swallowed (Node.js async event
+handler behavior).
+
+**Proposal**: Wrap click handler in try-catch:
+```typescript
+notification.on('click', async () => {
+  try {
+    await ensureWindowReady();
+    mainWindow?.show();
+    mainWindow?.focus();
+    if (options.workflowId) {
+      mainWindow?.webContents.send('navigate-to', `/workflows/${options.workflowId}`);
+    }
+  } catch (error) {
+    debugMain('Error handling notification click:', error);
+  }
+});
+```
+
+### Issue 4: Caller Behavior on False Return (MEDIUM)
+
+**Location**: apps/web/src/workers/WorkflowNotifications.ts
+
+**Description**: The current caller has a try-catch that catches thrown errors:
+```typescript
+try {
+  await window.electronAPI.showNotification({...});
+  this.notifiedWorkflows.add(notificationKey);  // Marks as "notified" even if false returned
+} catch (e) {
+  console.debug("Failed to show workflow notification:", e);
+}
+```
+
+But the handler now returns false instead of throwing, so:
+- The catch block never triggers for notification failures
+- The workflow is marked as "notified" even when notification failed
+- User silently misses the notification
+
+**Proposal**: Check the return value:
+```typescript
+const success = await window.electronAPI.showNotification({...});
+if (success) {
+  this.notifiedWorkflows.add(notificationKey);
+} else {
+  console.debug("Notification creation failed for workflow:", workflow.id);
+  // Don't add to notifiedWorkflows - try again next time
+}
+```
+
+## Positive Aspects
+
+1. **Prevents IPC handler crashes**: The main goal is achieved - Notification constructor
+   failures no longer crash the handler.
+
+2. **Good platform check**: Notification.isSupported() check at line 195 handles platforms
+   where notifications are unavailable.
+
+3. **Consistent logging**: Uses debugMain() which writes to ~/.keep.ai/debug.log, matching
+   other handlers in the file.
+
+4. **Good icon fallback**: Builds on getAppIcon() from commit f4cdcc0 which has SVG fallback
+   if icon loading fails.
+
+## Risk Assessment
+
+**Overall Risk**: LOW
+
+The change is defensive and cannot make things worse - previously uncaught exceptions would
+crash the IPC handler, now they're logged and the handler returns cleanly. The issues
+identified are about completeness rather than correctness.
+
+## Recommendations
+
+1. **HIGH priority**: Fix type definition mismatch in vite-env.d.ts
+2. **MEDIUM priority**: Update WorkflowNotifications.ts to check boolean return value
+3. **MEDIUM priority**: Apply consistent error handling to other IPC handlers
+4. **LOW priority**: Add error boundary to click handler
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Type Definition Mismatch) - created specs/electron-notification-return-type.md
+- Issue #2 (Inconsistent Error Handling Across IPC Handlers) - created specs/electron-ipc-error-handling.md
+- Issue #3 (Click Handler Has No Error Boundary) - created specs/electron-notification-click-error-handling.md
+- Issue #4 (Caller Behavior on False Return) - covered by specs/electron-notification-return-type.md

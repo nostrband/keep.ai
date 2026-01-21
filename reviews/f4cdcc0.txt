@@ -1,0 +1,135 @@
+# Commit Review: f4cdcc0
+
+## Summary
+Implement P1 electron window and notification improvements
+
+**Files Modified:**
+- apps/electron/src/main.ts (+88/-43 lines)
+- apps/web/src/components/WorkflowDetailPage.tsx (+9/-2 lines)
+- apps/web/src/lib/WorkflowNotifications.ts (-1 line)
+- IMPLEMENTATION_PLAN.md (status updates)
+
+## Changes Description
+
+### 1. ensureWindowReady() Function (main.ts)
+Added async function that waits for window to be ready before sending IPC messages:
+- Creates window if it doesn't exist
+- Returns immediately if window already ready
+- Uses promise-based waiting for concurrent callers
+- Tracks window ready state via `did-finish-load` event
+- Resets state when window is closed
+
+### 2. getAppIcon() Helper (main.ts)
+Added function to get app icon with fallback:
+- First tries to load from `assets/icon.png` file
+- Falls back to embedded SVG icon matching "K in square" design (golden border #D6A642)
+- Used for BrowserWindow, Notification, and Tray
+
+### 3. Updated All Handlers to Use ensureWindowReady()
+- Notification click handler
+- Tray menu "Open Keep.AI" and "New automation..."
+- Tray single-click handler
+- Global shortcut (CmdOrCtrl+N)
+
+### 4. WorkflowDetailPage Integration
+Added call to `workflowNotifications.clearWorkflowNotifications(id)` when viewing a workflow, preventing re-notifications for errors the user has already seen.
+
+### 5. Removed Unused Property
+Removed unused `checkIntervalMs` property from WorkflowNotifications class.
+
+---
+
+## Potential Issues
+
+### Issue 1: Race Condition in ensureWindowReady() (LOW)
+**Location:** apps/electron/src/main.ts:111-127
+
+Between checking `if (windowReadyPromise)` and creating a new promise, another caller could theoretically set `windowReadyPromise`. However, JavaScript is single-threaded for synchronous operations so this is unlikely in practice.
+
+**Recommendation:** Consider adding a lock/flag before promise creation for robustness:
+```typescript
+let isCreatingWindow = false;
+
+async function ensureWindowReady(): Promise<void> {
+  if (!mainWindow && !isCreatingWindow) {
+    isCreatingWindow = true;
+    createWindow();
+    isCreatingWindow = false;
+  }
+  // ...
+}
+```
+
+### Issue 2: Window Destruction During Concurrent Calls (MEDIUM)
+**Location:** apps/electron/src/main.ts:162-166
+
+If `ensureWindowReady()` is called while window is being destroyed, there's a small window where an old orphaned promise could hang:
+1. ensureWindowReady() checks windowReadyPromise → has old promise
+2. window.close() → sets windowReadyPromise = null
+3. ensureWindowReady() returns old orphaned promise that never resolves
+
+**Impact:** Could hang on tray click/shortcut if window closes unexpectedly.
+
+**Recommendation:** Add an isDestroying flag and check it in ensureWindowReady().
+
+### Issue 3: SVG Fallback Not Wrapped in Try-Catch (LOW)
+**Location:** apps/electron/src/main.ts:78-81
+
+The `nativeImage.createFromDataURL()` call is not wrapped in try-catch. If it fails (e.g., invalid base64), the function throws and could crash the handler.
+
+**Recommendation:** Wrap SVG creation in try-catch:
+```typescript
+try {
+  const dataUrl = `data:image/svg+xml;base64,${Buffer.from(svgIcon).toString('base64')}`;
+  return nativeImage.createFromDataURL(dataUrl);
+} catch (error) {
+  debugMain('Failed to create SVG icon:', error);
+  return nativeImage.createEmpty();
+}
+```
+
+### Issue 4: Window Ready State Not Reset on Page Reload (LOW)
+**Location:** apps/electron/src/main.ts:142-150
+
+The `did-finish-load` event can fire multiple times (e.g., after page reloads, navigations). Currently handled correctly since null check prevents double-resolution, but consider adding listener for `will-navigate` to reset `windowReady = false` for robustness.
+
+---
+
+## Positive Observations
+
+1. **Good error handling:** getAppIcon() checks if icon is empty, not just presence
+2. **Security best practice:** Uses contextIsolation: true in BrowserWindow options
+3. **Proper async/await:** All handlers correctly use async/await pattern
+4. **Safe optional chaining:** Uses `mainWindow?.show()` throughout
+5. **Proper notification clearing:** WorkflowDetailPage integration correctly clears notifications by workflow ID with proper useEffect dependency
+
+---
+
+## Proposals
+
+### Proposal 1: Add Mutex for Window Creation
+Add a simple flag to prevent multiple concurrent window creation attempts during rapid tray clicks or shortcuts.
+
+### Proposal 2: Add Error Boundary for Icon Creation
+Wrap the entire getAppIcon() in a try-catch to ensure it always returns a valid (possibly empty) NativeImage.
+
+### Proposal 3: Consider Window Reload Handling
+Add listener for `will-navigate` event to reset windowReady state before page reloads:
+```typescript
+mainWindow.webContents.on('will-navigate', () => {
+  windowReady = false;
+});
+```
+
+---
+
+## Verdict
+The implementation is solid and addresses the documented P1 issues correctly. The edge cases identified are unlikely to cause issues in typical usage but could be addressed for additional robustness. The code follows existing patterns and is well-structured.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Race Condition in ensureWindowReady()) - skipped
+- Issue #2 (Window Destruction During Concurrent Calls) - created specs/electron-window-ready-promise-rejection.md
+- Issue #3 (SVG Fallback Not Wrapped in Try-Catch) - created specs/electron-icon-creation-error-handling.md
+- Issue #4 (Window Ready State Not Reset on Page Reload) - skipped

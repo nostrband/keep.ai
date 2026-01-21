@@ -1,0 +1,201 @@
+# Code Review: Commit 78efd6c
+
+## Commit: Implement autonomy toggle backend integration
+**Date:** 2026-01-16
+**Author:** Claude Agent
+
+---
+
+## Summary of Changes
+
+This commit completes the integration of the autonomy toggle feature, connecting the UI to the backend. The feature allows users to control how autonomously the AI agent behaves:
+- **"ai_decides"** mode: Agent minimizes questions and uses safe defaults
+- **"coordinate"** mode: Agent asks clarifying questions before significant actions
+
+### Files Modified:
+1. `apps/web/src/hooks/useAutonomyPreference.ts` - Updated hook to sync localStorage with backend
+2. `packages/agent/src/agent-env.ts` - Added autonomyPrompt() method and constructor parameter
+3. `packages/agent/src/task-worker.ts` - Retrieves autonomy mode and passes to AgentEnv
+4. `packages/db/src/api.ts` - Added setAutonomyMode/getAutonomyMode methods
+5. `packages/proto/src/schemas.ts` - Added AutonomyMode type and metadata field
+6. `IMPLEMENTATION_PLAN.md` - Updated to mark feature complete
+
+---
+
+## Detailed Change Analysis
+
+### 1. useAutonomyPreference.ts
+- Added `useDbQuery` import to access backend API
+- Modified useEffect to sync localStorage preference to backend on mount
+- Updated setMode callback to persist to both localStorage AND backend
+- Error handling added with console.warn for both storage mechanisms
+
+### 2. agent-env.ts
+- Added `AutonomyMode` type definition (line 8)
+- Added `autonomyMode` private field to AgentEnv class
+- Extended constructor with optional `autonomyMode` parameter (defaults to 'ai_decides')
+- Added `autonomyPrompt()` private method that returns mode-specific guidance
+- Integrated autonomyPrompt() into both workerSystemPrompt() and plannerSystemPrompt()
+
+### 3. task-worker.ts
+- Added call to `api.getAutonomyMode()` before creating AgentEnv
+- Passes autonomyMode to AgentEnv constructor
+
+### 4. api.ts
+- Added `setAutonomyMode()` method using INSERT OR REPLACE into agent_state table
+- Added `getAutonomyMode()` method with default fallback to 'ai_decides'
+- Follows same pattern as existing setAgentStatus/getAgentStatus methods
+
+### 5. schemas.ts
+- Added `AutonomyMode` type export
+- Added optional `autonomy` field to message metadata schema
+
+---
+
+## Issues Identified
+
+### ISSUE 1: Race Condition - One-Way Sync (HIGH)
+**Location:** `apps/web/src/hooks/useAutonomyPreference.ts` lines 23-45
+
+**Problem:** The hook syncs localStorage → backend but never reads from backend. This creates issues:
+- Backend value is overwritten by localStorage on every API initialization
+- Multi-device scenarios will have inconsistent state (each device's localStorage wins)
+- The backend storage becomes pointless if localStorage always overwrites it
+
+**Evidence:** The useEffect reads from localStorage, then immediately calls `api.setAutonomyMode(localMode)` without ever calling `api.getAutonomyMode()` first.
+
+**Proposal:** Implement bidirectional sync:
+```typescript
+useEffect(() => {
+  if (!api) return;
+
+  // Fetch backend value first
+  api.getAutonomyMode().then((backendMode) => {
+    // Backend is source of truth for multi-device
+    setModeState(backendMode);
+    try {
+      localStorage.setItem(STORAGE_KEY, backendMode);
+    } catch {}
+  }).catch(() => {
+    // Fallback to localStorage if backend fails
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored === 'coordinate' || stored === 'ai_decides') {
+      setModeState(stored);
+    }
+  });
+  setIsLoaded(true);
+}, [api]);
+```
+
+---
+
+### ISSUE 2: Triple Type Definition Duplication (MEDIUM)
+**Locations:**
+- `packages/proto/src/schemas.ts` line 4
+- `packages/agent/src/agent-env.ts` line 8
+- `apps/web/src/hooks/useAutonomyPreference.ts` line 4
+
+**Problem:** `AutonomyMode` type is defined identically in 3 places:
+```typescript
+export type AutonomyMode = 'ai_decides' | 'coordinate';
+```
+
+This creates maintenance risk - if a new mode is added, all 3 files must be updated.
+
+**Proposal:** Use `packages/proto/src/schemas.ts` as single source of truth:
+```typescript
+// In agent-env.ts and useAutonomyPreference.ts:
+import { AutonomyMode } from "@app/proto";
+```
+
+---
+
+### ISSUE 3: No Error Handling for getAutonomyMode in TaskWorker (MEDIUM)
+**Location:** `packages/agent/src/task-worker.ts` line 581
+
+**Problem:** The call to `getAutonomyMode()` has no error handling:
+```typescript
+const autonomyMode = await this.api.getAutonomyMode();
+```
+
+If the database query fails, the entire task execution fails and gets retried.
+
+**Proposal:** Add fallback to default:
+```typescript
+let autonomyMode: AutonomyMode = 'ai_decides';
+try {
+  autonomyMode = await this.api.getAutonomyMode();
+} catch (error) {
+  this.debug('Failed to get autonomy mode, using default:', error);
+}
+```
+
+---
+
+### ISSUE 4: Unused Metadata Field (LOW)
+**Location:** `packages/proto/src/schemas.ts` line 10
+
+**Problem:** The `autonomy` field was added to message metadata schema but is never read or written anywhere in the codebase.
+
+**Proposal:** Either:
+- Remove the field if not needed
+- Implement per-message autonomy override feature that uses this field
+- Add a comment explaining future intended use
+
+---
+
+### ISSUE 5: WorkflowWorker Does Not Respect Autonomy (BY DESIGN - DOCUMENTED)
+**Location:** `packages/agent/src/workflow-worker.ts`
+
+**Observation:** The `WorkflowWorker` class does not instantiate `AgentEnv` and therefore does not respect the user's autonomy preference. This appears intentional based on comment at line 678: "Create SandboxAPI directly without needing AgentEnv or dummy task".
+
+**Rationale:** Workflows execute pre-generated scripts, not LLM-driven agents, so autonomy mode doesn't apply.
+
+---
+
+### ISSUE 6: Potential API Availability Race (LOW)
+**Location:** `apps/web/src/hooks/useAutonomyPreference.ts` lines 38-42
+
+**Problem:** The code calls `api.setAutonomyMode()` as soon as `api` becomes non-null, but doesn't check if the database is fully ready (`dbStatus === "ready"`).
+
+**Mitigating Factor:** The setAutonomyMode method uses a simple INSERT OR REPLACE which should succeed even during initialization.
+
+**Proposal:** Consider adding `dbStatus` check for robustness:
+```typescript
+const { api, dbStatus } = useDbQuery();
+// Only sync when database is fully ready
+if (api && dbStatus === "ready") {
+  api.setAutonomyMode(localMode).catch(...);
+}
+```
+
+---
+
+## Positive Observations
+
+1. **Clean Architecture:** The autonomy mode flows cleanly from UI → database → task-worker → agent-env → system prompt
+2. **Backward Compatible:** Optional constructor parameter with sensible default means existing code continues to work
+3. **Consistent Patterns:** Database methods follow existing patterns (setAgentStatus/getAgentStatus)
+4. **Clear Prompt Guidance:** The autonomyPrompt() method provides clear, actionable guidance to the LLM
+5. **Proper Parameterized Queries:** No SQL injection risks - uses parameterized queries
+
+---
+
+## Files Referenced
+
+- `/home/artur/src/nostr.band/keep.ai/apps/web/src/hooks/useAutonomyPreference.ts`
+- `/home/artur/src/nostr.band/keep.ai/packages/agent/src/agent-env.ts`
+- `/home/artur/src/nostr.band/keep.ai/packages/agent/src/task-worker.ts`
+- `/home/artur/src/nostr.band/keep.ai/packages/db/src/api.ts`
+- `/home/artur/src/nostr.band/keep.ai/packages/proto/src/schemas.ts`
+- `/home/artur/src/nostr.band/keep.ai/packages/agent/src/workflow-worker.ts`
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Race condition one-way sync) - covered by specs/remove-autonomy-localstorage.md
+- Issue #2 (Triple type definition duplication) - created specs/consolidate-autonomy-mode-type.md
+- Issue #3 (No error handling for getAutonomyMode) - created specs/handle-get-autonomy-mode-error.md
+- Issue #4 (Unused metadata field) - created specs/remove-unused-autonomy-metadata.md
+- Issue #5 (WorkflowWorker does not respect autonomy) - not an issue (by design)
+- Issue #6 (Potential API availability race) - covered by specs/remove-autonomy-localstorage.md

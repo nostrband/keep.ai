@@ -1,0 +1,346 @@
+COMMIT REVIEW: c27be5c
+========================
+Title: Add OS-level notification and tray badge support in Electron
+Date: Fri Jan 16 17:49:05 2026 +0000
+Author: Claude Agent
+
+FILES CHANGED:
+- IMPLEMENTATION_PLAN.md (+32/-27 lines)
+- apps/electron/src/main.ts (+57 lines)
+- apps/electron/src/preload.ts (+21/-3 lines)
+
+================================================================================
+SUMMARY OF CHANGES
+================================================================================
+
+This commit adds infrastructure for OS-level notifications and tray badge
+updates in the Electron app, per Spec 09 (OS-Level Notifications).
+
+1. ELECTRON MAIN PROCESS (main.ts)
+
+   Added Notification import from electron (line 36).
+
+   Added 'show-notification' IPC handler (lines 112-144):
+   - Accepts options: { title, body, workflowId? }
+   - Checks Notification.isSupported() before creating
+   - Creates notification with title, body, and app icon
+   - On click: Shows/focuses window, sends 'navigate-to' event if workflowId provided
+   - Returns boolean indicating success
+
+   Added 'update-tray-badge' IPC handler (lines 146-164):
+   - Accepts count: number
+   - macOS: Uses tray.setTitle() to show count in menu bar
+   - All platforms: Updates tooltip to show attention count
+   - Clears badge when count is 0
+
+2. PRELOAD SCRIPT (preload.ts)
+
+   Exposed three new APIs via contextBridge:
+   - showNotification(options): Invokes 'show-notification' handler
+   - updateTrayBadge(count): Invokes 'update-tray-badge' handler
+   - onNavigateTo(callback): Listens for 'navigate-to' events
+
+3. DOCUMENTATION (IMPLEMENTATION_PLAN.md)
+   - Marked section 8 (OS-Level Notifications) items as COMPLETED
+   - Added note that web app needs to call these APIs
+   - Noted filter by error type is remaining work
+
+================================================================================
+VERIFICATION: INFRASTRUCTURE IS FULLY WIRED
+================================================================================
+
+Verified that this infrastructure IS actively used by subsequent commits:
+
+CALLERS OF showNotification:
+- apps/web/src/lib/WorkflowNotifications.ts:138
+  Called from checkWorkflowsNeedingAttention()
+  Passes { title, body, workflowId }
+  Only shows when tab not visible (avoids duplicate alerts)
+  Only for non-fixable errors (auth, permission, network)
+
+CALLERS OF updateTrayBadge:
+- apps/web/src/lib/WorkflowNotifications.ts:101
+  Updates with count of workflows needing attention
+- apps/web/src/components/MainPage.tsx:255
+  Updates based on computed attentionCount via useEffect
+
+NAVIGATION HANDLER:
+- apps/web/src/App.tsx:42-60
+  ElectronNavigationHandler component listens for 'navigate-to'
+  Uses React Router's navigate() to handle routing
+  Properly cleans up listeners on unmount
+
+TYPE DEFINITIONS:
+- apps/web/src/vite-env.d.ts:22-28
+  TypeScript types match preload.ts implementation exactly
+
+================================================================================
+POTENTIAL ISSUES
+================================================================================
+
+ISSUE 1: Notification Icon Path Does Not Exist
+Severity: MEDIUM
+Location: apps/electron/src/main.ts:127
+
+The notification uses:
+```typescript
+icon: path.join(__dirname, "../assets/icon.png"),
+```
+
+This assumes assets/icon.png exists relative to the compiled main.cjs location.
+The path resolves to: apps/electron/assets/icon.png
+
+CONFIRMED: The file does NOT exist. The apps/electron/assets/ directory does
+not exist at all. No .png, .ico, or .icns files were found in apps/electron/.
+
+This means notifications will:
+- Show with a missing/default icon on most platforms
+- Potentially throw an error on some platforms (see Issue 2)
+- Look unprofessional without proper app branding
+
+--------------------------------------------------------------------------------
+
+ISSUE 2: No Error Handling for Notification Creation
+Severity: LOW
+Location: apps/electron/src/main.ts:119-143
+
+The notification creation has no try-catch:
+```typescript
+const notification = new Notification({
+  title: options.title,
+  body: options.body,
+  icon: path.join(__dirname, "../assets/icon.png"),
+});
+notification.show();
+return true;
+```
+
+If Notification constructor throws (e.g., invalid icon path on some platforms),
+the IPC handler would reject with an unhandled error.
+
+--------------------------------------------------------------------------------
+
+ISSUE 3: Tray Badge Only Works on macOS
+Severity: LOW (Platform Limitation, Not Bug)
+Location: apps/electron/src/main.ts:149-160
+
+The badge implementation uses:
+```typescript
+if (process.platform === 'darwin') {
+  if (count > 0) {
+    tray.setTitle(` ${count}`);
+  } else {
+    tray.setTitle('');
+  }
+}
+```
+
+On Windows and Linux, only the tooltip is updated - no visual badge.
+This is a platform limitation documented in Electron.
+
+Options for other platforms:
+- Windows: Custom tray icon with badge overlay
+- Linux: App indicators (system-dependent)
+
+--------------------------------------------------------------------------------
+
+ISSUE 4: Potential Race Condition on Window Creation
+Severity: VERY LOW
+Location: apps/electron/src/main.ts:131-139
+
+The click handler:
+```typescript
+notification.on('click', () => {
+  if (!mainWindow) {
+    createWindow();  // Creates window async
+  }
+  mainWindow?.show();
+  mainWindow?.focus();
+  if (options.workflowId) {
+    mainWindow?.webContents.send('navigate-to', `/workflows/${options.workflowId}`);
+  }
+});
+```
+
+If mainWindow is null and createWindow() is called, the subsequent lines
+execute before the window is ready. The optional chaining (?.) prevents
+crashes, but the navigation event might not be sent.
+
+In practice, createWindow() is synchronous (uses new BrowserWindow()),
+so mainWindow is set before the next lines execute. But if createWindow()
+ever becomes async, this could break.
+
+--------------------------------------------------------------------------------
+
+ISSUE 5: Navigation Event Sent Before Window Ready
+Severity: LOW
+Location: apps/electron/src/main.ts:138-139
+
+Related to Issue 4, even if mainWindow exists, the webContents might not
+have loaded the React app yet. Sending 'navigate-to' too early could:
+- Be ignored (no listener registered yet)
+- Queue up but confuse the app's initial routing
+
+The ElectronNavigationHandler in App.tsx registers the listener in useEffect,
+which runs after the component mounts. If the notification is clicked very
+quickly after window creation, the listener might not be ready.
+
+--------------------------------------------------------------------------------
+
+ISSUE 6: No Deduplication of Notifications
+Severity: LOW (UX Consideration)
+Location: apps/electron/src/main.ts:112-143
+
+Multiple calls to showNotification for the same workflow will create
+multiple OS notifications. If a workflow fails repeatedly (during retries),
+this could spam the user.
+
+However, checking WorkflowNotifications.ts shows it tracks shown notifications
+per-workflow-per-error-type (lines 25-30, 125-135), so this is handled at
+the caller level, not in the Electron infrastructure.
+
+RESOLUTION: Not an issue - deduplication handled by caller.
+
+================================================================================
+PROPOSALS
+================================================================================
+
+PROPOSAL 1: Create Missing Icon File
+Simplicity: Simple (create directory and file)
+
+The icon file is CONFIRMED MISSING. To fix:
+
+1. Create the directory: mkdir -p apps/electron/assets/
+2. Create or copy a 256x256 or 512x512 PNG icon to apps/electron/assets/icon.png
+3. Ideally use the same icon as the app's main icon for consistency
+
+Alternatively, remove the icon option from the Notification constructor to use
+the system default (less ideal but functional):
+```typescript
+const notification = new Notification({
+  title: options.title,
+  body: options.body,
+  // icon removed - will use system default
+});
+```
+
+--------------------------------------------------------------------------------
+
+PROPOSAL 2: Add Error Handling to Notification Handler
+Simplicity: Simple (wrap in try-catch)
+
+```typescript
+ipcMain.handle('show-notification', async (_event, options) => {
+  if (!Notification.isSupported()) {
+    debugMain('Notifications are not supported on this system');
+    return false;
+  }
+
+  try {
+    const notification = new Notification({
+      title: options.title,
+      body: options.body,
+      icon: path.join(__dirname, "../assets/icon.png"),
+    });
+
+    notification.on('click', () => {
+      // ... existing click handler
+    });
+
+    notification.show();
+    return true;
+  } catch (error) {
+    debugMain('Failed to create notification:', error);
+    return false;
+  }
+});
+```
+
+--------------------------------------------------------------------------------
+
+PROPOSAL 3: Add Badge Support for Windows (Future Enhancement)
+Simplicity: Medium
+
+For Windows, tray icons can be dynamically generated with a badge overlay.
+This requires:
+1. Using canvas or sharp to draw badge number on icon
+2. Calling tray.setImage() with the modified icon
+3. Caching generated icons to avoid repeated generation
+
+Example libraries: electron-windows-badge, custom implementation
+
+This is a UX enhancement, not a bug fix.
+
+--------------------------------------------------------------------------------
+
+PROPOSAL 4: Ensure Window Ready Before Navigation
+Simplicity: Simple (add webContents.once('did-finish-load'))
+
+```typescript
+notification.on('click', () => {
+  const showAndNavigate = () => {
+    mainWindow?.show();
+    mainWindow?.focus();
+    if (options.workflowId && mainWindow?.webContents) {
+      mainWindow.webContents.send('navigate-to', `/workflows/${options.workflowId}`);
+    }
+  };
+
+  if (!mainWindow) {
+    createWindow();
+    // Wait for window to load before navigating
+    mainWindow?.webContents.once('did-finish-load', showAndNavigate);
+  } else {
+    showAndNavigate();
+  }
+});
+```
+
+This ensures navigation only happens after the React app has loaded.
+
+However, this adds complexity for an edge case (clicking notification within
+milliseconds of app starting). The current code works in practice.
+
+================================================================================
+OVERALL ASSESSMENT
+================================================================================
+
+This commit provides solid infrastructure for OS-level notifications and
+tray badges. The implementation follows Electron best practices:
+- Uses contextIsolation and preload script
+- Properly exposes APIs via contextBridge
+- Handles navigation from notification clicks
+- Platform-specific badge handling
+
+The infrastructure is confirmed to be fully integrated with the web app:
+- WorkflowNotifications.ts calls showNotification for errors
+- MainPage.tsx updates tray badge based on attention count
+- App.tsx handles navigation events from notification clicks
+- TypeScript types in vite-env.d.ts match the implementation
+
+Key strengths:
+- Notification.isSupported() check prevents crashes
+- Navigation includes workflowId for deep linking
+- Tooltip updates on all platforms
+- Clean separation between main/preload/renderer
+
+The identified issues are minor:
+- Icon path should be verified (quick fix)
+- Error handling could be more robust
+- Windows/Linux don't get visual badge (platform limitation)
+- Potential timing issues are theoretical edge cases
+
+Quality: GOOD
+Security: SOLID (proper context isolation)
+Cross-Platform: PARTIAL (badge limited to macOS)
+Integration: COMPLETE
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Notification icon path doesn't exist) - created specs/notification-icon.md
+- Issue #2 (No error handling for notification creation) - created specs/notification-error-handling.md
+- Issue #3 (Tray badge only works on macOS) - skipped (platform limitation)
+- Issue #4 (Race condition on window creation) - created specs/electron-window-ready-before-ipc.md
+- Issue #5 (Navigation event before window ready) - covered by specs/electron-window-ready-before-ipc.md
+- Issue #6 (No deduplication) - not an issue (handled by caller)

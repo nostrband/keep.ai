@@ -1,0 +1,181 @@
+COMMIT REVIEW: 80465ba - Add tray menu IPC handlers for focus-input and pause-all-automations
+
+========================================
+CHANGES SUMMARY
+========================================
+
+This commit implements handlers for Electron tray menu items that were previously sending IPC messages with no React component listening:
+
+1. **ElectronIPCHandler component** (App.tsx):
+   - Renamed from `ElectronNavigationHandler` and expanded to handle three IPC events
+   - Added `onFocusInput` handler: navigates to main page and dispatches custom event
+   - Added `onPauseAllAutomations` handler: iterates over active workflows and sets status to 'disabled'
+   - Uses refs to hold navigate, location, and api to prevent callback re-registration
+   - Properly cleans up all listeners on unmount
+
+2. **MainPage.tsx**:
+   - Added listener for `FOCUS_INPUT_EVENT` custom event
+   - Queries `textarea[name="message"]` and focuses it
+   - Properly cleans up listener on unmount
+
+3. **IMPLEMENTATION_PLAN.md**:
+   - Updated task #15 status to COMPLETED
+   - Updated completion counts
+
+Files changed: apps/web/src/App.tsx, apps/web/src/components/MainPage.tsx, IMPLEMENTATION_PLAN.md
+
+========================================
+POTENTIAL ISSUES
+========================================
+
+ISSUE 1: Race condition - Focus event may fire before textarea exists
+Severity: MEDIUM
+Location: App.tsx:69-79, MainPage.tsx:303-317
+
+The focus-input handler uses a hardcoded 100ms setTimeout to allow navigation to complete before dispatching the custom event. However:
+- React Router navigation is sync for route matching but DOM rendering is async
+- If rendering takes >100ms (slow devices, complex re-renders), focus event fires before DOM is ready
+- If rendering takes <100ms, there's unnecessary delay
+
+The MainPage listener uses `document.querySelector('textarea[name="message"]')` which returns null if the element doesn't exist yet, causing silent failure.
+
+Proposal: Add retry logic with requestAnimationFrame:
+```typescript
+const handleFocusInput = () => {
+  const focusTextarea = (retries = 5) => {
+    const textarea = document.querySelector('textarea[name="message"]') as HTMLTextAreaElement;
+    if (textarea) {
+      textarea.focus();
+    } else if (retries > 0) {
+      requestAnimationFrame(() => focusTextarea(retries - 1));
+    }
+  };
+  focusTextarea();
+};
+```
+
+---
+
+ISSUE 2: Sequential workflow updates cause performance delay
+Severity: MEDIUM
+Location: App.tsx:98-103
+
+```typescript
+for (const workflow of activeWorkflows) {
+  await apiRef.current.scriptStore.updateWorkflow({
+    ...workflow,
+    status: 'disabled',
+  });
+}
+```
+
+Updates are awaited sequentially. With many active workflows (e.g., 50+), this causes noticeable delay. User expects "pause all" to be instant.
+
+Proposal: Use Promise.all for parallel updates:
+```typescript
+await Promise.all(activeWorkflows.map(w =>
+  apiRef.current.scriptStore.updateWorkflowFields(w.id, { status: 'disabled' })
+));
+```
+
+---
+
+ISSUE 3: Full object update risks overwriting concurrent modifications
+Severity: HIGH
+Location: App.tsx:98-103
+
+Using `updateWorkflow({ ...workflow, status: 'disabled' })` writes the entire workflow object back. If another process modifies the workflow during the iteration (e.g., cron expression update), those changes are lost (last-write-wins clobber).
+
+The codebase has `updateWorkflowFields()` specifically designed for atomic field updates (used by scheduler at workflow-scheduler.ts:273, 282, 290, 298).
+
+Proposal: Use `updateWorkflowFields()` for atomic status-only update:
+```typescript
+await apiRef.current.scriptStore.updateWorkflowFields(workflow.id, { status: 'disabled' });
+```
+
+---
+
+ISSUE 4: Silent partial failure on pause-all
+Severity: MEDIUM
+Location: App.tsx:82-109
+
+If one `updateWorkflow()` call fails mid-loop, the function catches the error and logs to console, but:
+- No user notification
+- Some workflows are paused, others aren't (inconsistent state)
+- No way to retry or rollback
+
+Proposal: Collect results and show toast on failure:
+```typescript
+const results = await Promise.allSettled(activeWorkflows.map(w =>
+  apiRef.current.scriptStore.updateWorkflowFields(w.id, { status: 'disabled' })
+));
+const failed = results.filter(r => r.status === 'rejected');
+if (failed.length > 0) {
+  console.error(`Failed to pause ${failed.length} of ${activeWorkflows.length} workflows`);
+  // Show toast notification to user
+}
+```
+
+---
+
+ISSUE 5: Workflow limit caps at 100
+Severity: LOW
+Location: App.tsx:87
+
+`listWorkflows()` defaults to limit=100. If user has 101+ active workflows, pause-all won't pause all of them with no warning.
+
+Proposal: Increase limit or implement pagination:
+```typescript
+const workflows = await apiRef.current.scriptStore.listWorkflows({ limit: 1000 });
+```
+
+---
+
+ISSUE 6: Hardcoded 'disabled' status without constant
+Severity: LOW
+Location: App.tsx:101
+
+The status 'disabled' is hardcoded as a string literal. While correct (matches StatusBadge and scheduler), it would be safer to use a shared constant or enum to prevent typos.
+
+Proposal: Define workflow status constants in @app/proto:
+```typescript
+export const WorkflowStatus = {
+  ACTIVE: 'active',
+  DISABLED: 'disabled',
+  ERROR: 'error',
+  DRAFT: '',
+} as const;
+```
+
+========================================
+CODE QUALITY NOTES
+========================================
+
+Positive aspects:
+- Proper ref handling to prevent callback re-registration (refs updated in separate effects)
+- Clean separation: IPC → custom event → component listener
+- All listeners properly return and call unsubscribe functions (no memory leaks)
+- Preload.ts correctly implements context isolation security pattern
+- TypeScript types properly defined in vite-env.d.ts
+
+The overall implementation pattern is sound. The issues identified are edge cases and optimizations rather than fundamental flaws.
+
+========================================
+VERIFICATION
+========================================
+
+Verified:
+- 'disabled' is the correct status for pausing (StatusBadge shows "Paused", scheduler skips non-active)
+- `textarea[name="message"]` exists in PromptInputTextarea component
+- Preload handlers properly return unsubscribe functions
+- IPC channels match between main.ts and preload.ts
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Race condition - Focus event before textarea exists) - created specs/focus-input-url-param.md
+- Issue #2 (Sequential workflow updates cause performance delay) - covered by specs/pause-all-workflows-sql.md
+- Issue #3 (Full object update risks overwriting concurrent modifications) - covered by specs/pause-all-workflows-sql.md
+- Issue #4 (Silent partial failure on pause-all) - covered by specs/pause-all-workflows-sql.md
+- Issue #5 (Workflow limit caps at 100) - covered by specs/pause-all-workflows-sql.md
+- Issue #6 (Hardcoded 'disabled' status without constant) - skipped

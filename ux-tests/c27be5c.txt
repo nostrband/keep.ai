@@ -1,0 +1,103 @@
+# UX Test Report: c27be5c - Add OS-level notification and tray badge support in Electron
+
+## Commit Summary
+- Date: Fri Jan 16 17:49:05 2026
+- Author: Claude Agent
+- Files changed: main.ts, preload.ts, IMPLEMENTATION_PLAN.md
+
+## Changes Made
+1. Import Notification from Electron in main.ts
+2. Add 'show-notification' IPC handler for displaying native OS notifications
+3. Notifications show title and body, click to open app and navigate to workflow
+4. Add 'update-tray-badge' IPC handler for tray badge updates
+5. macOS: Uses tray.setTitle() to show attention count
+6. Update tooltip to reflect attention count
+7. Expose electronAPI.showNotification() and updateTrayBadge() in preload
+8. Add electronAPI.onNavigateTo() for navigation from notification clicks
+
+## Test Environment
+- Platform: Web via Playwright (Electron-specific features not testable)
+- Server: localhost:3001
+
+## Testing Status: PARTIAL (Electron-only features)
+
+### Not Testable via Web Playwright
+The following features require Electron runtime and cannot be tested via web:
+- Native OS notification display (Notification.isSupported())
+- Tray badge updates (tray.setTitle() on macOS)
+- Notification click navigation via IPC
+- IPC message handling in main process
+
+### Code Review Findings
+
+#### Implementation Quality: 7/10
+
+**Strengths:**
+- Proper error handling with try-catch blocks
+- Notification support check via `Notification.isSupported()`
+- Proper async/await pattern for window readiness
+- Returns unsubscribe functions for listeners (prevents memory leaks)
+
+**Issues Identified:**
+
+1. **Missing error event handler on Notification (MINOR)**
+   - Location: main.ts notification handler
+   - Issue: No 'error' event listener on Notification object
+   - Impact: Notifications could fail silently in some edge cases
+
+2. **Missing Windows/Linux tray badge implementation (DESIGN GAP)**
+   - Location: main.ts 'update-tray-badge' handler
+   - Issue: Only implements macOS badge via `tray.setTitle()`
+   - Impact: Windows/Linux users won't see badge count, only tooltip
+
+3. **No validation of count parameter (INPUT VALIDATION)**
+   - Location: main.ts 'update-tray-badge' handler
+   - Issue: Count could be negative, causing "automation-1 need attention"
+   - Recommendation: Validate `count >= 0` before use
+
+4. **Type mismatch in handler return types (TYPE SAFETY)**
+   - Location: vite-env.d.ts declares `showNotification: () => Promise<void>`
+   - Actual: Returns `boolean`
+   - Impact: Works at runtime but technically incorrect
+
+#### Web App Integration Analysis
+
+Verified in WorkflowNotifications (apps/web/src/lib/queryClient.ts):
+- Calls `window.electronAPI.showNotification()` with proper parameters
+- Does not check return value for success/failure
+- Silent failures possible but logged at debug level
+
+## Potential Issues Found
+
+### ISSUE #1: Silent Notification Failures (MEDIUM)
+- **Description**: showNotification() returns boolean but caller doesn't check
+- **Location**: queryClient.ts WorkflowNotifications
+- **Expected**: User notification or retry on failure
+- **Actual**: Silent failure, debug log only
+- **Reproduction**: Run in Electron with OS notification permissions denied
+
+### ISSUE #2: Badge Count Mismatch (LOW)
+- **Description**: Badge count includes workflows not eligible for notification
+- **Location**: WorkflowNotifications.checkAndNotify()
+- **Impact**: User sees "5 need attention" badge but only gets 2 notifications
+- **Recommendation**: Count only shouldNotify=true workflows in badge
+
+## Recommendations
+
+1. Add input validation for badge count (>= 0)
+2. Check showNotification() return value and handle failures
+3. Add error event listener to Notification objects
+4. Consider Windows/Linux badge implementation
+5. Write tests for Electron IPC handlers
+
+## Conclusion
+
+The implementation provides functional OS-level notification and tray badge support for the Electron app. The core functionality is sound, but error handling and input validation could be improved. Since this is Electron-specific code, full UX testing requires running in the Electron environment rather than web.
+
+**Overall Assessment**: PASSES with minor issues (Electron testing required for full verification)
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Silent Notification Failures) - skipped
+- Issue #2 (Badge Count Mismatch) - created specs/tray-badge-count-accuracy.md

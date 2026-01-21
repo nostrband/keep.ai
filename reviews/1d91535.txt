@@ -1,0 +1,347 @@
+COMMIT REVIEW: 1d91535
+=======================
+Title: Implement unified main screen with workflow list and input
+Author: Claude Agent
+Date: Fri Jan 16 14:42:23 2026 +0000
+
+FILES CHANGED:
+- apps/web/src/App.tsx (routing update)
+- apps/web/src/components/MainPage.tsx (new file, 392 lines)
+- IMPLEMENTATION_PLAN.md
+
+================================================================================
+CHANGE DESCRIPTION
+================================================================================
+
+1. NEW MAINPAGE COMPONENT (apps/web/src/components/MainPage.tsx)
+   Created a unified main screen combining:
+
+   a) WORKFLOW LIST DISPLAY
+      - Shows all workflows with title, status badge, and secondary status line
+      - Secondary status indicates: waiting for input, failed runs, last run time,
+        next scheduled run, or schedule info
+      - Visual attention indicator (red left border) for workflows needing attention
+      - Sorted by: attention items first, then by last activity timestamp
+
+   b) ATTENTION SYSTEM
+      - Computes attention state from:
+        * Tasks in "wait" or "asks" state (waiting for user input)
+        * Failed runs (runs with error field set)
+      - Attention banner showing count of workflows needing attention
+      - Toggle to filter view to show only attention items
+
+   c) PROMPT INPUT INTERFACE
+      - Fixed position at bottom of viewport
+      - File upload support with progress indicator
+      - Sends messages to "main" chat for creating new automations
+      - Dynamic padding to prevent content from being hidden
+
+   d) HELPER FUNCTIONS
+      - formatTimeAgo(): Human-readable relative time ("5m ago", "2h ago")
+      - formatNextRun(): Future time formatting ("in 30m", "Tomorrow at 9:00")
+      - getSecondaryLine(): Computes status text and attention flag
+      - getStatusBadge(): Workflow status badge rendering
+
+2. ROUTING UPDATE (apps/web/src/App.tsx)
+   - Changed "/" route from ChatPage to MainPage
+   - Added "/chat" route for the old ChatPage
+   - MainPage is now the default landing page
+
+================================================================================
+ISSUES IDENTIFIED
+================================================================================
+
+ISSUE #1: SEQUENTIAL API CALLS FOR WORKFLOW RUNS (MEDIUM-HIGH)
+--------------------------------------------------------------
+Location: MainPage.tsx:195-210
+
+The effect fetches latest run for each workflow sequentially in a for loop:
+```typescript
+const fetchRuns = async () => {
+  const runs: Record<string, any> = {};
+  for (const workflow of workflows) {
+    try {
+      const workflowRuns = await api.scriptStore.getScriptRunsByWorkflowId(workflow.id);
+      if (workflowRuns.length > 0) {
+        runs[workflow.id] = workflowRuns[0];
+      }
+    } catch {
+      // Ignore errors
+    }
+  }
+  setLatestRuns(runs);
+};
+```
+
+Impact: With 20 workflows, this could take 20x longer than necessary.
+Each API call waits for the previous one to complete.
+
+PROPOSAL: Use Promise.all for parallel fetching:
+```typescript
+const fetchRuns = async () => {
+  const results = await Promise.all(
+    workflows.map(async (workflow) => {
+      try {
+        const runs = await api.scriptStore.getScriptRunsByWorkflowId(workflow.id);
+        return { id: workflow.id, run: runs[0] || null };
+      } catch {
+        return { id: workflow.id, run: null };
+      }
+    })
+  );
+
+  const runs: Record<string, any> = {};
+  for (const { id, run } of results) {
+    if (run) runs[id] = run;
+  }
+  setLatestRuns(runs);
+};
+```
+
+
+ISSUE #2: NO CLEANUP FOR IN-FLIGHT REQUESTS (MEDIUM)
+----------------------------------------------------
+Location: MainPage.tsx:191-211
+
+The useEffect that fetches runs has no cleanup function. If workflows change
+or component unmounts while requests are in flight, stale data could be set.
+
+PROPOSAL: Add cleanup with cancellation flag:
+```typescript
+useEffect(() => {
+  if (!api || workflows.length === 0) return;
+
+  let cancelled = false;
+
+  const fetchRuns = async () => {
+    // ... fetch logic ...
+    if (!cancelled) {
+      setLatestRuns(runs);
+    }
+  };
+
+  fetchRuns();
+  return () => { cancelled = true; };
+}, [api, workflows]);
+```
+
+
+ISSUE #3: CODE DUPLICATION - getStatusBadge (MEDIUM)
+----------------------------------------------------
+Location: MainPage.tsx:40-48
+
+This is the 4th copy of the same getStatusBadge function (also in WorkflowsPage,
+WorkflowDetailPage, TaskDetailPage from the previous commit).
+
+PROPOSAL: See proposal in 7251c17 review - extract to shared component.
+
+
+ISSUE #4: TYPE SAFETY - Multiple 'any' types (LOW-MEDIUM)
+---------------------------------------------------------
+Location: Throughout MainPage.tsx
+
+Multiple functions use 'any' type:
+- getStatusBadge(workflow: any)
+- getSecondaryLine(workflow: any, latestRun: any, task: any)
+- latestRuns state: Record<string, any>
+- taskMap: Record<string, any>
+
+PROPOSAL: Define proper TypeScript interfaces:
+```typescript
+import type { Workflow, Task } from "@app/db";
+import type { ScriptRun } from "packages/db/src/script-store";
+
+interface WorkflowWithStatus extends Workflow {
+  secondaryText: string;
+  needsAttention: boolean;
+  lastActivity: string;
+}
+```
+
+
+ISSUE #5: INPUT CLEARED BEFORE CONFIRMATION (LOW)
+-------------------------------------------------
+Location: MainPage.tsx:301
+
+The input is cleared immediately after calling mutate, before knowing if the
+message was actually sent successfully:
+```typescript
+addMessage.mutate({
+  chatId: "main",
+  role: "user",
+  content: messageContent,
+  files: attachedFiles,
+});
+
+setInput("");  // Cleared before confirmation
+```
+
+Impact: If the mutation fails, the user loses their input.
+
+PROPOSAL: Clear input in onSuccess callback:
+```typescript
+addMessage.mutate(
+  { chatId: "main", role: "user", content: messageContent, files: attachedFiles },
+  {
+    onSuccess: () => setInput(""),
+    onError: (error) => {
+      // Optionally show error toast
+      console.error('Failed to send message:', error);
+    }
+  }
+);
+```
+
+
+ISSUE #6: FILE INPUT ACCESS VIA DOM QUERY (LOW)
+-----------------------------------------------
+Location: MainPage.tsx:483-490
+
+Uses document.querySelector to find file input:
+```typescript
+<PromptInputButton
+  onClick={() => {
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    fileInput?.click();
+  }}
+```
+
+Impact: Fragile approach that could break if DOM structure changes or if
+multiple file inputs exist on the page.
+
+PROPOSAL: The PromptInput component already provides openFileDialog via context.
+Use the usePromptInputAttachments hook instead, or the component's fileInputRef.
+
+
+ISSUE #7: SILENT ERROR SWALLOWING (LOW)
+---------------------------------------
+Location: MainPage.tsx:203-205 and 289-290
+
+Errors are silently caught and ignored:
+```typescript
+} catch {
+  // Ignore errors
+}
+```
+
+```typescript
+} catch (error) {
+  console.error('File upload failed:', error);
+}
+```
+
+The file upload error is logged but the message still gets sent without files.
+User has no indication that their files weren't attached.
+
+PROPOSAL: Show error feedback to user:
+```typescript
+} catch (error) {
+  console.error('File upload failed:', error);
+  // Show toast or set error state
+  return; // Don't send message without files if files were intended
+}
+```
+
+
+ISSUE #8: MAGIC NUMBER FOR PADDING (TRIVIAL)
+--------------------------------------------
+Location: MainPage.tsx:341
+
+```typescript
+style={{ paddingBottom: Math.max(144, promptHeight + 32) }}
+```
+
+The values 144 and 32 are unexplained magic numbers.
+
+PROPOSAL: Extract to named constants:
+```typescript
+const MIN_BOTTOM_PADDING = 144; // Minimum padding when prompt is collapsed
+const PROMPT_PADDING_OFFSET = 32; // Extra padding around prompt container
+
+style={{ paddingBottom: Math.max(MIN_BOTTOM_PADDING, promptHeight + PROMPT_PADDING_OFFSET) }}
+```
+
+
+================================================================================
+POSITIVE OBSERVATIONS
+================================================================================
+
+1. The attention system is well-designed:
+   - Clear logic for what constitutes "needs attention"
+   - Visual hierarchy with red border and banner
+   - Toggle to filter view is a nice UX touch
+   - Count badge helps users prioritize
+
+2. Secondary status line provides valuable context:
+   - Shows last run time with success indicator
+   - Shows failure status with time
+   - Shows next scheduled run
+   - Shows "Waiting for input" for tasks needing attention
+
+3. Sorting logic is appropriate:
+   - Attention items bubble to top
+   - Then sorted by recency of activity
+   - Ensures users see important items first
+
+4. ResizeObserver usage for dynamic layout:
+   - Properly observes prompt container height changes
+   - Cleans up observer on unmount
+   - Smooth transition animation
+
+5. Good empty states:
+   - Different messages for "no workflows" vs "no attention-needed workflows"
+   - Helpful hint to create first automation
+
+6. File upload integration:
+   - Progress indicator with percentage
+   - Error display area
+   - Disabled submit during upload
+
+
+================================================================================
+ARCHITECTURAL CONSIDERATIONS
+================================================================================
+
+1. MAIN CHAT COUPLING
+   The component hardcodes "main" as the chat ID. This works for the current
+   design but couples the main screen to a specific chat concept. Consider
+   whether this should be more flexible.
+
+2. ROUTING CHANGE IMPACT
+   Moving "/" from ChatPage to MainPage is a significant UX change. Users
+   expecting the chat interface will now see the workflow list. The old
+   ChatPage is still available at "/chat" which is good for transition.
+
+3. DATA FETCHING STRATEGY
+   The component fetches workflow runs in a separate effect from workflows.
+   This creates a loading state where workflows are visible but runs are not.
+   Consider showing loading indicators on individual workflow cards while
+   their run data loads.
+
+
+================================================================================
+RISK ASSESSMENT
+================================================================================
+
+Overall Risk: LOW-MEDIUM
+
+- The sequential API fetching is a performance issue that will worsen as
+  users add more workflows
+- No breaking changes to existing functionality
+- ChatPage remains accessible at /chat
+- The code duplication continues the pattern from the previous commit
+
+Recommend addressing Issue #1 (parallel fetching) before production use
+with many workflows.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Sequential API calls) - created specs/batch-fetch-workflow-runs.md
+- Issue #2 (No cleanup for in-flight requests) - included in specs/batch-fetch-workflow-runs.md
+- Issue #3 (Code duplication getStatusBadge) - covered by specs/workflow-status-badge-component.md
+- Issue #4 (Type safety) - skipped
+- Issue #5 (Input cleared before confirmation) - skipped
+- Issue #6 (File input via DOM query) - skipped
+- Issue #7 (Silent error swallowing) - skipped
+- Issue #8 (Magic numbers) - skipped

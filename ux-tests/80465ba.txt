@@ -1,0 +1,89 @@
+Commit: 80465ba - Add tray menu IPC handlers for focus-input and pause-all-automations
+Date: Mon Jan 19 11:25:42 2026 +0000
+Author: Claude Agent
+
+================================================================================
+UX TEST REPORT
+================================================================================
+
+SUMMARY: PASS
+The FOCUS_INPUT_EVENT custom event handler is working correctly. The tray menu
+IPC handlers require Electron environment for full testing, but the web-based
+event handling was verified.
+
+--------------------------------------------------------------------------------
+TESTS PERFORMED
+--------------------------------------------------------------------------------
+
+1. FOCUS_INPUT_EVENT Test (Web environment)
+   - Navigated to main page (http://localhost:3001/)
+   - Verified textarea with name="message" exists
+   - Dispatched custom event 'keep-ai-focus-input'
+   - RESULT: Textarea focused correctly after event dispatch
+   - STATUS: PASS
+
+2. Textarea Presence Test
+   - Verified main input textarea exists on main page
+   - Textarea has placeholder "What would you like me to help automate?"
+   - STATUS: PASS
+
+--------------------------------------------------------------------------------
+LIMITATIONS
+--------------------------------------------------------------------------------
+
+- Full IPC handler testing requires Electron environment
+- Cannot test actual tray menu clicks from web browser
+- Cannot test pause-all-automations without active workflows
+- The following features were verified via code review only:
+  - onFocusInput IPC handler registration in App.tsx
+  - onPauseAllAutomations IPC handler registration in App.tsx
+  - Navigation to home page before focus (when not already on /)
+  - Workflow pause logic (iterates active workflows, sets status to 'disabled')
+
+--------------------------------------------------------------------------------
+CODE REVIEW FINDINGS
+--------------------------------------------------------------------------------
+
+1. IPC Handler Implementation (App.tsx lines 47-130):
+   - ElectronIPCHandler component properly handles three IPC events:
+     - 'navigate-to' (from notification clicks)
+     - 'focus-input' (from tray menu "New automation...")
+     - 'pause-all-automations' (from tray menu)
+   - Proper cleanup functions returned for all listeners
+   - Uses useCallback for stable function references
+
+2. Focus Input Logic:
+   - Navigates to '/' if not already there
+   - Dispatches FOCUS_INPUT_EVENT after 100ms delay (allows navigation)
+   - MainPage listens for this event and focuses textarea
+
+3. Pause All Logic:
+   - Fetches all workflows via api.scriptStore.listWorkflows()
+   - Filters to active workflows (status === 'active')
+   - Updates each to status: 'disabled'
+   - Invalidates React Query cache for UI refresh
+
+--------------------------------------------------------------------------------
+ISSUES FOUND
+--------------------------------------------------------------------------------
+
+NONE
+
+--------------------------------------------------------------------------------
+NOTES
+--------------------------------------------------------------------------------
+
+- The 100ms delay before dispatching FOCUS_INPUT_EVENT is a reasonable choice
+  but could potentially fail on slow devices. Consider making it configurable
+  or using a more robust solution.
+- No user feedback (toast/notification) when pause-all-automations completes
+- CSS selector 'textarea[name="message"]' is stable but tied to implementation
+
+================================================================================
+TEST COMPLETED: 2026-01-20
+================================================================================
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+No issues found in this review.

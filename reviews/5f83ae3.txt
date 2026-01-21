@@ -1,0 +1,181 @@
+COMMIT REVIEW: 5f83ae3 - Fix test issues and improve SQLite statement handling
+===============================================================================
+
+COMMIT SUMMARY
+--------------
+Author: Claude Agent
+Date: Fri Jan 16 19:26:24 2026 +0000
+
+This commit fixes two issues:
+1. Skips a file-transfer integration test that requires WebSocket connections
+2. Fixes a race condition in execManyArgs that caused SQLITE_MISUSE errors
+
+FILES CHANGED
+-------------
+1. IMPLEMENTATION_PLAN.md - Updated timestamp, marked items as completed
+2. packages/node/src/createDB.ts - Fixed execManyArgs race condition
+3. packages/tests/src/file-transfer.test.ts - Skipped network-dependent test
+
+DETAILED CHANGES
+----------------
+
+1. Test Skipping (file-transfer.test.ts:436-437)
+
+   Changed:
+   ```typescript
+   it('should work with real signers and encryption', async () => {
+   ```
+   To:
+   ```typescript
+   // Skip this test in Node.js - it requires WebSocket and real network connections to relays
+   it.skip('should work with real signers and encryption', async () => {
+   ```
+
+   Rationale: The test creates a real SimplePool which requires WebSocket connections
+   to Nostr relays. This isn't available in the Node.js test environment and the
+   test was causing flaky failures.
+
+2. execManyArgs Race Condition Fix (createDB.ts:47-105)
+
+   Previous Implementation (Parallel):
+   - All statements were executed in parallel using a shared prepared statement
+   - Used a `completed` counter to track when all were done
+   - Race condition: multiple stmt.run() calls could overlap, causing SQLITE_MISUSE
+
+   New Implementation (Sequential):
+   - Statements execute one at a time via recursive executeNext() pattern
+   - Added `finalized` flag to prevent double-finalize errors
+   - safeFinalize() helper ensures finalize is only called once
+
+   Key changes:
+   ```typescript
+   // Old: Parallel execution with shared counter
+   for (let i = 0; i < args.length; i++) {
+     stmt.run(argSet, function(runErr) {
+       completed++;
+       if (completed === total) stmt.finalize(...);
+     });
+   }
+
+   // New: Sequential execution with safe finalize
+   const executeNext = () => {
+     if (currentIndex >= args.length) {
+       safeFinalize(...);
+       return;
+     }
+     const argSet = args[currentIndex++];
+     stmt.run(argSet, function(runErr) {
+       if (runErr) { safeFinalize(() => reject(runErr)); return; }
+       results[index] = { lastID: this.lastID, changes: this.changes };
+       executeNext();  // Sequential: next only after current completes
+     });
+   };
+   ```
+
+POTENTIAL ISSUES
+----------------
+
+ISSUE 1: PERFORMANCE IMPACT FROM SEQUENTIAL EXECUTION [INFO - ACCEPTABLE]
+Location: createDB.ts:73-100
+
+Description:
+Changing from parallel to sequential execution could theoretically be slower for
+large batches.
+
+Assessment: This is actually the correct fix, not a performance regression:
+- SQLite prepared statements are NOT thread-safe
+- The previous parallel code was causing SQLITE_MISUSE errors
+- SQLite can only handle one write at a time anyway (single-writer design)
+- The node-sqlite3 library serializes writes internally
+- Sequential execution aligns with SQLite's actual behavior
+
+Usage analysis from the codebase:
+- Peer.ts: Uses batches of 2000 changes (chunked intentionally)
+- vacuum.ts: Uses batches of 1000 rows
+- These batch sizes are reasonable and won't cause noticeable slowdowns
+
+ISSUE 2: TEST SKIPPING RATIONALE [INFO - APPROPRIATE]
+Location: file-transfer.test.ts:436
+
+Description:
+The skipped test "should work with real signers and encryption" is a legitimate
+integration test that tests real cryptographic operations and network communication.
+
+Assessment: Skipping is appropriate because:
+- The test requires WebSocket connections to real Nostr relays
+- Network operations are unreliable in CI/test environments
+- The test file already has 11 other passing tests using comprehensive mocks
+- The MockSimplePool and MockNostrSigner provide full coverage of the logic
+- Real network testing should be in a separate integration test suite
+
+ISSUE 3: CALLBACK RECURSION PATTERN [INFO - SAFE]
+Location: createDB.ts:74-100
+
+Description:
+The executeNext() function calls itself recursively through a callback.
+
+Assessment: This is safe because:
+- Each callback executes on a new event loop tick (via Node.js async callback)
+- No stack buildup occurs - this is continuation-passing style
+- SQLite operations are I/O-bound, not CPU-bound
+- The pattern is idiomatic for Node.js async callback APIs
+
+ISSUE 4: STATEMENT PREPARATION ERROR HANDLING [INFO - CORRECT]
+Location: createDB.ts:53-57
+
+Description:
+```typescript
+const stmt = this.db.prepare(sql, (err) => {
+  if (err) {
+    reject(err);
+    return;
+  }
+  // ...
+});
+```
+If prepare fails, the callback returns early with reject. The stmt variable
+would be in an undefined state.
+
+Assessment: This is correct. The early return prevents any further code from
+executing with an invalid statement. The Promise is rejected immediately.
+
+PROPOSALS
+---------
+
+No issues requiring proposals. This is a solid bug fix.
+
+OBSERVATION: Future Optimization (Not Required)
+
+If batch inserts ever become a performance bottleneck, consider:
+1. Using SQLite's multi-value INSERT syntax for compatible queries
+2. Implementing connection pooling for read operations
+3. Using batch transaction wrapping (BEGIN/COMMIT around the sequence)
+
+However, the current implementation is correct and performant for the use cases
+in this codebase.
+
+VERDICT
+-------
+This is a high-quality bug fix that addresses a real race condition in the SQLite
+prepared statement handling. The change from parallel to sequential execution is
+the correct fix for SQLite's single-threaded write model.
+
+Good aspects:
+- Correctly identifies and fixes SQLITE_MISUSE race condition
+- Adds defensive double-finalize protection
+- Uses idiomatic Node.js async callback pattern
+- Clear and explanatory comment for test skip
+- Test skip is appropriate - other tests provide comprehensive mock coverage
+- Error handling is complete (prepare errors, run errors, finalize errors)
+
+The test skipping is also appropriate - the skipped test requires real network
+connections that aren't available in the test environment, and the existing
+mock-based tests provide adequate coverage of the file transfer logic.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Performance impact from sequential execution) - not an issue (correct fix)
+- Issue #2 (Test skipping rationale) - not an issue (appropriate skip)
+- Issue #3 (Callback recursion pattern) - not an issue (safe pattern)
+- Issue #4 (Statement preparation error handling) - not an issue (correct)

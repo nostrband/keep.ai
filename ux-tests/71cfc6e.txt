@@ -1,0 +1,130 @@
+UX TEST REPORT: Commit 71cfc6e
+================================
+Title: Implement fix attempt tracking and escalation for maintenance mode
+Date: 2026-01-20
+Tester: Claude Opus 4.5 (automated UX test)
+
+SUMMARY
+-------
+This commit adds tracking for consecutive fix attempts when a workflow enters
+maintenance mode due to logic errors. After MAX_FIX_ATTEMPTS (3) failed attempts,
+the system escalates to the user by pausing the workflow and displaying a
+notification message.
+
+TEST METHODOLOGY
+----------------
+- Code analysis of workflow-worker.ts escalation logic
+- Code analysis of event type registration in events.ts
+- Code analysis of EventItem.tsx rendering behavior
+- Playwright testing of application UI
+
+FINDINGS
+--------
+
+1. ESCALATION LOGIC: PASS
+   - enterMaintenanceMode() correctly checks fix count before attempting repair
+   - escalateToUser() properly pauses workflow (status="disabled")
+   - Fix count resets to 0 on escalation (giving user fresh start)
+   - Escalation message is well-written and informative
+
+2. USER MESSAGE: PASS
+   - Escalation message sent via api.addMessage() IS visible to users
+   - Message includes: error details, error type, recent logs, action steps
+   - Clear "Automation Paused: Manual Intervention Required" title
+
+3. CRITICAL ISSUE: maintenance_escalated and maintenance_started EVENTS NOT VISIBLE
+
+   SEVERITY: HIGH
+
+   DESCRIPTION:
+   The code creates two chat events:
+   - maintenance_started (line 623 of workflow-worker.ts)
+   - maintenance_escalated (line 679 of workflow-worker.ts)
+
+   However, these event types are NOT registered in the UI:
+   - apps/web/src/types/events.ts: EVENT_TYPES does not include these events
+   - apps/web/src/types/events.ts: EVENT_CONFIGS has no configuration for them
+
+   IMPACT:
+   When EventItem.tsx (line 30-34) tries to render these events:
+   ```
+   const config = EVENT_CONFIGS[type];
+   if (!config) {
+     console.warn(`Unknown event type: ${type}`);
+     return null;  // Event is INVISIBLE
+   }
+   ```
+
+   Result: Users cannot see when maintenance mode started or when escalation
+   occurred in the event timeline. Only the final escalation message is visible.
+
+   HOW TO REPRODUCE:
+   1. Create a workflow with a script that throws a logic error
+   2. Let the workflow run and fail 3+ times
+   3. Check the chat/event timeline
+   4. Expected: See maintenance_started and maintenance_escalated events
+   5. Actual: Events are missing from timeline, only see escalation message
+
+   EXPECTED OUTCOME:
+   Timeline should show:
+   - [maintenance_started] "Maintenance Mode: logic error"
+   - [maintenance_escalated] "Fix Failed After 3 Attempts - Manual Action Needed"
+
+   ACTUAL OUTCOME:
+   Timeline only shows the escalation chat message, no event markers.
+
+4. DATABASE FIELDS: PASS
+   - Migration v21 correctly adds maintenance_fix_count field
+   - Field is properly initialized to 0
+   - incrementMaintenanceFixCount() and resetMaintenanceFixCount() work correctly
+
+5. SIGNAL EMISSION: PASS
+   - "maintenance" signal emitted when entering maintenance mode
+   - "needs_attention" signal emitted when escalating to user
+   - Scheduler properly receives and handles these signals
+
+RECOMMENDATIONS
+---------------
+1. Add maintenance event types to apps/web/src/types/events.ts:
+
+   In EVENT_TYPES:
+   ```
+   MAINTENANCE_STARTED: "maintenance_started",
+   MAINTENANCE_ESCALATED: "maintenance_escalated",
+   ```
+
+   In EVENT_CONFIGS:
+   ```
+   [EVENT_TYPES.MAINTENANCE_STARTED]: {
+     emoji: "🔧",
+     title: (payload) => `Maintenance Mode: ${payload.error_type}`,
+     hasId: false,
+     significance: 'state',
+   },
+   [EVENT_TYPES.MAINTENANCE_ESCALATED]: {
+     emoji: "⚠️",
+     title: (payload) => `Fix Failed After ${payload.fix_attempts} Attempts`,
+     hasId: false,
+     significance: 'error',
+   },
+   ```
+
+2. Add payload interfaces for these event types for type safety
+
+OVERALL VERDICT
+---------------
+PARTIAL PASS - Backend logic works correctly, but UI event visibility is broken.
+The escalation message IS visible to users, so the critical user communication
+works. However, the event timeline markers are invisible, reducing user context.
+
+Files affected:
+- packages/agent/src/workflow-worker.ts (working correctly)
+- packages/db/src/migrations/v21.ts (working correctly)
+- packages/db/src/script-store.ts (working correctly)
+- apps/web/src/types/events.ts (MISSING event type registration)
+- apps/web/src/components/EventItem.tsx (returns null for unknown types)
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #3 (maintenance_started and maintenance_escalated Events Not Visible) - created specs/maintenance-event-types-registration.md

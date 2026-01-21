@@ -1,0 +1,126 @@
+UX TEST REPORT: Commit be063e5
+==============================
+"Implement activation flow for workflow security boundary"
+
+Test Date: 2026-01-20
+Tester: Claude UX Test Agent
+
+SUMMARY
+-------
+This commit implements a security boundary requiring users to explicitly
+activate AI-created workflow drafts before they can run on schedule.
+It adds Activate/Pause/Resume buttons and fixes the scheduler to only
+run workflows with status="active".
+
+TESTING METHODOLOGY
+-------------------
+- Code analysis of WorkflowDetailPage.tsx button logic
+- Code analysis of workflow-scheduler.ts filtering
+- Playwright visual testing
+
+TEST RESULTS
+------------
+Status: PASS with ONE BUG FOUND
+
+CRITICAL BUG FOUND
+------------------
+Issue: Success message not cleared when showing warning
+
+Location: apps/web/src/components/WorkflowDetailPage.tsx lines 75-84
+
+The showWarning() function does NOT clear the success message:
+```typescript
+const showWarning = (message: string) => {
+  if (warningTimeoutRef.current) {
+    clearTimeout(warningTimeoutRef.current);
+  }
+  setWarningMessage(message);
+  // MISSING: setSuccessMessage("");
+  warningTimeoutRef.current = setTimeout(() => {
+    setWarningMessage("");
+    warningTimeoutRef.current = null;
+  }, 5000);
+};
+```
+
+Impact: When a test run fails after a successful operation, both success
+and warning messages may briefly appear together, causing visual confusion.
+
+Note: This bug is already documented in:
+specs/workflow-detail-clear-success-on-warning.md
+
+POTENTIAL ISSUE
+---------------
+handleRunNow() doesn't validate script exists
+
+Location: WorkflowDetailPage.tsx lines 140-141
+
+The handleRunNow function checks for workflow but not latestScript:
+```typescript
+const handleRunNow = async () => {
+  if (!workflow) return;
+  // Missing: if (!latestScript) return;
+```
+
+Impact: Theoretically could trigger a run for a workflow without a script,
+though the UI button visibility should prevent this scenario.
+
+VERIFIED WORKING
+----------------
+1. Button visibility logic is CORRECT:
+   - Draft (status=""): Shows Activate (if script), Run now, Test run
+   - Active (status="active"): Shows Run now, Test run, Pause
+   - Paused (status="disabled"): Shows Test run, Resume
+
+2. Scheduler filtering is CORRECT:
+   - packages/agent/src/workflow-scheduler.ts lines 198-202
+   - Only workflows with status='active' are scheduled
+   - Draft and paused workflows never run automatically
+
+3. Validation before activation:
+   - handleActivate() checks both workflow and latestScript
+   - Activate button only renders when latestScript exists
+   - "Script required to activate" hint shows for draft without script
+
+4. Status badges display correctly:
+   - "" (empty) -> "Draft" (outline badge)
+   - "active" -> "Running" (green badge)
+   - "disabled" -> "Paused" (yellow badge)
+
+5. Success/warning message auto-clear:
+   - Success: 3 seconds
+   - Warning: 5 seconds
+   - Cleanup on component unmount
+
+SECURITY VERIFICATION
+---------------------
+The security boundary works as intended:
+- AI-created workflows start as drafts (status="")
+- Drafts cannot be scheduled until user clicks Activate
+- Scheduler explicitly filters: (w) => w.status === 'active'
+- This prevents unreviewed automations from executing
+
+BROWSER TEST
+------------
+- WorkflowDetailPage renders correctly
+- Shows "Workflow not found" for invalid IDs (tested)
+- No JavaScript errors
+- Navigation works (back button, links)
+
+CONCLUSION
+----------
+The activation flow feature works correctly and enforces the security
+boundary as designed. One confirmed bug exists (warning doesn't clear
+success message) which has an existing spec to fix. The handleRunNow
+validation gap is low risk due to UI constraints.
+
+Files tested:
+- apps/web/src/components/WorkflowDetailPage.tsx
+- packages/agent/src/workflow-scheduler.ts
+- apps/web/src/components/StatusBadge.tsx
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Success message not cleared when showing warning) - covered by specs/workflow-detail-clear-success-on-warning.md
+- Issue #2 (handleRunNow doesn't validate script exists) - skipped (low risk, UI prevents scenario)

@@ -1,0 +1,354 @@
+COMMIT REVIEW: b2c99ac
+=======================
+Title: Implement maintenance mode for automatic script error fixing
+Date: Fri Jan 16 17:18:25 2026 +0000
+Author: Claude Agent
+
+================================================================================
+CHANGES SUMMARY
+================================================================================
+
+This commit implements "maintenance mode" - an automatic script error fixing
+system where logic errors are routed to the planner agent for auto-fix.
+
+1. NEW FILE: packages/db/src/migrations/v18.ts (16 lines)
+   - Adds 'maintenance' column to workflows table (integer, default 0)
+   - Uses crsql_begin_alter/crsql_commit_alter for CR-SQLite compatibility
+
+2. MODIFIED: packages/db/src/script-store.ts
+   - Added 'maintenance: boolean' field to Workflow interface
+   - Updated all query methods to include maintenance field
+   - Added setWorkflowMaintenance() method for direct flag updates
+   - Updated addWorkflow(), updateWorkflow() to handle maintenance field
+
+3. MODIFIED: packages/agent/src/workflow-worker.ts
+   - Added enterMaintenanceMode() method (~130 lines)
+   - On logic error: sets maintenance flag, creates inbox item for planner
+   - Includes error context: message, stack, source, script code, recent logs
+   - Creates maintenance_started chat event for visibility
+   - Changed logic error routing from 'retry' to 'maintenance' signal
+
+4. MODIFIED: packages/agent/src/workflow-worker-signal.ts
+   - Added 'maintenance' signal type for scheduler coordination
+
+5. MODIFIED: packages/agent/src/workflow-scheduler.ts
+   - Added !w.maintenance filter to skip workflows in maintenance mode
+   - Added signal handler for 'maintenance' type (clears retry state)
+   - Added signal handler for 'needs_attention' type (clears retry state)
+
+6. MODIFIED: packages/agent/src/ai-tools/save.ts
+   - Detects if workflow was in maintenance mode when saving
+   - On save from maintenance: clears flag, sets next_run_timestamp to now
+   - Creates maintenance_fixed chat event with fix_comment
+
+7. MODIFIED: packages/db/src/api.ts
+   - Updated workflow creation to include maintenance: false
+
+8. MODIFIED: AGENTS.md
+   - Added DB migrations documentation note
+
+================================================================================
+POTENTIAL ISSUES
+================================================================================
+
+ISSUE 1: Race Condition - Scheduler May Overwrite Maintenance Flag [HIGH]
+---------------------------------------------------------------------------
+Problem: After workflow execution, the scheduler updates the workflow record
+with the next cron-based timestamp, which may overwrite the maintenance flag.
+
+Location: packages/agent/src/workflow-scheduler.ts (around line 238-285)
+
+Flow:
+1. Scheduler calls: await this.worker.executeWorkflow(...)
+2. Worker detects logic error, sets maintenance = true
+3. Scheduler (after execution returns) calculates next cron time
+4. Scheduler calls: await this.api.scriptStore.updateWorkflow({
+     ...workflow,  // <-- This is the OLD workflow object
+     next_run_timestamp: nextRun.toISOString(),
+   })
+5. This UPDATE may reset maintenance to false (depending on SQL behavior)
+
+Impact:
+- Maintenance mode may be immediately cleared before planner can fix
+- Workflow may run again with the broken script
+- Fix attempt is lost
+
+Proposal: Reload workflow after execution before updating:
+
+  await this.worker.executeWorkflow(...);
+  const updatedWorkflow = await this.api.scriptStore.getWorkflow(workflow.id);
+  if (updatedWorkflow && !updatedWorkflow.maintenance) {
+    // Only update next_run_timestamp if not in maintenance
+    await this.api.scriptStore.updateWorkflow({
+      ...updatedWorkflow,
+      next_run_timestamp: nextRun.toISOString(),
+    });
+  }
+
+--------------------------------------------------------------------------------
+
+ISSUE 2: Maintenance Chat Events Not Registered in UI [MEDIUM]
+---------------------------------------------------------------------------
+Problem: The maintenance events (maintenance_started, maintenance_fixed) are
+not defined in the UI event type system.
+
+Location: apps/web/src/types/events.ts
+
+Evidence: Searched for EVENT_TYPES constant and EVENT_CONFIGS mapping -
+neither contains 'maintenance_started', 'maintenance_fixed', or
+'maintenance_escalated' event types.
+
+Impact:
+- Users cannot see maintenance mode status in the chat UI
+- Auto-fix process is invisible to users
+- Reduces confidence in the "magical" auto-fix feature
+
+Proposal: Add event types to apps/web/src/types/events.ts:
+
+  maintenance_started: { emoji: "🔧", title: "Maintenance Started", ... },
+  maintenance_fixed: { emoji: "✅", title: "Script Fixed", ... },
+  maintenance_escalated: { emoji: "⚠️", title: "Fix Failed - Help Needed", ... },
+
+--------------------------------------------------------------------------------
+
+ISSUE 3: Non-Atomic Maintenance Flag Operations in save.ts [MEDIUM]
+---------------------------------------------------------------------------
+Problem: The save tool reads maintenance status, then later writes updates,
+creating a read-modify-write race condition.
+
+Location: packages/agent/src/ai-tools/save.ts lines 42-84
+
+Code:
+  const workflow = await opts.scriptStore.getWorkflowByTaskId(opts.taskId);
+  const wasInMaintenance = workflow.maintenance;  // READ
+  // ... script save happens (could be slow) ...
+  if (wasInMaintenance) {
+    await opts.scriptStore.updateWorkflow({  // WRITE
+      ...workflow,  // Old workflow data
+      maintenance: false,
+      next_run_timestamp: new Date().toISOString(),
+    });
+  }
+
+Impact:
+- If another process modifies workflow between read and write, changes are lost
+- Particularly problematic if user manually triggers workflow during fix
+- Could result in inconsistent state
+
+Proposal: Use database transaction or reload workflow before update:
+
+  if (wasInMaintenance) {
+    const currentWorkflow = await opts.scriptStore.getWorkflow(workflow.id);
+    await opts.scriptStore.updateWorkflow({
+      ...currentWorkflow,
+      maintenance: false,
+      next_run_timestamp: new Date().toISOString(),
+    });
+  }
+
+--------------------------------------------------------------------------------
+
+ISSUE 4: No Transaction Boundaries Around Maintenance Mode Entry [MEDIUM]
+---------------------------------------------------------------------------
+Problem: enterMaintenanceMode() performs multiple sequential database writes
+without transaction protection.
+
+Location: packages/agent/src/workflow-worker.ts enterMaintenanceMode() method
+
+Operations (in order):
+1. setWorkflowMaintenance(workflow.id, true)
+2. taskStore.getTask(workflow.task_id)
+3. inboxStore.saveInbox(...)
+4. chatStore.saveChatEvent(...)
+
+Impact:
+- If process crashes between operations, database is left in inconsistent state
+- Workflow could be in maintenance but inbox item never created
+- Planner would never receive the fix request
+
+Proposal: Wrap in database transaction (if supported) or add idempotency checks:
+
+  await this.api.db.tx(async (tx) => {
+    await this.api.scriptStore.setWorkflowMaintenance(workflow.id, true, tx);
+    await this.api.inboxStore.saveInbox(inboxItem, tx);
+    await this.api.chatStore.saveChatEvent(..., tx);
+  });
+
+--------------------------------------------------------------------------------
+
+ISSUE 5: Fix Count Reset Has Timing Window [LOW]
+---------------------------------------------------------------------------
+Problem: maintenance_fix_count is reset in a separate call after successful
+execution, creating a timing window.
+
+Location: packages/agent/src/workflow-worker.ts (after success path)
+
+Code pattern (current version, not in this commit but related):
+  if (workflow.maintenance_fix_count > 0) {
+    await this.api.scriptStore.resetMaintenanceFixCount(workflow.id);
+  }
+
+Impact:
+- Between successful run and reset, workflow could fail again
+- New failure increments already-elevated count
+- Could cause premature escalation
+
+Proposal: Reset fix count atomically with success recording, or use version
+numbers for optimistic locking.
+
+--------------------------------------------------------------------------------
+
+ISSUE 6: Inbox Item Content Structure Not Validated [LOW]
+---------------------------------------------------------------------------
+Problem: The inbox item content is a stringified JSON object with no schema
+validation on the receiving end.
+
+Location: packages/agent/src/workflow-worker.ts lines 488-511
+
+Code:
+  await this.api.inboxStore.saveInbox({
+    ...
+    content: JSON.stringify({
+      role: "user",
+      parts: [{
+        type: "text",
+        text: maintenanceMessage.instructions,
+      }],
+      metadata: {
+        ...
+      },
+    }),
+    ...
+  });
+
+Impact:
+- If content structure changes, planner may fail to parse
+- No type safety between producer and consumer
+- Potential for runtime errors during maintenance processing
+
+Proposal: Define shared schema type for maintenance inbox items:
+
+  // In packages/proto/src/schemas.ts
+  interface MaintenanceInboxContent {
+    role: "user";
+    parts: Array<{ type: "text"; text: string }>;
+    metadata: MaintenanceMetadata;
+  }
+
+--------------------------------------------------------------------------------
+
+ISSUE 7: 50-Line Log Limit May Be Insufficient [LOW]
+---------------------------------------------------------------------------
+Problem: Only the last 50 log lines are included in the maintenance request.
+
+Location: packages/agent/src/workflow-worker.ts line 476
+
+Code:
+  const recentLogs = logs.slice(-50).join("\n");
+
+Impact:
+- For complex scripts, 50 lines may not capture the error context
+- Important initialization logs may be cut off
+- Makes debugging harder for the planner agent
+
+Proposal: Consider making this configurable or increasing to 100-200 lines.
+Alternatively, include logs around the error (50 before error, 10 after).
+
+--------------------------------------------------------------------------------
+
+ISSUE 8: Chat Event Uses "main" Instead of Task Chat ID [LOW]
+---------------------------------------------------------------------------
+Problem: The maintenance_fixed event is saved to "main" chat instead of the
+task's specific chat.
+
+Location: packages/agent/src/ai-tools/save.ts line 69
+
+Code:
+  await opts.chatStore.saveChatEvent(
+    generateId(),
+    "main",  // <-- Should this be the task's chat_id?
+    "maintenance_fixed",
+    {...}
+  );
+
+Impact:
+- Maintenance events may appear in wrong chat context
+- User may not see the fix notification where expected
+
+Note: This might be intentional if "main" is a global events feed. Needs
+verification of intended behavior.
+
+Proposal: Consider using task.chat_id if events should be task-specific:
+  await opts.chatStore.saveChatEvent(
+    generateId(),
+    task.chat_id || "main",
+    ...
+  );
+
+================================================================================
+PROPOSALS SUMMARY
+================================================================================
+
+Priority HIGH:
+1. Fix scheduler race condition by reloading workflow after execution
+
+Priority MEDIUM:
+2. Register maintenance chat events in UI (EVENT_TYPES/EVENT_CONFIGS)
+3. Use database transactions around maintenance mode entry/exit
+4. Fix non-atomic read-modify-write in save tool
+
+Priority LOW:
+5. Add fix count reset atomicity
+6. Define shared schema for inbox content
+7. Increase log limit or make configurable
+8. Verify correct chat_id usage for events
+
+================================================================================
+POSITIVE ASPECTS
+================================================================================
+
+1. Comprehensive error context sent to planner (code, logs, stack trace)
+2. Clean signal-based coordination between worker and scheduler
+3. Proper migration using crsql_begin_alter/crsql_commit_alter
+4. Chat events for visibility (even if UI registration is pending)
+5. Automatic next_run_timestamp setting for immediate verification
+6. Fix comment included in maintenance_fixed event
+7. Planner task validation (checks task.type === "planner")
+8. Good separation of concerns between components
+9. Documentation update in AGENTS.md for migration patterns
+
+================================================================================
+ARCHITECTURAL NOTES
+================================================================================
+
+The maintenance mode implementation follows a sound pattern:
+
+  Error -> Maintenance Flag -> Inbox Item -> Planner Fix -> Save -> Clear Flag
+
+However, the lack of transactional guarantees means the system relies on
+eventual consistency. This is acceptable for a personal automation product
+but should be documented.
+
+The fix verification loop (immediate re-run after fix) is elegant:
+  1. Fix saved -> next_run_timestamp set to now
+  2. Scheduler picks up workflow
+  3. If fix works -> maintenance_fix_count reset
+  4. If fix fails -> increment count, re-enter maintenance
+
+This creates a feedback loop that either converges to a fix or escalates.
+
+================================================================================
+END OF REVIEW
+================================================================================
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Race condition scheduler overwrites maintenance flag) - created specs/workflow-state-consistency.md
+- Issue #2 (Maintenance chat events not in UI) - skipped
+- Issue #3 (Non-atomic maintenance flag operations) - skipped
+- Issue #4 (No transaction boundaries) - skipped
+- Issue #5 (Fix count reset timing) - skipped
+- Issue #6 (Inbox content not validated) - skipped
+- Issue #7 (50-line log limit) - skipped
+- Issue #8 (Chat event uses "main" chat) - skipped

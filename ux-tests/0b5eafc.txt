@@ -1,0 +1,111 @@
+# UX Test Report: Commit 0b5eafc
+## "Add retry reverse navigation to script run detail page"
+
+**Date**: 2026-01-20
+**Tester**: Claude Opus 4.5
+**Method**: Code analysis (build constraints prevented live Playwright testing)
+
+## Summary
+
+This commit adds bidirectional navigation for retry chains in the ScriptRunDetailPage. Users can now navigate from an original failed run to see its retry attempts, completing the navigation loop (previously only retry -> original was possible).
+
+## Changes Analyzed
+
+1. `packages/db/src/script-store.ts` - Added `getRetriesOfRun(runId)` method
+2. `apps/web/src/hooks/dbScriptReads.ts` - Added `useRetriesOfRun` hook
+3. `apps/web/src/hooks/queryKeys.ts` - Added `retriesOfRun` query key
+4. `apps/web/src/components/ScriptRunDetailPage.tsx` - Added "Retry Attempts" UI section
+
+## Issues Found
+
+### CRITICAL: Status Badge Logic Error for Failed Runs
+
+**Location**: `apps/web/src/components/ScriptRunDetailPage.tsx:153-159`
+
+**Problem**: The status badge checks `retry.error` truthiness to determine if a run failed:
+```typescript
+{retry.error ? (
+  <Badge variant="destructive">Failed</Badge>
+) : retry.end_timestamp ? (
+  <Badge variant="default">Success</Badge>
+) : (
+  <Badge variant="secondary">Running</Badge>
+)}
+```
+
+If a run failed but the `error` field is an empty string (which is the database default), it shows as "Success" or "Running" instead of "Failed".
+
+**Expected**: Failed runs should show "Failed" badge
+**Actual**: Empty error string causes incorrect status display
+**Severity**: HIGH - Users see wrong run status
+
+### HIGH: Silent Error Swallowing in useRetriesOfRun Hook
+
+**Location**: `apps/web/src/hooks/dbScriptReads.ts:115-120`
+
+**Problem**: The hook returns empty array on error:
+```typescript
+catch (error) {
+  return [];
+}
+```
+
+**Impact**: Users cannot distinguish between "no retries exist" and "failed to fetch retries". No error indication in the UI.
+
+### MEDIUM: No Input Validation on runId Parameter
+
+**Location**: `packages/db/src/script-store.ts:407-414`
+
+**Problem**: The `getRetriesOfRun` method doesn't validate `runId`:
+- Empty string would query `WHERE retry_of = ''`
+- Whitespace-only strings aren't trimmed
+- Could return unrelated records if DB has empty retry_of values
+
+**Recommendation**: Add validation:
+```typescript
+if (!runId || runId.trim() === '') return [];
+```
+
+### MEDIUM: Missing Database Index on retry_of Column
+
+**Location**: `packages/db/src/migrations/v20.ts`
+
+**Problem**: The `retry_of` column was added without an index. The query `WHERE retry_of = ?` performs a full table scan.
+
+**Impact**: Performance degradation on large script_runs tables.
+
+**Recommendation**: Add migration with index:
+```sql
+CREATE INDEX idx_script_runs_retry_of ON script_runs(retry_of);
+```
+
+### LOW: TypeScript Non-Null Assertions
+
+**Location**: `apps/web/src/components/ScriptRunDetailPage.tsx:11, 13`
+
+**Problem**: Uses `runId!` non-null assertion when `runId` could be undefined from URL params.
+
+**Impact**: Bypasses TypeScript safety, though runtime handles undefined gracefully.
+
+## Test Verification
+
+Due to build memory constraints, live Playwright testing was not possible. Analysis based on code review.
+
+## Recommendation
+
+**DO NOT SHIP** until the critical status badge logic error is fixed. A failed run showing as "Success" is a significant UX bug that could confuse users and hide problems.
+
+## Files Affected
+
+- `/home/artur/src/nostr.band/keep.ai/apps/web/src/components/ScriptRunDetailPage.tsx`
+- `/home/artur/src/nostr.band/keep.ai/apps/web/src/hooks/dbScriptReads.ts`
+- `/home/artur/src/nostr.band/keep.ai/apps/web/src/hooks/queryKeys.ts`
+- `/home/artur/src/nostr.band/keep.ai/packages/db/src/script-store.ts`
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Status Badge Logic Error for Failed Runs) - skipped
+- Issue #2 (Silent Error Swallowing in useRetriesOfRun Hook) - skipped
+- Issue #3 (No Input Validation on runId Parameter) - skipped
+- Issue #4 (Missing Database Index on retry_of Column) - skipped

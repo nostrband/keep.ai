@@ -1,0 +1,143 @@
+COMMIT REVIEW: 2aa2532
+=======================
+Title: Fix test suite issues and improve test reliability
+Date: Fri Jan 16 20:00:22 2026 +0000
+
+CHANGES SUMMARY
+===============
+
+This commit fixes multiple test files to make the test suite pass (55 tests passing, 28 skipped):
+
+1. crsqlite-peer-new.test.ts:
+   - Added all_peers and crsql_change_history tables required by Peer class
+   - Skipped entire test suite (describe.skip) for P2P sync tests that need real network
+
+2. nostr-transport.test.ts:
+   - Updated connection string regex to handle nonce and exp parameters
+   - Skipped two WebSocket-dependent tests (peer connection, invalid secret)
+
+3. nostr-transport-sync.test.ts:
+   - Skipped entire test suite that requires real WebSocket connections to Nostr relays
+
+4. transaction-error.test.ts:
+   - Changed tests from expecting nested transaction errors to expecting queuing behavior
+   - Updated Test 1 (nested tx with setTimeout) to verify transactions queue properly
+   - Updated Test 4 (synchronous nested tx) to verify queuing without deadlock
+
+5. exec-many-args-browser.test.ts:
+   - Skipped browser-specific tests that require IndexedDB and WASM
+
+FILES MODIFIED
+==============
+- IMPLEMENTATION_PLAN.md (documentation update)
+- packages/tests/src/crsqlite-peer-new.test.ts
+- packages/tests/src/exec-many-args-browser.test.ts
+- packages/tests/src/nostr-transport-sync.test.ts
+- packages/tests/src/nostr-transport.test.ts
+- packages/tests/src/transaction-error.test.ts
+
+ISSUES FOUND
+============
+
+ISSUE 1: Incorrect connection string regex (MEDIUM)
+---------------------------------------------------
+Location: packages/tests/src/nostr-transport.test.ts, line 28
+
+The regex was changed from:
+  /^nostr\+keepai:\/\/[0-9a-f]{64}\?relay=wss%3A%2F%2Frelay\.damus\.io&secret=[0-9a-f]{32}$/
+
+To:
+  /^nostr\+keepai:\/\/[0-9a-f]{64}\?relay=wss%3A%2F%2Frelay\.damus\.io&secret=[0-9a-f]{32}(&nonce=[0-9a-f]+)?(&exp=\d+)?$/
+
+Problems:
+- The nonce parameter is marked as optional `(&nonce=[0-9a-f]+)?` but nonce is ALWAYS generated
+  and ALWAYS required by NostrConnector.parseConnectionString() which throws an error if missing.
+- The exp parameter `(&exp=\d+)?` is never generated in the connection string and is not parsed.
+  This is overly permissive.
+
+Impact: The test passes because the actual generated string matches the overly permissive regex,
+but the regex does not accurately represent what the code generates and requires.
+
+PROPOSAL 1:
+Update regex to correctly require nonce and remove the exp parameter:
+  /^nostr\+keepai:\/\/[0-9a-f]{64}\?relay=wss%3A%2F%2Frelay\.damus\.io&secret=[0-9a-f]{32}&nonce=[0-9a-f]{32}$/
+
+
+ISSUE 2: Incorrect crsql_change_history table schema (LOW - tests skipped)
+--------------------------------------------------------------------------
+Location: packages/tests/src/crsqlite-peer-new.test.ts, lines 159-172
+
+The test creates crsql_change_history with:
+- pk as TEXT (should be BLOB as per migration v7)
+- val as ANY (should be BLOB as per migration v7)
+- Missing autoincrement id column
+- Custom PRIMARY KEY constraint not present in production
+
+Production schema (from packages/db/src/migrations/v7.ts):
+```sql
+CREATE TABLE crsql_change_history (
+  id integer primary key autoincrement,
+  `table` text not null,
+  pk blob not null,
+  cid text not null,
+  val blob,
+  col_version int not null,
+  db_version not null,
+  site_id blob not null,
+  cl int not null,
+  seq int not null
+)
+```
+
+Impact: LOW because the entire test suite is skipped with describe.skip. The incorrect schema
+would cause issues if tests were to be enabled - INSERT statements from Peer class would fail.
+
+PROPOSAL 2:
+If these tests are to be enabled in the future, use the correct schema from migration v7.
+For now, no action needed since tests are skipped.
+
+
+ISSUE 3: all_peers table schema is CORRECT
+------------------------------------------
+Location: packages/tests/src/crsqlite-peer-new.test.ts, lines 147-152
+
+The schema matches the production migration v8 exactly. No issues.
+
+
+ISSUE 4: Transaction test changes are CORRECT
+---------------------------------------------
+Location: packages/tests/src/transaction-error.test.ts
+
+The changes from expecting nested transaction errors to expecting queuing behavior are CORRECT.
+
+Verified that tx() in packages/node/src/createDB.ts and packages/browser/src/createDB.ts
+implements a txQueue promise chain that serializes transactions. When tx() is called:
+1. Inside a callback via setTimeout - the call is asynchronous, outside the isTx check,
+   so it gets queued and runs after the outer transaction completes.
+2. Synchronously inside outer tx callback - it gets queued but must not be awaited inline
+   to avoid deadlock.
+
+The updated tests correctly verify this queuing behavior.
+
+
+STYLING/CODE QUALITY NOTES
+==========================
+
+- Good documentation in IMPLEMENTATION_PLAN.md noting the "Statement is already finalized"
+  cleanup warning that occurs during tests
+- Test skip comments are clear and explain why tests are skipped
+- The transaction tests include helpful executionOrder tracking and console.log for debugging
+
+SUMMARY
+=======
+The commit achieves its goal of making tests pass. Main concern is the incorrect regex in
+nostr-transport.test.ts (Issue 1) which should be fixed to accurately reflect the connection
+string format. The crsql_change_history schema issue is low priority since those tests are skipped.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Incorrect connection string regex) - created specs/fix-connection-string-regex-test.md
+- Issue #2 (Incorrect crsql_change_history table schema) - skipped (tests are skipped)
+- Issue #3 (all_peers table schema) - not an issue
+- Issue #4 (Transaction test changes) - not an issue

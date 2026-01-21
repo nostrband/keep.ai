@@ -1,0 +1,85 @@
+COMMIT REVIEW: d01a17d - Hide empty event dropdown menu
+=======================================================
+
+SUMMARY OF CHANGES
+------------------
+This commit conditionally renders the dropdown menu in EventItem only when hasNavigation is
+true. When no actions are available, a spacer div with matching width (34px) is displayed
+instead to maintain consistent layout alignment with other event items.
+
+Previously, the dropdown button was always shown, but clicking it for non-navigable events
+displayed a disabled "No actions available" menu item - poor UX.
+
+Net result: +2 lines (minor restructuring). Eliminates misleading UI element.
+
+POSITIVE ASPECTS
+----------------
+1. Correctly removes misleading dropdown button that only showed disabled items
+2. Spacer maintains consistent visual alignment with other events that have menus
+3. hasNavigation logic is sound: requires BOTH config.hasId AND config.getEntityPath
+4. Good accessibility: no changes needed since spacer has no interactive elements
+5. File properly ends with newline (contrary to what diff output suggested)
+
+VERIFICATION OF IMPLEMENTATION
+------------------------------
+
+### hasNavigation determination (verified correct)
+The hasNavigation variable is determined by: `config.hasId && config.getEntityPath`
+
+Event type breakdown (26 total event types in EVENT_TYPE_CONFIGS):
+- 7 event types have dropdown visible (hasId: true with getEntityPath defined):
+  - CREATE_NOTE → /notes/{id}
+  - UPDATE_NOTE → /notes/{id}
+  - ADD_TASK → /tasks/{id}
+  - ADD_TASK_CRON → /tasks/{id}
+  - SEND_TO_TASK_INBOX → /tasks/{target_task_id}
+  - TASK_UPDATE → /tasks/{task_id}
+  - ADD_SCRIPT → /scripts/{script_id}
+- 19 event types have dropdown hidden (spacer shown instead)
+
+### Spacer width calculation (verified accurate)
+Button classes: `ml-2 px-2 py-1`
+Width calculation using Tailwind defaults (1rem = 16px):
+- ml-2: 0.5rem = 8px
+- px-2: 0.5rem × 2 = 16px padding
+- Content `···`: ~10px
+- Total: 8px + 16px + ~10px = 34px ✓
+
+The spacer correctly replicates: `<div className="ml-2 px-2 py-1 flex-shrink-0 w-[34px]" />`
+
+### Consistency with other components (acceptable)
+WorkflowEventGroup and TaskEventGroup always show their dropdowns (no conditional rendering).
+This is reasonable because:
+- Those components always have actions available ("Retry", "View workflow/task")
+- EventItem has varying action availability depending on event type
+- EventItem is the only component needing this pattern
+
+ISSUES IDENTIFIED
+-----------------
+None. This is a clean, well-implemented UX improvement.
+
+EDGE CASES VERIFIED
+-------------------
+- All 7 event types with hasId: true have getEntityPath defined (no false positives)
+- Zero event types with hasId: false have getEntityPath (no false negatives)
+- Special case DELETE_NOTE correctly has hasId: false with comment "Can't navigate to deleted note"
+- Cursor and hover styles only apply when hasNavigation is true (line 62)
+
+ACCESSIBILITY VERIFICATION
+--------------------------
+- Dropdown button has aria-label="Event actions" when visible
+- Spacer div has no interactive elements, no aria-label needed
+- Events without navigation don't have misleading cursor-pointer styles
+- Screen readers won't see any misleading interactive elements
+
+CONCLUSION
+----------
+This is an excellent, focused improvement. The implementation is correct, the spacer width
+accurately matches the button width, and no issues or edge cases were found. The change
+successfully improves UX by eliminating a misleading UI element while maintaining visual
+consistency through proper spacing.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+No issues to address - review approved.

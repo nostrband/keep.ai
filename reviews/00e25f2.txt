@@ -1,0 +1,220 @@
+COMMIT REVIEW: 00e25f2
+=======================
+
+Commit: 00e25f2373159dce4ec689b8ad8b4838dfb4cbc9
+Date: Fri Jan 16 20:27:30 2026 +0000
+Author: Claude Agent
+Message: Make debug.enable conditional on development mode
+
+Files Changed:
+- IMPLEMENTATION_PLAN.md (documentation update)
+- apps/web/src/main.tsx (code change)
+
+================================================================================
+CHANGE SUMMARY
+================================================================================
+
+This commit addresses a production readiness issue where `debug.enable("*")`
+was unconditionally called on app startup, causing verbose debug output in
+production builds.
+
+Key Changes:
+
+1. **Wrapped debug.enable() in development check** (lines 24-26 in main.tsx)
+   Before:
+   ```typescript
+   // FIXME debug
+   debug.enable("*");
+   ```
+
+   After:
+   ```typescript
+   // Enable debug output only in development mode
+   if (import.meta.env.DEV) {
+     debug.enable("*");
+   }
+   ```
+
+2. **Updated IMPLEMENTATION_PLAN.md:**
+   - Added new completed item documenting the fix
+   - Updated Last Updated timestamp
+
+================================================================================
+ISSUES IDENTIFIED
+================================================================================
+
+ISSUE 1: Inconsistent Development Mode Check Pattern
+----------------------------------------------------
+Severity: Medium
+
+The codebase uses two different patterns to check for development mode:
+
+1. **main.tsx** (this commit):
+   ```typescript
+   if (import.meta.env.DEV) {
+     debug.enable("*");
+   }
+   ```
+
+2. **worker.ts** (existing code):
+   ```typescript
+   declare const __DEV__: boolean;
+   if (typeof __DEV__ !== "undefined" && __DEV__) {
+     debug.enable("*");
+   }
+   ```
+
+Both patterns work, but using different patterns in different files creates
+inconsistency:
+
+- `import.meta.env.DEV` - Vite's built-in development mode flag (standard)
+- `__DEV__` - Custom define constant from vite.config.ts line 26:
+  `__DEV__: JSON.stringify(process.env.NODE_ENV !== "production")`
+
+Analysis:
+- `import.meta.env.DEV` is the standard Vite approach, more idiomatic
+- `__DEV__` requires extra type declaration and defensive check
+- Both produce the same result during build
+
+Proposal: Standardize on `import.meta.env.DEV` across the codebase:
+```typescript
+// In worker.ts, change from:
+declare const __DEV__: boolean;
+if (typeof __DEV__ !== "undefined" && __DEV__) {
+  debug.enable("*");
+}
+
+// To:
+if (import.meta.env.DEV) {
+  debug.enable("*");
+}
+```
+
+This would:
+- Remove the need for `__DEV__` define constant in vite.config.ts
+- Eliminate the type declaration and defensive check
+- Align with Vite best practices
+
+
+ISSUE 2: Debug Library Not Explicitly Listed as Dependency
+----------------------------------------------------------
+Severity: Low
+
+The `debug` package is imported in apps/web/src/main.tsx but is not listed in
+apps/web/package.json. It's only available through transitive dependencies
+from workspace packages (packages/db, packages/sync, etc.).
+
+This creates fragility - if workspace dependencies are restructured, the import
+could break.
+
+Files importing debug in apps/web/src:
+- main.tsx (line 11)
+- worker.ts (line 4)
+- shared-worker.ts (line 2)
+- QueryProviderEmbedded.tsx (line 20)
+
+Proposal: Add `debug` as an explicit dependency in apps/web/package.json:
+```json
+{
+  "dependencies": {
+    "debug": "^4.3.4",
+    ...
+  }
+}
+```
+
+
+ISSUE 3: No Runtime Override Mechanism
+--------------------------------------
+Severity: Low
+
+Once the application is built for production, there's no way to enable debug
+output without rebuilding. This can make production debugging difficult.
+
+Common patterns for this include:
+- localStorage flag check (e.g., `localStorage.getItem('DEBUG')`)
+- URL parameter check (e.g., `?debug=true`)
+- Environment variable at runtime
+
+Proposal: Consider adding a runtime override for debugging purposes:
+```typescript
+// Enable debug output in development mode or when explicitly requested
+const enableDebug =
+  import.meta.env.DEV ||
+  localStorage.getItem('debug_enabled') === 'true';
+
+if (enableDebug) {
+  debug.enable("*");
+}
+```
+
+This would allow production debugging without rebuilding.
+
+
+ISSUE 4: Vague Original FIXME Comment
+-------------------------------------
+Severity: Very Low
+
+The original code had `// FIXME debug` which wasn't very descriptive. While
+this commit properly fixes the issue, future FIXME comments should include
+more context about what needs to be fixed.
+
+The replacement comment `// Enable debug output only in development mode` is
+much better as it clearly explains the purpose of the code.
+
+Proposal: No action needed - just noting for future reference.
+
+================================================================================
+POSITIVE ASPECTS
+================================================================================
+
+1. **Uses standard Vite pattern**: `import.meta.env.DEV` is the idiomatic
+   way to check development mode in Vite applications.
+
+2. **Clear comment**: The new comment clearly explains the purpose of the
+   conditional check.
+
+3. **Production safety**: Debug output in production can leak sensitive
+   information and impact performance. This fix addresses both concerns.
+
+4. **Proper documentation**: IMPLEMENTATION_PLAN.md was updated to record
+   the fix.
+
+5. **Minimal change**: The fix is simple and focused - just wrapping the
+   existing call in a conditional, no unnecessary refactoring.
+
+================================================================================
+TESTING CONSIDERATIONS
+================================================================================
+
+To verify this change works correctly:
+
+1. **Development build**: `npm run dev` should show debug output in console
+2. **Production build**: `npm run build && npm run preview` should NOT show
+   debug output in console
+3. **Verify both main app and workers**: Check that both main.tsx and
+   worker.ts respect their respective development checks
+
+================================================================================
+CONCLUSION
+================================================================================
+
+This is a straightforward and correct fix for a production readiness issue.
+The debug library's enable-all call was inappropriately running in production,
+and this commit properly gates it behind a development mode check.
+
+The main improvement opportunity is to standardize the development mode check
+pattern across the codebase (main.tsx uses `import.meta.env.DEV` while
+worker.ts uses `__DEV__`).
+
+Overall Quality: GOOD
+Recommendation: No blocking issues. Consider standardizing the dev mode check
+pattern for consistency.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Inconsistent dev mode check pattern) - created specs/standardize-dev-mode-check.md
+- Issue #2 (Debug library not explicit dependency) - created specs/explicit-debug-dependency.md
+- Issue #3 (No runtime override mechanism) - created specs/debug-mode-settings-toggle.md
+- Issue #4 (Vague FIXME comment) - skipped (noting for future reference only)

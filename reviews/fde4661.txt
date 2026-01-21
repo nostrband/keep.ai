@@ -1,0 +1,178 @@
+COMMIT REVIEW: fde4661 - Enable context building for agents
+============================================================
+
+COMMIT SUMMARY
+--------------
+Author: Claude Agent
+Date: Fri Jan 16 19:13:10 2026 +0000
+
+This commit enables the previously-disabled buildContext() function in agent-env.ts,
+giving agents access to chat history context when processing tasks. The change also
+fixes an import path from "packages/proto/dist" to "@app/proto".
+
+FILES CHANGED
+-------------
+1. IMPLEMENTATION_PLAN.md - Updated timestamp, marked FIXME as completed
+2. packages/agent/src/agent-env.ts - Uncommented and enabled ~117 lines of context building code
+
+DETAILED CHANGES
+----------------
+
+1. Import Fix (agent-env.ts:5)
+   - Changed: `import { AssistantUIMessage } from "packages/proto/dist"`
+   - To: `import { AssistantUIMessage, ChatEvent } from "@app/proto"`
+   - This is a good fix - uses proper package alias instead of relative dist path
+
+2. buildContext() Implementation (agent-env.ts:92-206)
+   The function now:
+   - Parses inbox items to extract timestamps for pagination
+   - Fetches chat events using chatStore.getChatEvents() with before/since pagination
+   - Applies MAX_TOKENS limit: 1000 for workers, 5000 for planners
+   - Uses rough token estimation: JSON.stringify(e).length / 2
+   - Filters out inbox items to avoid duplication
+   - Converts ChatEvent objects to AssistantUIMessage format
+   - Adds stats message with current time and counts
+
+3. Action Event Handling (agent-env.ts:168-178)
+   - Action events are stripped of timestamp (moved to metadata.createdAt)
+   - Content is serialized as "Action Event: " + JSON.stringify(eventContent)
+   - Role is set to "assistant"
+
+POTENTIAL ISSUES
+----------------
+
+ISSUE 1: DUPLICATE MESSAGES IN LLM CONTEXT [HIGH SEVERITY]
+Location: agent-env.ts:92-95 + task-worker.ts:205
+
+Description:
+There is potential for duplicate messages to be sent to the LLM. The data flow is:
+1. TaskWorker loads history from memoryStore.getMessages() (messages table) at line 149
+2. History is pushed to agent.history at line 205 (before agent.loop())
+3. Inside agent.loop(), buildContext() is called which fetches from chatStore.getChatEvents() (chat_events table)
+4. The buildContext results are also pushed to agent.history at agent.ts:93-95
+
+If the same messages exist in both the messages table and chat_events table, they will
+both be loaded and sent to the LLM, wasting tokens and potentially confusing the model.
+
+The current deduplication logic (lines 142-144) only checks against inbox items:
+```typescript
+if (e.type === "message") {
+  const isInInbox = inbox.find((i) => i.id === e.id);
+  if (isInInbox) continue;  // Only skips inbox items, not pre-loaded history!
+}
+```
+
+Evidence: Messages appear to be saved to both tables through different code paths:
+- saveHistory() saves to memoryStore (messages table)
+- saveChatMessages() saves to chatStore
+- Events are saved via saveChatEvent() to chat_events table
+
+ISSUE 2: STATS MESSAGE USES HARDCODED "main" [LOW SEVERITY]
+Location: agent-env.ts:188
+
+Description:
+```typescript
+- Messages: ${await this.#api.chatStore.countMessages("main")}
+```
+The stats message always counts messages in the "main" chat, regardless of which
+task's thread is being processed. This could be confusing if the agent is working
+on a task in a different thread.
+
+ISSUE 3: TOKEN ESTIMATION ACCURACY [LOW SEVERITY]
+Location: agent-env.ts:148
+
+Description:
+```typescript
+tokens += Math.ceil(JSON.stringify(e).length / 2);
+```
+The approximation of 2 characters per token is rough. JSON has lots of punctuation
+and structure that doesn't map well to tokens. Common estimates for English text
+are ~4 characters per token.
+
+However, this is acceptable because:
+- It's only used for local context limiting, not billing
+- Being conservative (overestimating tokens) is safer than underestimating
+- Actual token counts from the provider are used for cost tracking
+
+ISSUE 4: chatId FALLBACK TO "main" [INFO - LOW RISK]
+Location: agent-env.ts:130
+
+Description:
+```typescript
+chatId: this.task.thread_id || "main",
+```
+Falls back to "main" if thread_id is empty. In normal operation, thread_id should
+already be set by executeTask() (task-worker.ts:161) before buildContext() is called.
+The fallback serves as a safety net but may indicate an unexpected code path if triggered.
+
+PROPOSALS
+---------
+
+PROPOSAL 1: Deduplicate Between History Sources
+Severity: HIGH - Should be fixed
+Effort: Low
+
+Add deduplication when building context to skip messages already in the loaded history.
+Options:
+
+A) Pass loaded history IDs to buildContext():
+```typescript
+async buildContext(input: StepInput, loadedHistoryIds?: Set<string>): Promise<AssistantUIMessage[]> {
+  // ... existing code ...
+  for (const e of events) {
+    if (e.type === "message") {
+      // Skip if already in loaded history
+      if (loadedHistoryIds?.has(e.id)) continue;
+      // Skip if in inbox
+      const isInInbox = inbox.find((i) => i.id === e.id);
+      if (isInInbox) continue;
+    }
+    // ...
+  }
+}
+```
+
+B) Track message IDs when pushing to history in agent.ts:
+```typescript
+const seenIds = new Set<string>(this.history.map(m => m.id));
+const contexts = await this.env.buildContext(input);
+for (const c of contexts) {
+  if (!seenIds.has(c.id)) {
+    this.history.push(c);
+    seenIds.add(c.id);
+  }
+}
+```
+
+C) Choose single source of truth - either memoryStore OR chatStore for history,
+   not both. This is a larger architectural change.
+
+PROPOSAL 2: Use Task's Chat ID for Stats
+Severity: LOW - Nice to have
+Effort: Trivial
+
+Change:
+```typescript
+- Messages: ${await this.#api.chatStore.countMessages(this.task.chat_id || "main")}
+```
+
+VERDICT
+-------
+The commit enables useful functionality for agent context awareness. However, the
+potential duplicate message issue (Issue 1) should be investigated and fixed as it
+could impact token usage and LLM response quality.
+
+Good aspects:
+- Proper import path fix
+- Reasonable token estimation for local limiting
+- Correct handling of action events vs message events
+- Proper pagination using timestamps
+- Re-sorting events to chronological order
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Duplicate messages in LLM context) - created specs/revert-context-building.md
+- Issue #2 (Stats message uses hardcoded "main") - covered by specs/revert-context-building.md
+- Issue #3 (Token estimation accuracy) - covered by specs/revert-context-building.md
+- Issue #4 (chatId fallback to "main") - covered by specs/revert-context-building.md

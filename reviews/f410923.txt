@@ -1,0 +1,114 @@
+COMMIT REVIEW: f410923 - Deduplicate TaskEventGroup header rendering
+=====================================================================
+
+SUMMARY OF CHANGES
+------------------
+This commit extracts shared header content from TaskEventGroup into an inline HeaderContent
+component and factors out headerBaseClass CSS class string. The previous code had ~120 lines
+of duplicated JSX - once in a Link wrapper (for navigable tasks) and once in a div wrapper
+(fallback). Both wrappers now render the same HeaderContent.
+
+Net result: -44 lines (113 lines removed, 69 lines added). Eliminates risk of the two
+header versions diverging.
+
+POSITIVE ASPECTS
+----------------
+1. Successfully eliminates duplicate JSX (~70 lines of identical content was duplicated)
+2. headerBaseClass string correctly factors out conditional CSS classes
+3. Both Link and div wrappers now use identical content, reducing maintenance burden
+4. DropdownMenu with Link wrapper is correctly implemented using asChild pattern
+5. Good accessibility: button has aria-label="Task actions"
+6. e.stopPropagation() correctly prevents Link navigation when clicking dropdown trigger
+
+ISSUES IDENTIFIED
+-----------------
+
+### ISSUE 1: Inline component definition is a React anti-pattern
+**Severity**: Medium
+**Location**: TaskEventGroup.tsx (lines 149-203)
+**Description**: The HeaderContent component is defined INSIDE the TaskEventGroup function
+component:
+```tsx
+export function TaskEventGroup({ taskId, events }: TaskEventGroupProps) {
+  // ... state and hooks ...
+
+  const HeaderContent = () => (
+    // ... JSX ...
+  );
+
+  return (/* uses HeaderContent */);
+}
+```
+This is problematic because:
+1. A new HeaderContent function is created on EVERY render of TaskEventGroup
+2. React cannot recognize it's the "same" component between renders (function identity changes)
+3. Cannot use React.memo() on an inline component
+4. Missing proper displayName in React DevTools
+5. The component has a useEffect with setInterval that updates every second during active runs,
+   causing frequent re-renders and HeaderContent recreation
+
+**Proposal**: Three options (in order of preference):
+1. Extract HeaderContent outside TaskEventGroup, passing needed values as props:
+```tsx
+interface HeaderContentProps {
+  task: Task | undefined;
+  taskTitle: string;
+  duration: string | null;
+  steps: number | null;
+  totalCost: number;
+  handleViewTask: () => void;
+}
+const HeaderContent = ({ task, taskTitle, duration, steps, totalCost, handleViewTask }: HeaderContentProps) => (/*...*/);
+```
+2. Use a JSX fragment variable instead of a component:
+```tsx
+const headerContent = <>/* ... JSX ... */</>;
+// Then use {headerContent} in both places
+```
+3. If closure access to local variables is essential, use useMemo:
+```tsx
+const HeaderContent = useMemo(() => () => (/*...*/), [task, taskTitle, duration, steps, totalCost]);
+```
+
+### ISSUE 2: Performance concern with timer re-renders
+**Severity**: Low
+**Location**: TaskEventGroup.tsx (lines 52-61)
+**Description**: The component has a useEffect with setInterval that updates currentTime
+every second when a task is running. Combined with the inline component definition, this
+means HeaderContent is recreated every second during active task runs. While modern React
+handles this efficiently for simple JSX, it's still wasteful.
+
+**Proposal**: This is addressed by fixing Issue 1. Additionally, consider React.memo on
+TaskEventGroup if parent components trigger frequent re-renders.
+
+### ISSUE 3: Inconsistent inline component patterns in codebase
+**Severity**: Low (observation)
+**Description**: The codebase has a correct pattern in SharedHeader.tsx where AssistantIcon
+is defined OUTSIDE the component at module scope. The TaskEventGroup inline definition is
+inconsistent with this established pattern.
+
+**Proposal**: Follow the existing pattern from SharedHeader.tsx when extracting HeaderContent.
+
+VERIFICATION
+------------
+The following aspects were verified and found to be correct:
+- headerBaseClass is properly used in both Link and div wrappers
+- DropdownMenu with asChild prop is correctly implemented
+- stopPropagation prevents Link navigation on dropdown click
+- Accessibility is handled (aria-label on button, keyboard support from Radix UI)
+- Subsequent commits (25f1622, 5042d69) correctly maintained the HeaderContent pattern
+
+CONCLUSION
+----------
+The deduplication itself was well-executed and achieves its stated goal. The code successfully
+eliminates duplicate JSX and reduces the risk of the two header versions diverging. However,
+the inline component definition is a React anti-pattern that should be refactored. The
+functional impact is minimal (React handles it efficiently), but it violates best practices
+and could cause issues if the pattern is copied elsewhere in the codebase.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Inline component definition is React anti-pattern) - created specs/taskeventgroup-header-refactor.md
+- Issue #2 (Performance concern with timer re-renders) - covered by specs/taskeventgroup-header-refactor.md
+- Issue #3 (Inconsistent inline component patterns) - covered by specs/taskeventgroup-header-refactor.md

@@ -1,0 +1,159 @@
+COMMIT REVIEW: 341d5f8 - Fix chat pin-to-bottom behavior with ResizeObserver
+
+========================================
+CHANGES SUMMARY
+========================================
+
+This commit adds ResizeObserver to ChatInterface.tsx to keep users scrolled to the bottom when content expands dynamically (images loading, markdown rendering):
+
+1. **ResizeObserver implementation** (ChatInterface.tsx:191-220):
+   - Observes the container element for size changes
+   - Tracks `lastHeight` to detect content growth vs shrinkage
+   - Only auto-scrolls if `wasAtBottomRef.current` is true (user was at bottom)
+   - Properly disconnects observer on unmount
+
+2. **IMPLEMENTATION_PLAN.md**:
+   - Updated task #17 status to COMPLETED
+   - Updated completion counts
+
+Files changed: apps/web/src/components/ChatInterface.tsx, IMPLEMENTATION_PLAN.md
+
+========================================
+POTENTIAL ISSUES
+========================================
+
+ISSUE 1: Inconsistent DOM references for height comparison
+Severity: HIGH
+Location: ChatInterface.tsx:266-279 (after dcd4f8d patch, lines 266-285)
+
+The ResizeObserver implementation has a critical inconsistency:
+```typescript
+let lastHeight = container.scrollHeight;  // Uses container ref
+
+const observer = new ResizeObserver(() => {
+  const el = document.documentElement;
+  const newHeight = el.scrollHeight;  // Uses document.documentElement
+
+  if (newHeight > lastHeight) {
+    scrollToBottom("auto");
+  }
+  lastHeight = newHeight;  // Now stores documentElement height
+});
+```
+
+- `lastHeight` is initialized from `container.scrollHeight`
+- `newHeight` is read from `document.documentElement.scrollHeight`
+- These are different DOM nodes with different scrollHeight values
+- After first resize, `lastHeight` stores documentElement value, making initial comparison incorrect
+
+Proposal: Use consistent DOM reference:
+```typescript
+const observer = new ResizeObserver(() => {
+  if (!wasAtBottomRef.current) return;
+
+  const el = document.documentElement;
+  const newHeight = el.scrollHeight;
+
+  if (newHeight > lastHeight) {
+    scrollToBottom("auto");
+  }
+
+  lastHeight = newHeight;
+});
+
+// Initialize with same reference
+let lastHeight = document.documentElement.scrollHeight;
+```
+
+---
+
+ISSUE 2: ResizeObserver effect re-runs on every render
+Severity: MEDIUM
+Location: ChatInterface.tsx:285 (dependency array)
+
+```typescript
+}, [scrollToBottom]);
+```
+
+`scrollToBottom` is a `useCallback` with empty dependency array (line 188), but React still creates a new function reference on each render. This causes the ResizeObserver effect to re-run, disconnecting and reconnecting the observer.
+
+However, looking at the actual code at line 188:
+```typescript
+const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
+  window.scrollTo({ top: document.documentElement.scrollHeight, behavior });
+}, []);
+```
+
+The empty `[]` means `scrollToBottom` is stable across renders. This should NOT cause unnecessary re-runs. Verified: this is not an issue.
+
+---
+
+ISSUE 3: Race condition between ResizeObserver and scroll tracking
+Severity: LOW
+Location: ChatInterface.tsx:268-277
+
+The ResizeObserver callback checks `wasAtBottomRef.current` to decide whether to scroll. But `wasAtBottomRef` is updated asynchronously by the scroll event listener (line 156). Sequence:
+1. Content resizes (ResizeObserver fires)
+2. ResizeObserver reads `wasAtBottomRef` (might be stale)
+3. Scroll event fires (updates `wasAtBottomRef`)
+
+If content resizes before the scroll event has updated the ref, the check uses stale data.
+
+In practice, this is a minor issue because:
+- The scroll event listener is passive and fires quickly
+- Most resize triggers (image load) happen after user is already at stable scroll position
+
+Proposal: No change needed - edge case is rare and impact is minor (worst case: one missed auto-scroll).
+
+---
+
+ISSUE 4: Observer created for container but height compared against document
+Severity: MEDIUM
+Location: ChatInterface.tsx:282
+
+```typescript
+observer.observe(container);
+```
+
+The observer is attached to `container` (the chat messages div), but height comparisons use `document.documentElement.scrollHeight`. This works because:
+- Container resize triggers the callback
+- Document's scrollHeight changes when container grows
+
+But it's semantically misleading. A clearer approach would observe the document body or explicitly comment why we observe container but measure document.
+
+Proposal: Add clarifying comment:
+```typescript
+// Observe container - its resize triggers callback
+// Compare against document.documentElement.scrollHeight for accurate scroll position
+observer.observe(container);
+```
+
+========================================
+CODE QUALITY NOTES
+========================================
+
+Positive aspects:
+- Proper cleanup with `observer.disconnect()` on unmount
+- Early return when user not at bottom (preserves manual scroll position)
+- Uses "auto" scroll behavior for instant jump (not jarring smooth scroll)
+- Clean integration with existing `wasAtBottomRef` pattern
+
+The commit message correctly notes that the three existing scroll listeners are kept separate because they serve distinct purposes. This is the right architectural decision.
+
+========================================
+VERIFICATION
+========================================
+
+Verified:
+- `scrollToBottom` uses `window.scrollTo` with document.documentElement.scrollHeight
+- `wasAtBottomRef` is updated by scroll event listener with 30px threshold
+- ResizeObserver is a standard Web API with good browser support
+- No memory leaks - observer properly disconnected
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Inconsistent DOM references for height comparison) - created specs/chat-resizeobserver-height-reference.md
+- Issue #2 (ResizeObserver effect re-runs on every render) - skipped (not an issue - verified stable)
+- Issue #3 (Race condition between ResizeObserver and scroll tracking) - skipped
+- Issue #4 (Observer created for container but height compared against document) - skipped

@@ -1,0 +1,160 @@
+COMMIT REVIEW: 6f551f1
+=======================
+Title: Remove more commented-out code blocks (~43 lines)
+Author: Claude Agent
+Date: 2026-01-16
+
+SUMMARY OF CHANGES
+------------------
+This commit removes approximately 43 lines of commented-out code across 4 files:
+
+1. packages/agent/src/index.ts (3 lines removed)
+   - Removed commented-out Memory type export:
+   ```typescript
+   // Interfaces
+   // export { type Memory } from "./interfaces";
+   ```
+
+2. packages/agent/src/task-scheduler.ts (4 lines removed)
+   - Removed commented-out getTodoTasks() references:
+   ```typescript
+   // // Get tasks with expired timers and with non-empty inboxes
+   // const todoTasks = await this.api.taskStore.getTodoTasks();
+   ...
+   // todoTasks.map((t) => taskMap.set(t.id, t));
+   ```
+
+3. packages/agent/src/task-worker.ts (26 lines removed)
+   - Removed entire commented-out startStatusUpdater() method implementation
+
+4. packages/db/src/nostr-peer-store.ts (10 lines removed)
+   - Removed commented-out listNostrPeerCursors() method:
+   ```typescript
+   // async listNostrPeerCursors(): Promise<NostrPeerCursor[]> { ... }
+   ```
+
+VERIFICATION OF REMOVED CODE
+----------------------------
+
+Memory type export:
+- The Memory interface was never imported or used anywhere in the codebase
+- Export was commented out in commit a09d1ec (Nov 20, 2025)
+- Safe to remove
+
+getTodoTasks() references:
+- The getTodoTasks() method was removed from TaskStore in commit b5ebf07
+- The commented code was calling a non-existent method
+- Replaced by getTasks(ids) and listTasks() methods
+- Safe to remove
+
+startStatusUpdater() method:
+- Intentionally disabled in commit 7b40d02 (Jan 14, 2026) during "Big refactor for workflow management focus"
+- Method was never called after being commented out
+- Safe to remove
+
+listNostrPeerCursors() method:
+- Never used in production code (commented out immediately after creation)
+- Replaced by specific getters: getNostrPeerCursorSend() and getNostrPeerCursorRecv()
+- Safe to remove
+
+ISSUES FOUND
+------------
+
+Issue #1: Orphaned Agent Status Infrastructure
+Severity: Medium
+Location: packages/db/src/api.ts lines 198-224, packages/agent/src/task-worker.ts
+
+The removal of startStatusUpdater() leaves behind orphaned infrastructure:
+
+1. Database methods that are never called:
+   - setAgentStatus(value: string) - line 198-205 in api.ts - NEVER CALLED
+   - getAgentStatus() - line 207-224 in api.ts - only called by frontend
+
+2. Database table that is written to but never updated:
+   - agent_state table (created in migrations/v2.ts)
+
+3. Frontend still polling dead data:
+   - useAgentStatus() hook in apps/web/src/hooks/dbApiReads.ts polls every 5 seconds
+   - SharedHeader.tsx displays status that will always be empty
+
+Current behavior: The frontend shows empty status because nothing ever calls setAgentStatus().
+
+Issue #2: Remaining Commented Code in task-worker.ts
+Severity: Low
+Location: packages/agent/src/task-worker.ts lines 109, 138, 402-404
+
+While the startStatusUpdater() method body was removed, references to it remain commented out:
+
+Line 109:
+```typescript
+// let statusUpdaterInterval: ReturnType<typeof setInterval> | undefined;
+```
+
+Line 138:
+```typescript
+// statusUpdaterInterval = await this.startStatusUpdater(taskType);
+```
+
+Lines 402-404:
+```typescript
+// if (statusUpdaterInterval) clearInterval(statusUpdaterInterval);
+// this.debug(`Clear agent status`);
+// await this.api.setAgentStatus("");
+```
+
+These should also be removed for consistency.
+
+Issue #3: Dead Code File - interfaces.ts
+Severity: Low
+Location: packages/agent/src/interfaces.ts
+
+The interfaces.ts file is now entirely dead code. It contains only:
+```typescript
+import { ModelMessage } from "ai";
+
+export interface Memory {
+  getMessages({}): Promise<ModelMessage[]>;
+}
+```
+
+Both the Memory interface and the ModelMessage import are unused. The entire file can be deleted.
+
+PROPOSALS
+---------
+
+Proposal for Issue #1 (Orphaned Agent Status Infrastructure):
+Option A: Remove the orphaned infrastructure entirely:
+1. Delete setAgentStatus() and getAgentStatus() from packages/db/src/api.ts
+2. Remove useAgentStatus() hook from apps/web/src/hooks/dbApiReads.ts
+3. Remove agent status display from SharedHeader.tsx
+4. Consider dropping agent_state table in a migration
+
+Option B: Re-enable agent status updates:
+1. Uncomment the status updater code in task-worker.ts
+2. This would restore the "Planning...", "Executing...", "Working..." status indicators
+
+Recommendation: Option A is simpler. If status updates are needed in the future, they can be re-implemented with fresh design. The commented code suggests this feature was intentionally disabled during the workflow management refactor.
+
+Proposal for Issue #2 (Remaining Commented Code):
+Remove the remaining commented references in task-worker.ts:
+- Delete line 109 (statusUpdaterInterval declaration)
+- Delete line 138 (startStatusUpdater call)
+- Delete lines 402-404 (cleanup code)
+
+This completes the cleanup started in this commit.
+
+Proposal for Issue #3 (Dead interfaces.ts):
+Delete packages/agent/src/interfaces.ts entirely. The file serves no purpose.
+
+OVERALL VERDICT
+---------------
+Good cleanup commit that removes verified dead code. All removed code was properly verified as unused. However, the commit reveals some orphaned infrastructure (agent status system) and incomplete cleanup (remaining commented references, dead interfaces.ts file) that should be addressed in follow-up work.
+
+The agent status orphaned infrastructure (Issue #1) is the most significant finding - it represents dead code paths that the frontend still tries to consume, resulting in always-empty status displays.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Orphaned agent status infrastructure) - created specs/remove-orphaned-agent-status.md and ideas/agent-status-from-active-runs.md
+- Issue #2 (Remaining commented code in task-worker.ts) - covered by specs/remove-orphaned-agent-status.md
+- Issue #3 (Dead interfaces.ts file) - covered by specs/remove-orphaned-agent-status.md

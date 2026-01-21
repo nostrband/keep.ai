@@ -1,0 +1,212 @@
+UX Test Report: eaf4c4e - Implement early abort when user pauses running workflow
+================================================================================
+
+Commit: eaf4c4eb344e5050642cf878432ad7ffdedc2ecb
+Date: Mon Jan 19 10:53:34 2026 +0000
+Files Changed:
+  - IMPLEMENTATION_PLAN.md
+  - packages/agent/src/errors.ts (WorkflowPausedError class)
+  - packages/agent/src/index.ts (export)
+  - packages/agent/src/sandbox/api.ts (checkWorkflowActive method)
+  - packages/agent/src/workflow-worker.ts (pause handling)
+
+TEST ENVIRONMENT
+----------------
+- Server: Running on localhost:3001
+- Database: Empty (no existing workflows)
+- Test Method: Code analysis + Playwright UI verification where applicable
+
+FEATURE DESCRIPTION
+-------------------
+This commit implements early abort when a user pauses a running workflow.
+Instead of continuing to completion, execution stops cleanly on the next
+tool invocation.
+
+Key implementation points:
+1. WorkflowPausedError class for clean abort signaling
+2. checkWorkflowActive() called before each tool in sandbox API
+3. workflowId passed from WorkflowWorker to SandboxAPI
+4. Paused runs recorded with "paused" result instead of error
+
+CODE ANALYSIS
+-------------
+
+1. WORKFLOWPAUSEDERROR CLASS (packages/agent/src/errors.ts):
+   ```typescript
+   export class WorkflowPausedError extends Error {
+     public readonly workflowId: string;
+
+     constructor(workflowId: string) {
+       super(`Workflow ${workflowId} was paused by user`);
+       this.name = 'WorkflowPausedError';
+       this.workflowId = workflowId;
+     }
+   }
+
+   export function isWorkflowPausedError(error: unknown): error is WorkflowPausedError {
+     return error instanceof WorkflowPausedError;
+   }
+   ```
+   - Clean error class extending Error
+   - Includes workflowId for debugging
+   - Type guard function for error checking
+
+2. CHECK WORKFLOW ACTIVE (packages/agent/src/sandbox/api.ts, lines 84-101):
+   ```typescript
+   private async checkWorkflowActive(): Promise<void> {
+     if (!this.workflowId) return;  // Skip for non-workflow contexts
+
+     try {
+       const workflow = await this.api.scriptStore.getWorkflow(this.workflowId);
+       if (!workflow || workflow.status !== 'active') {
+         this.debug(`Workflow ${this.workflowId} is no longer active...`);
+         throw new WorkflowPausedError(this.workflowId);
+       }
+     } catch (error) {
+       if (error instanceof WorkflowPausedError) {
+         throw error;  // Re-throw pause errors
+       }
+       this.debug(`Error checking workflow status: ${error}`);
+       // Don't block on DB errors - allow execution to continue
+     }
+   }
+   ```
+
+   Analysis:
+   - Called before each tool invocation (line 133 of api.ts)
+   - Queries database for current workflow status
+   - Throws WorkflowPausedError if status !== 'active'
+   - Gracefully handles database errors (fail-open for resilience)
+   - Skips check when workflowId is not provided (test runs, etc.)
+
+3. PAUSE HANDLING IN WORKFLOW WORKER (packages/agent/src/workflow-worker.ts):
+   ```typescript
+   if (isWorkflowPausedError(error)) {
+     this.debug("WORKFLOW_PAUSED: User paused workflow during execution");
+
+     const costMicrodollars = Math.ceil((sandbox?.context?.cost || 0) * 1000000);
+
+     await this.api.scriptStore.finishScriptRun(
+       scriptRunId,
+       new Date().toISOString(),
+       '"paused"',      // Result field
+       "",              // No error message
+       logs.join("\n"),
+       "",              // No error type
+       costMicrodollars
+     );
+
+     this.emitSignal({ type: "done", ... });
+     return;  // Clean return, no re-throw
+   }
+   ```
+
+   Analysis:
+   - Catches WorkflowPausedError specifically
+   - Records run with result="paused", error=""
+   - Preserves logs and cost from execution up to pause point
+   - Emits "done" signal (no retry or maintenance triggers)
+   - Does NOT change workflow status (user already set it)
+
+4. PAUSE VS ERROR COMPARISON:
+   | Aspect            | Paused Run              | Failed Run                    |
+   |-------------------|-------------------------|-------------------------------|
+   | error field       | EMPTY                   | Error message text            |
+   | result field      | "paused"                | Empty or partial              |
+   | error_type        | EMPTY                   | auth/permission/network/etc.  |
+   | UI Status Badge   | "Completed" (green)     | "Error" (red)                 |
+   | Scheduler Signal  | "done"                  | "retry"/"needs_attention"     |
+   | Triggers Retry?   | NO                      | YES (for retryable errors)    |
+   | Maintenance Mode? | NO                      | YES (for logic errors)        |
+
+UX VERIFICATION STATUS
+----------------------
+[NOT TESTABLE - NO DATA] Pause during active workflow execution
+  - Expected: Execution stops on next tool call, run shows as "Completed" with "paused" result
+  - Reason: No active workflows to pause
+
+[NOT TESTABLE - NO DATA] Pause button visibility
+  - Expected: "Pause" button visible only for status === "active"
+  - Location: WorkflowDetailPage.tsx (lines 295-306)
+  - Reason: No active workflows in database
+
+[NOT TESTABLE - NO DATA] Paused run display in run history
+  - Expected: Green "Completed" badge, Result shows "paused"
+  - Location: ScriptRunDetailPage.tsx (lines 44-50, 179-186)
+  - Reason: No script runs in database
+
+[NOT TESTABLE - NO DATA] Cost accumulation on paused run
+  - Expected: Cost reflects tools called before pause
+  - Reason: No runs to verify
+
+[VERIFIED - CODE] Pause detection mechanism
+  - checkWorkflowActive() queries DB before each tool
+  - Correctly throws WorkflowPausedError when status !== 'active'
+  - Graceful fallback on DB errors (execution continues)
+
+[VERIFIED - CODE] Clean abort handling
+  - WorkflowPausedError caught separately from other errors
+  - Run recorded with "paused" result, not error
+  - No retry or maintenance triggers
+  - Cost and logs preserved
+
+[VERIFIED - CODE] UI button logic
+  - Pause button: shows when workflow.status === "active"
+  - Resume button: shows when workflow.status === "disabled"
+  - handlePause: sets status to "disabled"
+  - handleResume: sets status to "active"
+
+EDGE CASES ANALYZED
+-------------------
+1. Pause with no workflowId (test run context):
+   - checkWorkflowActive() returns early (line 85)
+   - Script executes normally without pause checks
+   - CORRECT BEHAVIOR
+
+2. Database error during pause check:
+   - Error logged, execution continues
+   - Only WorkflowPausedError causes abort
+   - CORRECT BEHAVIOR (fail-open for resilience)
+
+3. Long-running tool call when pause triggered:
+   - Pause detected before NEXT tool call
+   - Current tool may complete first
+   - EXPECTED BEHAVIOR (granularity is per-tool)
+
+4. Race condition: pause and resume quickly:
+   - Each check queries current DB state
+   - If resumed before next check, execution continues
+   - CORRECT BEHAVIOR
+
+ISSUES FOUND
+------------
+POTENTIAL ISSUE: Tool call check timing
+
+The pause check happens BEFORE tool input validation (line 133 of api.ts):
+```typescript
+const tool = this.tools[call.toolName];
+if (!tool) {
+  results.push({ error: ... });
+  continue;
+}
+await this.checkWorkflowActive();  // <-- Called after tool lookup
+```
+
+If a tool call has invalid parameters, the pause check still runs.
+This is actually fine - even invalid tool calls should respect pause state.
+
+No actual issues found. Implementation is correct.
+
+RECOMMENDATIONS
+---------------
+1. Add visual feedback in UI when workflow is being paused (loading state)
+2. Consider adding a "Paused by user" label on paused runs instead of relying
+   on result="paused" text
+3. Add integration tests for pause during multi-tool execution
+
+RESULT: PASS (code analysis only - no runtime UX testing possible due to empty database)
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+No issues found in this review.

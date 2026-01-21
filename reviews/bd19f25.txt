@@ -1,0 +1,139 @@
+COMMIT REVIEW: bd19f25 - Validate workflow status before allowing retry
+
+============================================================
+SUMMARY OF CHANGES
+============================================================
+
+This commit adds validation to prevent false-positive retry feedback for workflows
+that are not in the 'active' status. The scheduler only executes workflows where
+status === 'active', so showing "Retry scheduled" for paused/disabled workflows
+was misleading.
+
+Files Changed:
+- IMPLEMENTATION_PLAN.md - Marked task as completed
+- apps/web/src/components/WorkflowEventGroup.tsx - Added status validation
+
+Changes in WorkflowEventGroup.tsx:
+
+1. Early exit validation in handleRetry (lines 74-78):
+   - Checks if workflow.status !== 'active' before scheduling retry
+   - Shows "Enable workflow first to retry" message and returns early
+   - Prevents mutation from executing for non-active workflows
+
+2. UI disabled state on Retry menu item (line 213):
+   - Adds condition: disabled={... || !!(workflow && workflow.status !== 'active')}
+   - Disables the menu item for non-active workflows
+
+3. Menu item label change (lines 216-219):
+   - Shows "Enable to retry" instead of "Retry" for non-active workflows
+   - Shows "Retrying..." when mutation is pending
+   - Shows "Retry" only for active workflows
+
+============================================================
+ISSUES IDENTIFIED
+============================================================
+
+ISSUE 1: Double-bang (!!) readability concern
+Severity: LOW (Code Style)
+Location: WorkflowEventGroup.tsx line 213
+
+The condition `!!(workflow && workflow.status !== 'active')` uses double-bang
+for boolean coercion. While correct, it's slightly harder to read.
+
+Could be simplified to: `workflow?.status !== 'active'`
+since the disabled prop already treats truthy/falsy values as boolean.
+
+---
+
+ISSUE 2: Minor race condition possibility
+Severity: LOW (Edge Case)
+Location: handleRetry function
+
+Between the status check and the mutation, a user could theoretically pause
+the workflow via another browser tab. The mutation would succeed (setting
+next_run_timestamp) but the scheduler would not execute it.
+
+Impact: The user would see "Retry scheduled" but the workflow wouldn't run.
+They would discover this when navigating to the workflow detail page and
+seeing it's paused.
+
+Mitigation: This is an extremely rare edge case. The current implementation
+is appropriate for v1. A full solution would require server-side validation.
+
+---
+
+ISSUE 3: Error state not explicitly mentioned in message
+Severity: VERY LOW (UX)
+Location: showSuccessMessage call
+
+The message "Enable workflow first to retry" covers both 'disabled' (paused)
+and 'error' states. For 'error' state workflows, "Enable" might be slightly
+confusing since the workflow was active before it errored.
+
+However, the user action is the same in both cases (navigate to workflow
+and fix/re-enable), so this is acceptable.
+
+============================================================
+POSITIVE OBSERVATIONS
+============================================================
+
+1. Correct scheduler alignment: The check `status !== 'active'` matches
+   exactly what the scheduler uses in workflow-scheduler.ts line 201.
+
+2. Uses the proper timeout cleanup pattern: The commit uses showSuccessMessage
+   helper which properly manages setTimeout with useRef and cleanup on unmount.
+   No memory leak concerns.
+
+3. Clear comment explaining the rationale: "Only allow retry for active
+   workflows - scheduler only executes where status === 'active'"
+
+4. Two-layer validation: Both logic layer (early return) and UI layer
+   (disabled button) prevent the action.
+
+5. Consistent with other status checks: This matches the pattern used in
+   sandbox/api.ts, MainPage.tsx, and other components.
+
+============================================================
+PROPOSALS FOR RESOLUTION
+============================================================
+
+PROPOSAL 1: Simplify boolean coercion (for ISSUE 1)
+Change line 213 from:
+  disabled={updateWorkflowMutation.isPending || !!(workflow && workflow.status !== 'active')}
+To:
+  disabled={updateWorkflowMutation.isPending || workflow?.status !== 'active'}
+
+Effort: Trivial
+Impact: Slightly improved readability
+
+---
+
+PROPOSAL 2: Consider 'error' state in message (for ISSUE 3)
+Could differentiate the message based on status:
+  if (workflow.status === 'error') {
+    showSuccessMessage("Fix workflow errors before retry");
+  } else {
+    showSuccessMessage("Enable workflow first to retry");
+  }
+
+Effort: Small
+Impact: Slightly clearer UX for error state
+Verdict: Optional, current implementation is acceptable
+
+============================================================
+OVERALL ASSESSMENT
+============================================================
+
+Quality: GOOD
+This is a solid bug fix that correctly prevents a genuine UX issue. The
+implementation aligns with scheduler behavior and uses proper patterns.
+
+Recommendation: APPROVE
+No blocking issues. The identified concerns are minor code style preferences.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Double-bang readability concern) - skipped
+- Issue #2 (Minor race condition possibility) - skipped
+- Issue #3 (Error state not explicitly mentioned in message) - skipped

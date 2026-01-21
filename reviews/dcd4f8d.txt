@@ -1,0 +1,211 @@
+COMMIT REVIEW: dcd4f8d - Restore scroll position when returning to chat pages
+
+========================================
+CHANGES SUMMARY
+========================================
+
+This commit adds scroll position persistence for chat pages using sessionStorage:
+
+1. **Scroll position check on mount** (ChatInterface.tsx:116-127):
+   - Checks sessionStorage for saved position on mount
+   - Sets `shouldRestoreScrollRef.current = true` if position exists
+
+2. **Save position on navigation** (ChatInterface.tsx:130-144):
+   - useEffect cleanup saves current scroll position to sessionStorage
+   - Uses per-chat key: `chat-scroll-${chatId}`
+
+3. **Restore position on first load** (ChatInterface.tsx:205-226):
+   - If `shouldRestoreScrollRef && !restoredScrollRef`, restores saved position
+   - Updates `wasAtBottomRef` based on restored position
+   - Clears saved position after restoration
+
+4. **Reset state on chat change** (ChatInterface.tsx:295-302):
+   - Resets `shouldRestoreScrollRef` and `restoredScrollRef` when chatId changes
+
+5. **IMPLEMENTATION_PLAN.md**:
+   - Updated task #18 status to COMPLETED
+   - Updated completion counts
+
+Files changed: apps/web/src/components/ChatInterface.tsx, IMPLEMENTATION_PLAN.md
+
+========================================
+POTENTIAL ISSUES
+========================================
+
+ISSUE 1: Scroll position may be saved incorrectly due to effect timing
+Severity: MEDIUM
+Location: ChatInterface.tsx:130-144
+
+```typescript
+useEffect(() => {
+  const storageKey = getScrollStorageKey(chatId);
+
+  return () => {
+    const scrollTop = document.documentElement.scrollTop;
+    sessionStorage.setItem(storageKey, String(scrollTop));
+  };
+}, [chatId, location.pathname]);
+```
+
+The cleanup function runs when `location.pathname` changes, but the component may have already started unmounting by then. The saved scrollTop might be 0 or incorrect if the DOM has started tearing down.
+
+Additionally, `handleBeforeUnload` is defined but never attached:
+```typescript
+const handleBeforeUnload = () => {
+  const scrollTop = document.documentElement.scrollTop;
+  sessionStorage.setItem(storageKey, String(scrollTop));
+};
+```
+
+This function is unused - it appears to be dead code left from an incomplete implementation.
+
+Proposal: Remove dead code and use beforeunload for page refresh:
+```typescript
+useEffect(() => {
+  const storageKey = getScrollStorageKey(chatId);
+
+  const handleBeforeUnload = () => {
+    sessionStorage.setItem(storageKey, String(document.documentElement.scrollTop));
+  };
+
+  window.addEventListener('beforeunload', handleBeforeUnload);
+
+  return () => {
+    window.removeEventListener('beforeunload', handleBeforeUnload);
+    sessionStorage.setItem(storageKey, String(document.documentElement.scrollTop));
+  };
+}, [chatId]);
+```
+
+---
+
+ISSUE 2: Multiple refs for coordination creates complexity
+Severity: LOW
+Location: ChatInterface.tsx:113-115
+
+```typescript
+const shouldRestoreScrollRef = useRef(false);
+const restoredScrollRef = useRef(false);
+```
+
+Three refs now coordinate scroll behavior: `wasAtBottomRef`, `shouldRestoreScrollRef`, `restoredScrollRef`. This creates state machine complexity where the combination of these values determines behavior.
+
+The logic at lines 205-226 checks:
+```typescript
+if (shouldRestoreScrollRef.current && !restoredScrollRef.current) {
+  // ... restore
+  restoredScrollRef.current = true;
+  shouldRestoreScrollRef.current = false;
+}
+```
+
+This works but is fragile. If the effect runs multiple times due to dependency changes, the flags protect against double-restoration, which is correct.
+
+Proposal: No code change, but consider future refactor to use a single state machine ref:
+```typescript
+type ScrollState = 'initial' | 'restoring' | 'restored' | 'normal';
+const scrollStateRef = useRef<ScrollState>('initial');
+```
+
+---
+
+ISSUE 3: Potential race between save and restore on fast navigation
+Severity: LOW
+Location: ChatInterface.tsx:141-142
+
+If user navigates away and back very quickly (faster than cleanup + mount cycle), the old save could overwrite or interfere:
+1. Cleanup saves position for chatId A
+2. New mount for chatId A reads position
+3. Both happen in same tick
+
+In practice, React's batching and effect ordering prevent this, but it's worth noting.
+
+Proposal: No change needed - React's guarantees handle this correctly.
+
+---
+
+ISSUE 4: wasAtBottomRef calculation after restoration uses restored position
+Severity: LOW
+Location: ChatInterface.tsx:220-222
+
+```typescript
+const el = document.documentElement;
+const distanceFromBottom = el.scrollHeight - (position + el.clientHeight);
+wasAtBottomRef.current = distanceFromBottom <= 30;
+```
+
+This calculates `wasAtBottomRef` based on the restored `position`, not the actual current scroll position after `window.scrollTo()` completes. Since `scrollTo` with behavior "auto" is synchronous, this should be accurate.
+
+However, if content has changed since the position was saved (new messages), the calculated distance may be incorrect. The 30px threshold provides buffer.
+
+Proposal: No change needed - the 30px threshold handles minor discrepancies.
+
+---
+
+ISSUE 5: sessionStorage not cleared on explicit navigation to new chat
+Severity: LOW
+Location: ChatInterface.tsx:116-127
+
+When navigating to a different chat (chatId changes), the old chat's position is saved but may become stale. If user doesn't return to that chat for a long session, the saved position may be completely wrong when they eventually return.
+
+The code does clear after restoration (line 215), which prevents stale reads on second navigation.
+
+Proposal: Consider adding TTL or version to sessionStorage values:
+```typescript
+sessionStorage.setItem(storageKey, JSON.stringify({
+  position: scrollTop,
+  timestamp: Date.now()
+}));
+
+// On restore, check if stale (e.g., > 5 minutes)
+if (Date.now() - saved.timestamp > 5 * 60 * 1000) {
+  sessionStorage.removeItem(storageKey);
+  return; // Skip restoration, scroll to bottom
+}
+```
+
+---
+
+ISSUE 6: Dependencies array includes scrollToBottom
+Severity: LOW
+Location: ChatInterface.tsx:257
+
+```typescript
+}, [hasData, lastMessageTimestamp, rows.length, isFetching, chatId, scrollToBottom]);
+```
+
+`scrollToBottom` was added as a dependency. While it's memoized with `[]`, including it is technically correct for the exhaustive-deps rule. This is fine.
+
+========================================
+CODE QUALITY NOTES
+========================================
+
+Positive aspects:
+- Per-chat storage keys prevent cross-chat interference
+- Position cleared after restoration prevents stale positions
+- Coordinates with pin-to-bottom by updating `wasAtBottomRef`
+- Reset on chatId change prevents stale state
+
+The implementation correctly integrates with the existing scroll behavior from commit 341d5f8. The coordination between restoration and pin-to-bottom is well thought out.
+
+Dead code note: `handleBeforeUnload` at line 135-138 is defined but never used.
+
+========================================
+VERIFICATION
+========================================
+
+Verified:
+- sessionStorage is synchronous and available in all browsers
+- getScrollStorageKey returns unique key per chat
+- Restoration runs before scrollToBottom in first-load logic
+- Refs are properly reset when chatId changes
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Scroll position save timing + dead code) - created specs/chat-scroll-position-save-cleanup.md
+- Issue #2 (Multiple refs for coordination creates complexity) - skipped
+- Issue #3 (Potential race between save and restore) - skipped
+- Issue #4 (wasAtBottomRef calculation after restoration) - skipped
+- Issue #5 (sessionStorage not cleared on explicit navigation) - skipped
+- Issue #6 (Dependencies array includes scrollToBottom) - skipped

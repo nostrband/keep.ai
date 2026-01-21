@@ -1,0 +1,98 @@
+COMMIT: 04d0576
+TITLE: Use debug module in service-worker.ts
+DATE: 2026-01-19
+
+== SUMMARY OF CHANGES ==
+
+This commit replaces the custom DEBUG_SW/debugLog pattern in service-worker.ts with
+the standard debug module, matching the pattern used in worker.ts and shared-worker.ts.
+
+Changes in apps/web/src/service-worker.ts:
+
+1. Added import: import debug from "debug";
+
+2. Replaced:
+     const DEBUG_SW = false;
+     const debugLog = (...args: any[]) => DEBUG_SW && console.log(...args);
+   With:
+     const log = debug("keep:service-worker");
+
+3. Changed all debugLog() calls to log() calls throughout the file (14 occurrences)
+
+4. Updated IMPLEMENTATION_PLAN.md to mark spec #35 as COMPLETED
+
+== ANALYSIS ==
+
+The migration aligns service-worker.ts with the debug module pattern used elsewhere.
+However, there is an inconsistency with other workers that affects functionality.
+
+Pattern comparison:
+- service-worker.ts: Uses debug("keep:service-worker") but NO debug.enable() call
+- worker.ts: Uses debug("keep:worker") WITH debug.enable("*") in DEV mode
+- shared-worker.ts: Uses debug("keep:shared-worker") WITH debug.enable("*") in DEV mode
+
+== POTENTIAL ISSUES ==
+
+1. BUG: Missing debug.enable() in service-worker.ts
+
+   worker.ts and shared-worker.ts both have:
+     if (import.meta.env.DEV) {
+       debug.enable("*");
+     }
+
+   service-worker.ts is MISSING this pattern. Without it, debug logs from the service
+   worker will NEVER appear, even in development mode.
+
+   This is likely an oversight - the commit description says it matches the pattern
+   in worker.ts and shared-worker.ts, but the debug.enable() call was not included.
+
+2. CONTEXT: Service workers cannot access localStorage
+
+   The debug module normally uses localStorage to persist enabled namespaces. Service
+   workers don't have localStorage access, so:
+   - Manual localStorage-based enable won't work
+   - debug.enable() must be called programmatically on every service worker startup
+   - This makes the missing debug.enable() call even more impactful
+
+3. MINOR: No runtime debug control for service workers
+
+   The main thread debug toggle (localStorage "keep-ai-debug-mode") won't affect the
+   service worker. This is acceptable for V1 but could be improved by having the main
+   thread send a message to enable debug logging.
+
+== PROPOSALS ==
+
+1. IMPORTANT: Add debug.enable() to match other workers
+
+   Add this to service-worker.ts after the debug import:
+
+     if (import.meta.env.DEV) {
+       debug.enable("*");
+     }
+
+   This ensures debug logs appear during development, matching worker.ts and
+   shared-worker.ts behavior.
+
+2. OPTIONAL: Add message-based debug control for production
+
+   For runtime debug control in production, the service worker could listen for
+   a message from the main thread:
+
+     self.addEventListener("message", (event) => {
+       if (event.data.type === "ENABLE_DEBUG") {
+         debug.enable("*");
+       }
+     });
+
+   And main.tsx could send this message when debug mode is toggled in settings.
+   LOW PRIORITY for V1.
+
+The core migration is correct, but the missing debug.enable() call makes the debug
+logging non-functional. This should be addressed.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Missing debug.enable() in service-worker.ts) - skipped
+- Issue #2 (Service workers cannot access localStorage) - skipped (contextual info)
+- Issue #3 (No runtime debug control for service workers) - skipped (low priority)

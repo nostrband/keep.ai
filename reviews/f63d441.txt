@@ -1,0 +1,107 @@
+COMMIT REVIEW: f63d441 - Fix race condition in integration test db.run calls
+
+================================================================================
+SUMMARY
+================================================================================
+
+This commit fixes a race condition in the user-server integration tests where
+SQLite db.run() calls were not being properly awaited before querying results.
+
+Files changed:
+- apps/user-server/src/__tests__/integration.test.ts (+16 lines, -10 lines)
+
+================================================================================
+CHANGES IN PLAIN ENGLISH
+================================================================================
+
+The commit wraps two direct db.run() calls in the integration tests with Promise
+wrappers. Previously, the test code was:
+
+  await (database as any).db.run(
+    'UPDATE api_keys SET key_hash = ? WHERE id = ?',
+    [keyHash, apiKey.id]
+  );
+
+This was incorrect because SQLite3's db.run() is callback-based and doesn't
+return a Promise. The `await` was doing nothing - the code would proceed to
+query findApiKey() before the UPDATE actually completed.
+
+The fix wraps each call in a proper Promise:
+
+  await new Promise<void>((resolve, reject) => {
+    (database as any).db.run(
+      'UPDATE api_keys SET key_hash = ? WHERE id = ?',
+      [keyHash, apiKey.id],
+      (err: Error | null) => err ? reject(err) : resolve()
+    );
+  });
+
+This ensures the UPDATE completes before the test proceeds to query the result.
+
+================================================================================
+POTENTIAL ISSUES
+================================================================================
+
+ISSUE #1: Similar race conditions exist in other test files
+Severity: HIGH
+
+The same pattern exists in TWO other test files that were NOT fixed:
+
+1. apps/user-server/src/__tests__/database.test.ts (line 81):
+   - Uses `await (database as any).db.run(...)` without callback
+
+2. apps/user-server/src/__tests__/server.test.ts (lines 96, 128, 168):
+   - THREE instances of the same pattern
+   - All updating API keys without proper Promise wrapping
+
+These tests have the same race condition and could fail intermittently.
+
+--------------------------------------------------------------------------------
+
+ISSUE #2: No reusable helper for promisified db.run
+Severity: LOW
+
+The Database class already uses proper Promise wrapping internally for all its
+public methods. However, there's no exposed helper for test code that needs
+direct db access.
+
+The codebase has a Sqlite3DBWrapper in packages/node/src/createDB.ts that
+provides async exec() methods, showing a better pattern exists.
+
+================================================================================
+PROPOSALS
+================================================================================
+
+PROPOSAL #1: Fix remaining race conditions in other test files
+Apply the same Promise wrapper pattern to:
+- database.test.ts: 1 instance
+- server.test.ts: 3 instances
+
+This is straightforward copy-paste of the same fix.
+
+PROPOSAL #2: Extract a test utility helper (optional)
+Create a shared test utility:
+
+  async function runDbStatement(db: any, sql: string, params: any[]): Promise<void> {
+    return new Promise((resolve, reject) => {
+      db.run(sql, params, (err: Error | null) => err ? reject(err) : resolve());
+    });
+  }
+
+This would prevent future occurrences of the bug and make tests cleaner.
+However, this is a nice-to-have - the main priority is fixing the other tests.
+
+================================================================================
+VERDICT
+================================================================================
+
+The fix is CORRECT and addresses a real race condition. However, it's INCOMPLETE
+because the same bug exists in two other test files that weren't addressed.
+
+Recommend fixing all 4 remaining instances in database.test.ts and server.test.ts.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Similar race conditions exist in other test files) - skipped
+- Issue #2 (No reusable helper for promisified db.run) - skipped

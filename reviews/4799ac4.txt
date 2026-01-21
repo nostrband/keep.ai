@@ -1,0 +1,72 @@
+COMMIT REVIEW: 4799ac4
+=======================
+Title: Remove debug console.log statements from sandbox.ts
+Author: Claude Agent
+Date: 2026-01-16
+
+SUMMARY OF CHANGES
+------------------
+This commit removes 2 debug console.log statements from packages/agent/src/sandbox/sandbox.ts at lines 185-186.
+
+The removed code:
+```typescript
+console.log("result", result);
+console.log("state", state);
+```
+
+These statements were located in the eval() method's try block, after resolving the result and state from the QuickJS sandbox execution. They logged the raw result and state values after every sandbox execution.
+
+CONTEXT
+-------
+The Sandbox class is a secure JavaScript execution environment using QuickJS (via quickjs-emscripten) to run untrusted JavaScript code in isolation. The eval() method:
+1. Wraps user code in an async IIFE
+2. Injects previous state into globalThis.state
+3. Evaluates the code using QuickJS
+4. Extracts the return value as "result"
+5. Reads globalThis.state as "state"
+6. Returns { ok: true, result, state }
+
+The removed console.log statements were added in commit 6fbaf7ce (Dec 22, 2025) during a refactoring that changed how result/state were retrieved. They were debugging aids to verify the new approach worked correctly.
+
+ASSESSMENT
+----------
+This is a straightforward and correct cleanup. The removed statements:
+- Were always-on (not conditional on debug flags)
+- Ran on every sandbox execution (potentially very noisy)
+- Served no purpose beyond development debugging
+- Were not part of any logging infrastructure
+
+ISSUES FOUND
+------------
+
+Issue #1: Incomplete Cleanup - Remaining Commented Debug Code
+Severity: Low
+Location: packages/agent/src/sandbox/sandbox.ts:175
+
+There is still a commented-out console.log statement in sandbox.ts at line 175:
+```typescript
+// console.log("code", wrappedSource);
+```
+
+This was likely used during development to debug the wrapped source code being executed. While commented out (so not actively running), it should be removed for consistency with the cleanup effort in this commit.
+
+PROPOSALS
+---------
+
+Proposal for Issue #1:
+Remove the commented-out console.log at line 175 to complete the cleanup:
+```diff
+-      // console.log("code", wrappedSource);
+       const evaluation = this.#ctx.evalCode(wrappedSource, filename, {
+```
+
+This is a simple one-line deletion that completes the debug code cleanup in this file.
+
+OVERALL VERDICT
+---------------
+Good commit. Correctly removes production-noise debug statements. One minor follow-up cleanup opportunity identified (removing the remaining commented debug line).
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Remaining commented debug code) - skipped (trivial)

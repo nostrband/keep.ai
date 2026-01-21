@@ -1,0 +1,194 @@
+# Commit Review: 8c0b25f
+
+## Summary
+Add batch fetch for workflow latest runs
+
+**Files Modified:**
+- packages/db/src/script-store.ts (+51 lines)
+- apps/web/src/components/MainPage.tsx (+18/-16 lines)
+- apps/web/src/lib/WorkflowNotifications.ts (+18/-21 lines)
+- IMPLEMENTATION_PLAN.md (status updates)
+
+## Changes Description
+
+### 1. New getLatestRunsByWorkflowIds() Method (script-store.ts)
+Added batch method to fetch latest run for each workflow in a single SQL query:
+- Uses subquery with `MAX(start_timestamp)` grouped by `workflow_id`
+- Returns a Map from workflow_id to ScriptRun
+- Handles empty input array early (returns empty Map)
+- Properly parameterizes placeholders to prevent SQL injection
+
+### 2. MainPage.tsx Updates
+- Replaced sequential per-workflow fetch loop with batch query
+- Added cleanup flag (`cancelled = true`) to prevent stale state updates if component unmounts during fetch
+- Converts Map to Record for state compatibility
+
+### 3. WorkflowNotifications.ts Updates
+- Replaced sequential loop with batch query
+- Removed per-workflow try-catch (error handling now at batch level)
+- Logic for checking errors and maintenance mode unchanged
+
+---
+
+## Potential Issues
+
+### Issue 1: Set Iteration During Deletion - CRITICAL BUG
+**Location:** apps/web/src/lib/WorkflowNotifications.ts:167-169
+
+The `clearWorkflowNotifications()` method deletes Set entries while iterating:
+```javascript
+for (const key of this.notifiedWorkflows) {
+  if (key.startsWith(`${workflowId}:`)) {
+    this.notifiedWorkflows.delete(key);  // UNSAFE
+  }
+}
+```
+
+**Problem:** In JavaScript, modifying a Set during iteration causes undefined behavior. The iterator may skip entries, resulting in a non-deterministic memory leak where some notification keys won't be deleted.
+
+**Impact:** Stale notification entries accumulate; user may not be re-notified for genuinely new errors because old keys remain.
+
+**Recommendation:**
+```javascript
+const keysToDelete = Array.from(this.notifiedWorkflows)
+  .filter(key => key.startsWith(`${workflowId}:`));
+keysToDelete.forEach(key => this.notifiedWorkflows.delete(key));
+```
+
+### Issue 2: Multiple Rows with Same Timestamp (MEDIUM)
+**Location:** packages/db/src/script-store.ts:476-487
+
+The SQL JOIN uses `MAX(start_timestamp)` as the sole tiebreaker. If multiple runs have the exact same `start_timestamp` for a workflow, the query returns multiple rows, but `runMap.set()` only keeps the last one (unpredictable which one).
+
+**Scenario:**
+- Workflow w1 has two runs with identical start_timestamp
+- Query returns both rows
+- Map stores only the second one (non-deterministic)
+
+**Recommendation:** Add a secondary tiebreaker:
+```sql
+INNER JOIN (
+  SELECT workflow_id, MAX(start_timestamp) as max_start, MAX(id) as max_id
+  FROM script_runs
+  WHERE workflow_id IN (${placeholders})
+  GROUP BY workflow_id
+) latest ON sr.workflow_id = latest.workflow_id
+  AND sr.start_timestamp = latest.max_start
+  AND sr.id = latest.max_id
+```
+
+### Issue 3: Removed Error Handling Reduced Robustness (MEDIUM)
+**Location:** apps/web/src/lib/WorkflowNotifications.ts:63-95
+
+In the old code, each workflow had individual try-catch, so one failure wouldn't affect others. Now if the batch query fails, no workflows get notifications and the tray badge doesn't update.
+
+**Impact:** Complete notification system failure on any database error.
+
+**Recommendation:** Wrap the batch query in try-catch:
+```javascript
+try {
+  const latestRunsMap = await api.scriptStore.getLatestRunsByWorkflowIds(workflowIds);
+  // ... process map ...
+} catch (e) {
+  console.warn("Failed to fetch latest runs:", e);
+  return;
+}
+```
+
+### Issue 4: Silent Error Handling in MainPage (MEDIUM)
+**Location:** apps/web/src/components/MainPage.tsx:185-187
+
+The catch block silently ignores all errors:
+```typescript
+} catch {
+  // Ignore errors
+}
+```
+
+**Impact:** Network errors, database failures are silently ignored. Makes debugging production issues difficult.
+
+**Recommendation:**
+```typescript
+} catch (error) {
+  console.debug("Failed to fetch latest runs:", error);
+}
+```
+
+### Issue 5: Redundant WHERE Clause in SQL (LOW)
+**Location:** packages/db/src/script-store.ts:485
+
+The outer `WHERE sr.workflow_id IN (${placeholders})` is redundant since the INNER JOIN already filters by workflow_id. Minor performance impact.
+
+**Recommendation:** Remove the redundant WHERE clause.
+
+### Issue 6: Missing Index on workflow_id (MEDIUM - Performance)
+**Location:** Database schema
+
+The query groups and filters by `workflow_id`, but no index exists on this column:
+- v11: Created `idx_script_runs_script_id` and `idx_script_runs_start_timestamp`
+- v16: Added `workflow_id` column but NO index was created
+
+**Impact:** Poor performance on large datasets due to full table scan.
+
+**Recommendation:** Add migration to create composite index:
+```sql
+CREATE INDEX idx_script_runs_workflow_id_start_timestamp
+ON script_runs(workflow_id DESC, start_timestamp DESC)
+```
+
+### Issue 7: Type Safety with `any` (LOW)
+**Location:** apps/web/src/components/MainPage.tsx:160
+
+```typescript
+const [latestRuns, setLatestRuns] = useState<Record<string, any>>({});
+```
+
+Using `any` type loses type safety.
+
+**Recommendation:** Import and use proper `ScriptRun` type instead of `any`.
+
+---
+
+## Positive Observations
+
+1. **Significant performance improvement:** Single query instead of N queries
+2. **Proper cleanup flag pattern:** MainPage correctly prevents stale state updates on unmount
+3. **SQL injection safe:** Uses parameterized queries with proper placeholder binding
+4. **Handles empty input:** Early return for empty workflow array
+5. **Follows existing codebase patterns:** Similar structure to other batch methods in ScriptStore
+
+---
+
+## Proposals
+
+### Proposal 1: Fix Set Iteration Bug (CRITICAL)
+Immediately fix the clearWorkflowNotifications() method to avoid undefined behavior during iteration.
+
+### Proposal 2: Add Error Handling
+Wrap the batch query calls in try-catch to restore resilience against partial failures.
+
+### Proposal 3: Add Secondary Tiebreaker
+Modify SQL query to include MAX(id) for deterministic results when timestamps collide.
+
+### Proposal 4: Add Database Index
+Create a migration to add composite index on (workflow_id, start_timestamp) for better query performance.
+
+### Proposal 5: Add Debug Logging
+Replace silent error handling with console.debug() for production debugging.
+
+---
+
+## Verdict
+The commit successfully implements batch fetching for significant performance improvement. However, there is a **critical bug** in Set iteration during deletion that should be fixed immediately. The removal of per-workflow error handling also reduces system resilience and should be addressed. The SQL query edge case with duplicate timestamps is unlikely but possible in concurrent scenarios.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Set Iteration During Deletion) - covered by specs/fix-set-iteration-delete-bug.md
+- Issue #2 (Multiple Rows with Same Timestamp) - skipped
+- Issue #3 (Removed Error Handling Reduced Robustness) - skipped
+- Issue #4 (Silent Error Handling in MainPage) - skipped
+- Issue #5 (Redundant WHERE Clause in SQL) - skipped (may help optimizer)
+- Issue #5b (Missing IN clause length limits) - created specs/in-clause-length-limits.md
+- Issue #6 (Missing Index on workflow_id) - created specs/script-runs-workflow-id-index.md
+- Issue #7 (Type Safety with any) - created specs/mainpage-latestRuns-type-safety.md

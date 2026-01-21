@@ -1,0 +1,203 @@
+# UX Test Report: Commit d4007cb
+# "Fix 4 P0 critical bugs: state consistency, retry limits, error handling, cost tracking"
+
+## Test Date: 2026-01-20
+## Commit: d4007cb70680199e205154eb1a4bf5e67d48dd36
+
+## Summary
+This commit fixes four P0 critical bugs:
+1. workflow-state-consistency: Add updateWorkflowFields() for atomic partial updates
+2. network-error-max-retries: Add MAX_NETWORK_RETRIES=5 limit with escalation
+3. handle-get-autonomy-mode-error: Add try-catch with fallback to 'ai_decides'
+4. task-worker-include-tool-costs: Combine agent LLM + tool costs, fix TaskEventGroup
+
+## Test Environment
+- Server: localhost:3001 (fresh database, no existing tasks)
+- Browser: Playwright headless Chromium
+
+## UX-Relevant Changes Analysis
+
+### 1. Cost Display Fix (TaskEventGroup.tsx)
+**Status: VERIFIED (Code Review)**
+
+**Before (Buggy):**
+- TaskEventGroup summed event costs separately from taskRun.cost
+- This caused double-counting when both agent LLM and tool costs were present
+
+**After (Fixed):**
+```typescript
+// Lines 87-92 in TaskEventGroup.tsx
+// Get cost from task_run - this already includes both agent LLM costs and tool costs
+// Do NOT sum event costs separately to avoid double-counting
+let totalCost = 0;
+if (taskRun?.cost != null && taskRun.cost > 0) {
+  totalCost = taskRun.cost / 1000000; // It's stored as integer w/ increased precision
+}
+```
+
+**Verification:** Code correctly uses only taskRun.cost (which now includes combined
+agent + tool costs) instead of summing event costs.
+
+### 2. Network Error Max Retries (workflow-scheduler.ts)
+**Status: VERIFIED (Code Review)**
+
+**Before (Buggy):**
+- Network errors retried indefinitely with exponential backoff
+- User never notified that workflow was stuck
+
+**After (Fixed):**
+- MAX_NETWORK_RETRIES = 5
+- After 5 retries, workflow status changes to 'error'
+- Workflow appears in "Needs Attention" section
+
+**Verification:** Code adds constant and escalation logic:
+```typescript
+private static readonly MAX_NETWORK_RETRIES = 5;
+// After exceeding retries, sets workflow status to 'error'
+```
+
+### 3. Workflow State Consistency (script-store.ts)
+**Status: VERIFIED (Code Review)**
+
+**Before (Buggy):**
+- Used spread pattern: `{ ...workflow, field: value }`
+- Concurrent changes (e.g., user pausing workflow) could be overwritten
+
+**After (Fixed):**
+- New `updateWorkflowFields()` method uses atomic SQL UPDATE
+- Only updates specified fields, preserving other concurrent changes
+
+**Verification:** Method signature confirms partial updates:
+```typescript
+async updateWorkflowFields(
+  workflowId: string,
+  fields: Partial<Pick<Workflow, 'timestamp' | 'next_run_timestamp' | 'status' | ...>>,
+  tx?: DBInterface
+): Promise<void>
+```
+
+### 4. Autonomy Mode Error Handling (task-worker.ts)
+**Status: VERIFIED (Code Review)**
+
+**Before (Buggy):**
+- `getAutonomyMode()` call had no try-catch
+- DB query failure crashed task execution
+
+**After (Fixed):**
+- Wrapped in try-catch with fallback to 'ai_decides'
+- Task continues with default behavior if DB fails
+
+## UX Tests Conducted
+
+### 1. TaskEventGroup Component Verification
+**Status: PASSED (Code Review)**
+
+Confirmed at lines 87-92 of TaskEventGroup.tsx:
+- Cost is read only from taskRun.cost
+- Division by 1000000 converts microdollars to dollars
+- No event cost summation that could cause double-counting
+
+### 2. Error State Escalation UI
+**Status: COULD NOT TEST (No data)**
+
+Unable to test visibility of:
+- Workflow error status badge after 5 retries
+- "Needs Attention" section showing failed workflows
+- User navigation to view error details
+
+### 3. Cost Display Accuracy
+**Status: COULD NOT TEST (No data)**
+
+Unable to test:
+- Actual cost values displayed in TaskEventGroup
+- Cost matches agent + tool costs combined
+- No double-counting visible in UI
+
+## Issues Found
+
+### ISSUE #1: Cannot Verify Cost Display Without Running Tasks
+**Severity: Testing Limitation**
+**Description:** Cost display fix cannot be verified without tasks that have completed
+with both agent LLM costs and tool costs.
+
+**Impact:** Need a task that:
+1. Uses the AI model (agent cost)
+2. Calls external tools (tool cost)
+3. Completes successfully
+
+### ISSUE #2: Cannot Verify Max Retries Without Network Errors
+**Severity: Testing Limitation**
+**Description:** MAX_NETWORK_RETRIES=5 escalation cannot be verified without:
+1. A workflow scheduled to run
+2. Network failures occurring during execution
+3. Retry count reaching 5+
+
+## Code Quality Assessment
+
+### Strengths:
+1. Clear separation of concerns (atomic updates in script-store.ts)
+2. Good error handling pattern (try-catch with sensible default)
+3. Well-documented code changes (comments explain why)
+4. Proper constant usage (MAX_NETWORK_RETRIES)
+
+### Potential Concerns:
+1. No user notification when autonomy mode fallback occurs
+2. No indicator in UI when workflow is in retry state (before hitting max)
+
+## Verification Against Bug Specifications
+
+| Bug ID | Fix Description | Code Present | UX Verified |
+|--------|-----------------|--------------|-------------|
+| workflow-state-consistency | updateWorkflowFields() atomic updates | YES | NO (no workflow) |
+| network-error-max-retries | MAX_NETWORK_RETRIES=5 with escalation | YES | NO (no network errors) |
+| handle-get-autonomy-mode-error | try-catch with 'ai_decides' fallback | YES | NO (no DB failures) |
+| task-worker-include-tool-costs | Combined cost in finishTaskRun, UI uses only taskRun.cost | YES | NO (no completed tasks) |
+
+## Recommendations
+
+1. Add unit tests for:
+   - updateWorkflowFields() preserves other fields
+   - MAX_NETWORK_RETRIES escalation
+   - Autonomy mode fallback behavior
+
+2. Add integration tests for:
+   - Cost calculation accuracy (agent + tool costs)
+   - Workflow state persistence during concurrent modifications
+
+3. Consider UI improvements:
+   - Show retry count/status before escalation
+   - Notify user when autonomy mode fallback occurs
+   - Show breakdown of agent vs tool costs (optional)
+
+## Test Coverage Summary
+
+| Test Case | Status |
+|-----------|--------|
+| TaskEventGroup uses taskRun.cost only | PASSED (code review) |
+| updateWorkflowFields() exists | PASSED (code review) |
+| MAX_NETWORK_RETRIES = 5 | PASSED (code review) |
+| Autonomy mode try-catch exists | PASSED (code review) |
+| Cost display shows correct value | NOT TESTED (no data) |
+| Error status after max retries | NOT TESTED (no data) |
+| Concurrent workflow update safety | NOT TESTED (no data) |
+
+## Conclusion
+
+All four P0 bug fixes are properly implemented in code. The changes follow good patterns:
+- Atomic updates prevent race conditions
+- Retry limits prevent infinite loops
+- Error handling prevents crashes
+- Cost tracking eliminates double-counting
+
+**UX impact is positive but unverified:** These are critical infrastructure fixes that
+prevent data corruption and improve reliability. However, the user-visible outcomes
+(correct costs, proper error escalation) could not be verified without running tasks.
+
+**Recommendation:** APPROVED based on code review. Recommend additional E2E testing
+with actual workflow executions before production deployment.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Cannot Verify Cost Display Without Running Tasks) - skipped (testing limitation, not code issue)
+- Issue #2 (Cannot Verify Max Retries Without Network Errors) - skipped (testing limitation, not code issue)

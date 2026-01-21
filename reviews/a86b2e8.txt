@@ -1,0 +1,327 @@
+# Code Review: a86b2e8
+
+## Commit: Implement notification filtering by error type for workflow errors
+
+**Author:** Claude Agent <claude@anthropic.com>
+**Date:** Fri Jan 16 18:32:10 2026 +0000
+
+---
+
+## Summary of Changes
+
+This commit implements per-spec (09, 09b) notification filtering based on error type:
+- Only notify users for auth/permission/network errors (require user action)
+- Logic errors handled silently by agent via maintenance mode
+- Updates tray badge with count of workflows needing attention
+
+### Files Modified:
+- `IMPLEMENTATION_PLAN.md` - Updated task status
+- `apps/web/src/App.tsx` - Added ElectronNavigationHandler component
+- `apps/web/src/components/MainPage.tsx` - Error type filtering in UI
+- `apps/web/src/lib/WorkflowNotifications.ts` - NEW: Notification service
+- `apps/web/src/queryClient.ts` - Integration point for notifications
+- `apps/web/src/vite-env.d.ts` - TypeScript declarations for Electron API
+- `packages/agent/src/workflow-worker.ts` - Records error_type in script runs
+- `packages/db/src/database.ts` - Register migration v22
+- `packages/db/src/migrations/v22.ts` - Add error_type column
+- `packages/db/src/script-store.ts` - Update queries to include error_type
+
+---
+
+## Detailed Analysis
+
+### Migration v22.ts
+
+**Adds:** `error_type text not null default ''` to script_runs table
+
+**Pattern:** Correctly follows existing conventions:
+- Uses `crsql_begin_alter`/`crsql_commit_alter`
+- NOT NULL with empty string default
+- Good documentation
+
+### WorkflowNotifications.ts (NEW FILE)
+
+**Purpose:** Singleton service that:
+- Checks workflows for errors requiring user attention
+- Shows OS notifications via Electron API
+- Updates tray badge with attention count
+- Tracks which workflows have been notified to prevent duplicates
+
+### workflow-worker.ts Changes
+
+**Line 161-162:** Adds empty error_type for successful runs
+**Lines 195-213:** Classifies and records error_type for failed runs
+
+### MainPage.tsx Changes
+
+**Lines 52-100:** Error type filtering logic:
+- `ATTENTION_ERROR_TYPES = ['auth', 'permission', 'network']`
+- Maintenance mode shows "Auto-fixing issue..." (not attention)
+- User-friendly messages for each error type
+
+---
+
+## Issues Identified
+
+### Issue 1: N+1 Query Problem in WorkflowNotifications (HIGH)
+
+**Location:** `apps/web/src/lib/WorkflowNotifications.ts:55-96`
+
+**Problem:** The service makes sequential API calls for each workflow:
+
+```typescript
+const workflows = await api.scriptStore.listWorkflows();  // 1 query
+
+for (const workflow of workflows) {
+  const runs = await api.scriptStore.getScriptRunsByWorkflowId(workflow.id);  // N queries
+  // ...
+}
+```
+
+**Impact:** With 100 workflows, this makes 101 API calls. If each takes 50ms, total is 5+ seconds. This runs on every database change to script_runs or workflows tables.
+
+**Proposal:** Add a batch query method:
+```typescript
+// In script-store.ts
+async getLatestRunsForWorkflows(workflowIds: string[]): Promise<Map<string, ScriptRun>> {
+  // Single query with GROUP BY or window function
+}
+
+// In WorkflowNotifications.ts
+const workflowIds = workflows.map(w => w.id);
+const latestRuns = await api.scriptStore.getLatestRunsForWorkflows(workflowIds);
+```
+
+---
+
+### Issue 2: Incorrect Cleanup in ElectronNavigationHandler (HIGH)
+
+**Location:** `apps/web/src/App.tsx:45-57`
+
+**Problem:** Multiple issues with the useEffect pattern:
+
+```typescript
+useEffect(() => {
+  if (!window.electronAPI) return;
+
+  window.electronAPI.onNavigateTo((path: string) => {
+    navigate(path);
+  });
+
+  return () => {
+    window.electronAPI?.removeAllListeners('navigate-to');
+  };
+}, [navigate]);  // navigate changes on every render!
+```
+
+**Issues:**
+1. `navigate` from `useNavigate()` returns a new function reference on each render
+2. This causes the effect to run on every render, adding new listeners
+3. `removeAllListeners` removes ALL listeners, not just this component's
+4. Listener accumulation leads to multiple navigations per event
+
+**Impact:** Memory leak, multiple navigation handlers executing.
+
+**Proposal:** Use a ref to stabilize the callback:
+```typescript
+const navigateRef = useRef(navigate);
+navigateRef.current = navigate;
+
+useEffect(() => {
+  if (!window.electronAPI) return;
+
+  const handler = (path: string) => {
+    navigateRef.current(path);
+  };
+
+  window.electronAPI.onNavigateTo(handler);
+
+  return () => {
+    window.electronAPI?.removeAllListeners('navigate-to');
+  };
+}, []);  // Empty dependency array
+```
+
+---
+
+### Issue 3: Unused Methods in WorkflowNotifications (MEDIUM)
+
+**Location:** `apps/web/src/lib/WorkflowNotifications.ts:159-183`
+
+**Problem:** Two methods are defined but never called:
+- `clearWorkflowNotifications(workflowId)` - Should clear when user views a workflow
+- `reset()` - Should reset state on logout/app restart
+
+Additionally, `checkIntervalMs` property (line 28) is declared but never used.
+
+**Impact:**
+- No way to clear notifications when user addresses them
+- Dead code indicates incomplete implementation
+
+**Proposal:**
+1. Call `clearWorkflowNotifications()` from WorkflowDetailPage when user views a workflow
+2. Call `reset()` on app logout or full reload
+3. Remove or implement `checkIntervalMs`
+
+---
+
+### Issue 4: Memory Accumulation in notifiedWorkflows Set (MEDIUM)
+
+**Location:** `apps/web/src/lib/WorkflowNotifications.ts:25, 147-153`
+
+**Problem:** The Set grows indefinitely and only cleans up when size exceeds 100:
+
+```typescript
+private notifiedWorkflows: Set<string> = new Set();
+
+// Only cleans up after 100+ entries
+if (this.notifiedWorkflows.size > 100) {
+  const keysArray = Array.from(this.notifiedWorkflows);
+  keysArray.slice(0, keysArray.length - 100).forEach(key => {
+    this.notifiedWorkflows.delete(key);
+  });
+}
+```
+
+**Impact:**
+- Slow growth but unbounded until 100 entries
+- Cleanup is inefficient (Array.from, slice, forEach)
+- No time-based cleanup for stale entries
+
+**Proposal:** Add time-based cleanup:
+```typescript
+interface NotificationRecord {
+  key: string;
+  timestamp: number;
+}
+
+// Clean entries older than 1 hour
+const oneHourAgo = Date.now() - 60 * 60 * 1000;
+for (const [key, record] of this.notifiedWorkflows) {
+  if (record.timestamp < oneHourAgo) {
+    this.notifiedWorkflows.delete(key);
+  }
+}
+```
+
+---
+
+### Issue 5: Silent Error Swallowing in Individual Workflow Checks (MEDIUM)
+
+**Location:** `apps/web/src/lib/WorkflowNotifications.ts:66-68`
+
+**Problem:** Errors when fetching individual workflow runs are silently ignored:
+
+```typescript
+try {
+  const runs = await api.scriptStore.getScriptRunsByWorkflowId(workflow.id);
+  // ...
+} catch (e) {
+  // Ignore individual workflow errors
+}
+```
+
+**Impact:** If a specific workflow has data issues, its error state is completely missed.
+
+**Proposal:** Log errors and consider partial results:
+```typescript
+} catch (e) {
+  console.debug("Failed to fetch runs for workflow", workflow.id, e);
+  // Continue to next workflow
+}
+```
+
+---
+
+### Issue 6: Duplicate Tray Badge Updates (LOW)
+
+**Location:**
+- `apps/web/src/lib/WorkflowNotifications.ts:101`
+- `apps/web/src/components/MainPage.tsx:252-259`
+
+**Problem:** Both WorkflowNotifications and MainPage update the tray badge:
+
+```typescript
+// WorkflowNotifications.ts:101
+await window.electronAPI.updateTrayBadge(workflowsNeedingAttention.length);
+
+// MainPage.tsx:252-259
+window.electronAPI.updateTrayBadge(attentionCount)
+```
+
+**Impact:** Redundant IPC calls. Could cause flickering if counts differ temporarily.
+
+**Proposal:** Centralize badge updates in one location (preferably MainPage since it has the most accurate real-time count).
+
+---
+
+### Issue 7: Error Type Classification Edge Cases (LOW)
+
+**Location:** `packages/agent/src/workflow-worker.ts:195-210`
+
+**Problem:** Not all error types are classified:
+
+```typescript
+if (error === ERROR_BAD_REQUEST) {
+  errorType = ''; // BAD_REQUEST is not a classified error type
+} else if (error === ERROR_PAYMENT_REQUIRED) {
+  errorType = ''; // PAYMENT_REQUIRED is not a classified error type
+}
+```
+
+**Impact:** BAD_REQUEST and PAYMENT_REQUIRED errors fall through to empty string, treated as legacy errors needing attention.
+
+**Proposal:** Classify these appropriately:
+- `ERROR_BAD_REQUEST` → Could be 'logic' (script bug) or 'permission'
+- `ERROR_PAYMENT_REQUIRED` → Should probably be 'auth' (needs payment setup)
+
+---
+
+### Issue 8: Missing Newline at End of vite-env.d.ts (LOW)
+
+**Location:** `apps/web/src/vite-env.d.ts` (last line)
+
+**Problem:** File doesn't end with a newline, which can cause issues with some tools.
+
+**Proposal:** Add newline at end of file.
+
+---
+
+## Positive Observations
+
+1. **Good separation of concerns** - WorkflowNotifications is a clean singleton service
+2. **Proper error type filtering** - Clear distinction between user-actionable vs agent-fixable errors
+3. **User-friendly messages** - Different messages for auth/permission/network errors
+4. **Tab visibility check** - Only shows notifications when app is not visible
+5. **Notification deduplication** - Tracks notified workflows to prevent spam
+6. **Type safety** - Proper TypeScript interfaces for Electron API
+7. **Consistent schema updates** - All SQL queries updated to include new fields
+
+---
+
+## Summary
+
+| Issue | Severity | Category |
+|-------|----------|----------|
+| N+1 query problem in WorkflowNotifications | HIGH | Performance |
+| Incorrect cleanup in ElectronNavigationHandler | HIGH | Memory Leak |
+| Unused methods in WorkflowNotifications | MEDIUM | Incomplete Feature |
+| Memory accumulation in notifiedWorkflows | MEDIUM | Resource Management |
+| Silent error swallowing | MEDIUM | Observability |
+| Duplicate tray badge updates | LOW | Code Duplication |
+| Error type classification edge cases | LOW | Logic Completeness |
+| Missing newline at EOF | LOW | Code Style |
+
+**Overall Assessment:** The feature is well-designed with proper error type filtering per spec. The WorkflowNotifications service provides good user-facing notifications. However, there are two high-severity issues: the N+1 query problem can cause significant performance degradation with many workflows, and the ElectronNavigationHandler has a memory leak due to incorrect useEffect dependencies. These should be addressed before shipping.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (N+1 query problem) - updated specs/batch-fetch-workflow-runs.md to include WorkflowNotifications
+- Issue #2 (Incorrect cleanup in ElectronNavigationHandler) - created specs/fix-electron-navigation-handler-cleanup.md
+- Issue #3 (Unused methods in WorkflowNotifications) - created specs/wire-up-workflow-notifications-methods.md
+- Issue #4 (Memory accumulation in notifiedWorkflows) - skipped (covered by Issue #3 spec)
+- Issue #5 (Silent error swallowing) - created specs/log-workflow-notification-fetch-errors.md
+- Issue #6 (Duplicate tray badge updates) - created specs/centralize-tray-badge-updates.md
+- Issue #7 (Error type classification edge cases) - created specs/internal-error-classification.md and ideas/user-balance-and-payments.md and ideas/in-app-bug-report.md
+- Issue #8 (Missing newline at EOF) - skipped

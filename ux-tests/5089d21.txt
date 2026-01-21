@@ -1,0 +1,142 @@
+# UX Test Report: Commit 5089d21
+## "Add app update notification banner when service worker updates"
+
+**Date**: 2026-01-20
+**Tester**: Claude Opus 4.5
+**Method**: Code analysis (build constraints prevented live Playwright testing)
+
+## Summary
+
+This commit adds a blue notification banner that appears when the service worker is updated to a new version. The banner auto-dismisses after 10 seconds and can be manually dismissed.
+
+## Changes Analyzed
+
+1. `apps/web/src/main.tsx` - Added APP_UPDATE_EVENT and service worker update detection
+2. `apps/web/src/App.tsx` - Added AppUpdateBanner component
+
+## Issues Found
+
+### CRITICAL: Memory Leak - setTimeout Not Cleaned Up
+
+**Location**: `apps/web/src/App.tsx:147-148`
+
+**Problem**:
+```typescript
+const handleAppUpdate = () => {
+  setShowBanner(true);
+  setTimeout(() => setShowBanner(false), 10000);
+};
+```
+
+The setTimeout is not stored in a ref and not cleaned up on unmount or event re-fire.
+
+**Impact**:
+- Memory leak if multiple updates occur
+- Multiple timeouts scheduled that could conflict
+- Stale closures over `setShowBanner`
+
+**Fix needed**: Use a ref pattern like elsewhere in the codebase:
+```typescript
+const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+// In handleAppUpdate:
+if (timeoutRef.current) clearTimeout(timeoutRef.current);
+timeoutRef.current = setTimeout(() => setShowBanner(false), 10000);
+// In cleanup:
+return () => {
+  if (timeoutRef.current) clearTimeout(timeoutRef.current);
+};
+```
+
+### CRITICAL: Race Condition on Service Worker Activation
+
+**Location**: `apps/web/src/main.tsx:75-78`
+
+**Problem**:
+```typescript
+if (newWorker.state === "activated") {
+  if (navigator.serviceWorker.controller) {
+    window.dispatchEvent(new CustomEvent(APP_UPDATE_EVENT));
+  }
+}
+```
+
+The check for `navigator.serviceWorker.controller` at the `activated` state is unreliable:
+- `activated` fires when the SW reaches activated state
+- The controller might still be the OLD worker at this moment
+- The `controllerchange` event fires AFTER `activated`
+
+**Impact**:
+- Banner might fire even on first install (false positive)
+- Banner might miss legitimate updates (false negative)
+
+**Better approach**: Listen to `controllerchange` event instead of `activated`.
+
+### HIGH: Multiple Event Listeners Accumulate
+
+**Location**: `apps/web/src/main.tsx:70-83`
+
+**Problem**: Each `updatefound` event adds a new `statechange` listener to the installing worker:
+```typescript
+registration.addEventListener("updatefound", () => {
+  const newWorker = registration.installing;
+  if (newWorker) {
+    newWorker.addEventListener("statechange", () => {...});
+  }
+});
+```
+
+**Impact**: Memory leak if page is open for extended periods with multiple update checks.
+
+### MEDIUM: Z-Index Conflicts with Modal Dialogs
+
+**Location**: `apps/web/src/App.tsx:157`
+
+**Problem**: Banner uses `z-50`, same as modal dialogs (ConnectDeviceDialog, DevicesPage).
+
+**Impact**: If a modal opens while banner is visible, they compete for z-index layer. Banner may appear behind modal backdrop.
+
+**Recommendation**: Use `z-[60]` or higher to ensure banner always shows above dialogs.
+
+### MEDIUM: No Page Reload Mechanism
+
+**Location**: `apps/web/src/App.tsx:156-169`
+
+**Problem**: Banner only informs user of update but doesn't prompt reload. Users might:
+- Dismiss the banner
+- Continue working with stale code
+- Experience inconsistencies between old JS and new service worker
+
+**Recommendation**: Add a "Reload" button to the banner.
+
+### LOW: Event Timing Mismatch
+
+**Problem**: The `APP_UPDATE_EVENT` dispatches on `activated`, but actual controller switch happens at `controllerchange`. The existing `handleControllerChange` in `QueryProviderEmbedded.tsx` handles key data re-sending after the switch.
+
+**Impact**: Banner appears before actual handoff completes - minor UX timing issue.
+
+## Test Verification
+
+Due to build memory constraints, live Playwright testing was not possible. Analysis based on code review.
+
+## Recommendation
+
+**HIGH PRIORITY FIXES NEEDED** before shipping:
+1. Add setTimeout cleanup to prevent memory leak
+2. Fix race condition by listening to `controllerchange` instead of `activated`
+3. Consider adding a "Reload" button for better UX
+
+The feature intent is good but implementation has issues that could cause memory problems and unreliable behavior.
+
+## Files Affected
+
+- `/home/artur/src/nostr.band/keep.ai/apps/web/src/main.tsx`
+- `/home/artur/src/nostr.band/keep.ai/apps/web/src/App.tsx`
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Memory Leak - setTimeout Not Cleaned Up) - created specs/app-update-banner-timeout-cleanup.md
+- Issue #2 (Race Condition on Service Worker Activation) - created specs/service-worker-update-detection.md
+- Issue #3 (Multiple Event Listeners Accumulate) - skipped
+- Issue #4 (Z-Index Conflicts with Modal Dialogs) - created specs/app-update-banner-z-index.md
+- Issue #5 (No Page Reload Mechanism) - skipped

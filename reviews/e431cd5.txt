@@ -1,0 +1,445 @@
+COMMIT REVIEW: e431cd5
+=======================
+Title: Implement Mermaid diagram display for workflow explanations
+Date: Fri Jan 16 17:29:48 2026 +0000
+Author: Claude Agent
+
+================================================================================
+CHANGES SUMMARY
+================================================================================
+
+This commit adds visual workflow explanations using Mermaid diagrams and
+one-sentence summaries displayed on the workflow detail page.
+
+1. NEW FILE: packages/db/src/migrations/v19.ts (17 lines)
+   - Adds 'summary' and 'diagram' columns to scripts table (text, default '')
+   - Uses crsql_begin_alter/crsql_commit_alter for CR-SQLite compatibility
+
+2. NEW FILE: apps/web/src/components/MermaidDiagram.tsx (67 lines)
+   - React component for rendering Mermaid diagrams
+   - Uses mermaid.render() API with async rendering
+   - Error handling with fallback display of raw diagram source
+   - Security settings: securityLevel: "loose", htmlLabels: true
+
+3. MODIFIED: packages/db/src/script-store.ts
+   - Added 'summary' and 'diagram' fields to Script interface
+   - Updated all 8 SELECT queries to include new fields
+   - Updated addScript() INSERT to include new fields
+
+4. MODIFIED: packages/agent/src/ai-tools/save.ts
+   - Added 'summary' and 'diagram' optional parameters to SaveInfoSchema
+   - Script creation now includes summary/diagram fields
+
+5. MODIFIED: apps/web/src/components/WorkflowDetailPage.tsx
+   - Added "What This Automation Does" section
+   - Displays summary text and MermaidDiagram component
+   - Conditional rendering when summary or diagram exists
+
+6. MODIFIED: packages/agent/src/agent-env.ts
+   - Updated planner system prompt to require summary/diagram on save
+   - Includes example Mermaid flowchart format in prompt
+
+7. MODIFIED: apps/web/package.json
+   - Added mermaid@^11.12.2 dependency
+
+8. MODIFIED: package-lock.json
+   - Locked mermaid version to 11.12.2
+
+================================================================================
+POTENTIAL ISSUES
+================================================================================
+
+ISSUE 1: XSS Vulnerability with securityLevel: "loose" [HIGH]
+---------------------------------------------------------------------------
+Problem: The MermaidDiagram component uses securityLevel: "loose" which
+disables many security protections.
+
+Location: apps/web/src/components/MermaidDiagram.tsx lines 6-14
+
+Code:
+  mermaid.initialize({
+    startOnLoad: false,
+    theme: "neutral",
+    securityLevel: "loose",  // <-- SECURITY RISK
+    flowchart: {
+      useMaxWidth: true,
+      htmlLabels: true,       // <-- Additional risk factor
+      curve: "basis",
+    },
+  });
+
+Security Context:
+- Mermaid has had multiple XSS vulnerabilities (CVE-2025-54881, etc.)
+- Version 11.12.2 includes fixes for known CVEs
+- However, "loose" mode explicitly allows click event callbacks
+- Combined with htmlLabels: true, this creates attack surface
+
+Attack Vector:
+1. Agent is manipulated via prompt injection
+2. Agent generates malicious Mermaid diagram
+3. Diagram contains XSS payload (e.g., click callbacks with JavaScript)
+4. User views workflow detail page
+5. Malicious JavaScript executes in user's browser
+
+Impact:
+- Arbitrary JavaScript execution in user's browser
+- Cookie theft, session hijacking
+- Local storage access
+- Potential system compromise via Electron context
+
+Proposal: Change security settings to "strict" or "sandbox":
+
+  mermaid.initialize({
+    startOnLoad: false,
+    theme: "neutral",
+    securityLevel: "strict",  // or "sandbox"
+    flowchart: {
+      useMaxWidth: true,
+      htmlLabels: false,      // Disable HTML in labels
+      curve: "basis",
+    },
+  });
+
+Additional protection with DOMPurify:
+  import DOMPurify from 'dompurify';
+
+  const sanitizedSvg = DOMPurify.sanitize(svg, { USE_PROFILES: { svg: true } });
+  setSvgContent(sanitizedSvg);
+
+--------------------------------------------------------------------------------
+
+ISSUE 2: dangerouslySetInnerHTML Without Sanitization [HIGH]
+---------------------------------------------------------------------------
+Problem: SVG output from Mermaid is injected directly without sanitization.
+
+Location: apps/web/src/components/MermaidDiagram.tsx lines 62-66
+
+Code:
+  return (
+    <div
+      ref={containerRef}
+      className={`mermaid-container overflow-auto ${className}`}
+      dangerouslySetInnerHTML={{ __html: svgContent }}
+    />
+  );
+
+Impact:
+- Any malicious content in the SVG is executed
+- Combined with "loose" security mode, risk is amplified
+- React's dangerouslySetInnerHTML bypasses React's XSS protections
+
+Proposal: Add DOMPurify sanitization before setting innerHTML:
+
+  import DOMPurify from 'dompurify';
+
+  // In renderDiagram():
+  const { svg } = await mermaid.render(id, diagram);
+  const sanitizedSvg = DOMPurify.sanitize(svg, {
+    USE_PROFILES: { svg: true, svgFilters: true },
+    ADD_TAGS: ['foreignObject'],
+  });
+  setSvgContent(sanitizedSvg);
+
+Note: DOMPurify is already installed in the project (verified in package.json).
+
+--------------------------------------------------------------------------------
+
+ISSUE 3: No Input Validation for Diagram Content [MEDIUM]
+---------------------------------------------------------------------------
+Problem: The save tool accepts arbitrary diagram strings without validation.
+
+Location: packages/agent/src/ai-tools/save.ts lines 16-18
+
+Code:
+  diagram: z
+    .string()
+    .optional()
+    .describe("Mermaid diagram source showing the automation flow (flowchart)"),
+
+Issues:
+- No length limit (could store megabytes of diagram data)
+- No syntax validation (malformed diagrams only fail at render)
+- No content filtering for dangerous patterns
+
+Proposal: Add validation constraints:
+
+  diagram: z
+    .string()
+    .max(10000)  // 10KB limit
+    .optional()
+    .refine(
+      (d) => !d || /^(flowchart|graph|sequenceDiagram|classDiagram)/i.test(d.trim()),
+      "Diagram must start with valid Mermaid diagram type"
+    )
+    .describe("Mermaid flowchart diagram (max 10KB)"),
+
+--------------------------------------------------------------------------------
+
+ISSUE 4: summary/diagram Parameters Are Optional [MEDIUM]
+---------------------------------------------------------------------------
+Problem: Despite the prompt saying they're required, the parameters are
+optional in the schema.
+
+Location: packages/agent/src/ai-tools/save.ts lines 10-18
+
+Code:
+  summary: z.string().optional().describe(...),
+  diagram: z.string().optional().describe(...),
+
+Location: packages/agent/src/agent-env.ts lines 486-488
+
+Prompt says:
+  "When saving, you MUST also provide:
+   - 'summary': A one-sentence description...
+   - 'diagram': A Mermaid flowchart..."
+
+Impact:
+- Agent may skip providing summary/diagram despite prompt instruction
+- No enforcement at tool level
+- Old scripts (and scripts saved without) have empty fields
+- Inconsistent user experience
+
+Proposal: Either:
+A) Make required in schema (breaking change for existing code):
+   summary: z.string().min(1).describe(...),
+   diagram: z.string().min(1).describe(...),
+
+B) Add migration strategy for existing scripts (backfill via agent)
+
+C) Accept optional but add UI indication when missing:
+   {!latestScript.summary && <p>Summary not yet generated</p>}
+
+--------------------------------------------------------------------------------
+
+ISSUE 5: No Render Timeout or Size Limits [MEDIUM]
+---------------------------------------------------------------------------
+Problem: Complex Mermaid diagrams could hang the browser or consume
+excessive memory.
+
+Location: apps/web/src/components/MermaidDiagram.tsx lines 30-40
+
+Code:
+  const renderDiagram = async () => {
+    try {
+      setError(null);
+      const id = `mermaid-${Math.random().toString(36).substring(7)}`;
+      const { svg } = await mermaid.render(id, diagram);  // No timeout
+      setSvgContent(svg);
+    } catch (err) {
+      ...
+    }
+  };
+
+Impact:
+- Malicious or buggy diagram could freeze the page
+- No way for user to cancel rendering
+- Memory exhaustion possible with large diagrams
+
+Proposal: Add timeout wrapper:
+
+  const renderWithTimeout = async (diagram: string, timeoutMs = 5000) => {
+    const renderPromise = mermaid.render(id, diagram);
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Diagram rendering timed out')), timeoutMs)
+    );
+    return Promise.race([renderPromise, timeoutPromise]);
+  };
+
+--------------------------------------------------------------------------------
+
+ISSUE 6: Missing Error Boundary [LOW-MEDIUM]
+---------------------------------------------------------------------------
+Problem: Mermaid rendering errors could crash the entire page component.
+
+Location: apps/web/src/components/MermaidDiagram.tsx
+
+Although there's try-catch in renderDiagram(), errors during initial render
+or synchronous code paths could propagate up.
+
+Impact:
+- Page crash on malformed diagram
+- User loses access to workflow detail page
+
+Proposal: Add React error boundary or wrap component:
+
+  function MermaidDiagramSafe(props: MermaidDiagramProps) {
+    return (
+      <ErrorBoundary fallback={<p>Failed to load diagram</p>}>
+        <MermaidDiagram {...props} />
+      </ErrorBoundary>
+    );
+  }
+
+--------------------------------------------------------------------------------
+
+ISSUE 7: No Tests for New Functionality [MEDIUM]
+---------------------------------------------------------------------------
+Problem: No test coverage for the new MermaidDiagram component, save tool
+parameters, or migration.
+
+Evidence: Searched packages/tests/ and apps/web/ for mermaid-related tests.
+Found no test files for:
+- MermaidDiagram component rendering
+- XSS attack vector testing
+- Database migration v19
+- Save tool with summary/diagram parameters
+
+Impact:
+- Regressions may go unnoticed
+- Security issues harder to catch
+- No confidence in edge case handling
+
+Proposal: Add tests:
+
+  // MermaidDiagram.test.tsx
+  describe('MermaidDiagram', () => {
+    it('renders valid flowchart diagram', () => {...});
+    it('shows error for invalid diagram', () => {...});
+    it('handles empty diagram', () => {...});
+    it('sanitizes potential XSS payloads', () => {...});
+    it('handles very large diagrams gracefully', () => {...});
+  });
+
+--------------------------------------------------------------------------------
+
+ISSUE 8: UI Shows Empty Section Header [LOW]
+---------------------------------------------------------------------------
+Problem: The "What This Automation Does" section could show with only title
+if one field exists but the other is empty.
+
+Location: apps/web/src/components/WorkflowDetailPage.tsx lines 481-497
+
+Code:
+  {latestScript && (latestScript.summary || latestScript.diagram) && (
+    <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
+      <h2>What This Automation Does</h2>
+      {latestScript.summary && <p>{latestScript.summary}</p>}
+      {latestScript.diagram && <MermaidDiagram ... />}
+    </div>
+  )}
+
+Impact:
+- If only summary exists, shows text with no diagram (acceptable)
+- If only diagram exists, shows diagram with no explanation (confusing)
+- Section header always visible even if content is minimal
+
+Proposal: Add contextual text or improve layout:
+
+  {latestScript.diagram && !latestScript.summary && (
+    <p className="text-gray-500 mb-4">Automation flow diagram:</p>
+  )}
+
+--------------------------------------------------------------------------------
+
+ISSUE 9: Migration May Impact Large Databases [LOW]
+---------------------------------------------------------------------------
+Problem: Adding columns to scripts table triggers ALTER TABLE which may
+lock the table in SQLite.
+
+Location: packages/db/src/migrations/v19.ts
+
+Code:
+  await tx.exec(`SELECT crsql_begin_alter('scripts')`);
+  await tx.exec(`ALTER TABLE scripts ADD COLUMN summary text not null default ''`);
+  await tx.exec(`ALTER TABLE scripts ADD COLUMN diagram text not null default ''`);
+  await tx.exec(`SELECT crsql_commit_alter('scripts')`);
+
+Impact:
+- For users with many scripts, migration could be slow
+- Application may appear frozen during migration
+- No progress indicator for users
+
+Note: This is minor for a personal automation product where script count
+is typically low.
+
+Proposal: Add logging for migration progress or consider batched migration
+for very large datasets (not needed for typical usage).
+
+================================================================================
+PROPOSALS SUMMARY
+================================================================================
+
+Priority HIGH:
+1. Change securityLevel to "strict" in Mermaid initialization
+2. Add DOMPurify sanitization before dangerouslySetInnerHTML
+3. Set htmlLabels: false to reduce attack surface
+
+Priority MEDIUM:
+4. Add input validation for diagram content (length limit, syntax check)
+5. Add render timeout to prevent page freezes
+6. Add tests for security and functionality
+7. Consider making summary/diagram required or add UI guidance
+
+Priority LOW:
+8. Add React error boundary around MermaidDiagram
+9. Improve UI for partial content states
+10. Add migration progress indicator (if needed)
+
+================================================================================
+POSITIVE ASPECTS
+================================================================================
+
+1. Clean component structure with proper hooks usage
+2. Good error handling with user-friendly error display
+3. Proper Mermaid initialization at module level (not in render)
+4. useEffect correctly handles diagram prop changes
+5. Comprehensive database changes (all 8 queries updated)
+6. Proper migration using crsql_begin_alter/crsql_commit_alter
+7. Clear prompt instructions with example diagram format
+8. Conditional rendering prevents empty section display
+9. Reasonable default theme ("neutral") works in light/dark mode
+10. MermaidDiagram component is reusable and self-contained
+
+================================================================================
+SECURITY RECOMMENDATIONS
+================================================================================
+
+The current implementation has a combined security risk from:
+1. securityLevel: "loose"
+2. htmlLabels: true
+3. dangerouslySetInnerHTML without sanitization
+4. No input validation on diagram content
+
+Recommended minimum changes for security:
+
+```typescript
+// MermaidDiagram.tsx
+import DOMPurify from 'dompurify';
+
+mermaid.initialize({
+  startOnLoad: false,
+  theme: "neutral",
+  securityLevel: "strict",  // Changed from "loose"
+  flowchart: {
+    useMaxWidth: true,
+    htmlLabels: false,      // Changed from true
+    curve: "basis",
+  },
+});
+
+// In renderDiagram():
+const { svg } = await mermaid.render(id, diagram);
+const sanitizedSvg = DOMPurify.sanitize(svg, {
+  USE_PROFILES: { svg: true, svgFilters: true },
+});
+setSvgContent(sanitizedSvg);
+```
+
+This maintains functionality while significantly reducing XSS attack surface.
+
+================================================================================
+END OF REVIEW
+================================================================================
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (XSS with securityLevel loose) - created specs/reuse-markdown-for-mermaid.md (removes mermaid package)
+- Issue #2 (dangerouslySetInnerHTML without sanitization) - covered by specs/reuse-markdown-for-mermaid.md
+- Issue #3 (No input validation for diagram) - skipped
+- Issue #4 (summary/diagram optional) - skipped
+- Issue #5 (No render timeout) - skipped
+- Issue #6 (Missing error boundary) - skipped
+- Issue #7 (No tests) - skipped
+- Issue #8 (UI shows empty section header) - skipped
+- Issue #9 (Migration may impact large databases) - skipped

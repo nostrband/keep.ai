@@ -1,0 +1,151 @@
+UX TEST REPORT: Commit a86b2e8
+================================
+Title: Implement notification filtering by error type for workflow errors
+Date: 2026-01-20
+Tester: Claude Opus 4.5 (automated UX test)
+
+SUMMARY
+-------
+This commit implements intelligent error type filtering for notifications,
+ensuring users are only notified for errors requiring action (auth, permission,
+network) while logic errors are handled silently via maintenance mode.
+
+TEST METHODOLOGY
+----------------
+- Code analysis of WorkflowNotifications.ts filtering logic
+- Code analysis of MainPage.tsx error display
+- Code analysis of error type classification
+- Playwright testing of UI elements
+
+FINDINGS
+--------
+
+1. ERROR TYPE CLASSIFICATION: PASS
+   - Clear categorization: auth, permission, network, logic, internal
+   - NOTIFY_ERROR_TYPES = ['auth', 'permission', 'network'] - correct
+   - SILENT_ERROR_TYPES = ['logic'] - correct for maintenance mode
+
+2. USER-FRIENDLY ERROR MESSAGES: PASS
+   MainPage.tsx displays contextual messages:
+   - auth: "⚠ Authentication expired [time]"
+   - permission: "⚠ Permission denied [time]"
+   - network: "⚠ Network error [time]"
+   - internal: "⚠ Something went wrong [time] - contact support"
+   - logic: "Issue detected [time] - fixing..." (no attention marker)
+
+3. VISUAL ATTENTION INDICATORS: PASS
+   - Workflows needing attention get red left border (border-l-4 border-l-red-500)
+   - Text color changes to red (text-red-600) for attention items
+   - Non-attention items display in gray
+
+4. ATTENTION FILTERING BANNER: PASS
+   - Banner shows count: "X workflows need attention"
+   - Toggle button to filter view (show only attention items)
+   - Dynamic button text: "Click to show all" when filtered
+   - Color-coded button states work correctly
+
+5. NOTIFICATION DEDUPLICATION: PASS
+   - Uses format `${workflowId}:${scriptRunId}` to prevent duplicates
+   - Memory bounded: keeps last 100 notification records
+   - Automatic cleanup of older entries
+
+6. TAB VISIBILITY RESPECT: PASS
+   - Only shows OS notification if tab is NOT visible
+   - Uses document.visibilityState check
+   - Respectful UX that doesn't interrupt active users
+
+7. ISSUE: Missing 'internal' Error Type in WorkflowNotifications
+
+   SEVERITY: MEDIUM
+
+   DESCRIPTION:
+   MainPage.tsx defines ATTENTION_ERROR_TYPES with 'internal' (line 40), but
+   WorkflowNotifications.ts (lines 128-134) only handles 'auth', 'permission',
+   and 'network' for notification body messages.
+
+   IMPACT:
+   If an 'internal' error occurs:
+   - MainPage will show attention indicator (correct)
+   - But notification body defaults to raw error message instead of
+     user-friendly "An internal error occurred" message
+
+   HOW TO REPRODUCE:
+   1. Trigger an internal error in a workflow script
+   2. Check OS notification message
+   3. Expected: "An internal error occurred. Please contact support."
+   4. Actual: Raw error message shown
+
+8. ISSUE: Legacy Error Type Inconsistency
+
+   SEVERITY: LOW
+
+   DESCRIPTION:
+   MainPage.tsx (line 73) treats empty error_type as attention-needing:
+   ```
+   (errorType === '' && !workflow.maintenance)
+   ```
+   But WorkflowNotifications has no special handling for empty strings.
+
+   IMPACT:
+   MainPage shows attention for legacy/unclassified errors, but
+   notifications may not fire consistently.
+
+9. ISSUE: No Notification Grouping
+
+   SEVERITY: LOW
+
+   DESCRIPTION:
+   Each workflow error produces individual notification. If 5 workflows
+   fail with auth errors, user gets 5 separate notifications.
+
+   IMPACT:
+   Potential notification spam when multiple workflows fail simultaneously.
+
+10. MAINTENANCE MODE INTEGRATION: PASS
+    - workflow.maintenance check skips notification (line 71-75)
+    - MainPage shows "Auto-fixing issue..." for maintenance mode
+    - Prevents confusion with double-notifications
+
+11. TRAY BADGE INTEGRATION: PASS (Electron only)
+    - Updates OS tray badge with attention count
+    - Graceful degradation when Electron API unavailable
+
+12. DATABASE SCHEMA: PASS
+    - Migration v22 adds error_type field correctly
+    - Default empty string for backward compatibility
+
+RECOMMENDATIONS
+---------------
+1. Add 'internal' error type handling in WorkflowNotifications.ts:
+   ```
+   } else if (errorType === 'internal') {
+     body = 'An internal error occurred. Please contact support.';
+   }
+   ```
+
+2. Consider notification grouping for batch failures
+
+3. Add rate limiting to prevent notification spam from rapidly failing workflows
+
+4. Document expected error_type values for future development
+
+OVERALL VERDICT
+---------------
+PASS - The notification filtering works correctly for the primary use cases.
+The user-friendly messages display appropriately in the main UI. Minor gaps
+in 'internal' error type handling and edge cases do not significantly impact
+the user experience.
+
+Files affected:
+- apps/web/src/lib/WorkflowNotifications.ts (working with minor gap)
+- apps/web/src/components/MainPage.tsx (working correctly)
+- packages/db/src/migrations/v22.ts (working correctly)
+- packages/agent/src/workflow-worker.ts (error type recording works)
+- apps/web/src/queryClient.ts (integration working)
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #7 (Missing 'internal' Error Type in WorkflowNotifications) - covered by specs/workflow-notifications-internal-error.md
+- Issue #8 (Legacy Error Type Inconsistency) - created specs/legacy-error-type-notification-handling.md
+- Issue #9 (No Notification Grouping) - created specs/notification-grouping-batch-errors.md

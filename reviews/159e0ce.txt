@@ -1,0 +1,106 @@
+# Review: 159e0ce - Remove dead quick-reply code and validate ask options
+
+## Summary of Changes
+
+This commit makes two changes:
+1. Removes dead quick-reply code from MainPage.tsx
+2. Adds input validation to formatAsks() in packages/agent/src/ai-tools/ask.ts
+
+**Files Changed:**
+- Modified `apps/web/src/components/MainPage.tsx` (-39 lines)
+- Modified `packages/agent/src/ai-tools/ask.ts` (+10 lines)
+- Updated `IMPLEMENTATION_PLAN.md` (status tracking)
+
+### Change 1: Dead Code Removal (MainPage.tsx)
+
+**Removed:**
+- `useTaskByChatId("main")` hook call
+- `useTaskState(mainTask?.id)` hook call
+- `quickReplyOptions` useMemo computation
+- `handleQuickReply` callback function
+- `QuickReplyButtons` rendering
+- Unused imports: `useTaskByChatId`, `useTaskState`, `QuickReplyButtons`, `parseAsks`
+
+**Reason:** No task is ever created with chat_id="main". Tasks are created in `packages/db/src/api.ts:createTask()` with randomly generated chatIds (`bytesToHex(randomBytes(16))`). The "main" chatId is used for messages/conversations, not tasks, so `useTaskByChatId("main")` always returns null.
+
+### Change 2: Ask Options Validation (ask.ts)
+
+**Added validation to formatAsks():**
+```typescript
+const cleanedOptions = [...new Set(
+  options
+    .map(opt => opt.trim())
+    .filter(opt => opt.length > 0)
+)];
+```
+
+This filters:
+- Empty strings after trimming
+- Whitespace-only strings
+- Duplicate options
+
+---
+
+## Potential Issues
+
+### Issue 1: Set deduplication order (Very Low Priority)
+
+**Description:** Using `new Set()` for deduplication preserves insertion order in modern JavaScript engines, but this is technically implementation-dependent behavior.
+
+**Location:** `packages/agent/src/ai-tools/ask.ts:30-34`
+
+**Impact:** If the order of options matters to users (e.g., "Yes" should always appear before "No"), the current implementation depends on Set iteration order.
+
+**Evidence:** Modern JavaScript (ES2015+) specifies Set iteration in insertion order, and all current Node.js/browser versions follow this. Practically, this is not an issue.
+
+**Proposal:** No change needed. The current implementation is standard and works correctly in all modern environments. If explicit order guarantees were needed, an alternative approach using a manual seen-set pattern could be used, but this is over-engineering.
+
+### Issue 2: Silent filtering of all options (Low Priority)
+
+**Description:** If all options passed in are empty/whitespace strings, `cleanedOptions` becomes empty, and formatAsks falls back to plain string storage (no options property).
+
+**Location:** `packages/agent/src/ai-tools/ask.ts:36-38`
+
+**Impact:** The LLM provided options but they were all invalid, so the user sees no quick-reply buttons. This is arguably correct behavior - showing empty buttons would be worse.
+
+**Proposal:** No change needed. The current behavior is sensible - invalid input produces reasonable output.
+
+### Issue 3: Validation runs on each call, not at tool definition (Not an Issue)
+
+**Description:** The validation happens at runtime during formatAsks() execution, not at tool schema validation time.
+
+**Verification:** This is correct. Zod schema validates structure (array of strings), while formatAsks() cleans the data. Having runtime cleanup is appropriate since the LLM might generate options with extra whitespace.
+
+---
+
+## Verification
+
+### Dead Code Analysis
+
+I verified the claim that no task has chat_id="main":
+
+1. **Task creation** (`packages/db/src/api.ts:287`): `chat_id: chatId` where chatId is `bytesToHex(randomBytes(16))` - always a random UUID
+2. **Database queries**: Searched for any code that might set chat_id="main" on a task - none found
+3. **Usage in MainPage**: The "main" chatId is used for `addMessage.mutate({ chatId: "main", ... })` which creates messages, not tasks
+
+The dead code removal is correct and safe.
+
+---
+
+## Assessment
+
+**Quality:** Good
+**Risk:** Very Low
+
+Both changes are well-justified:
+1. The dead code removal eliminates code that could never execute, reducing maintenance burden
+2. The validation prevents potential UI issues with empty/duplicate quick-reply buttons
+
+The commit also correctly marks spec #24 (extract-quick-reply-hook) as "NO_LONGER_APPLICABLE" since removing the MainPage duplicate means there's no longer duplication to extract.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Set deduplication order) - not an issue (modern JS guarantees insertion order)
+- Issue #2 (Silent filtering of all options) - not an issue (sensible behavior)
+- Issue #3 (Validation runs at runtime) - not an issue (correct design)

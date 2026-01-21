@@ -1,0 +1,294 @@
+COMMIT REVIEW: d3fb044
+=======================
+"Add empty state example suggestions and Press Enter hint"
+Author: Claude Agent
+Date: Fri Jan 16 21:30:08 2026 +0000
+
+================================================================================
+CHANGES SUMMARY
+================================================================================
+
+This commit adds user onboarding improvements to the main page:
+1. Example automation suggestions that users can click to populate the input
+2. A "Press Enter to create automation" hint when typing
+3. Visual polish with a Sparkles icon
+4. Improved empty state messaging for the "attention only" filter view
+
+FILES MODIFIED:
+- IMPLEMENTATION_PLAN.md (20 changes - documentation updates)
+- apps/web/src/components/MainPage.tsx (49 changes)
+
+================================================================================
+DETAILED CHANGES
+================================================================================
+
+NEW IMPORTS ADDED:
+- Suggestions, Suggestion from "../ui" (UI components for clickable suggestions)
+- Sparkles from "lucide-react" (icon for visual polish)
+
+NEW CONSTANT:
+```typescript
+const EXAMPLE_SUGGESTIONS = [
+  "Send me a daily summary of my unread emails",
+  "Alert me when a website changes",
+  "Remind me to drink water every 2 hours",
+  "Save interesting tweets to a note",
+];
+```
+
+EMPTY STATE UI CHANGES:
+- Added conditional rendering based on showAttentionOnly filter
+- For "attention only" filter: Shows "No workflows need attention" / "All automations are running smoothly"
+- For default view: Shows Sparkles icon, "No automations yet", example suggestions grid
+- Each suggestion is a clickable button that populates the input via setInput(suggestion)
+
+PRESS ENTER HINT:
+- Shows below the input when user has typed something
+- Uses <kbd> element styled with Tailwind utilities
+- Condition: input.trim() && !uploadState.isUploading
+
+================================================================================
+POTENTIAL ISSUES
+================================================================================
+
+ISSUE #1: Suggestions Container Not Using Suggestions Component
+---------------------------------------------------------------
+Severity: Low (Consistency)
+Location: apps/web/src/components/MainPage.tsx lines ~385-390
+
+The code imports both `Suggestions` (plural, a container component) and `Suggestion`
+(individual items), but only uses the individual `Suggestion` components wrapped
+in a manual div:
+
+```typescript
+<div className="flex flex-wrap justify-center gap-2 max-w-lg">
+  {EXAMPLE_SUGGESTIONS.map((suggestion, index) => (
+    <Suggestion key={index} ... />
+  ))}
+</div>
+```
+
+The `Suggestions` component exists in the UI library and provides a horizontally
+scrollable container with ScrollArea. The manual div uses `flex-wrap` instead
+which is different behavior.
+
+Analysis:
+- Current implementation: flex-wrap causes items to wrap to multiple rows
+- Suggestions component: horizontal scrolling, no wrap
+
+The current flex-wrap behavior may actually be better for this use case (showing
+all options at once), so this is not necessarily wrong, just inconsistent with
+importing the unused Suggestions component.
+
+--------------------------------------------------------------------------------
+
+ISSUE #2: Missing Accessibility Attributes
+------------------------------------------
+Severity: Medium
+Location: apps/web/src/components/MainPage.tsx lines ~368-395
+
+The empty state lacks proper accessibility markup:
+
+1. No semantic headings - "No automations yet" is styled text, not an <h2> or <h3>
+2. No aria-labels on suggestion buttons - screen readers will just say "button"
+3. No semantic grouping for suggestions - no fieldset/legend or list structure
+4. Sparkles icon has no aria-hidden attribute
+
+For a v1 product aiming to be "lovable and complete", accessibility matters.
+
+--------------------------------------------------------------------------------
+
+ISSUE #3: kbd Element Dark Mode Styling
+---------------------------------------
+Severity: Low
+Location: apps/web/src/components/MainPage.tsx line ~502
+
+The <kbd> element uses hardcoded light theme colors:
+```html
+<kbd className="px-1.5 py-0.5 bg-gray-100 rounded border border-gray-200 font-mono">
+```
+
+If the app supports dark mode (checking globals.css suggests it does with CSS
+variables), this kbd styling would look wrong:
+- bg-gray-100 stays light gray
+- border-gray-200 stays light gray
+- Would have poor contrast on dark backgrounds
+
+--------------------------------------------------------------------------------
+
+ISSUE #4: Using Array Index as React Key
+----------------------------------------
+Severity: Very Low
+Location: apps/web/src/components/MainPage.tsx line ~386
+
+```typescript
+{EXAMPLE_SUGGESTIONS.map((suggestion, index) => (
+  <Suggestion key={index} ...
+```
+
+Using array index as key is a React anti-pattern because:
+- If items can be reordered/filtered, React may mismatch state
+- Can cause performance issues with reconciliation
+
+However, for this specific case:
+- EXAMPLE_SUGGESTIONS is a static array that never changes
+- Items are not reorderable or removable
+- This is effectively safe, just not best practice
+
+--------------------------------------------------------------------------------
+
+ISSUE #5: Hardcoded Suggestion Text (i18n Concern)
+--------------------------------------------------
+Severity: Low (Future-proofing)
+Location: apps/web/src/components/MainPage.tsx lines ~54-59
+
+```typescript
+const EXAMPLE_SUGGESTIONS = [
+  "Send me a daily summary of my unread emails",
+  "Alert me when a website changes",
+  "Remind me to drink water every 2 hours",
+  "Save interesting tweets to a note",
+];
+```
+
+All strings are hardcoded in English. If the product ever needs internationalization,
+this would need to be refactored to use i18n keys.
+
+For a local personal automation product, this may not be a priority, but worth
+noting for future scope.
+
+--------------------------------------------------------------------------------
+
+ISSUE #6: Press Enter Hint Shows During Upload
+----------------------------------------------
+Severity: Very Low (Good catch by author)
+Location: apps/web/src/components/MainPage.tsx line ~498
+
+The condition `!uploadState.isUploading` correctly hides the "Press Enter" hint
+during file uploads, which is good UX. No issue here - just noting good practice.
+
+================================================================================
+PROPOSALS
+================================================================================
+
+PROPOSAL #1: Add Basic Accessibility Attributes
+-----------------------------------------------
+Priority: Medium
+Location: apps/web/src/components/MainPage.tsx
+
+Improve accessibility with minimal changes:
+
+```typescript
+<div className="flex flex-col items-center justify-center py-12 text-center">
+  <Sparkles className="size-12 text-gray-300 mb-4" aria-hidden="true" />
+  <p className="text-gray-500 text-lg mb-2" role="heading" aria-level={2}>
+    No automations yet
+  </p>
+  <p className="text-gray-400 text-sm mb-6">
+    Type below or try one of these examples
+  </p>
+  <div
+    className="flex flex-wrap justify-center gap-2 max-w-lg"
+    role="group"
+    aria-label="Example automation suggestions"
+  >
+    {EXAMPLE_SUGGESTIONS.map((suggestion, index) => (
+      <Suggestion
+        key={suggestion}  // Use suggestion text as key (unique)
+        suggestion={suggestion}
+        onClick={() => setInput(suggestion)}
+        className="text-xs"
+        aria-label={`Try: ${suggestion}`}
+      />
+    ))}
+  </div>
+</div>
+```
+
+--------------------------------------------------------------------------------
+
+PROPOSAL #2: Fix kbd Dark Mode Styling
+--------------------------------------
+Priority: Low
+Location: apps/web/src/components/MainPage.tsx
+
+Replace hardcoded colors with theme-aware variants:
+
+```typescript
+<kbd className="px-1.5 py-0.5 bg-muted rounded border border-border font-mono text-muted-foreground">
+  Enter
+</kbd>
+```
+
+Or use CSS variables that respect the theme:
+- bg-muted (typically lighter than background)
+- border-border (theme border color)
+- text-muted-foreground (for subtle text)
+
+--------------------------------------------------------------------------------
+
+PROPOSAL #3: Remove Unused Suggestions Import
+---------------------------------------------
+Priority: Very Low
+Location: apps/web/src/components/MainPage.tsx line 23
+
+If the Suggestions (plural) component is not being used, remove the import:
+
+```typescript
+// Change this:
+import { Suggestion, Suggestions, ... } from "../ui";
+
+// To this:
+import { Suggestion, ... } from "../ui";
+```
+
+Keeps imports clean and makes it clear what's actually being used.
+
+--------------------------------------------------------------------------------
+
+PROPOSAL #4: Use Suggestion Text as React Key
+---------------------------------------------
+Priority: Very Low
+Location: apps/web/src/components/MainPage.tsx line 386
+
+```typescript
+// Change:
+key={index}
+
+// To:
+key={suggestion}
+```
+
+Since each suggestion string is unique, this provides a stable key without relying
+on array position. Marginal improvement but follows React best practices.
+
+================================================================================
+OVERALL ASSESSMENT
+================================================================================
+
+Risk Level: LOW
+Impact: UX improvement - adds helpful onboarding guidance
+
+This commit makes valuable UX improvements for new users:
+- Example suggestions help users understand what the product can do
+- Press Enter hint reduces friction for first-time use
+- Sparkles icon adds appropriate visual polish
+
+The implementation is solid with some minor areas for improvement:
+- Accessibility could be enhanced with semantic markup and ARIA attributes
+- Dark mode support for kbd element should be verified
+- Unused Suggestions import could be cleaned up
+
+VERDICT: Good commit. Achieves its UX goals effectively. The accessibility
+improvements are the most actionable follow-up items for a "lovable and complete"
+v1 release.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Suggestions container unused) - skipped
+- Issue #2 (Missing accessibility attributes) - skipped
+- Issue #3 (kbd dark mode styling) - skipped
+- Issue #4 (Array index as React key) - skipped
+- Issue #5 (Hardcoded i18n strings) - skipped
+- Issue #6 (Press Enter hint during upload) - not an issue (good practice)

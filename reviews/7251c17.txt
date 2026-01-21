@@ -1,0 +1,204 @@
+COMMIT REVIEW: 7251c17
+=======================
+Title: Update workflow status badges: Pending→Draft, Active→Running, Disabled→Paused
+Author: Claude Agent
+Date: Fri Jan 16 14:37:04 2026 +0000
+
+FILES CHANGED:
+- apps/web/src/components/TaskDetailPage.tsx
+- apps/web/src/components/WorkflowDetailPage.tsx
+- apps/web/src/components/WorkflowsPage.tsx
+- apps/web/src/lib/PushNotificationManager.ts
+- packages/agent/src/sandbox/sandbox.ts
+- packages/tests/src/sandbox.test.ts
+- IMPLEMENTATION_PLAN.md
+- .claude/settings.local.json
+
+================================================================================
+CHANGE DESCRIPTION
+================================================================================
+
+1. STATUS TERMINOLOGY UPDATE (WorkflowsPage, WorkflowDetailPage, TaskDetailPage)
+   - Changed "Disabled" → "Paused" with yellow badge (bg-yellow-100 text-yellow-800)
+   - Changed "Active" → "Running" with green badge (bg-green-100 text-green-800)
+   - Changed "Pending" → "Draft" with outline variant
+   - Updated toggle button labels: "Enable"/"Disable" → "Resume"/"Pause"
+   - Updated success messages: "Workflow disabled" → "Workflow paused", etc.
+
+2. TYPE FIXES IN SANDBOX (packages/agent/src/sandbox/sandbox.ts)
+   - Made EvalGlobal interface properties optional (memory?, tools?, tasks?, docs?)
+   - Added index signature [key: string]: any to EvalGlobal for extensibility
+   - Added Symbol.dispose() method to Sandbox class for explicit resource management
+   - Improved abort signal error message handling with proper type checks:
+     * Checks if reason is an Error instance
+     * Uses message, name, or "Aborted" fallback
+     * Properly converts non-Error reasons with String()
+
+3. PUSH NOTIFICATION FIX (apps/web/src/lib/PushNotificationManager.ts)
+   - Fixed applicationServerKey type: changed from Uint8Array to ArrayBuffer
+   - Used `.buffer as ArrayBuffer` to satisfy the Web Push API type requirements
+
+4. TEST UPDATE (packages/tests/src/sandbox.test.ts)
+   - Changed abort test assertion from exact match `expect(error).toBe("Aborted")`
+     to flexible check `expect(error.toLowerCase()).toContain("abort")`
+   - This accommodates browser differences in abort error messages
+
+================================================================================
+ISSUES IDENTIFIED
+================================================================================
+
+ISSUE #1: CODE DUPLICATION - getStatusBadge function (MEDIUM)
+-----------------------------------------------------------------
+Location: WorkflowsPage.tsx:8-14, WorkflowDetailPage.tsx:18-24, TaskDetailPage.tsx:236-242
+         (Also duplicated again in MainPage.tsx in a later commit)
+
+The `getStatusBadge` function is copy-pasted identically across 3 files:
+```typescript
+const getStatusBadge = (workflow: any) => {
+  if (workflow.status === "disabled") {
+    return <Badge className="bg-yellow-100 text-yellow-800">Paused</Badge>;
+  } else if (workflow.status === "active") {
+    return <Badge className="bg-green-100 text-green-800">Running</Badge>;
+  } else {
+    return <Badge variant="outline">Draft</Badge>;
+  }
+};
+```
+
+Impact: Any future status changes must be updated in multiple places, increasing
+maintenance burden and risk of inconsistencies.
+
+PROPOSAL: Extract to a shared utility component:
+```typescript
+// apps/web/src/components/WorkflowStatusBadge.tsx
+import { Badge } from "../ui";
+
+interface Props {
+  status: string | undefined;
+}
+
+export function WorkflowStatusBadge({ status }: Props) {
+  if (status === "disabled") {
+    return <Badge className="bg-yellow-100 text-yellow-800">Paused</Badge>;
+  } else if (status === "active") {
+    return <Badge className="bg-green-100 text-green-800">Running</Badge>;
+  } else {
+    return <Badge variant="outline">Draft</Badge>;
+  }
+}
+```
+
+
+ISSUE #2: TYPE SAFETY - Using 'any' type for workflow parameter (LOW)
+----------------------------------------------------------------------
+Location: All getStatusBadge functions
+
+The workflow parameter uses `any` type, defeating TypeScript's type checking.
+
+PROPOSAL: Use proper Workflow type from the database package:
+```typescript
+import type { Workflow } from "@app/db";
+const getStatusBadge = (workflow: Pick<Workflow, 'status'>) => { ... }
+```
+
+
+ISSUE #3: BADGE STYLING INCONSISTENCY (LOW)
+-------------------------------------------
+Location: All status badge implementations
+
+Custom className overrides (bg-yellow-100, bg-green-100) are used instead of
+leveraging the Badge component's variant system. The Badge component only has:
+default, secondary, destructive, outline variants.
+
+Impact: Bypasses design system, makes theme customization harder.
+
+PROPOSAL: Either:
+a) Add 'success' and 'warning' variants to Badge component
+b) Keep current approach but document it as intentional for semantic colors
+
+
+ISSUE #4: EvalGlobal INTERFACE CHANGE MAY BE TOO PERMISSIVE (LOW)
+-----------------------------------------------------------------
+Location: packages/agent/src/sandbox/sandbox.ts:11-17
+
+The change made all properties optional AND added an index signature:
+```typescript
+export interface EvalGlobal {
+  memory?: any,
+  tools?: any,
+  tasks?: any,
+  docs?: (tool: string) => string;
+  [key: string]: any;
+}
+```
+
+The index signature `[key: string]: any` effectively makes this interface
+equivalent to `Record<string, any>`, which removes type safety benefits.
+
+PROPOSAL: If extensibility is needed, consider a more constrained approach:
+```typescript
+export interface EvalGlobal {
+  memory?: any;
+  tools?: any;
+  tasks?: any;
+  docs?: (tool: string) => string;
+}
+
+// For test extensions, use intersection types:
+type TestEvalGlobal = EvalGlobal & { customTestProp: string };
+```
+
+
+ISSUE #5: DOUBLE SEMICOLON IN SANDBOX.TS (TRIVIAL)
+--------------------------------------------------
+Location: packages/agent/src/sandbox/sandbox.ts around context assignment
+
+There's a double semicolon in the code: `this.#context = context;;`
+This is harmless but indicates a minor oversight.
+
+PROPOSAL: Remove the extra semicolon.
+
+
+================================================================================
+POSITIVE OBSERVATIONS
+================================================================================
+
+1. Symbol.dispose implementation follows the TC39 Explicit Resource Management
+   proposal correctly, enabling `using sandbox = new Sandbox()` patterns.
+
+2. The abort signal error handling is now robust, handling Error objects,
+   string reasons, and undefined cases properly.
+
+3. The ArrayBuffer fix for applicationServerKey correctly addresses the Web Push
+   API type requirements (PushSubscriptionOptionsInit.applicationServerKey
+   expects BufferSource, not Uint8Array directly in some contexts).
+
+4. The flexible test assertion is a pragmatic solution for cross-environment
+   compatibility.
+
+5. The terminology change (Paused/Running/Draft) is more user-friendly than
+   the technical terms (Disabled/Active/Pending).
+
+
+================================================================================
+RISK ASSESSMENT
+================================================================================
+
+Overall Risk: LOW
+
+- The status terminology changes are purely cosmetic UI updates
+- Type fixes are defensive and don't change runtime behavior
+- No breaking changes to APIs or data structures
+- Tests were updated to remain compatible
+
+The code duplication issue should be addressed before it spreads further,
+but it doesn't pose an immediate risk.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Code duplication getStatusBadge) - created specs/workflow-status-badge-component.md
+- Issue #2 (Type safety any type) - skipped
+- Issue #3 (Badge styling inconsistency) - skipped
+- Issue #4 (EvalGlobal too permissive) - skipped
+- Issue #5 (Double semicolon) - skipped

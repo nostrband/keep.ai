@@ -1,0 +1,158 @@
+COMMIT REVIEW: 6311761 - Mark log-workflow-notification-fetch-errors as completed
+
+================================================================================
+CHANGES SUMMARY
+================================================================================
+
+This commit marks spec #41 (log-workflow-notification-fetch-errors) as
+COMPLETED in IMPLEMENTATION_PLAN.md. The commit claims that the spec's
+requirement for console.debug logging is already satisfied in the current
+WorkflowNotifications.ts implementation.
+
+Files changed:
+- IMPLEMENTATION_PLAN.md only (status update and resolution note)
+
+Claims made in commit message:
+1. console.debug logging exists at lines 101 and 153
+2. Uses batch fetch via getLatestRunsByWorkflowIds()
+
+================================================================================
+ISSUES IDENTIFIED
+================================================================================
+
+ISSUE 1: Misleading Commit Message [MEDIUM]
+-------------------------------------------
+The commit message states the code "already has console.debug logging",
+implying it was always there. In reality:
+
+- The previous version (before commit 8c0b25f) had a SILENT empty catch block
+  with just a comment: `// Ignore individual workflow errors`
+- The console.debug logging was ADDED in commit 8c0b25f as part of the batch
+  fetch refactor
+
+The spec WAS addressed, but by commit 8c0b25f, not by pre-existing code.
+This commit is essentially crediting the wrong cause.
+
+ISSUE 2: console.debug Is Wrong Log Level [MEDIUM]
+--------------------------------------------------
+Location: apps/web/src/lib/WorkflowNotifications.ts lines 101 and 153
+
+Current code:
+```typescript
+console.debug("Failed to update tray badge:", e);  // line 101
+console.debug("Failed to show workflow notification:", e);  // line 153
+```
+
+Problems:
+- console.debug() is often stripped/hidden in production builds
+- These are ERROR-level conditions (failed operations affecting functionality)
+- Makes production debugging difficult when users report notification issues
+
+Should use console.error() or console.warn() instead.
+
+The review for commit 8c0b25f (Proposal 5) recommended console.warn() for
+exactly this reason.
+
+ISSUE 3: Missing Try-Catch Around Batch Query [MEDIUM]
+------------------------------------------------------
+Location: apps/web/src/lib/WorkflowNotifications.ts line 65
+
+The batch query has NO error handling:
+```typescript
+const latestRunsMap = await api.scriptStore.getLatestRunsByWorkflowIds(workflowIds);
+```
+
+Previously, individual workflow fetch failures were isolated. Now, if the
+entire batch query fails, ALL workflows lose notifications for that check
+cycle.
+
+This was identified in review 8c0b25f.txt (Issue 3) but remains unfixed.
+
+ISSUE 4: Set Iteration Bug Still Present [CRITICAL - EXISTING]
+--------------------------------------------------------------
+Location: apps/web/src/lib/WorkflowNotifications.ts clearWorkflowNotifications()
+
+Review 8c0b25f.txt identified a critical bug in Set iteration during deletion
+(Issue 1). This commit does not address it and the bug remains.
+
+This is outside the scope of the spec being marked, but worth noting since
+it affects the same file.
+
+ISSUE 5: Incomplete Verification [LOW]
+--------------------------------------
+The commit marks the spec as complete without addressing the broader error
+handling robustness that the spec intended to improve. While the literal
+requirement (add logging) is met, the spirit of the spec (proper error
+handling) is only partially satisfied.
+
+================================================================================
+PROPOSALS
+================================================================================
+
+PROPOSAL 1: Change console.debug to console.warn [RECOMMENDED]
+--------------------------------------------------------------
+Update the logging level for production visibility:
+
+Line 101:
+```typescript
+console.warn("Failed to update tray badge:", e);
+```
+
+Line 153:
+```typescript
+console.warn("Failed to show workflow notification:", e);
+```
+
+PROPOSAL 2: Add try-catch around batch query [RECOMMENDED]
+----------------------------------------------------------
+Wrap the batch fetch to prevent complete notification failure:
+
+```typescript
+let latestRunsMap: Map<string, ScriptRun> | undefined;
+try {
+  latestRunsMap = await api.scriptStore.getLatestRunsByWorkflowIds(workflowIds);
+} catch (e) {
+  console.warn("Failed to fetch latest runs batch:", e);
+  return; // Skip this notification cycle
+}
+```
+
+PROPOSAL 3: Update commit message/resolution accuracy [OPTIONAL]
+----------------------------------------------------------------
+The IMPLEMENTATION_PLAN.md resolution could be updated to more accurately
+describe when the fix was implemented (commit 8c0b25f).
+
+================================================================================
+OVERALL ASSESSMENT
+================================================================================
+
+The commit correctly identifies that the spec's literal requirement (console
+logging) exists in the codebase. The logging IS present at lines 101 and 153,
+and batch fetch IS used.
+
+However, the commit:
+1. Misattributes when the fix was implemented
+2. Uses suboptimal log level (console.debug vs console.warn/error)
+3. Doesn't address remaining error handling gaps identified in prior reviews
+
+Rating: ACCEPTABLE but misleading
+
+Key points:
++ Spec requirement (logging) is technically satisfied
++ Batch fetch claim is accurate
+- Commit message incorrectly implies code was "already" there
+- console.debug level is inappropriate for error conditions
+- Missing try-catch around batch query (existing issue)
+- Critical Set iteration bug still present (existing issue)
+
+The spec can reasonably be marked as completed since logging exists, but
+the remaining issues from review 8c0b25f.txt should be addressed separately.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Misleading Commit Message) - skipped
+- Issue #2 (console.debug Is Wrong Log Level) - skipped
+- Issue #3 (Missing Try-Catch Around Batch Query) - skipped
+- Issue #4 (Set Iteration Bug Still Present) - created specs/fix-set-iteration-delete-bug.md
+- Issue #5 (Incomplete Verification) - skipped

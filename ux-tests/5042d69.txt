@@ -1,0 +1,121 @@
+UX TEST REPORT: Commit 5042d69
+================================
+"Collapse low-signal events in chat timeline"
+
+TEST DATE: 2026-01-20
+TEST METHOD: Code Review + Static Analysis
+RUNTIME TEST: Limited (app requires valid API key for full automation flow)
+
+COMMIT SUMMARY
+--------------
+Implements smart collapsing of low-signal (routine read) events in the chat
+timeline while keeping high-signal (writes, errors) events always visible.
+Users can click to expand collapsed sections.
+
+CHANGES REVIEWED
+----------------
+1. apps/web/src/lib/eventSignal.ts (NEW FILE)
+   - SignalLevel type: 'high' | 'low'
+   - LOW_SIGNAL_EVENTS array: WEB_FETCH, WEB_SEARCH, GET_WEATHER, etc.
+   - getEventSignalLevel() function with dynamic Gmail classification
+   - partitionEventsBySignal() function
+   - getEventTypeLabel() for human-readable labels
+   - calculateEventsCost() utility
+
+2. apps/web/src/components/CollapsedEventSummary.tsx (NEW FILE)
+   - Renders collapsed event summary button
+   - Shows event count, types (up to 3), and aggregate cost
+   - Chevron icon indicates expand/collapse state
+   - Accessible with aria-expanded and aria-label
+
+3. apps/web/src/components/TaskEventGroup.tsx
+   - Added isLowSignalCollapsed state (default: true)
+   - Uses partitionEventsBySignal to split events
+   - Shows CollapsedEventSummary when shouldCollapseEvents
+   - Error override: all events visible on error
+
+4. apps/web/src/components/WorkflowEventGroup.tsx
+   - Same collapse pattern as TaskEventGroup
+
+EXPECTED UX CHANGES
+-------------------
+1. Default Collapsed View:
+   - Low-signal events (web fetch, search, analysis) collapsed by default
+   - Shows: "3 routine events (web fetch, text classify, Gmail read)"
+   - Aggregate cost displayed if applicable
+
+2. Expand/Collapse Toggle:
+   - Click CollapsedEventSummary to expand
+   - Chevron changes: ">" (collapsed) to "v" (expanded)
+   - Button shows "Show" or "Hide" label
+
+3. Error State Override:
+   - When run has error, ALL events shown without collapse
+   - Provides full debugging context
+
+4. High-Signal Events Always Visible:
+   - Write operations (notes, tasks, file saves)
+   - Image/text generation
+   - Script creation
+   - Gmail send/modify operations
+
+LOW-SIGNAL EVENTS (Collapsed by default):
+- WEB_FETCH
+- WEB_SEARCH
+- GET_WEATHER
+- TEXT_EXTRACT
+- TEXT_CLASSIFY
+- TEXT_SUMMARIZE
+- IMAGES_EXPLAIN
+- PDF_EXPLAIN
+- AUDIO_EXPLAIN
+- GMAIL_API_CALL (only read operations)
+
+ISSUES FOUND
+------------
+NONE
+
+CODE QUALITY ASSESSMENT
+-----------------------
+- Clean separation: classification logic in eventSignal.ts, UI in components
+- Consistent collapse pattern in both TaskEventGroup and WorkflowEventGroup
+- Type-safe partitioning with generics
+- Proper null checks for error detection
+- Gmail write methods correctly identified as high-signal
+- Accessible UI with proper ARIA attributes
+- Cost calculation handles missing data gracefully
+
+VERIFICATION CHECKLIST
+----------------------
+[x] SignalLevel classification correctly implemented
+[x] All event types properly classified
+[x] CollapsedEventSummary renders correctly (code review)
+[x] Collapse/expand state management correct
+[x] Error override (auto-expand on error) implemented
+[x] Event partitioning logic is sound
+[x] Cost calculation handles edge cases
+[x] Toggle interaction properly wired
+[x] Gmail write/read classification correct
+[x] Marker events (TASK_RUN, TASK_RUN_END) filtered out
+
+POTENTIAL EDGE CASES VERIFIED
+-----------------------------
+1. Empty low-signal events: No collapse UI shown (correct)
+2. All low-signal events: Only collapse summary visible (correct)
+3. Mixed events: High-signal visible, low-signal in collapse (correct)
+4. Error state: All events visible, no collapse (correct)
+5. Gmail consolidation: Consolidates before partitioning (correct)
+
+CONCLUSION
+----------
+PASS - No UX issues found.
+
+This commit significantly improves chat timeline readability by collapsing
+routine operations while keeping important events visible. The error override
+ensures debugging context is preserved when needed. The implementation is
+consistent across both TaskEventGroup and WorkflowEventGroup.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+No issues found in this review.

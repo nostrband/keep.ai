@@ -1,0 +1,164 @@
+COMMIT REVIEW: 0b5eafc - Add retry reverse navigation to script run detail page
+
+================================================================================
+SUMMARY
+================================================================================
+
+This commit adds bidirectional navigation in retry chains. Previously users
+could only navigate from a retry to its original failed run. Now they can also
+see which retries followed a failed run.
+
+Files changed:
+- packages/db/src/script-store.ts (+29 lines) - getRetriesOfRun() method
+- apps/web/src/hooks/dbScriptReads.ts (+18 lines) - useRetriesOfRun hook
+- apps/web/src/hooks/queryKeys.ts (+1 line) - retriesOfRun query key
+- apps/web/src/components/ScriptRunDetailPage.tsx (+34 lines) - Retry display
+- IMPLEMENTATION_PLAN.md (+4 lines, -3 lines) - Documentation
+
+================================================================================
+CHANGES IN PLAIN ENGLISH
+================================================================================
+
+1. script-store.ts: New method getRetriesOfRun(runId) that queries all runs
+   where retry_of equals the given runId, ordered by retry_count ASC. Returns
+   an array of ScriptRun objects.
+
+2. dbScriptReads.ts: New React Query hook useRetriesOfRun(runId) that fetches
+   retries using the new store method. Includes proper error handling and
+   table metadata for cache invalidation.
+
+3. queryKeys.ts: Adds retriesOfRun(runId) key factory for the new query.
+
+4. ScriptRunDetailPage.tsx: When viewing a run that has been retried, shows a
+   "Retry Attempts" section listing each retry with:
+   - Link to the retry run ("Retry #N")
+   - Status badge (Failed/Success/Running)
+   - Timestamp
+
+================================================================================
+POTENTIAL ISSUES
+================================================================================
+
+ISSUE #1: Missing database index on retry_of column
+Severity: HIGH (Performance)
+
+The SQL query filters by retry_of:
+
+  SELECT ... FROM script_runs WHERE retry_of = ? ORDER BY retry_count ASC
+
+But there is NO INDEX on the retry_of column. Looking at migration v20 (which
+added retry_of and retry_count), no index was created.
+
+Existing indexes on script_runs (from v11):
+- idx_script_runs_script_id ON script_runs(script_id)
+- idx_script_runs_start_timestamp ON script_runs(start_timestamp)
+
+This means getRetriesOfRun() performs a full table scan on every call. As the
+script_runs table grows (thousands/millions of rows), this will cause
+significant performance degradation. The query runs every time a user views
+a run detail page.
+
+--------------------------------------------------------------------------------
+
+ISSUE #2: Query cache invalidation may not trigger in all scenarios
+Severity: MEDIUM
+
+The hook properly declares meta: { tables: ["script_runs"] } for invalidation.
+However, retries are created in the backend workflow-worker.ts via
+startScriptRun(), which runs outside the frontend mutation layer.
+
+The invalidation depends on notifyTablesChanged(["script_runs"]) being called
+after retries are created. If this doesn't happen reliably (e.g., in
+background workflow execution), the retry list won't update until the user
+manually refreshes or navigates away and back.
+
+--------------------------------------------------------------------------------
+
+ISSUE #3: Redundant conditional check
+Severity: LOW (Code quality)
+
+ScriptRunDetailPage line 52 uses:
+
+  {run.retry_of && run.retry_count > 0 && ...}
+
+The retry_count > 0 check is redundant because:
+- Non-retry runs have retry_of = '' (empty string, falsy)
+- Retry runs have retry_of = <original_run_id> (truthy) AND retry_count >= 1
+
+Checking just run.retry_of would be sufficient and clearer.
+
+--------------------------------------------------------------------------------
+
+ISSUE #4: Assumes retries use same script_id
+Severity: LOW (Edge case)
+
+The retry link uses retry.script_id:
+
+  to={`/scripts/${retry.script_id}/runs/${retry.id}`}
+
+Currently this is safe because retries are created with the same script from
+the original workflow. However, if script versioning or switching logic ever
+changes during retries, this could create broken links.
+
+================================================================================
+PROPOSALS
+================================================================================
+
+PROPOSAL #1: Add database index on retry_of column
+Create a new migration (e.g., v22) that adds:
+
+  CREATE INDEX idx_script_runs_retry_of ON script_runs(retry_of);
+
+Or for optimal querying in both directions:
+
+  CREATE INDEX idx_script_runs_retry_of_count ON script_runs(retry_of, retry_count);
+
+This is critical for performance at scale.
+
+--------------------------------------------------------------------------------
+
+PROPOSAL #2: Ensure cache invalidation for backend retry creation
+Verify that workflow-worker.ts calls notifyTablesChanged(["script_runs"]) after
+finishScriptRun() when processing retries. If not, add explicit invalidation:
+
+  queryClient.invalidateQueries({
+    predicate: (query) => query.meta?.tables?.includes("script_runs")
+  });
+
+--------------------------------------------------------------------------------
+
+PROPOSAL #3: Simplify conditional check
+Change line 52 from:
+
+  {run.retry_of && run.retry_count > 0 && (
+
+To:
+
+  {run.retry_of && (
+
+This makes the intent clearer and removes redundancy.
+
+================================================================================
+VERDICT
+================================================================================
+
+The feature implementation is functionally correct and provides a useful UX
+improvement for navigating retry chains. The SQL query is well-formed and
+follows existing patterns in the codebase.
+
+However, the MISSING INDEX on retry_of is a significant performance issue that
+should be addressed before this feature sees production usage at scale. Without
+an index, every run detail page view triggers a full table scan.
+
+Priority actions:
+1. Add index on retry_of column (HIGH - performance critical)
+2. Verify cache invalidation for background retries (MEDIUM)
+3. Simplify conditional check (LOW - code quality)
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Missing database index on retry_of column) - created specs/script-runs-retry-of-index.md
+- Issue #2 (Query cache invalidation may not trigger) - skipped
+- Issue #3 (Redundant conditional check) - skipped
+- Issue #4 (Assumes retries use same script_id) - skipped

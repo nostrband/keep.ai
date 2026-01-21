@@ -1,0 +1,239 @@
+COMMIT REVIEW: c319861
+=======================
+Title: Enable sandbox tool output validation and fix related issues
+Date: 2026-01-16 21:01:33
+
+SUMMARY OF CHANGES
+------------------
+This is a multi-part commit that enables output validation in the sandbox API and
+fixes several related issues. Files modified: 7
+
+1. packages/agent/src/sandbox/api.ts
+   - CRITICAL FIX: Moved output validation to run BEFORE return statement
+   - Previously: validation code was after `return result;` (unreachable!)
+   - Now: `let result` declared outside try block, validation runs, then return
+   - Changed error type from generic Error to LogicError for validation failures
+   - Uncommented/enabled the outputSchema validation that was disabled with FIXME
+
+2. packages/agent/src/tools/get-task.ts
+   - Changed runTime from Date object to ISO string: `new Date(...).toISOString()`
+   - This fixes schema validation since outputSchema expects z.string()
+
+3. packages/agent/src/tools/list-tasks.ts
+   - Added missing `runTime` field to returned objects
+   - Uses same ISO string format: `new Date(task.timestamp * 1000).toISOString()`
+
+4. packages/agent/src/tools/audio-explain.ts
+   - Removed 2 debug console.log statements for fileRecord and base64Audio.length
+
+5. packages/db/src/migrations/v1.ts
+   - Updated misleading FIXME comment about deprecated fields
+   - Clarified: only 'task' field is unused; 'deleted' is actively used for soft-delete;
+     'cron' on tasks table is legacy but 'cron' on workflows table is actively used
+
+6. packages/tests/src/nip44-v3.test.ts
+   - Fixed Vitest deprecation warning
+   - Changed `{ timeout: 20000 }` object to just `20000` number as third arg to it()
+
+7. IMPLEMENTATION_PLAN.md
+   - Updated multiple sections to reflect completion status
+   - Added detailed list of 7 remaining FIXMEs
+   - Renumbered nice-to-have sections (17→18, 18→19, etc.)
+
+ANALYSIS
+--------
+
+### Output Validation Fix (sandbox/api.ts)
+
+BEFORE (broken):
+```typescript
+try {
+  const result = await tool.execute(validatedInput);
+  this.debug("Tool called", {...});
+  return result;  // <-- Early return, validation never runs!
+} catch (e) { ... }
+
+// FIXME not sure if all tools return all declared fields
+// if (tool.outputSchema) { ... }  // Commented out AND unreachable
+```
+
+AFTER (fixed):
+```typescript
+let result: unknown;
+try {
+  result = await tool.execute(validatedInput);
+  this.debug("Tool called", {...});
+  // No return here
+} catch (e) { ... }
+
+if (tool.outputSchema) {
+  try {
+    tool.outputSchema.parse(result);
+  } catch (error) {
+    throw new LogicError(`Invalid output from ${ns}.${name}: ...`, { source: `${ns}.${name}` });
+  }
+}
+
+return result;  // Return AFTER validation
+```
+
+This is a correct architectural fix. The validation code was previously:
+1. Commented out with a FIXME expressing uncertainty
+2. Placed AFTER a return statement (would be unreachable even if uncommented!)
+
+### LogicError Usage
+
+Using LogicError instead of generic Error is CORRECT because:
+- LogicError is a ClassifiedError with type='logic'
+- These errors are routed to the agent auto-fix (maintenance mode)
+- Output validation failures indicate tool implementation bugs, not user errors
+- The source tracking (`source: ${ns}.${name}`) helps identify which tool failed
+
+### Task Tools Fixes
+
+Both fixes to get-task.ts and list-tasks.ts are correct:
+- outputSchema declares `runTime: z.string()`
+- Code now returns ISO string format via `.toISOString()`
+- The timestamp multiplication by 1000 is correct (Unix epoch seconds → JS milliseconds)
+
+### v1.ts FIXME Update
+
+The updated comment is accurate based on codebase analysis:
+- `task` field: NOT referenced anywhere in production code; safe to remove
+- `deleted` field: ACTIVELY used in 4+ locations for soft-delete filtering
+- `cron` on tasks: Never referenced in production code (legacy)
+- `cron` on workflows: ACTIVELY used for workflow scheduling
+
+ISSUES FOUND
+------------
+
+ISSUE #1: Incorrect Tool Count in Commit Message
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Severity: Low
+Type: Documentation inaccuracy
+
+The commit message claims "Validation now runs for all 25 tools with outputSchema"
+but there are actually 35 tools with outputSchema defined in packages/agent/src/tools/.
+
+Tools with outputSchema (35 total):
+- get-note, add-task, text-classify, images-transform, update-note
+- images-generate, images-explain, read-file, script-history, web-download
+- list-events, text-summarize, text-generate, search-notes, atob
+- send-to-task-inbox, get-script, audio-explain, web-fetch, get-weather
+- pdf-explain, list-files, list-notes, list-tasks, save-file
+- user-send, text-extract, get-task, list-script-runs, get-script-run
+- add-task-recurring, list-scripts, task-update, create-note, search-files
+
+Impact: Minor - the validation runs correctly for all 35 tools; only the
+commit message count is wrong.
+
+ISSUE #2: Missing outputSchema on web-search.ts
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Severity: Medium
+Type: Potential bug / inconsistency
+
+The web-search.ts tool returns complex structured data but has NO outputSchema:
+```typescript
+return {
+  query: searchQuery,
+  searchType,
+  totalResults: data.total,
+  requestedResults: data.requested,
+  results: data.results.map(...),
+  searchOptions
+};
+```
+
+This tool will NOT be validated since it lacks outputSchema, but it returns
+structured data that could potentially have mismatches.
+
+Note: This is a pre-existing issue, not introduced by this commit. However,
+enabling output validation highlights this inconsistency.
+
+Impact: If web-search.ts returns malformed data, it won't be caught by validation.
+
+ISSUE #3: console-log.ts Returns Data Without outputSchema
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Severity: Low
+Type: Inconsistency
+
+The console-log.ts tool returns `{ success: true }` but has no outputSchema.
+This is a simple tool and unlikely to cause issues, but it's inconsistent
+with other tools.
+
+Impact: Negligible - the return value is trivial and unlikely to have issues.
+
+PROPOSALS
+---------
+
+PROPOSAL #1: Add outputSchema to web-search.ts
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Priority: Medium
+Effort: Low
+
+Add outputSchema to web-search.ts to match its return type. This ensures
+validation catches any future regressions in the search results format.
+
+```typescript
+outputSchema: z.object({
+  query: z.string(),
+  searchType: z.string(),
+  totalResults: z.number(),
+  requestedResults: z.number(),
+  results: z.array(z.object({
+    title: z.string(),
+    description: z.string(),
+    url: z.string(),
+    favicon: z.string().optional(),
+  })),
+  searchOptions: z.object({...}).optional(),
+})
+```
+
+PROPOSAL #2: No action needed for commit message typo
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The tool count error in the commit message is a minor historical inaccuracy.
+Git commit messages are immutable without rewriting history. Not worth fixing.
+
+PROPOSAL #3: Consider adding outputSchema to console-log.ts
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Priority: Low
+Effort: Trivial
+
+For consistency, could add:
+```typescript
+outputSchema: z.object({ success: z.boolean() })
+```
+
+This is optional and low priority.
+
+MINOR OBSERVATIONS
+------------------
+
+1. The Vitest timeout fix follows the codebase convention. Other test files
+   in packages/tests/src/ also use plain numbers for timeouts (60000, 35000,
+   30000, 45000, 10000, 5000).
+
+2. The IMPLEMENTATION_PLAN.md updates are comprehensive and helpful for tracking
+   remaining work. The newly added "17. Remaining FIXMEs" section provides good
+   visibility into technical debt.
+
+3. The audio-explain.ts console.log removal is appropriate - the file now uses
+   the proper `debug` library for logging instead of raw console.log.
+
+4. The v1.ts comment update removes a misleading FIXME that could have led to
+   accidental removal of the actively-used 'deleted' field.
+
+VERDICT: APPROVED (with recommendations for follow-up)
+
+The core fix (enabling output validation) is correct and important. The related
+fixes to task tools ensure validation passes. The only follow-up items are:
+- Consider adding outputSchema to web-search.ts (medium priority)
+- Optionally add outputSchema to console-log.ts (low priority)
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Incorrect tool count in commit message) - skipped (immutable commit message)
+- Issue #2 (Missing outputSchema on web-search.ts) - skipped (pre-existing)
+- Issue #3 (console-log.ts without outputSchema) - skipped (trivial)

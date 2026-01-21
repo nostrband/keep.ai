@@ -1,0 +1,222 @@
+# Commit Review: a348c9f
+
+## Summary
+Fix setTimeout cleanup in success/warning messages
+
+**Files Modified:**
+- apps/web/src/components/WorkflowEventGroup.tsx (+25/-6 lines)
+- apps/web/src/components/ScriptDetailPage.tsx (+40/-21 lines)
+- apps/web/src/components/TaskDetailPage.tsx (+44/-25 lines)
+- apps/web/src/components/WorkflowDetailPage.tsx (+22/-21 lines)
+- apps/web/src/ui/components/ai-elements/code-block.tsx (+14/-7 lines)
+- IMPLEMENTATION_PLAN.md (status updates)
+
+## Changes Description
+
+### Pattern Applied Across Components
+Added useRef for timeout tracking and cleanup useEffect in all affected components:
+
+1. **Timeout Ref Declaration:**
+```typescript
+const successTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+const warningTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+```
+
+2. **Cleanup Effect on Unmount:**
+```typescript
+useEffect(() => {
+  return () => {
+    if (successTimeoutRef.current) clearTimeout(successTimeoutRef.current);
+    if (warningTimeoutRef.current) clearTimeout(warningTimeoutRef.current);
+  };
+}, []);
+```
+
+3. **Helper Functions:**
+```typescript
+const showSuccessMessage = (message: string) => {
+  if (successTimeoutRef.current) clearTimeout(successTimeoutRef.current);
+  setSuccessMessage(message);
+  successTimeoutRef.current = setTimeout(() => {
+    setSuccessMessage("");
+    successTimeoutRef.current = null;
+  }, 3000);
+};
+```
+
+### Components Modified
+- **WorkflowEventGroup.tsx:** Added success message timeout cleanup
+- **ScriptDetailPage.tsx:** Added both warning and success timeout cleanup
+- **TaskDetailPage.tsx:** Added both warning and success timeout cleanup
+- **WorkflowDetailPage.tsx:** Added both warning and success timeout cleanup
+- **CodeBlockCopyButton:** Added copy state timeout cleanup
+
+---
+
+## Potential Issues
+
+### Issue 1: Inconsistent Timeout Durations (LOW)
+**Location:** Various files
+
+| Component | Success | Warning |
+|-----------|---------|---------|
+| WorkflowDetailPage | 3000ms | 5000ms |
+| ScriptDetailPage | 3000ms | 3000ms |
+| TaskDetailPage | 3000ms | 3000ms |
+| WorkflowEventGroup | 3000ms | N/A |
+| CodeBlockCopyButton | 2000ms (via `timeout` prop default) | N/A |
+
+**Problem:** WorkflowDetailPage uses 5000ms for warnings while other components use 3000ms. This creates inconsistent UX where warnings stay visible longer in one context.
+
+**Recommendation:** Standardize warning timeout to 3000ms across all components.
+
+### Issue 2: Missing successMessage Clear in Warning Helper (LOW)
+**Location:** apps/web/src/components/WorkflowDetailPage.tsx:75-84
+
+WorkflowDetailPage's `showWarning()` doesn't clear the success message:
+```typescript
+const showWarning = (message: string) => {
+  if (warningTimeoutRef.current) clearTimeout(warningTimeoutRef.current);
+  setWarningMessage(message);
+  // Missing: setSuccessMessage("");
+  ...
+};
+```
+
+But ScriptDetailPage and TaskDetailPage do clear it:
+```typescript
+const showWarning = (message: string) => {
+  ...
+  setWarning(message);
+  setSuccessMessage(""); // ← Clears success message
+  ...
+};
+```
+
+**Impact:** If a success message is displayed and then a warning occurs, both could briefly appear together in WorkflowDetailPage.
+
+**Recommendation:** Add `setSuccessMessage("");` to WorkflowDetailPage's showWarning() function.
+
+### Issue 3: Significant Code Duplication (MEDIUM)
+**Location:** All modified files
+
+The helper functions are duplicated across 4+ files:
+- `showSuccessMessage` pattern: ~10 lines × 4 files = ~40 lines
+- `showWarning` pattern: ~10 lines × 3 files = ~30 lines
+- Cleanup effect: ~6 lines × 5 files = ~30 lines
+
+**Total: ~100 lines of duplicated code**
+
+**Recommendation:** Extract a reusable hook:
+```typescript
+// hooks/useAutoHidingMessage.ts
+export function useAutoHidingMessage(options?: {
+  successDuration?: number;
+  warningDuration?: number;
+}) {
+  const [successMessage, setSuccessMessage] = useState("");
+  const [warning, setWarning] = useState("");
+  const successTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const warningTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (successTimeoutRef.current) clearTimeout(successTimeoutRef.current);
+      if (warningTimeoutRef.current) clearTimeout(warningTimeoutRef.current);
+    };
+  }, []);
+
+  const showSuccessMessage = useCallback((message: string) => {
+    if (successTimeoutRef.current) clearTimeout(successTimeoutRef.current);
+    setSuccessMessage(message);
+    setWarning("");
+    successTimeoutRef.current = setTimeout(() => {
+      setSuccessMessage("");
+      successTimeoutRef.current = null;
+    }, options?.successDuration ?? 3000);
+  }, [options?.successDuration]);
+
+  const showWarning = useCallback((message: string) => {
+    if (warningTimeoutRef.current) clearTimeout(warningTimeoutRef.current);
+    setWarning(message);
+    setSuccessMessage("");
+    warningTimeoutRef.current = setTimeout(() => {
+      setWarning("");
+      warningTimeoutRef.current = null;
+    }, options?.warningDuration ?? 3000);
+  }, [options?.warningDuration]);
+
+  return { successMessage, warning, showSuccessMessage, showWarning };
+}
+```
+
+### Issue 4: Other Components with setTimeout Still Missing Cleanup (MEDIUM)
+**Location:** Other files not modified in this commit
+
+Several other files use setTimeout without cleanup:
+- **FilesPage.tsx (lines 222, 263):** Upload state timeouts without ref tracking
+- **App.tsx (line 147):** `setTimeout(() => setShowBanner(false), 10000)` without cleanup
+- **QueryProvider.tsx (lines 102-135):** Ping timeout management has issues with local variable tracking
+
+**Recommendation:** Apply the same pattern to these files for consistency.
+
+### Issue 5: Missing Null Assignment in CodeBlockCopyButton (LOW)
+**Location:** apps/web/src/ui/components/ai-elements/code-block.tsx:146
+
+The timeout callback doesn't set ref to null after clearing:
+```typescript
+copyTimeoutRef.current = setTimeout(() => {
+  setIsCopied(false);
+  // Missing: copyTimeoutRef.current = null;
+}, timeout);
+```
+
+Other components set the ref to null. Minor inconsistency.
+
+**Recommendation:** Add `copyTimeoutRef.current = null;` for consistency.
+
+---
+
+## Positive Observations
+
+1. **Correct React pattern:** Uses useRef instead of useState for timeout IDs
+2. **Proper cleanup effect:** Empty dependency array ensures cleanup only runs on unmount
+3. **Clears existing timeout before new one:** Prevents multiple overlapping timeouts
+4. **Null assignment after clear:** Most components properly null the ref after clearing
+5. **Fixes real issue:** Prevents React warnings about setting state on unmounted components
+
+---
+
+## Proposals
+
+### Proposal 1: Standardize Timeout Durations
+Change WorkflowDetailPage warning timeout from 5000ms to 3000ms for consistency.
+
+### Proposal 2: Fix Missing Message Clear
+Add `setSuccessMessage("")` to WorkflowDetailPage's showWarning() to prevent both messages appearing simultaneously.
+
+### Proposal 3: Extract Reusable Hook
+Create `useAutoHidingMessage` hook in `hooks/` directory to eliminate ~100 lines of code duplication.
+
+### Proposal 4: Apply Pattern to Other Components
+Apply the same setTimeout cleanup pattern to:
+- FilesPage.tsx
+- App.tsx
+- QueryProvider.tsx
+
+### Proposal 5: Add Null Assignment to CodeBlockCopyButton
+For consistency, add `copyTimeoutRef.current = null;` in the timeout callback.
+
+---
+
+## Verdict
+The commit correctly implements the setTimeout cleanup pattern to prevent React warnings about setting state on unmounted components. The implementation is sound and follows React best practices. The main concerns are code duplication (could be addressed with a reusable hook) and minor inconsistencies between components (timeout durations, missing message clears). There are also other components in the codebase that would benefit from the same pattern.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Inconsistent Timeout Durations) - skipped
+- Issue #2 (Missing successMessage Clear in Warning Helper) - created specs/workflow-detail-clear-success-on-warning.md
+- Issue #3 (Significant Code Duplication) - created specs/extract-auto-hiding-message-hook.md
+- Issue #4 (Other Components with setTimeout Missing Cleanup) - created specs/settimeout-cleanup-remaining-components.md
+- Issue #5 (Missing Null Assignment in CodeBlockCopyButton) - created specs/codeblock-timeout-null-assignment.md

@@ -1,0 +1,96 @@
+UX Test Report: bd19f25 - Validate workflow status before allowing retry
+==========================================================================
+
+Commit: bd19f25b51f16d16948a796795d856dc2eb1f566
+Date: Mon Jan 19 10:35:17 2026 +0000
+Files Changed:
+  - IMPLEMENTATION_PLAN.md
+  - apps/web/src/components/WorkflowEventGroup.tsx
+
+TEST ENVIRONMENT
+----------------
+- Server: Running on localhost:3001
+- Database: Empty (no existing workflows)
+- Test Method: Code analysis + Playwright UI verification where applicable
+
+FEATURE DESCRIPTION
+-------------------
+This commit adds validation to prevent retry operations on non-active workflows.
+Changes include:
+1. Check workflow.status === 'active' before scheduling retry (line 75)
+2. Show "Enable workflow first to retry" message for non-active workflows (line 76)
+3. Disable Retry menu item for paused/disabled workflows (line 213)
+4. Display "Enable to retry" text instead of "Retry" for non-active workflows (lines 218-219)
+
+CODE ANALYSIS
+-------------
+WorkflowEventGroup.tsx implementation verified:
+
+1. RETRY BUTTON DISABLE LOGIC (line 213):
+   ```typescript
+   disabled={updateWorkflowMutation.isPending || !!(workflow && workflow.status !== 'active')}
+   ```
+   - Correctly disables button when mutation is pending
+   - Correctly disables when workflow exists AND status is not 'active'
+   - The double negation (!!) ensures boolean evaluation
+
+2. CONDITIONAL LABEL TEXT (lines 216-220):
+   ```typescript
+   {updateWorkflowMutation.isPending
+     ? "Retrying..."
+     : (workflow && workflow.status !== 'active')
+       ? "Enable to retry"
+       : "Retry"}
+   ```
+   - Shows "Retrying..." during mutation
+   - Shows "Enable to retry" for non-active workflows
+   - Shows "Retry" for active workflows
+
+3. HANDLER VALIDATION (lines 74-78):
+   ```typescript
+   if (workflow.status !== 'active') {
+     showSuccessMessage("Enable workflow first to retry");
+     return;
+   }
+   ```
+   - Validates status before making any mutation
+   - Shows instructional message
+   - Returns early without calling API
+
+UX VERIFICATION STATUS
+----------------------
+[NOT TESTABLE - NO DATA] Active workflow retry flow
+  - Expected: Click dropdown > See "Retry" > Click > See "Retry scheduled" message
+  - Reason: No active workflows in database to test with
+
+[NOT TESTABLE - NO DATA] Paused workflow retry attempt
+  - Expected: Click dropdown > See "Enable to retry" (greyed out) > Cannot click
+  - Reason: No paused workflows in database to test with
+
+[NOT TESTABLE - NO DATA] Draft workflow retry attempt
+  - Expected: Click dropdown > See "Enable to retry" (greyed out) > Cannot click
+  - Reason: No draft workflows in database to test with
+
+[VERIFIED - CODE] UI button states are correctly implemented
+  - Disabled state uses Radix UI's data-[disabled] which applies opacity-50 and pointer-events-none
+  - Text changes based on workflow status
+  - Handler validates before mutation
+
+ISSUES FOUND
+------------
+None. The code implementation appears correct and follows the intended behavior:
+- Uses positive logic matching scheduler behavior (status === 'active')
+- Provides clear user feedback via message and button text
+- Prevents API calls for operations that would be no-ops on the backend
+
+RECOMMENDATIONS
+---------------
+1. Add integration test that creates workflow via API and tests retry button states
+2. Consider adding visual indicator (e.g., icon change) alongside text change
+
+RESULT: PASS (code analysis only - no runtime UX testing possible due to empty database)
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+No issues found in this review.

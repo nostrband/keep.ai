@@ -1,0 +1,127 @@
+COMMIT REVIEW: d77deb5
+=======================
+
+Commit: d77deb5dd19584102c06c9d60e54e4c4e492bdc7
+Date: Fri Jan 16 20:28:34 2026 +0000
+Author: Claude Agent
+Message: Remove debug console.log in file get endpoint
+
+Files Changed:
+- apps/server/src/server.ts (1 line removed)
+
+================================================================================
+CHANGE SUMMARY
+================================================================================
+
+This is a simple cleanup commit that removes a debug `console.log` statement
+that was left in the `/api/file/get` endpoint.
+
+Key Change:
+
+Removed from line 1660 (before the change):
+```typescript
+console.log("fileRecord", fileRecord);
+```
+
+The surrounding code:
+```typescript
+if (!fs.existsSync(filePathLocal)) {
+  return reply.status(404).send({ error: "File not found on disk" });
+}
+// console.log("fileRecord", fileRecord);  <-- REMOVED
+
+// Set appropriate headers
+reply.header("Content-Type", fileRecord.media_type);
+```
+
+================================================================================
+ISSUES IDENTIFIED
+================================================================================
+
+ISSUE 1: None - This is a Clean Cleanup
+---------------------------------------
+Severity: None
+
+This commit has no issues. It's a straightforward removal of debug output
+that should not be present in production code.
+
+================================================================================
+ANALYSIS
+================================================================================
+
+**Why this console.log was problematic:**
+
+1. **Information Disclosure**: The fileRecord contains metadata including:
+   - `id` (file hash)
+   - `name` (original filename)
+   - `path` (local storage path)
+   - `media_type` (MIME type)
+   - `size` (file size in bytes)
+   - `upload_time` (timestamp)
+   - `summary` (description)
+
+   Logging this to the console in production could expose sensitive information
+   about user files to server logs.
+
+2. **Performance**: While minimal, console.log does have a performance cost,
+   especially when serializing objects on every file request.
+
+3. **Log Noise**: Debug statements add noise to production logs, making it
+   harder to identify actual issues.
+
+**Code Consistency:**
+
+The rest of the file-related code properly uses `debugServer()` from the
+`debug` library for logging:
+- Line 1679: `debugServer("Error in /api/file:", error);`
+- Line 1711: `debugServer("Error in /api/file/info:", error);`
+
+The removed console.log was inconsistent with this pattern.
+
+================================================================================
+POSITIVE ASPECTS
+================================================================================
+
+1. **Correct identification**: The commit correctly identified a debug
+   statement that should not be in production code.
+
+2. **Minimal change**: Only the necessary line was removed - no scope creep.
+
+3. **Aligns with project patterns**: Other file handling code uses
+   `debugServer()` instead of `console.log`, and error handling consistently
+   uses the debug library.
+
+4. **Part of broader cleanup**: This commit appears to be part of a series
+   of commits cleaning up debug statements (see related commits bd596cf,
+   62a37dd, 4799ac4, 19097a9).
+
+================================================================================
+VERIFICATION
+================================================================================
+
+To verify no other stray console.log statements remain in file handling code:
+
+```bash
+grep -n "console.log" apps/server/src/server.ts | grep -i file
+```
+
+Current state: No other console.log statements related to file handling
+remain in the file.
+
+================================================================================
+CONCLUSION
+================================================================================
+
+This is a trivial but correct cleanup commit. It removes debug output that
+was accidentally left in the codebase. The change is minimal, focused, and
+aligns with the project's logging patterns (using `debug` library instead of
+console.log).
+
+Overall Quality: GOOD
+Recommendation: No issues. This is exactly the kind of cleanup that should
+be done before production release.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+No issues identified in this commit.

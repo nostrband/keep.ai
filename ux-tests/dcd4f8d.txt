@@ -1,0 +1,127 @@
+# UX Test Report: Commit dcd4f8d
+# "Restore scroll position when returning to chat pages"
+
+## Test Date: 2026-01-20
+## Commit: dcd4f8d0b61dbbe86b9bfc62d0d19618870240f2
+
+## Summary
+This commit adds scroll position restoration using sessionStorage when navigating away from and returning to chat pages.
+
+## Features Tested
+
+### 1. Scroll Position Saving on Navigation Away
+**Status: UNCLEAR**
+- Unable to directly verify sessionStorage writes during testing
+- The commit claims to save scroll position in useEffect cleanup
+
+### 2. Scroll Position Restoration on Return
+**Status: FAIL**
+- Scroll position was NOT restored when returning to chat page
+- Expected position: 300px (where user scrolled to)
+- Actual position: 1298px (scrolled to bottom instead)
+
+## Test Procedure
+
+1. Created a chat with multiple messages (scrollable content)
+2. Scrolled to position 300px
+3. Verified scroll position was at 300px
+4. Navigated away using in-app back button (client-side navigation)
+5. Navigated back using browser back button
+6. Checked scroll position - it was at 1298px (near bottom), NOT 300px
+
+## BUGS FOUND
+
+### BUG 1: Scroll Position Not Restored (HIGH SEVERITY)
+**Issue:** The scroll restoration feature does not work when using browser back/forward navigation.
+
+**How to Reproduce:**
+1. Navigate to a chat page with scrollable content
+2. Scroll to a specific position (not bottom)
+3. Navigate away from the chat page (any method)
+4. Use browser back button to return
+5. Observe: Page scrolls to bottom instead of restoring previous position
+
+**Expected Behavior:**
+- Scroll position should be restored to where user left off (300px)
+- User should see the same content they were viewing before navigation
+
+**Actual Behavior:**
+- Page scrolls to bottom (1298px)
+- sessionStorage value appears to be null after page load
+- First load behavior kicks in and scrolls to bottom
+
+**Technical Analysis:**
+Based on code review, potential issues:
+
+1. **Full Page Reload Issue**: Browser back button appears to trigger full page reload (evidenced by "Initializing database..." message), which may cause timing issues with sessionStorage read/write.
+
+2. **Save Effect Timing**: The save effect (line 130-144) uses cleanup function:
+   ```typescript
+   useEffect(() => {
+     return () => {
+       const scrollTop = document.documentElement.scrollTop;
+       sessionStorage.setItem(storageKey, String(scrollTop));
+     };
+   }, [chatId, location.pathname]);
+   ```
+   The cleanup may not fire properly during full page navigation.
+
+3. **Restore Check Timing**: The restore check (line 116-127) runs on mount:
+   ```typescript
+   useEffect(() => {
+     const savedPosition = sessionStorage.getItem(storageKey);
+     if (savedPosition) {
+       shouldRestoreScrollRef.current = true;
+     }
+   }, [chatId]);
+   ```
+   This runs synchronously but may race with other effects.
+
+4. **Storage Key Consistency**: Storage key is `chat-scroll-${chatId}`. If chatId changes between save and restore, position won't be found.
+
+**Possible Root Causes:**
+1. Browser back button doesn't trigger React Router cleanup, so position is never saved
+2. Full page reload clears the component state before cleanup runs
+3. Race condition between save and restore effects
+4. chatId might be undefined briefly on first mount
+
+**Impact:**
+- Users lose their reading position when navigating back to chats
+- Particularly frustrating for long chat histories
+- The "scroll to bottom" default behavior is disruptive when user was reading older messages
+
+**Recommended Fixes:**
+1. Use `beforeunload` event listener in addition to useEffect cleanup
+2. Save scroll position on scroll events (debounced) rather than only on unmount
+3. Add `popstate` event listener for browser navigation
+4. Consider using a scroll restoration library that handles edge cases
+
+### BUG 2: Potential Race Condition (MEDIUM SEVERITY)
+**Issue:** Multiple refs and flags manage scroll state with potential for race conditions.
+
+**Technical Details:**
+- `shouldRestoreScrollRef`, `restoredScrollRef`, `wasAtBottomRef`, `isFirstLoadRef` all interact
+- Order of effect execution may vary
+- No locking mechanism between save and restore operations
+
+## Files Changed in Commit
+- apps/web/src/components/ChatInterface.tsx
+- IMPLEMENTATION_PLAN.md
+
+## Code Review Notes
+
+The implementation approach is reasonable (sessionStorage + useEffect cleanup), but doesn't account for:
+1. Full page navigations (browser back/forward, refresh)
+2. beforeunload vs component cleanup timing
+3. The app's "Initializing database..." phase that delays React mounting
+
+The feature likely works for SPA-style navigation (clicking links that use React Router) but fails for browser-level navigation.
+
+## Conclusion
+The scroll restoration feature does not work in the tested scenario (browser back navigation). This is a common user flow that needs to be supported. The feature needs additional implementation work to handle full page reloads and browser navigation events.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Bug #1 (Scroll Position Not Restored) - updated specs/chat-scroll-position-save-cleanup.md (use React Router ScrollRestoration)
+- Bug #2 (Potential Race Condition) - covered by specs/chat-scroll-position-save-cleanup.md (ScrollRestoration replaces manual code)

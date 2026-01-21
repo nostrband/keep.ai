@@ -1,0 +1,88 @@
+# Review: Commit 071f1a8
+
+**Commit**: 071f1a863a1d3913966ca6c5e8fdbcf0296253fb
+**Title**: Remove unused autonomy field from message metadata
+**Date**: Mon Jan 19 12:09:37 2026 +0000
+**Files Changed**: 2 (IMPLEMENTATION_PLAN.md, packages/proto/src/schemas.ts)
+
+## Summary of Changes
+
+This commit removes the unused `autonomy` field from the `metadataSchema` in `packages/proto/src/schemas.ts`:
+
+**Before**:
+```typescript
+const metadataSchema = z.object({
+  createdAt: z.string().datetime(),
+  threadId: z.string().optional(),
+  volatile: z.boolean().optional(),
+  autonomy: z.enum(['ai_decides', 'coordinate']).optional(),
+});
+```
+
+**After**:
+```typescript
+const metadataSchema = z.object({
+  createdAt: z.string().datetime(),
+  threadId: z.string().optional(),
+  volatile: z.boolean().optional(),
+});
+```
+
+The IMPLEMENTATION_PLAN.md was updated to mark task #30 as completed.
+
+## Verification of Unused Status
+
+Comprehensive codebase search confirmed the field was **truly unused**:
+- Zero reads of `metadata.autonomy` anywhere in the codebase
+- Zero writes to `metadata.autonomy` anywhere in the codebase
+- The field was added in commit 78efd6c ("Implement autonomy toggle backend integration") but was never actually integrated
+
+## How Autonomy Mode Is Actually Stored
+
+Autonomy mode is stored separately in the `agent_state` table (not in message metadata):
+
+**Database Schema** (`packages/db/src/migrations/v2.ts`):
+```sql
+CREATE TABLE IF NOT EXISTS agent_state (
+  key TEXT NOT NULL PRIMARY KEY,
+  value TEXT NOT NULL DEFAULT '',
+  timestamp TEXT NOT NULL DEFAULT ''
+)
+```
+
+**API Methods** (`packages/db/src/api.ts`):
+- `setAutonomyMode(mode)`: Stores in agent_state with key='autonomy_mode'
+- `getAutonomyMode()`: Retrieves from agent_state, defaults to 'ai_decides'
+
+**Flow**:
+1. User toggles preference → `api.setAutonomyMode()` → agent_state table
+2. Task worker starts → `api.getAutonomyMode()` → passes to AgentEnv
+3. AgentEnv generates mode-specific system prompts
+
+## Positive Aspects
+
+1. **Safe dead code removal**: Field was verified unused across entire codebase
+2. **Schema cleanliness**: Removes unnecessary optional field from metadata
+3. **No data loss**: Autonomy mode uses separate storage mechanism (agent_state table)
+4. **No migration needed**: Since the field was never populated, no data cleanup required
+
+## Issues Found
+
+**None identified.**
+
+The removal is clean and safe. The commit message accurately describes the change and the reason. The autonomy mode functionality continues to work correctly via the agent_state table mechanism.
+
+## Historical Note
+
+The `autonomy` field in metadataSchema appears to have been added speculatively in commit 78efd6c (Jan 16, 2026) when implementing the autonomy toggle backend. However, the actual implementation used the agent_state table approach instead, leaving this schema field as dead code from day one.
+
+## Overall Assessment
+
+This is a clean, well-verified dead code removal. The commit message is accurate, the change is minimal and focused, and thorough verification confirmed the field was never used.
+
+**Verdict**: EXCELLENT - No issues found
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+No issues to address - review approved.

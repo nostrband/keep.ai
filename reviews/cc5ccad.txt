@@ -1,0 +1,146 @@
+# Review: Commit cc5ccad
+
+**Commit**: cc5ccad6098e7ddcc9219121ad83fd20bd8789ef
+**Title**: Remove localStorage from autonomy preference hook
+**Date**: Mon Jan 19 12:08:44 2026 +0000
+**Files Changed**: 2 (IMPLEMENTATION_PLAN.md, useAutonomyPreference.ts)
+
+## Summary of Changes
+
+This commit simplifies the `useAutonomyPreference` hook by removing the dual-storage mechanism (localStorage + database API). The hook now:
+- Reads from `api.getAutonomyMode()` when dbStatus is 'ready'
+- Writes only via `api.setAutonomyMode()`
+- Removed the unused `getAutonomyPreference()` helper function
+- Removed the `STORAGE_KEY` constant
+
+**Lines removed**: ~36 lines of localStorage-related code
+**Lines added**: ~21 lines of simpler API-only implementation
+
+## Positive Aspects
+
+1. **Eliminates sync issues**: Having localStorage AND database was a potential source of desync bugs.
+2. **Single source of truth**: Database is now the only persistence layer.
+3. **Cleaner code**: Simpler implementation with fewer edge cases.
+4. **Proper removal of dead code**: `getAutonomyPreference()` was never actually called anywhere.
+
+## Issues Found
+
+### Issue 1: Strict dbStatus Check May Cause Stuck Loading State (Medium Severity)
+
+**Location**: `useAutonomyPreference.ts` (effect condition)
+```typescript
+if (!api || dbStatus !== 'ready') return;
+```
+
+**Problem**: The hook only loads when `dbStatus === 'ready'`. However, dbStatus can transition to other states like 'syncing', 'disconnected', 'locked', or 'error' without ever reaching 'ready'.
+
+**Impact**: In offline mode, error conditions, or when another tab holds the lock, `isLoaded` stays `false` forever and the autonomy toggle never appears.
+
+### Proposal 1: Handle Additional dbStatus States
+
+Consider loading the preference when dbStatus is either 'ready' OR 'syncing' (where the local database is usable but not fully synced):
+```typescript
+if (!api || (dbStatus !== 'ready' && dbStatus !== 'syncing')) return;
+```
+
+Alternatively, add explicit handling for error states to show a fallback UI or use default values.
+
+---
+
+### Issue 2: Optimistic Update Without Rollback (Medium Severity)
+
+**Location**: `useAutonomyPreference.ts` (setMode function)
+```typescript
+const setMode = useCallback((newMode: AutonomyMode) => {
+  setModeState(newMode);  // Optimistic update
+
+  if (api) {
+    api.setAutonomyMode(newMode).catch((error) => {
+      console.warn('Could not save autonomy preference to database:', error);
+      // BUG: State is not reverted on failure
+    });
+  }
+}, [api]);
+```
+
+**Problem**: If the database write fails, the UI shows the new mode but the database has the old value. On page reload, the preference reverts unexpectedly.
+
+**Impact**: User sees inconsistent behavior - toggle appears to work but preference doesn't persist.
+
+### Proposal 2: Revert State on Failure
+
+```typescript
+const setMode = useCallback((newMode: AutonomyMode) => {
+  const previousMode = mode;  // Capture current state
+  setModeState(newMode);
+
+  if (api) {
+    api.setAutonomyMode(newMode).catch((error) => {
+      console.warn('Could not save autonomy preference to database:', error);
+      setModeState(previousMode);  // Rollback on failure
+    });
+  }
+}, [api, mode]);
+```
+
+Note: This requires adding `mode` to the dependency array.
+
+---
+
+### Issue 3: Race Condition - Toggle Before Load (Low Severity)
+
+**Scenario**:
+1. Component mounts, `isLoaded = false`
+2. User clicks toggle immediately (UI allows this since button exists)
+3. `setMode('coordinate')` called, state updated
+4. Database load completes, overwrites with `'ai_decides'`
+
+**Problem**: Early user interaction is silently overwritten by database load.
+
+**Impact**: Unlikely in practice since load is usually fast, but could confuse users on slow connections.
+
+### Proposal 3: Disable Toggle Until Loaded
+
+In MainPage.tsx, the toggle button should be disabled until loaded:
+```typescript
+<button
+  onClick={toggleAutonomyMode}
+  disabled={!isAutonomyLoaded}  // Add this
+>
+```
+
+Currently MainPage conditionally renders the entire toggle section with `{isAutonomyLoaded && ...}`, which is an acceptable alternative.
+
+---
+
+### Issue 4: No Multi-Tab Synchronization (Low Severity)
+
+**Problem**: The hook doesn't subscribe to database changes. If user toggles preference in Tab A, Tab B won't reflect the change until refresh.
+
+**Impact**: Minor UX inconsistency in multi-tab scenarios.
+
+### Proposal 4: Subscribe to Database Changes (Post-V1)
+
+Use the peer's change event to invalidate/reload when `agent_state` table changes. This is a nice-to-have for V1.
+
+---
+
+## Overall Assessment
+
+The commit achieves its stated goal of removing redundant localStorage usage. The implementation is cleaner and eliminates potential sync issues. However, there are some edge cases around error handling and state rollback that could cause confusing user experiences.
+
+**Severity Assessment**:
+- Issue 1 (strict dbStatus): Medium - could cause stuck loading in edge cases
+- Issue 2 (no rollback): Medium - silent failures lead to unexpected behavior
+- Issue 3 (race condition): Low - unlikely in practice
+- Issue 4 (multi-tab): Low - minor UX issue
+
+**Verdict**: ACCEPTABLE with recommended follow-ups for Issues 1 and 2
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Strict dbStatus Check May Cause Stuck Loading) - not an issue (App.tsx gates entire UI when dbStatus !== 'ready')
+- Issue #2 (Optimistic Update Without Rollback) - skipped
+- Issue #3 (Race Condition - Toggle Before Load) - skipped
+- Issue #4 (No Multi-Tab Synchronization) - skipped

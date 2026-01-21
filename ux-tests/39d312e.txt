@@ -1,0 +1,76 @@
+UX TEST REPORT: Commit 39d312e
+================================
+"Fix future timestamp edge case and clean up file parts handling"
+
+TEST DATE: 2026-01-20
+TEST METHOD: Code Review + Static Analysis
+RUNTIME TEST: N/A (backend logic changes, no visible UI)
+
+COMMIT SUMMARY
+--------------
+This commit fixes two issues:
+1. Future timestamp edge case in chat read tracking
+2. File parts handling cleanup in agent environment
+
+CHANGES REVIEWED
+----------------
+1. apps/web/src/hooks/dbWrites.ts
+   - Now passes event timestamp to readChat()
+
+2. packages/db/src/chat-store.ts
+   - readChat() accepts optional eventTimestamp parameter
+   - Uses max(now, eventTimestamp) to prevent repeated DB writes
+
+3. packages/agent/src/agent-env.ts
+   - File parts converted to human-readable format
+   - Uses isFileUIPart type guard instead of type check
+   - Output: "[Attached file: filename (mediaType)]"
+
+UX IMPACT ANALYSIS
+------------------
+1. Future Timestamp Fix:
+   - NO VISIBLE UX CHANGE to end users
+   - Backend optimization that prevents repeated database writes
+   - May slightly improve scrolling performance in chat history
+   - Fixes edge case where events with future timestamps caused infinite update loops
+
+2. File Parts Handling:
+   - NO VISIBLE UX CHANGE to end users
+   - Internal change affecting how file attachments are represented to the agent
+   - Agent now sees cleaner "[Attached file: doc.pdf (application/pdf)]" format
+   - May improve agent's understanding of file context
+
+ISSUES FOUND
+------------
+NONE
+
+CODE QUALITY ASSESSMENT
+-----------------------
+- Correct timestamp comparison using ISO 8601 strings (lexicographically sortable)
+- Proper null/undefined handling with optional chaining
+- Type-safe implementation using isFileUIPart type guard
+- Backward compatible (optional parameter)
+- Clear comments explaining rationale
+
+VERIFICATION CHECKLIST
+----------------------
+[x] Timestamp comparison logic is correct
+[x] Edge cases handled (null timestamp, future timestamp, same timestamp)
+[x] No race conditions in async operations
+[x] Type safety maintained
+[x] File parts gracefully handle missing metadata
+[x] No infinite loop potential
+[x] Backward compatibility preserved
+
+CONCLUSION
+----------
+PASS - No UX issues found.
+
+This commit implements bug fixes and code improvements that have no direct
+visible UX impact but improve reliability and code quality. The changes are
+correctly implemented with proper edge case handling.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+No issues found in this review.

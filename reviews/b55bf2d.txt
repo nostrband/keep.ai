@@ -1,0 +1,90 @@
+COMMIT: b55bf2d
+TITLE: Restore console.error for critical Peer.ts errors
+DATE: 2026-01-19
+
+== SUMMARY OF CHANGES ==
+
+This commit changes 6 critical error logging calls in packages/sync/src/Peer.ts from
+this.debug() to console.error() so they are visible in production without DEBUG env var.
+
+Errors converted to console.error():
+
+1. Line 461: "Error applying changes to database:" (applyChanges method)
+   - Critical: Database write failure in sync operation
+   - Throws error after logging
+
+2. Line 496: "Error initializing last db version:" (initialize method)
+   - Critical: Startup failure reading schema version
+   - Throws error after logging
+
+3. Line 546: "Error in readCursor:" (readCursor method)
+   - Critical: Cannot read sync cursor state from database
+   - Throws error after logging
+
+4. Line 582: "Error in writeCursor:" (writeCursor method)
+   - Critical: Cannot persist sync cursor state
+   - Throws error after logging
+
+5. Line 647: "Error in writeChangesToHistory:" (writeChangesToHistory method)
+   - Critical: Cannot write to crsql_change_history table
+   - Throws error after logging
+
+6. Line 915: "Error in queued callback:" (queued method)
+   - Critical: Errors in the serialization queue (onConnect, onSync, onReceive, etc.)
+   - Does NOT throw - caught to prevent queue from staying in rejected state
+   - This was silently swallowing errors before
+
+== ANALYSIS ==
+
+The commit correctly identifies and restores console.error for critical database and
+sync operations that must be visible in production. The debug module (this.debug())
+only outputs when DEBUG environment variable is set, making these critical errors
+invisible by default.
+
+Errors intentionally left as this.debug() are appropriate:
+- "Error stopping transport" - non-critical cleanup
+- "Sync error with peer" - expected in unreliable network conditions
+- "Error broadcasting changes" - transient network errors
+- "Send error with peer" - normal failure mode for unreliable transport
+
+== POTENTIAL ISSUES ==
+
+1. MINOR: Missing context in "Error in queued callback"
+   The queued callback error at line 915 doesn't indicate which callback failed
+   (onConnect, onSync, onReceive, etc.). This makes debugging harder when errors occur.
+
+2. MINOR: Errors that throw in onSync/onReceive (lines 194, 198, 295, 299) have
+   this.debug() calls before throwing. The error will be caught by the queue and
+   logged at line 915, but the additional context (peer ID, error type) won't be
+   visible in production.
+
+== PROPOSALS ==
+
+1. OPTIONAL: Enhance error context in queued callback handler
+   Current:
+     console.error("Error in queued callback:", err);
+
+   Could be enhanced to include callback name:
+     .then((r) => {
+       this.#queuePromise = undefined;
+       return r;
+     }, callbackName)
+     .catch((err) => {
+       console.error(`Error in queued callback (${callbackName}):`, err);
+     });
+
+   This would require passing the callback name through the queue chain.
+   LOW PRIORITY - current implementation is functional.
+
+2. OPTIONAL: Consider a centralized error logging function for future
+   This would provide consistent formatting and make it easy to add error
+   monitoring services (Sentry, etc.) later. LOW PRIORITY for V1.
+
+Overall this is a well-executed change that correctly restores visibility for
+critical errors while keeping non-critical errors as debug logging.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Missing context in "Error in queued callback") - skipped
+- Issue #2 (Errors in onSync/onReceive have this.debug() before throw) - skipped

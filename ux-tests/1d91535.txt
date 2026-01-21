@@ -1,0 +1,79 @@
+UX TEST REPORT - Commit 1d91535
+================================
+Implement unified main screen with workflow list and input
+
+Test Date: 2026-01-20
+Test Environment: Local server (http://localhost:3001)
+Test Tool: Playwright
+
+COMMIT SUMMARY:
+- Create MainPage.tsx combining workflow list and prompt input on single page
+- Add attention banner showing count of workflows needing attention
+- Compute attention state from failed runs and waiting tasks (state=wait/asks)
+- Add secondary status line to workflow items showing run status
+- Sort workflows by attention first, then by last activity
+- Add visual attention indicator (red left border) for attention items
+- Update App.tsx routing: "/" now shows MainPage, "/chat" shows old ChatPage
+
+TEST RESULTS:
+
+1. MAIN PAGE ROUTING
+   PASS: "/" route correctly loads MainPage (verified via Playwright navigation)
+   Evidence: page.url() returns "http://localhost:3001/" and shows MainPage content
+
+2. EMPTY STATE DISPLAY
+   PASS: "No automations yet" message displays when no workflows exist
+   PASS: "Type below or try one of these examples" instruction visible
+   Evidence: Screenshot /tmp/test-1d91535-mainpage.png
+
+3. EXAMPLE SUGGESTIONS
+   PASS: Four example automation suggestions displayed:
+   - "Send me a daily summary of my unread emails"
+   - "Alert me when a website changes"
+   - "Remind me to drink water every 2 hours"
+   - "Save interesting tweets to a note"
+   Evidence: Verified via Playwright getByText() and screenshot
+
+4. PROMPT INPUT POSITIONING
+   PASS: Prompt input positioned at bottom of page
+   Evidence: Input bounding box y=742 (well into bottom area of 900px viewport)
+   Placeholder text: "What would you like me to help automate?"
+
+5. INPUT TOOLBAR
+   PASS: "+" button visible for file attachments
+   PASS: Send button (arrow icon) visible on right
+   Evidence: Screenshot /tmp/test-1d91535-mainpage.png
+
+6. "PRESS ENTER" HINT
+   PASS: "Press Enter to create automation" hint appears when text is entered
+   Evidence: Screenshot /tmp/test-after-example-click.png shows hint after
+   clicking example suggestion
+
+7. ATTENTION BANNER (Code Inspection)
+   NOT TESTABLE: No workflows exist to trigger attention state
+   Code verified at MainPage.tsx:330-347:
+   - Banner shows "{count} workflow(s) need attention"
+   - Click toggles between all workflows and attention-only view
+
+8. WORKFLOW LIST WITH ATTENTION INDICATORS (Code Inspection)
+   NOT TESTABLE: No workflows exist
+   Code verified at MainPage.tsx:387-391:
+   - Red left border applied via: border-l-4 border-l-red-500
+   - Attention items sorted first (MainPage.tsx:222-227)
+
+ISSUES FOUND: None
+
+NOTES:
+- Could not test workflow list features (attention banner, red border, sorting)
+  due to inability to create workflows without valid OpenRouter API key
+- All code inspection confirms correct implementation
+- UI layout and empty state behavior verified via live testing
+
+VERDICT: PASS
+All testable UX changes from commit 1d91535 work as intended.
+Untested features (attention indicators) verified via code inspection.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+No issues found in this review.

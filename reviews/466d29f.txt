@@ -1,0 +1,150 @@
+COMMIT REVIEW: 466d29f - Fix audio-explain cost tracking format
+
+============================================================
+SUMMARY OF CHANGES
+============================================================
+
+This commit fixes a bug where audio-explain tool costs were not being accumulated
+properly. The tool was passing the full `usage` object instead of the standardized
+`{ cost: usage.cost }` format used by all other tools.
+
+Files Changed:
+- IMPLEMENTATION_PLAN.md - Marked task as completed
+- packages/agent/src/tools/audio-explain.ts - Fixed usage data format
+
+Change in audio-explain.ts:
+
+Before (incorrect):
+  await getContext().createEvent("audio_explain", {
+    file: fileRecord.name,
+    prompt,
+    explanation: explanation.substring(0, 200) + (explanation.length > 200 ? "..." : ""),
+    usage  // Passed full object
+  });
+
+After (correct):
+  await getContext().createEvent("audio_explain", {
+    file: fileRecord.name,
+    prompt,
+    explanation: explanation.substring(0, 200) + (explanation.length > 200 ? "..." : ""),
+    usage: { cost: usage.cost }  // Passes structured format
+  });
+
+============================================================
+ANALYSIS
+============================================================
+
+WHY THIS BUG MATTERED:
+
+The cost accumulation system in createEvent (task-worker.ts and workflow-worker.ts)
+checks specifically for `content?.usage?.cost`:
+
+```typescript
+if (content?.usage?.cost != null && typeof content.usage.cost === 'number') {
+  sandbox.context!.cost += content.usage.cost;
+}
+```
+
+When `usage` was passed directly (without nesting under `usage:` key), the check
+`content?.usage?.cost` would look for `content.usage.usage.cost` which doesn't
+exist, causing the cost to not be accumulated.
+
+CORRECT PATTERN:
+
+All tools that make billable API calls must pass: `usage: { cost: usage.cost }`
+
+This creates the structure: `content = { ..., usage: { cost: X } }`
+Which allows: `content.usage.cost` to resolve to `X`
+
+CONSISTENCY VERIFICATION:
+
+Other tools correctly following this pattern:
+- pdf-explain.ts - Line 197: `usage: { cost: usage.cost }`
+- images-explain.ts - Line 197: `usage: { cost: usage.cost }`
+- text-generate.ts - Line 116: `usage: { cost: usage.cost }`
+- text-summarize.ts - `usage: { cost: usage.cost }`
+- text-classify.ts - `usage: { cost: usage.cost }`
+- text-extract.ts - `usage: { cost: usage.cost }`
+- images-generate.ts - Line 211: `usage: { cost: usage.cost }`
+- images-transform.ts - `usage: { cost: usage.cost }`
+
+The audio-explain tool was the only tool with this bug.
+
+============================================================
+ISSUES IDENTIFIED
+============================================================
+
+No issues with this fix. However, an observation about the codebase:
+
+OBSERVATION: Fragile cost tracking pattern
+Severity: MEDIUM (Technical Debt, not blocking)
+Location: System-wide pattern
+
+The cost tracking system relies on tools manually passing the correct
+object structure. There's no type enforcement that `usage` must be
+structured as `{ cost: number }`.
+
+This is how the bug in audio-explain happened - it's easy to pass `usage`
+directly instead of `{ usage: { cost: usage.cost } }`.
+
+============================================================
+POSITIVE OBSERVATIONS
+============================================================
+
+1. Minimal one-line fix: The change is surgical and precise, touching only
+   the problematic line.
+
+2. Matches established pattern: Now consistent with all other tools in the
+   codebase.
+
+3. Cost tracking will now work: Audio processing costs (which can be
+   significant for long audio files) will properly accumulate in the
+   workflow/task run totals.
+
+4. Correct commit message: The commit message clearly explains what was
+   wrong and how it was fixed.
+
+============================================================
+PROPOSALS FOR RESOLUTION
+============================================================
+
+No changes needed for this commit - it's correct.
+
+FUTURE IMPROVEMENT (optional, for technical debt):
+
+Consider creating a helper function or type to enforce the correct cost
+tracking structure:
+
+```typescript
+// In a shared types file
+interface UsageTracking {
+  usage: { cost: number };
+}
+
+// Or a helper function
+function formatUsageForEvent(usage: { cost?: number }): { usage: { cost: number } } {
+  return { usage: { cost: usage.cost || 0 } };
+}
+```
+
+This would prevent similar bugs in future tools.
+
+Effort: Medium
+Impact: Prevents future cost tracking bugs
+Priority: Low (since all current tools are now correct)
+
+============================================================
+OVERALL ASSESSMENT
+============================================================
+
+Quality: GOOD
+This is a correct fix for a real bug that was causing audio processing
+costs to not be tracked. The fix is minimal and follows established patterns.
+
+Recommendation: APPROVE
+No issues with this commit.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Observation (Fragile cost tracking pattern) - created specs/cost-tracking-helper.md

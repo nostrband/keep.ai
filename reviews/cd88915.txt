@@ -1,0 +1,201 @@
+# Review: cd8891546abc9be7542105d727a5c4b26c14b245
+
+**Commit Message:** Add script version history UI with diff view and rollback
+
+**Date:** Fri Jan 16 22:40:24 2026 +0000
+
+**Files Changed:**
+- IMPLEMENTATION_PLAN.md
+- apps/web/src/components/ScriptDiff.tsx (NEW)
+- apps/web/src/components/WorkflowDetailPage.tsx
+- apps/web/src/hooks/dbScriptReads.ts
+- apps/web/src/hooks/dbWrites.ts
+
+---
+
+## Summary of Changes
+
+This commit adds a script version history feature to the workflow detail page, allowing users to:
+1. View all previous versions of a workflow's script
+2. Compare adjacent versions with a visual diff view
+3. Roll back to any previous version with one click
+
+### New Components and Hooks:
+- **ScriptDiff.tsx**: New component implementing line-by-line diff visualization using LCS algorithm
+- **useScriptVersionsByWorkflowId**: New query hook to fetch all script versions for a workflow
+- **useRollbackScript**: New mutation hook for rolling back to a previous script version
+
+### UI Changes in WorkflowDetailPage:
+- "View history (X versions)" button to expand/collapse version list
+- Version history panel showing all versions with timestamps and change comments
+- "Show diff" buttons to compare adjacent versions inline
+- "Rollback" buttons for non-current versions
+
+---
+
+## Potential Issues
+
+### ISSUE 1: LCS Algorithm Tie-Breaking Bug (HIGH SEVERITY)
+**File:** apps/web/src/components/ScriptDiff.tsx:51
+**Problem:** The LCS backtracking uses `>=` instead of `>` for tie-breaking:
+```typescript
+} else if (j > 0 && (i === 0 || lcs[i][j - 1] >= lcs[i - 1][j])) {
+```
+Standard LCS algorithms use `>` to prioritize deletions over insertions, producing more intuitive diffs. Using `>=` can produce non-deterministic or visually confusing diff presentations.
+**Impact:** Same files may produce inconsistent diff representations.
+
+### ISSUE 2: Empty String Edge Case (HIGH SEVERITY)
+**File:** apps/web/src/components/ScriptDiff.tsx:73-74
+**Problem:** Empty string handling is incorrect:
+```typescript
+const oldLines = oldCode.split("\n");
+const newLines = newCode.split("\n");
+```
+`"".split("\n")` returns `[""]` (array with one empty string), not `[]`. This causes:
+- Comparing empty vs non-empty files shows incorrect results
+- Trailing newlines create spurious empty lines in diff
+**Impact:** Common use cases like new scripts or cleared scripts display incorrectly.
+
+### ISSUE 3: O(n*m) Memory Complexity for Large Files (MEDIUM SEVERITY)
+**File:** apps/web/src/components/ScriptDiff.tsx:23-24
+**Problem:** The LCS matrix stores all n*m values:
+```typescript
+const lcs: number[][] = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
+```
+For a 10,000-line file comparison, this creates a 100M integer matrix (~400MB). Large files could crash the browser tab.
+**Impact:** Performance degradation or crashes for files >1,000-5,000 lines.
+
+### ISSUE 4: Accessibility Issues (HIGH SEVERITY)
+**File:** apps/web/src/components/ScriptDiff.tsx:115-162
+**Problems:**
+- Color-only differentiation (green/red) excludes colorblind users
+- No ARIA labels on +/- indicators
+- No table headers for screen readers
+- Missing semantic HTML structure
+**Impact:** Component is not accessible to users with disabilities.
+
+### ISSUE 5: Rollback Not Atomic / Race Conditions (HIGH SEVERITY)
+**File:** apps/web/src/hooks/dbWrites.ts:202-227
+**Problem:** The rollback operation performs three separate async operations without a transaction:
+```typescript
+const targetScript = await api.scriptStore.getScript(input.targetScriptId);  // Query 1
+const latestScript = await api.scriptStore.getLatestScriptByWorkflowId(input.workflowId);  // Query 2
+const nextVersion = latestScript ? latestScript.version + 1 : 1;  // Computed
+await api.scriptStore.addScript({...});  // Query 3
+```
+**Race conditions possible:**
+- Two concurrent rollbacks could create same version number
+- Concurrent edit + rollback could collide
+- If Query 2 fails (DB error vs no scripts), version could be incorrect
+**Impact:** Data corruption or version collisions in concurrent scenarios.
+
+### ISSUE 6: Rollback Not Idempotent (MEDIUM SEVERITY)
+**File:** apps/web/src/hooks/dbWrites.ts:211-213
+**Problem:** Each rollback creates a new script version with unique ID:
+```typescript
+const newId = bytesToHex(randomBytes(16));
+```
+Double-clicking "Rollback" creates two rollback versions (v6 and v7 both containing v2's code).
+**Impact:** Duplicate versions cluttering history; confusing UX.
+
+### ISSUE 7: Missing Query Invalidation (LOW SEVERITY)
+**File:** apps/web/src/hooks/dbWrites.ts:232-237
+**Problem:** Missing invalidation for `qk.scriptVersions(taskId)` if task-level script versions are displayed elsewhere.
+**Impact:** Stale data in other UI components referencing the same task.
+
+### ISSUE 8: Version Ordering Logic Fragile (LOW SEVERITY)
+**File:** apps/web/src/components/WorkflowDetailPage.tsx:485-490
+**Problem:** The code assumes DESC ordering from database when calculating "previous version":
+```typescript
+const previousVersion = scriptVersions[index + 1];  // Works by accident
+```
+This works because DB returns `ORDER BY version DESC`, but the relationship is undocumented and fragile.
+**Impact:** Bug if sort order changes; confusing for maintainers.
+
+---
+
+## Proposals
+
+### PROPOSAL 1: Fix LCS Tie-Breaking
+Change line 51 from `>=` to `>`:
+```typescript
+} else if (j > 0 && (i === 0 || lcs[i][j - 1] > lcs[i - 1][j])) {
+```
+
+### PROPOSAL 2: Handle Empty Strings
+Add input normalization before splitting:
+```typescript
+const oldLines = oldCode ? oldCode.split("\n") : [];
+const newLines = newCode ? newCode.split("\n") : [];
+```
+Or check for empty string case at start of computeDiff.
+
+### PROPOSAL 3: Add File Size Limit
+Add a check before computing diff:
+```typescript
+const MAX_LINES = 5000;
+if (oldLines.length > MAX_LINES || newLines.length > MAX_LINES) {
+  return <div>Files too large for diff view</div>;
+}
+```
+Consider using a streaming/chunk-based diff algorithm for large files.
+
+### PROPOSAL 4: Improve Accessibility
+- Add ARIA labels: `<span aria-label="line added" className="text-green-600">+</span>`
+- Add secondary visual indicator beyond color (strikethrough for removed, underline for added)
+- Add table headers with proper `<thead>` structure
+- Test with screen reader
+
+### PROPOSAL 5: Wrap Rollback in Transaction (if cr-sqlite tx API allows)
+If not possible, at minimum add optimistic locking or use mutation keys to debounce rapid clicks.
+
+### PROPOSAL 6: Prevent Double Rollback
+Either:
+- Disable rollback button globally during mutation (not just per-version)
+- Check if latest script already has same code as target before creating new version
+- Use mutation key for deduplication
+
+### PROPOSAL 7: Add scriptVersions(taskId) Invalidation
+Add to onSuccess:
+```typescript
+if (targetScript.task_id) {
+  queryClient.invalidateQueries({ queryKey: qk.scriptVersions(targetScript.task_id) });
+}
+```
+
+### PROPOSAL 8: Document Version Ordering
+Add comment explaining the assumption:
+```typescript
+// NOTE: scriptVersions is returned in DESC order by version from database
+// So index+1 gives us the "previous" (older) version for diff comparison
+const previousVersion = scriptVersions[index + 1];
+```
+
+---
+
+## Summary
+
+| Issue | Severity | Complexity to Fix |
+|-------|----------|-------------------|
+| LCS tie-breaking | HIGH | Simple (1 char change) |
+| Empty string handling | HIGH | Simple |
+| Memory complexity | MEDIUM | Medium |
+| Accessibility | HIGH | Medium |
+| Rollback race conditions | HIGH | Complex |
+| Rollback not idempotent | MEDIUM | Simple |
+| Missing query invalidation | LOW | Simple |
+| Fragile version ordering | LOW | Simple (comment) |
+
+The feature implementation is functional but has several issues that should be addressed before production use. Priority should be: #1 (LCS bug), #2 (empty string), #4 (accessibility), then #5/#6 (rollback safety).
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (LCS Algorithm Tie-Breaking Bug) - covered by specs/scriptdiff-use-diff-library.md
+- Issue #2 (Empty String Edge Case) - covered by specs/scriptdiff-use-diff-library.md
+- Issue #3 (O(n*m) Memory Complexity) - created specs/scriptdiff-use-diff-library.md
+- Issue #4 (Accessibility Issues) - skipped
+- Issue #5 (Rollback Not Atomic / Race Conditions) - created specs/active-script-version-pointer.md
+- Issue #6 (Rollback Not Idempotent) - covered by specs/active-script-version-pointer.md
+- Issue #7 (Missing Query Invalidation) - created specs/rollback-script-query-invalidation.md
+- Issue #8 (Version Ordering Logic Fragile) - created specs/scriptdiff-find-version-by-number.md

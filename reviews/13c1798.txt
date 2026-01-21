@@ -1,0 +1,67 @@
+COMMIT: 13c1798
+TITLE: Remove orphaned agent status infrastructure
+DATE: 2026-01-19
+
+== SUMMARY OF CHANGES ==
+
+This commit removes the orphaned agent status infrastructure that became dead code
+when startStatusUpdater was removed in earlier commits. The cleanup includes:
+
+1. packages/db/src/api.ts:
+   - Removed setAgentStatus(value: string) method
+   - Removed getAgentStatus() method
+   - Removed MAX_STATUS_TTL constant (60 seconds)
+
+2. apps/web/src/hooks/dbApiReads.ts:
+   - Deleted entire file (only contained useAgentStatus hook)
+   - Hook was polling every 5 seconds for status that was never being updated
+
+3. apps/web/src/hooks/queryKeys.ts:
+   - Removed agentStatus query key
+
+4. apps/web/src/components/SharedHeader.tsx:
+   - Removed useAgentStatus import
+   - Removed status display below "Assistant" title
+
+5. packages/agent/src/task-worker.ts:
+   - Removed commented-out status updater code from executeTask method
+
+6. packages/agent/src/interfaces.ts:
+   - Deleted entire file (only contained unused Memory interface)
+
+7. packages/db/README.md:
+   - Removed documentation for deleted methods
+
+8. IMPLEMENTATION_PLAN.md:
+   - Updated to mark spec #31 as COMPLETED
+   - Updated completion counts
+
+== ANALYSIS ==
+
+The removal was complete and thorough. No orphaned references remain in active code.
+
+The agent_state table still exists and is still used for storing autonomy_mode preference
+via setAutonomyMode()/getAutonomyMode() methods, so there's no database cleanup needed.
+
+The infrastructure was already effectively dead:
+- Commit 7b40d02 (Jan 14) commented out startStatusUpdater()
+- Commit 6f551f1 (Jan 16) removed the startStatusUpdater method body
+- This commit (13c1798) removes the remaining unused infrastructure
+
+== POTENTIAL ISSUES ==
+
+None identified. This is a clean removal of dead code with no side effects.
+
+== PROPOSALS ==
+
+No action needed. The commit is well-executed.
+
+The ideas/agent-status-from-active-runs.md file documents a planned reimplementation
+that would derive status from active task_runs and script_runs instead of manual updates.
+This is a good design direction but is not yet implemented - it remains a future
+enhancement documented in the ideas folder.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+No issues to address - clean code removal.

@@ -1,0 +1,173 @@
+# Review: Commit 19097a9
+
+## Summary
+**Commit:** 19097a9 - Remove debug console.log statements from worker files
+**Date:** 2026-01-16
+**Author:** Claude Agent
+
+## Changes Description
+
+This commit cleans up production console output by replacing console.log statements across worker files with debug-controlled logging. The changes span 7 files:
+
+1. **service-worker.ts** - Added `DEBUG_SW = false` constant with `debugLog()` wrapper function. Replaced ~22 console.log calls with debugLog().
+
+2. **shared-worker.ts** - Imported debug module and created `log = debug("keep:shared-worker")` namespace. Replaced 2 console.log statements.
+
+3. **worker.ts** - Fixed unconditional `debug.enable("*")` by adding `__DEV__` check. Created `log = debug("keep:worker")` namespace. Replaced console.log.
+
+4. **lib/worker.ts** - Created `log = debug("keep:sync-worker")` namespace. Replaced ~10 console.log statements while keeping console.error for actual errors.
+
+5. **ConnectDeviceDialog.tsx** - Silenced QR scan error callback that logged on every frame without QR code detected.
+
+6. **vite.config.ts** - Added `__DEV__` build-time constant: `__DEV__: JSON.stringify(process.env.NODE_ENV !== "production")`.
+
+7. **IMPLEMENTATION_PLAN.md** - Updated timestamp and documented changes.
+
+---
+
+## Issues Identified
+
+### Issue 1: Inconsistent Debug Logging Approach (HIGH)
+
+**Location:** service-worker.ts:14-16 vs shared-worker.ts, worker.ts, lib/worker.ts
+
+**Problem:** The service worker uses a completely different debug pattern than the other workers:
+- service-worker.ts: Uses hardcoded `DEBUG_SW = false` with custom `debugLog()` wrapper
+- Other workers: Use the standard `debug` module with namespaces
+
+This creates several problems:
+1. DEBUG_SW is hardcoded to `false`, making it impossible to enable debug logging without code changes
+2. Unlike the debug module which respects DEBUG environment variable, this requires manual code edits
+3. No namespace filtering capability (can't do `DEBUG=keep:service-worker`)
+4. Inconsistent developer experience across different worker contexts
+
+**Proposal:** Replace the custom DEBUG_SW pattern with the debug module, matching other workers:
+```typescript
+import debug from "debug";
+const log = debug("keep:service-worker");
+```
+This would provide: runtime-controllable logging, consistent pattern, namespace filtering support.
+
+---
+
+### Issue 2: Debug Enablement Asymmetry Between Workers (HIGH)
+
+**Location:**
+- worker.ts:8-12 (has debug.enable check)
+- shared-worker.ts (no debug.enable)
+
+**Problem:** worker.ts enables debug logging in development mode:
+```typescript
+if (typeof __DEV__ !== "undefined" && __DEV__) {
+  debug.enable("*");
+}
+```
+
+But shared-worker.ts has no equivalent. This means:
+- In development: worker.ts shows debug logs, shared-worker.ts doesn't
+- Debug logs from shared-worker.ts will never appear even in dev mode
+- Inconsistent debugging experience
+
+**Proposal:** Add the same debug enablement pattern to shared-worker.ts:
+```typescript
+declare const __DEV__: boolean;
+if (typeof __DEV__ !== "undefined" && __DEV__) {
+  debug.enable("*");
+}
+```
+
+---
+
+### Issue 3: Dev Mode Detection Pattern Inconsistency (MEDIUM)
+
+**Location:**
+- worker.ts:8-12 uses `__DEV__` custom constant
+- main.tsx:24 uses `import.meta.env.DEV` (Vite standard)
+
+**Problem:** The codebase has two different patterns for detecting development mode:
+1. Custom `__DEV__` constant (defined in vite.config.ts, requires type declaration)
+2. Vite's built-in `import.meta.env.DEV` (idiomatic, no declaration needed)
+
+Additionally, `__DEV__` is NOT declared in vite-env.d.ts - only local declarations exist in worker.ts, causing type safety concerns.
+
+**Proposal:** Standardize on `import.meta.env.DEV` for consistency with Vite idioms. This is already documented in specs/standardize-dev-mode-check.md. The custom `__DEV__` constant adds complexity without benefit.
+
+---
+
+### Issue 4: Missing __DEV__ Type Declaration (LOW)
+
+**Location:** apps/web/src/vite-env.d.ts, worker.ts:8
+
+**Problem:** The `__DEV__` constant is defined in vite.config.ts but not declared in vite-env.d.ts. Worker.ts has to declare it locally:
+```typescript
+declare const __DEV__: boolean;
+```
+
+Other constants (__SERVERLESS__, __ELECTRON__) are properly declared globally in vite-env.d.ts.
+
+**Proposal:** Either:
+- Add `declare const __DEV__: boolean;` to vite-env.d.ts for consistency, OR
+- Remove __DEV__ entirely and use import.meta.env.DEV (preferred)
+
+---
+
+### Issue 5: Debug Namespace Inconsistency (LOW)
+
+**Location:** Various worker files
+
+**Problem:** The debug namespaces are inconsistent:
+- `keep:worker` (worker.ts)
+- `keep:shared-worker` (shared-worker.ts)
+- `keep:sync-worker` (lib/worker.ts)
+
+While these work, the naming doesn't clearly indicate what each worker does:
+- "worker" vs "sync-worker" are confusingly similar
+- "shared-worker" describes the worker type, not its function
+
+**Proposal:** Consider more descriptive namespaces:
+- `keep:worker:dedicated` (worker.ts - dedicated worker entry)
+- `keep:worker:shared` (shared-worker.ts - shared worker entry)
+- `keep:sync` (lib/worker.ts - sync functionality)
+
+---
+
+### Issue 6: QR Scanner Callback Change is Good But Comment Could Be Clearer (LOW)
+
+**Location:** ConnectDeviceDialog.tsx:87-90
+
+**Problem:** The change silences the QR scan error callback, which is correct behavior (html5-qrcode calls this frequently when no QR in frame). However, the comment could be more explicit that this is intentional suppression of library noise, not error hiding.
+
+**Current:**
+```typescript
+() => {
+  // QR scan callback is called frequently when no QR code in frame
+  // This is expected behavior and should be silent
+}
+```
+
+**Proposal:** No change needed - the comment adequately explains the intent. This is good practice.
+
+---
+
+## Summary
+
+| Issue | Severity | Description |
+|-------|----------|-------------|
+| #1 | HIGH | Inconsistent debug pattern in service-worker (custom vs debug module) |
+| #2 | HIGH | shared-worker.ts has no debug.enable() call for dev mode |
+| #3 | MEDIUM | __DEV__ vs import.meta.env.DEV inconsistency |
+| #4 | LOW | __DEV__ not declared in vite-env.d.ts |
+| #5 | LOW | Debug namespace naming could be clearer |
+| #6 | LOW | QR callback change is fine, no action needed |
+
+The commit achieves its goal of cleaning up production console output but introduces inconsistency in how debug logging is implemented across different workers. The highest priority fix would be aligning service-worker.ts with the debug module pattern used elsewhere, and ensuring shared-worker.ts can actually output debug logs in development mode.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Inconsistent debug pattern in service-worker) - created specs/service-worker-use-debug-module.md
+- Issue #2 (shared-worker.ts no debug.enable) - created specs/shared-worker-enable-debug.md
+- Issue #3 (__DEV__ vs import.meta.env.DEV) - covered by specs/standardize-dev-mode-check.md
+- Issue #4 (Missing __DEV__ type declaration) - covered by specs/standardize-dev-mode-check.md
+- Issue #5 (Debug namespace naming) - skipped
+- Issue #6 (QR callback change) - not an issue (good change)

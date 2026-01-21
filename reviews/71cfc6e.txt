@@ -1,0 +1,277 @@
+# Code Review: 71cfc6e
+
+## Commit: Implement fix attempt tracking and escalation for maintenance mode
+
+**Author:** Claude Agent <claude@anthropic.com>
+**Date:** Fri Jan 16 18:09:27 2026 +0000
+
+---
+
+## Summary of Changes
+
+This commit adds tracking for consecutive fix attempts when a workflow enters maintenance mode due to logic errors. After MAX_FIX_ATTEMPTS (3) failed attempts, the system escalates to the user by pausing the workflow and displaying a notification message, preventing infinite auto-fix loops.
+
+### Files Modified:
+- `IMPLEMENTATION_PLAN.md` - Updated task status
+- `packages/agent/src/workflow-worker.ts` - Core escalation logic
+- `packages/db/src/api.ts` - Initialize new field in workflow creation
+- `packages/db/src/database.ts` - Register migration v21
+- `packages/db/src/migrations/v21.ts` - Add maintenance_fix_count column
+- `packages/db/src/script-store.ts` - Add increment/reset methods
+
+---
+
+## Detailed Analysis
+
+### Migration v21.ts
+
+**Adds:** `maintenance_fix_count integer not null default 0` to workflows table
+
+**Pattern:** Correctly follows existing migration patterns:
+- Uses `crsql_begin_alter`/`crsql_commit_alter` for CRSQLite CRR tables
+- NOT NULL with default is the correct approach for existing rows
+- Good documentation explaining the field's purpose
+
+### workflow-worker.ts Changes
+
+**New Constants:**
+- `MAX_FIX_ATTEMPTS = 3` (line 20)
+
+**Modified Methods:**
+- `executeWorkflow()` - Resets fix count on successful run (lines 173-177)
+- `enterMaintenanceMode()` - Checks count before allowing auto-fix (lines 423-434)
+
+**New Method:**
+- `escalateToUser()` - Pauses workflow and notifies user (lines 556-653)
+
+---
+
+## Issues Identified
+
+### Issue 1: Race Condition in Fix Count Check (HIGH - CRITICAL)
+
+**Location:** `packages/agent/src/workflow-worker.ts:423-434`
+
+**Problem:** The code checks a STALE `workflow` object before incrementing the fix count:
+
+```typescript
+// Line 423-427: Uses stale workflow.maintenance_fix_count
+const currentFixCount = workflow.maintenance_fix_count || 0;
+if (currentFixCount >= MAX_FIX_ATTEMPTS) {
+  await this.escalateToUser(...);
+  return;
+}
+
+// Line 433: THEN increments in database
+const newFixCount = await this.api.scriptStore.incrementMaintenanceFixCount(workflow.id);
+```
+
+**Race Condition Scenario:**
+1. Two concurrent script executions both fail with logic errors
+2. Both enter `enterMaintenanceMode()` with stale `workflow` object showing `maintenance_fix_count = 2`
+3. Both pass the check (`2 >= 3` is false)
+4. Both call `incrementMaintenanceFixCount()` → database goes to 3, then 4
+5. **Result:** MAX_FIX_ATTEMPTS limit is exceeded; both executions proceed to auto-fix
+
+**Impact:** The limit can be exceeded by concurrent executions, defeating the purpose of the escalation mechanism.
+
+**Proposal:** Increment FIRST, then check the new count:
+```typescript
+// Atomic increment first
+const newFixCount = await this.api.scriptStore.incrementMaintenanceFixCount(workflow.id);
+
+// Then check if we exceeded the limit
+if (newFixCount > MAX_FIX_ATTEMPTS) {
+  // Roll back and escalate
+  await this.api.scriptStore.resetMaintenanceFixCount(workflow.id);
+  await this.escalateToUser(workflow, script, scriptRunId, error, logs, newFixCount - 1);
+  return;
+}
+```
+
+Or better, implement an atomic check-and-increment in the database layer:
+```typescript
+// In script-store.ts
+async tryIncrementMaintenanceFixCount(workflowId: string, maxAttempts: number): Promise<{ newCount: number, exceeded: boolean }> {
+  // Single atomic SQL operation
+}
+```
+
+---
+
+### Issue 2: Silent Failure in escalateToUser (MEDIUM)
+
+**Location:** `packages/agent/src/workflow-worker.ts:598-611`
+
+**Problem:** If task retrieval fails, the function returns early without notifying the user:
+
+```typescript
+let task;
+try {
+  task = await this.api.taskStore.getTask(workflow.task_id);
+} catch (e) {
+  this.debug("Failed to get task for escalation:", e);
+  return;  // USER NEVER NOTIFIED!
+}
+```
+
+**Impact:** Workflow is paused (line 591-596) but user is never told why. The workflow just silently stops.
+
+**Proposal:** Always emit the signal and consider alternative notification:
+```typescript
+try {
+  task = await this.api.taskStore.getTask(workflow.task_id);
+} catch (e) {
+  this.debug("Failed to get task for escalation:", e);
+  // Still emit signal so external handlers can notify
+  this.emitSignal({
+    type: "needs_attention",
+    workflowId: workflow.id,
+    timestamp: Date.now(),
+    error: `Auto-fix failed after ${fixAttempts} attempts: ${error.message}`,
+    errorType: "logic",
+    scriptRunId,
+  });
+  return;
+}
+```
+
+---
+
+### Issue 3: Message Send Failure Swallowed (MEDIUM)
+
+**Location:** `packages/agent/src/workflow-worker.ts:655-663`
+
+**Problem:** If sending the escalation message fails, the user may never see it:
+
+```typescript
+try {
+  await this.api.addMessage({
+    chatId: task.chat_id,
+    content: escalationMessage,
+    role: "assistant",
+  });
+} catch (e) {
+  this.debug("Failed to send escalation message:", e);
+  // No fallback!
+}
+```
+
+**Impact:** Critical user notification can fail silently. Only the signal is emitted, but signal handlers could also fail.
+
+**Proposal:** Add fallback notification mechanism:
+```typescript
+try {
+  await this.api.addMessage({...});
+} catch (e) {
+  this.debug("Failed to send escalation message:", e);
+  // Create an inbox item as fallback
+  try {
+    await this.api.inboxStore.saveInbox({
+      id: `escalation.fallback.${workflow.id}.${scriptRunId}`,
+      task_id: workflow.task_id,
+      type: "escalation_failed",
+      content: JSON.stringify({ error: error.message, fixAttempts }),
+      timestamp: new Date().toISOString(),
+    });
+  } catch (e2) {
+    this.debug("Fallback notification also failed:", e2);
+  }
+}
+```
+
+---
+
+### Issue 4: Workflow Object Mutation in escalateToUser (LOW)
+
+**Location:** `packages/agent/src/workflow-worker.ts:580-593`
+
+**Problem:** The escalateToUser method uses spread operator on the workflow parameter:
+
+```typescript
+await this.api.scriptStore.updateWorkflow({
+  ...workflow,
+  status: "disabled",
+  maintenance: false,
+  maintenance_fix_count: 0,
+});
+```
+
+This works, but the `workflow` parameter is stale (passed from `executeWorkflow()`). Any concurrent modifications to the workflow would be overwritten.
+
+**Impact:** Low risk in practice since the workflow is being paused anyway, but could cause data loss if concurrent updates happened.
+
+**Proposal:** Fetch fresh workflow before updating:
+```typescript
+const freshWorkflow = await this.api.scriptStore.getWorkflow(workflow.id);
+if (freshWorkflow) {
+  await this.api.scriptStore.updateWorkflow({
+    ...freshWorkflow,
+    status: "disabled",
+    maintenance: false,
+    maintenance_fix_count: 0,
+  });
+}
+```
+
+---
+
+### Issue 5: Missing TypeScript Type for maintenance_fix_count in Workflow Interface Initial Value (LOW)
+
+**Location:** `packages/db/src/api.ts:284`
+
+**Code:**
+```typescript
+maintenance: false,
+maintenance_fix_count: 0,
+```
+
+**Assessment:** This is correctly initialized. The Workflow interface in script-store.ts (line 44) properly includes the field. No issue here - just noting for completeness.
+
+---
+
+### Issue 6: Debug Logging Only (LOW)
+
+**Location:** Throughout `escalateToUser()`
+
+**Problem:** All error logging uses `this.debug()` which is conditional on debug flag. In production, these errors may not be visible.
+
+**Proposal:** Use proper error logging for critical failures:
+```typescript
+// For critical notification failures, use console.error or a proper logger
+console.error("Failed to send escalation notification:", e);
+```
+
+---
+
+## Positive Observations
+
+1. **Good migration pattern** - Follows established conventions exactly
+2. **Comprehensive escalation message** - User-friendly, explains what happened and what to do
+3. **Proper reset on success** - Fix count resets after successful run (line 173-177)
+4. **Chat event tracking** - Creates `maintenance_escalated` event for history
+5. **Signal emission** - Allows external handlers to react to escalation
+
+---
+
+## Summary
+
+| Issue | Severity | Category |
+|-------|----------|----------|
+| Race condition in fix count check | HIGH | Concurrency Bug |
+| Silent failure when task fetch fails | MEDIUM | Error Handling |
+| Message send failure swallowed | MEDIUM | Error Handling |
+| Stale workflow object mutation | LOW | Data Integrity |
+| Debug-only logging for critical errors | LOW | Observability |
+
+**Overall Assessment:** The feature is well-designed with good user messaging and proper event tracking. However, the race condition in the fix count check is a critical bug that can allow the MAX_FIX_ATTEMPTS limit to be exceeded. The increment should happen before the check, not after. Silent failures in escalateToUser should be addressed to ensure users are always notified when their workflow is paused.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Race condition in fix count check) - skipped (single-threaded per-workflow execution prevents this)
+- Issue #2 (Silent failure in escalateToUser) - skipped (db consistency issue, needs higher-level solution)
+- Issue #3 (Message send failure swallowed) - skipped (needs higher-level db error handling solution)
+- Issue #4 (Workflow object mutation) - covered by specs/workflow-state-consistency.md
+- Issue #5 (TypeScript type) - not an issue
+- Issue #6 (Debug logging only) - skipped

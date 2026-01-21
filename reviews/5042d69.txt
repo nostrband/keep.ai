@@ -1,0 +1,174 @@
+# Review: Commit 5042d69 - Collapse low-signal events in chat timeline
+
+## Summary of Changes
+
+This commit implements auto-collapsing of routine/low-signal events in the chat timeline UI. Key changes:
+
+1. **New eventSignal.ts module**: Defines SignalLevel classification ('high' | 'low') to determine which events should be collapsed by default. Low-signal events include routine read operations (web fetch, web search, text analysis, Gmail reads) while high-signal events (writes, errors, user interactions) remain visible.
+
+2. **CollapsedEventSummary component**: New React component that renders a collapsible summary showing event count, unique event types (up to 3), and aggregate cost. Users can click to expand/collapse.
+
+3. **TaskEventGroup & WorkflowEventGroup updates**: Both components now partition events using `partitionEventsBySignal()` and conditionally render the CollapsedEventSummary for low-signal events. Error states auto-expand all events for debugging context.
+
+4. **Gmail dynamic classification**: Gmail API calls are classified dynamically - read methods are low-signal, write methods are high-signal using `GMAIL_WRITE_METHODS`.
+
+---
+
+## Potential Issues
+
+### Issue 1: Gmail Method Matching Uses Substring Logic (Medium)
+
+**Location**: `apps/web/src/lib/eventSignal.ts:53-54`
+
+```typescript
+const isWriteMethod = GMAIL_WRITE_METHODS.some((method) =>
+  gmailPayload.method?.includes(method)
+);
+```
+
+**Problem**: Uses `.includes()` for substring matching. If a future method like `"users.messages.send_later"` is added, it would incorrectly match `"users.messages.send"` and be classified as a write operation.
+
+**Proposal**: Use exact prefix matching or document that substring matching is intentional:
+```typescript
+const isWriteMethod = GMAIL_WRITE_METHODS.some((method) =>
+  gmailPayload.method?.startsWith(method) || gmailPayload.method === method
+);
+```
+
+---
+
+### Issue 2: getEventTypeLabel Hardcodes "Gmail read" (Low-Medium)
+
+**Location**: `apps/web/src/lib/eventSignal.ts:112`
+
+```typescript
+case EVENT_TYPES.GMAIL_API_CALL:
+  return "Gmail read";
+```
+
+**Problem**: The label function assumes Gmail calls are always reads, which is misleading for write operations. While write operations are high-signal and won't appear in collapsed summaries, the function is exported and could be used elsewhere.
+
+**Proposal**: Make the function payload-aware or rename to "Gmail operation":
+```typescript
+case EVENT_TYPES.GMAIL_API_CALL:
+  return "Gmail"; // Generic label
+```
+
+---
+
+### Issue 3: Missing aria-controls for Accessibility (Medium)
+
+**Location**: `apps/web/src/components/CollapsedEventSummary.tsx:48-50`
+
+```typescript
+aria-expanded={isExpanded}
+aria-label={`${action} ${eventCount} routine events`}
+```
+
+**Problem**: The button has `aria-expanded` but no `aria-controls` attribute to link to the controlled content. This reduces accessibility for screen reader users.
+
+**Proposal**: Add an ID to the expanded content and link with aria-controls:
+```typescript
+aria-controls="collapsed-events-content"
+```
+
+---
+
+### Issue 4: Chevron Emoji Not Hidden from Screen Readers (Low)
+
+**Location**: `apps/web/src/components/CollapsedEventSummary.tsx:53`
+
+```typescript
+<span className="text-gray-400 flex-shrink-0">{chevron}</span>
+```
+
+**Problem**: The chevron characters (▼/▶) are decorative but visible to screen readers. The aria-label compensates, but best practice is to hide decorative elements.
+
+**Proposal**: Add `aria-hidden="true"`:
+```typescript
+<span className="text-gray-400 flex-shrink-0" aria-hidden="true">{chevron}</span>
+```
+
+---
+
+### Issue 5: Cost Emoji Lacks Semantic Meaning (Low)
+
+**Location**: `apps/web/src/components/CollapsedEventSummary.tsx:62-66`
+
+```typescript
+<span className="flex items-center gap-1 text-xs text-gray-400 flex-shrink-0">
+  <span>💵</span>
+  <span>{totalCost.toFixed(2)}</span>
+</span>
+```
+
+**Problem**: The 💵 emoji provides no semantic meaning for screen readers.
+
+**Proposal**: Add an aria-label or visually hidden text:
+```typescript
+<span className="flex items-center gap-1 text-xs text-gray-400 flex-shrink-0" aria-label={`Cost: $${totalCost.toFixed(2)}`}>
+  <span aria-hidden="true">💵</span>
+  <span>${totalCost.toFixed(2)}</span>
+</span>
+```
+
+---
+
+### Issue 6: No Defensive Check for Empty Events Array (Low)
+
+**Location**: `apps/web/src/components/CollapsedEventSummary.tsx`
+
+**Problem**: The component doesn't validate that the events array is non-empty. If passed an empty array, it would render "0 routine events ()".
+
+**Mitigation**: Parent components check `lowSignal.length > 0` before rendering, so this is safe in practice.
+
+**Proposal**: Add defensive early return:
+```typescript
+if (events.length === 0) {
+  return null;
+}
+```
+
+---
+
+### Issue 7: Undocumented SignalLevel vs EventSignificance Relationship (Low)
+
+**Location**: `apps/web/src/lib/eventSignal.ts:8`
+
+**Problem**: The code notes "This is separate from EventSignificance" but doesn't document the relationship between the two systems:
+- SignalLevel (high/low) = collapse behavior
+- EventSignificance (write/normal/error/success/user/state) = visual styling
+
+**Proposal**: Add a mapping comment explaining how they relate:
+```typescript
+/**
+ * Mapping between EventSignificance and SignalLevel:
+ * - 'write', 'state', 'error', 'success', 'user' → HIGH (always visible)
+ * - 'normal' → varies based on event type (reads=LOW, generates=HIGH)
+ */
+```
+
+---
+
+## Overall Assessment
+
+**Quality**: Good implementation with thoughtful design choices (dynamic Gmail classification, auto-expand on errors, aggregate cost display).
+
+**Recommendations Priority**:
+1. (Medium) Add aria-controls for accessibility
+2. (Medium) Consider documenting or tightening Gmail method matching
+3. (Low) Hide decorative elements from screen readers
+4. (Low) Add defensive empty array check
+
+The implementation correctly achieves the goal of reducing visual noise for routine operations while keeping important events visible.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Gmail Method Matching Uses Substring Logic) - skipped
+- Issue #2 (getEventTypeLabel Hardcodes "Gmail read") - skipped (write methods not exposed yet)
+- Issue #3 (Missing aria-controls for Accessibility) - skipped
+- Issue #4 (Chevron Emoji Not Hidden from Screen Readers) - skipped
+- Issue #5 (Cost Emoji Lacks Semantic Meaning) - skipped
+- Issue #6 (No Defensive Check for Empty Events Array) - skipped
+- Issue #7 (Undocumented SignalLevel vs EventSignificance Relationship) - skipped

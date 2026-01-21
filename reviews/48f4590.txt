@@ -1,0 +1,355 @@
+# Code Review: Commit 48f4590
+
+## Commit: Implement quick-reply buttons for agent questions
+**Date:** 2026-01-16
+**Author:** Claude Agent
+
+---
+
+## Summary of Changes
+
+This commit adds support for structured question formats with quick-reply options. When an agent asks a yes/no or multiple-choice question, users see clickable buttons above the input instead of having to type a response.
+
+### Files Modified:
+1. `packages/agent/src/ai-tools/ask.ts` - Added optional `options` array to ask tool schema
+2. `packages/agent/src/agent.ts` - Updated to use `formattedAsks` with options
+3. `packages/agent/src/index.ts` - Exported parseAsks and StructuredAsk for UI
+4. `apps/web/src/components/QuickReplyButtons.tsx` - New component for displaying options
+5. `apps/web/src/components/ChatPage.tsx` - Integrated quick-reply buttons
+6. `apps/web/src/components/MainPage.tsx` - Integrated quick-reply buttons
+7. `apps/web/src/hooks/dbTaskReads.ts` - Added useTaskByChatId hook
+8. `apps/web/src/hooks/queryKeys.ts` - Added taskByChatId query key
+9. `apps/web/src/lib/parseAsks.ts` - Utility to parse structured asks (DUPLICATE)
+10. `apps/web/src/ui/index.ts` - Exported Suggestions component
+11. `IMPLEMENTATION_PLAN.md` - Updated to mark feature complete
+
+---
+
+## Detailed Change Analysis
+
+### 1. ask.ts (Agent Tool)
+- Added optional `options` array to `AskInfoSchema`:
+  ```typescript
+  options: z.array(z.string()).optional()
+    .describe("Quick-reply options for the user...")
+  ```
+- Added `formatAsks()` function - stores as JSON when options provided, plain string otherwise
+- Added `parseAsks()` function - parses structured format with fallback to plain string
+- Updated `makeAskTool()` to include `formattedAsks` in callback
+- Enhanced tool description with examples for the AI
+
+### 2. agent.ts
+- Changed `output.patch.asks` from `info.asks` to `info.formattedAsks` (line 200)
+- This ensures options are persisted as JSON in task state
+
+### 3. QuickReplyButtons.tsx (New)
+- Simple component that renders options as `<Suggestion>` buttons
+- Uses existing Suggestions/Suggestion components from UI package
+- Handles disabled state and empty options gracefully
+
+### 4. ChatPage.tsx & MainPage.tsx
+- Added `useTaskByChatId` and `useTaskState` hooks to fetch current task
+- Added `quickReplyOptions` useMemo to parse options from task.asks
+- Added `handleQuickReply` callback to send selected option as user message
+- Renders QuickReplyButtons above the PromptInput
+
+### 5. parseAsks.ts (New - DUPLICATE)
+- Defines `StructuredAsk` interface and `parseAsks()` function
+- **Note:** This is a duplicate of code in `ask.ts`
+
+---
+
+## Issues Identified
+
+### ISSUE 1: Code Duplication - parseAsks Exists in Two Places (HIGH)
+**Locations:**
+- `apps/web/src/lib/parseAsks.ts` (lines 1-36)
+- `packages/agent/src/ai-tools/ask.ts` (lines 23-50)
+
+**Problem:** The `parseAsks` function and `StructuredAsk` interface are defined identically in both files. The agent package already exports these via `index.ts` (line 70):
+```typescript
+export { parseAsks, type StructuredAsk } from "./ai-tools/ask";
+```
+
+But the web app imports from its local duplicate instead of the agent package.
+
+**Impact:**
+- Bug fixes must be applied in two places
+- Implementations could diverge over time
+- Unnecessary code maintenance burden
+
+**Proposal:** Delete `apps/web/src/lib/parseAsks.ts` and import from agent package:
+```typescript
+// In ChatPage.tsx and MainPage.tsx:
+import { parseAsks } from "@app/agent";
+```
+
+**Note:** This requires adding `@app/agent` to web app's package.json dependencies.
+
+---
+
+### ISSUE 2: Significant Code Duplication Between ChatPage and MainPage (HIGH)
+**Locations:**
+- `apps/web/src/components/ChatPage.tsx` lines 38-50, 102-111, 172-179
+- `apps/web/src/components/MainPage.tsx` lines 177-189, 304-313, 456-463
+
+**Problem:** ~40 lines of near-identical code in both pages:
+
+1. **Task fetching** (identical except variable names):
+   ```typescript
+   const { data: task } = useTaskByChatId(id);
+   const { data: taskState } = useTaskState(task?.id || "");
+   ```
+
+2. **quickReplyOptions useMemo** (identical logic):
+   ```typescript
+   const quickReplyOptions = useMemo(() => {
+     if (!task || !taskState) return [];
+     if (task.state !== "wait" && task.state !== "asks") return [];
+     if (!taskState.asks) return [];
+     const parsed = parseAsks(taskState.asks);
+     return parsed.options || [];
+   }, [task, taskState]);
+   ```
+
+3. **handleQuickReply callback** (identical except chatId):
+   ```typescript
+   const handleQuickReply = useCallback((option: string) => {
+     addMessage.mutate({
+       chatId: "main", // or `id`
+       role: "user",
+       content: option,
+       files: [],
+     });
+   }, [addMessage]);
+   ```
+
+4. **QuickReplyButtons JSX** (completely identical):
+   ```tsx
+   {quickReplyOptions.length > 0 && (
+     <QuickReplyButtons
+       options={quickReplyOptions}
+       onSelect={handleQuickReply}
+       disabled={addMessage.isPending || uploadState.isUploading}
+     />
+   )}
+   ```
+
+**Proposal:** Extract to a custom hook:
+```typescript
+// hooks/useQuickReply.ts
+export function useQuickReply(chatId: string) {
+  const { data: task } = useTaskByChatId(chatId);
+  const { data: taskState } = useTaskState(task?.id || "");
+  const addMessage = useAddMessage();
+
+  const quickReplyOptions = useMemo(() => {
+    if (!task || !taskState) return [];
+    if (task.state !== "wait" && task.state !== "asks") return [];
+    if (!taskState.asks) return [];
+    const parsed = parseAsks(taskState.asks);
+    return parsed.options || [];
+  }, [task, taskState]);
+
+  const handleQuickReply = useCallback((option: string) => {
+    addMessage.mutate({ chatId, role: "user", content: option, files: [] });
+  }, [addMessage, chatId]);
+
+  return { quickReplyOptions, handleQuickReply, isDisabled: addMessage.isPending };
+}
+
+// Usage in components:
+const { quickReplyOptions, handleQuickReply, isDisabled } = useQuickReply("main");
+```
+
+---
+
+### ISSUE 3: React Keys Use Array Index (LOW)
+**Location:** `apps/web/src/components/QuickReplyButtons.tsx` line 30
+
+**Problem:** Using array index as key:
+```tsx
+{options.map((option, index) => (
+  <Suggestion key={index} ... />
+))}
+```
+
+If options contain duplicates (e.g., `["Yes", "Yes", "No"]`), React reconciliation won't work correctly.
+
+**Proposal:** Use content-based keys:
+```tsx
+{options.map((option, index) => (
+  <Suggestion key={`${index}-${option}`} ... />
+))}
+```
+
+---
+
+### ISSUE 4: No Validation of Options Array Contents (LOW)
+**Location:** `packages/agent/src/ai-tools/ask.ts` lines 56-61
+
+**Problem:** The `formatAsks` function accepts any string array without validation:
+- Empty strings: `["Yes", "", "No"]` - empty button would render
+- Duplicates: `["Yes", "Yes", "No"]` - confusing to users
+- Very long strings: No truncation
+
+**Proposal:** Add basic validation:
+```typescript
+function formatAsks(asks: string, options?: string[]): string {
+  if (options && options.length > 0) {
+    // Filter empty strings and deduplicate
+    const cleanOptions = [...new Set(options.filter(o => o.trim()))];
+    if (cleanOptions.length > 0) {
+      return JSON.stringify({ question: asks, options: cleanOptions });
+    }
+  }
+  return asks;
+}
+```
+
+---
+
+### ISSUE 5: Missing Accessibility Enhancements (MEDIUM)
+**Location:** `apps/web/src/components/QuickReplyButtons.tsx`
+
+**Problems:**
+1. No ARIA label on the container explaining these are quick-reply options
+2. No semantic grouping (`role="group"`)
+3. Screen reader users only hear button text without context
+
+**Proposal:**
+```tsx
+return (
+  <div className="mb-3" role="group" aria-label="Quick reply options">
+    <div className="text-xs text-gray-500 mb-2" id="quick-reply-label">
+      Quick replies:
+    </div>
+    <Suggestions aria-labelledby="quick-reply-label">
+      {options.map((option, index) => (
+        <Suggestion
+          key={`${index}-${option}`}
+          suggestion={option}
+          onClick={() => onSelect(option)}
+          disabled={disabled}
+          aria-label={`Reply with: ${option}`}
+        />
+      ))}
+    </Suggestions>
+  </div>
+);
+```
+
+---
+
+### ISSUE 6: getTaskByChatId Returns Non-Deterministic Results (LOW)
+**Location:** `packages/db/src/task-store.ts` lines 221-246
+
+**Problem:** The SQL query has no `ORDER BY` or `LIMIT 1`:
+```sql
+SELECT ... FROM tasks WHERE chat_id = ? AND (deleted IS NULL OR deleted = FALSE)
+```
+
+If multiple tasks share the same `chat_id`, which one is returned is undefined.
+
+**Context:** In the new `useTaskByChatId` hook usage, this could theoretically return the wrong task if data is inconsistent. Currently unlikely given the data model.
+
+**Proposal:** Add explicit ordering:
+```sql
+SELECT ... FROM tasks
+WHERE chat_id = ? AND (deleted IS NULL OR deleted = FALSE)
+ORDER BY timestamp DESC
+LIMIT 1
+```
+
+---
+
+### ISSUE 7: "main" Chat Has No Task (DESIGN CONSIDERATION)
+**Location:** `apps/web/src/components/MainPage.tsx` line 177
+
+**Observation:** `useTaskByChatId("main")` is called, but there's no task with `chat_id = "main"` in the database. The query returns `null`, so `mainTaskState` is also null, and `quickReplyOptions` is always empty for MainPage.
+
+**Analysis:** This means quick-reply buttons will NEVER appear on the main page, only on individual chat pages. This may be intentional (main page is for new conversations) or a gap in implementation.
+
+**If this is a bug:** A task with `chat_id = "main"` needs to be created for the main worker agent.
+
+**If intentional:** Consider removing the dead code from MainPage or documenting why it's there.
+
+---
+
+### ISSUE 8: Error Handling in useTaskByChatId Swallows Errors (LOW)
+**Location:** `apps/web/src/hooks/dbTaskReads.ts` lines 97-106
+
+**Problem:** The queryFn catches all errors and returns null:
+```typescript
+queryFn: async () => {
+  if (!api) return null;
+  try {
+    const task = await api.taskStore.getTaskByChatId(chatId);
+    return task;
+  } catch (error) {
+    return null;  // All errors silently become null
+  }
+}
+```
+
+Database errors, network issues, etc. are all treated as "no task found".
+
+**Proposal:** Only catch expected "not found" cases:
+```typescript
+queryFn: async () => {
+  if (!api) return null;
+  const task = await api.taskStore.getTaskByChatId(chatId);
+  return task;  // Let actual errors propagate to React Query
+}
+```
+
+---
+
+## Positive Observations
+
+1. **Backward Compatible:** Plain string asks continue to work - JSON parsing gracefully falls back
+2. **Good Tool Description:** The ask tool has clear examples showing how to use options
+3. **Reuses Existing UI:** QuickReplyButtons uses existing Suggestion component, maintaining consistency
+4. **Proper Disabled State:** Buttons correctly disable during message sending or file upload
+5. **Sensible Task State Filtering:** Only shows options when task is in "wait" or "asks" state
+6. **Clean Export:** Agent package properly exports parseAsks for UI consumption
+
+---
+
+## Data Flow Summary
+
+1. Agent calls `ask` tool with question and options
+2. `formatAsks()` creates JSON: `{"question": "Archive?", "options": ["Yes", "No"]}`
+3. Agent.ts stores this in `output.patch.asks`
+4. Database saves to `task_state.asks` field
+5. UI fetches task state via `useTaskState`
+6. `parseAsks()` extracts options from JSON
+7. QuickReplyButtons renders options as clickable buttons
+8. User clicks button → sends option text as new message
+
+---
+
+## Files Referenced
+
+- `/home/artur/src/nostr.band/keep.ai/packages/agent/src/ai-tools/ask.ts`
+- `/home/artur/src/nostr.band/keep.ai/packages/agent/src/agent.ts`
+- `/home/artur/src/nostr.band/keep.ai/packages/agent/src/index.ts`
+- `/home/artur/src/nostr.band/keep.ai/apps/web/src/components/QuickReplyButtons.tsx`
+- `/home/artur/src/nostr.band/keep.ai/apps/web/src/components/ChatPage.tsx`
+- `/home/artur/src/nostr.band/keep.ai/apps/web/src/components/MainPage.tsx`
+- `/home/artur/src/nostr.band/keep.ai/apps/web/src/hooks/dbTaskReads.ts`
+- `/home/artur/src/nostr.band/keep.ai/apps/web/src/lib/parseAsks.ts`
+- `/home/artur/src/nostr.band/keep.ai/apps/web/src/ui/index.ts`
+- `/home/artur/src/nostr.band/keep.ai/packages/db/src/task-store.ts`
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Code duplication parseAsks) - created specs/remove-duplicate-parse-asks.md
+- Issue #2 (Code duplication ChatPage/MainPage) - created specs/extract-quick-reply-hook.md
+- Issue #3 (React keys use array index) - skipped
+- Issue #4 (No validation of options array) - created specs/validate-ask-options.md
+- Issue #5 (Missing accessibility) - skipped
+- Issue #6 (getTaskByChatId non-deterministic) - skipped
+- Issue #7 (main chat has no task - dead code) - created specs/remove-mainpage-quick-reply-dead-code.md
+- Issue #8 (Error handling swallows errors) - skipped

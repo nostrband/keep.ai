@@ -1,0 +1,187 @@
+# Code Review: Commit e9a99d8
+# "Add internal error classification for ERROR_BAD_REQUEST"
+# Date: 2026-01-20
+
+## Summary of Changes
+
+This commit adds a new 'internal' error classification for ERROR_BAD_REQUEST, which
+indicates bugs in our code (invalid AI API requests). Internal errors:
+- Stop the workflow (no retry or auto-fix)
+- Surface a "contact support" message to users
+- Signal 'needs_attention' for UI notification
+
+Files changed:
+- packages/agent/src/errors.ts (new 'internal' type, InternalError class)
+- packages/agent/src/workflow-worker.ts (classify ERROR_BAD_REQUEST as internal)
+- apps/web/src/components/MainPage.tsx (display message for internal errors)
+- IMPLEMENTATION_PLAN.md (status update)
+
+## Detailed Changes
+
+1. **ErrorType union**: Added 'internal' to the type union:
+   `'auth' | 'permission' | 'network' | 'logic' | 'internal'`
+
+2. **InternalError class**: New ClassifiedError subclass for bugs in our code.
+   Routed to user (must contact support), not auto-retryable.
+
+3. **ERROR_BAD_REQUEST classification**: Changed from empty error_type to 'internal'.
+   This error occurs when we send an invalid request to the AI API (HTTP 400).
+
+4. **Signal change**: ERROR_BAD_REQUEST now emits 'needs_attention' signal instead
+   of 'done' signal, ensuring UI shows notification.
+
+5. **UI message**: MainPage.tsx displays "Something went wrong - contact support"
+   for internal errors.
+
+## Potential Issues
+
+### Issue 1: WorkflowNotifications.ts Missing 'internal' (HIGH)
+
+**Location**: apps/web/src/workers/WorkflowNotifications.ts, lines 78-79
+
+**Description**: The notification constants don't include 'internal':
+```typescript
+const NOTIFY_ERROR_TYPES = ['auth', 'permission', 'network'];  // 'internal' MISSING
+const SILENT_ERROR_TYPES = ['logic'];
+```
+
+**Impact**: When errorType === 'internal':
+- `shouldNotify` = false (not in NOTIFY_ERROR_TYPES)
+- `isLogicError` = false (not in SILENT_ERROR_TYPES)
+- No OS notification is triggered
+- User only sees the error if they open the app
+
+**Proposal**: Add 'internal' to NOTIFY_ERROR_TYPES:
+```typescript
+const NOTIFY_ERROR_TYPES = ['auth', 'permission', 'network', 'internal'];
+```
+
+And add a message body case (around line 127):
+```typescript
+} else if (errorType === 'internal') {
+  body = 'Something went wrong. Please contact support.';
+}
+```
+
+### Issue 2: ERROR_BAD_REQUEST Source Verification (LOW)
+
+**Location**: packages/agent/src/agent.ts, lines 358-359
+
+**Description**: ERROR_BAD_REQUEST is thrown when the AI API returns HTTP 400:
+```typescript
+if (apiCallError.statusCode === 400) {
+  throw ERROR_BAD_REQUEST;
+}
+```
+
+**Analysis**: HTTP 400 from the AI API (OpenRouter/Anthropic) means:
+- Invalid message format
+- Invalid tool schema
+- Invalid parameters
+- Malformed context/system prompt
+
+These are ALL caused by our code constructing invalid requests - users cannot
+trigger this via their script content (that would cause sandbox errors, not 400).
+
+**Conclusion**: The 'internal' classification is correct. This is indeed a bug in
+our code, not a user error.
+
+### Issue 3: No Support Channel Exists Yet (LOW)
+
+**Location**: apps/web/src/components/MainPage.tsx, line 96
+
+**Description**: The message says "contact support":
+```typescript
+return { text: `Something went wrong ${ago} - contact support`, isAttention: true };
+```
+
+But there's no support channel or bug report mechanism exposed to users.
+
+**Assessment**: Acceptable for now - shows users the problem is on our side, not
+theirs. Better than pretending it's auto-fixable.
+
+**Proposal**: Consider adding to the settings page or help section:
+- GitHub issues link for bug reports
+- Or implement in-app bug report feature (mentioned in ideas/in-app-bug-report.md)
+
+### Issue 4: Other Potential Internal Errors Not Classified (LOW)
+
+**Description**: ERROR_BAD_REQUEST is now classified as 'internal', but other
+potential internal bugs might not be:
+
+- Database state corruption (inconsistent data)
+- Resource exhaustion (out of memory, file handles)
+- Internal service communication failures
+
+Currently these would fall through to the catch-all logic in ensureClassified()
+and become LogicError, which triggers auto-fix attempts (inappropriate for bugs).
+
+**Proposal**: Audit codebase for other scenarios that should be 'internal':
+- Invalid state assertions
+- Invariant violations
+- Serialization/deserialization failures on our data
+
+### Issue 5: InternalError Class Not Used Directly (INFORMATIONAL)
+
+**Location**: packages/agent/src/errors.ts
+
+**Description**: The InternalError class is defined but ERROR_BAD_REQUEST is
+classified by setting errorType = 'internal' directly rather than throwing
+InternalError:
+```typescript
+// workflow-worker.ts line 243
+if (error === ERROR_BAD_REQUEST) {
+  errorType = 'internal';  // Set type directly
+```
+
+vs:
+```typescript
+// What InternalError class would allow
+throw new InternalError('Bad request to AI API', { cause: originalError });
+```
+
+**Assessment**: This is fine - the class exists for future use where we want
+to throw InternalError directly with context. The constant ERROR_BAD_REQUEST
+predates the error classification system.
+
+## Positive Aspects
+
+1. **Correct error routing**: Internal errors emit 'needs_attention' (not 'done'),
+   ensuring proper UI notification.
+
+2. **No retry for internal bugs**: Correctly stops the workflow - retrying a bug
+   in our code won't fix anything.
+
+3. **Clear user message**: "Something went wrong - contact support" is honest and
+   doesn't blame the user.
+
+4. **Proper signal handling**: WorkflowScheduler handles 'internal' via the existing
+   'needs_attention' signal path.
+
+5. **Error type consistency**: InternalError class follows the same pattern as
+   AuthError, PermissionError, NetworkError, LogicError.
+
+6. **Workflow status set to error**: Prevents stuck workflows or infinite retries.
+
+## Risk Assessment
+
+**Overall Risk**: LOW-MEDIUM
+
+The core implementation is correct, but the missing notification support means
+users might not be alerted to internal errors unless they check the app.
+
+## Recommendations
+
+1. **HIGH priority**: Add 'internal' to NOTIFY_ERROR_TYPES in WorkflowNotifications.ts
+2. **HIGH priority**: Add notification message body for internal errors
+3. **LOW priority**: Document support/bug-report process for users
+4. **LOW priority**: Audit for other scenarios that should be classified as 'internal'
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (WorkflowNotifications.ts Missing 'internal') - created specs/workflow-notifications-internal-error.md
+- Issue #2 (ERROR_BAD_REQUEST Source Verification) - not an issue (verification confirms correct classification)
+- Issue #3 (No Support Channel Exists Yet) - skipped
+- Issue #4 (Other Potential Internal Errors Not Classified) - skipped
+- Issue #5 (InternalError Class Not Used Directly) - not an issue (informational)

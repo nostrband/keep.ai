@@ -1,0 +1,131 @@
+COMMIT REVIEW: f6f410b - Add explicit debug dependency to apps/web
+
+================================================================================
+CHANGES SUMMARY
+================================================================================
+
+This commit adds `"debug": "^4.3.4"` as an explicit dependency in
+apps/web/package.json. Previously, debug was only available as a transitive
+dependency through workspace packages, creating fragility.
+
+Files changed:
+- apps/web/package.json (1 line added)
+- IMPLEMENTATION_PLAN.md (status updates)
+
+The debug module is imported by 7 files in apps/web/:
+- src/main.tsx
+- src/worker.ts
+- src/service-worker.ts
+- src/shared-worker.ts
+- src/lib/worker.ts
+- src/QueryProviderEmbedded.tsx
+- src/lib/PushNotificationManager.ts
+
+================================================================================
+ISSUES IDENTIFIED
+================================================================================
+
+ISSUE 1: Missing @types/debug in apps/web [MEDIUM]
+--------------------------------------------------
+Location: apps/web/package.json devDependencies
+
+apps/web is a TypeScript project with explicit type definitions:
+  - @types/react
+  - @types/react-dom
+  - @types/react-syntax-highlighter
+  - @types/qrcode
+
+However, @types/debug is NOT included in devDependencies. It relies on the
+root-level @types/debug: "^4.1.12".
+
+This creates similar fragility to the issue this commit was trying to solve:
+  - TypeScript type checking depends on root package configuration
+  - If workspace type resolution changes, types could break
+  - Inconsistent with the explicit dependency philosophy
+
+ISSUE 2: Version Inconsistency Across Monorepo [LOW]
+----------------------------------------------------
+Debug versions in the monorepo:
+
+Version ^4.3.4 (majority - 8 packages):
+  - apps/web (this commit)
+  - apps/server
+  - apps/push
+  - packages/agent
+  - packages/browser
+  - packages/db
+  - packages/node
+  - packages/sync
+
+Version ^4.4.3 (2 packages):
+  - apps/cli
+  - root package.json
+
+The commit correctly uses ^4.3.4 to match the majority, but the inconsistency
+between cli/root and other packages remains.
+
+Risk: Low - minor version differences in debug should be compatible. However,
+this violates the consistency principle.
+
+ISSUE 3: Dependency Placement [VERIFIED CORRECT]
+------------------------------------------------
+The dependency is correctly placed in `dependencies` (not devDependencies)
+because:
+  - debug is imported in production code (workers, main.tsx)
+  - The code is bundled into the production build
+  - It's not a build-time-only dependency
+
+No action needed - placement is correct.
+
+================================================================================
+PROPOSALS
+================================================================================
+
+PROPOSAL 1: Add @types/debug to apps/web devDependencies [RECOMMENDED]
+----------------------------------------------------------------------
+To complete the explicit dependency fix:
+
+```json
+"devDependencies": {
+  "@types/debug": "^4.1.12",
+  // ... existing deps
+}
+```
+
+This prevents type resolution issues when workspace configuration changes,
+matching the philosophy of making dependencies explicit.
+
+PROPOSAL 2: Standardize debug version across monorepo [LOW PRIORITY]
+--------------------------------------------------------------------
+Update apps/cli/package.json and root package.json to use ^4.3.4 for
+consistency, OR update all packages to ^4.4.3.
+
+This is low priority since minor version differences are compatible, but
+would improve monorepo consistency.
+
+================================================================================
+OVERALL ASSESSMENT
+================================================================================
+
+The commit successfully addresses its primary goal: making debug an explicit
+dependency to prevent breakage from transitive dependency changes. The version
+chosen (^4.3.4) is consistent with the majority of the monorepo.
+
+Rating: GOOD with one recommended follow-up
+
+Key points:
++ Fixes the fragility issue for runtime dependency
++ Correct version matching other packages
++ Correct placement in dependencies (not devDependencies)
+- Missing @types/debug creates similar fragility for type checking
+- Minor version inconsistency with cli/root packages (low priority)
+
+The most important follow-up is adding @types/debug to devDependencies to
+complete the explicit dependency fix for both runtime and type checking.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Missing @types/debug in apps/web) - created specs/add-types-debug-dependency.md
+- Issue #2 (Version Inconsistency Across Monorepo) - created specs/standardize-debug-version.md
+- Issue #3 (Dependency Placement) - not an issue, verified correct

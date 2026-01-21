@@ -1,0 +1,68 @@
+COMMIT REVIEW: 62a37dd
+=======================
+Title: Remove additional debug console.log statements from web app
+Date: 2026-01-16 20:30:31
+
+SUMMARY OF CHANGES
+------------------
+This commit removes debug console.log statements from 6 files in the web app:
+
+1. apps/web/src/QueryProviderEmbedded.tsx
+   - Removed "Service worker controller change" log from handleControllerChange()
+
+2. apps/web/src/components/FilesPage.tsx
+   - Removed file upload success log after nostr upload
+
+3. apps/web/src/components/NewPage.tsx
+   - Removed 'Creating task...' log before api.createTask call
+
+4. apps/web/src/hooks/dbChatReads.ts
+   - Removed 'Invalidate' log when invalidating chat queries
+
+5. apps/web/src/hooks/useFileUpload.ts
+   - Removed file upload success log with fileRecord details
+
+6. apps/web/src/queryClient.ts
+   - Removed notifyTablesChanged debug log showing tables, isLocalChange, globalThis
+   - Changed error handler from console.log("error", e) to console.error("onTablesUpdate error:", e)
+
+Total: 10 lines removed, 1 line modified
+
+ANALYSIS
+--------
+This is a straightforward cleanup commit that removes debug logging that was likely
+added during development. The changes are appropriate for production readiness.
+
+The error handling change in queryClient.ts deserves specific attention:
+- BEFORE: .catch((e: any) => console.log("error", e))
+- AFTER:  .catch((e: any) => console.error("onTablesUpdate error:", e))
+
+This change is CORRECT because:
+- console.error() properly indicates error-level severity
+- The new message "onTablesUpdate error:" provides better context than generic "error"
+- Errors are more visible in browser dev tools and monitoring systems
+- The catch block still prevents crashes - just improves logging quality
+
+ISSUES FOUND
+------------
+No significant issues found.
+
+MINOR OBSERVATIONS
+------------------
+1. The commit is well-scoped - only touches debug logging, no functional changes.
+
+2. The onTablesUpdate function (called in queryClient.ts) is only used in one place
+   (dbChatReads.ts) where it does optimistic updates for chat events. The error
+   handling is appropriate since failures in this path shouldn't crash the app
+   but should be logged for debugging.
+
+PROPOSALS
+---------
+None required - this is a clean, well-executed cleanup commit.
+
+VERDICT: APPROVED
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+No issues identified in this commit.

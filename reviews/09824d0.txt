@@ -1,0 +1,191 @@
+# Review: Commit 09824d0 - Fix web build by moving parseAsks to @app/proto
+
+## Summary of Changes
+
+This commit fixes a web frontend build failure caused by importing `parseAsks` from `@app/agent`, which pulled in the entire agent bundle including Node.js-only dependencies.
+
+1. **Move to @app/proto**: Created `packages/proto/src/ask-parser.ts` containing `parseAsks()` function and `StructuredAsk` interface. These are browser-compatible with no external dependencies.
+
+2. **Update ChatPage.tsx**: Changed import from `@app/agent` to `@app/proto`.
+
+3. **Backward compatibility**: Added re-export in `@app/agent/src/ai-tools/ask.ts` to maintain compatibility for existing consumers.
+
+4. **Vite config fix**: Replaced aggressive `define: { global: "globalThis" }` string replacement with a `globalPolyfillPlugin` that injects `<script>window.global = window;</script>` in HTML head. This avoids breaking `@opentelemetry/api` imports.
+
+---
+
+## Potential Issues
+
+### Issue 1: Missing @deprecated JSDoc on Re-export (Low)
+
+**Location**: `packages/agent/src/ai-tools/ask.ts:4-5`
+
+```typescript
+// Re-export from @app/proto for backward compatibility
+export { parseAsks, type StructuredAsk } from "@app/proto";
+```
+
+**Problem**: The re-export comment explains backward compatibility but lacks a deprecation marker to guide future maintainers toward the canonical import path.
+
+**Proposal**: Add JSDoc deprecation:
+```typescript
+/**
+ * Re-export from @app/proto for backward compatibility.
+ * @deprecated Prefer importing directly from @app/proto
+ */
+export { parseAsks, type StructuredAsk } from "@app/proto";
+```
+
+---
+
+### Issue 2: Vite Global Polyfill Uses Simple String Replace (Low)
+
+**Location**: `apps/web/vite.config.ts:10-12`
+
+```typescript
+return html.replace(
+  "<head>",
+  `<head><script>window.global = window;</script>`
+);
+```
+
+**Problem**: Uses simple string replacement which could fail with unusual HTML formatting or comments before the `<head>` tag.
+
+**Mitigation**: Vite generates consistent HTML structure, making this unlikely to fail in practice.
+
+**Proposal**: Add a comment documenting this assumption:
+```typescript
+// Assumes Vite generates a standard HTML structure with <head> tag
+return html.replace(
+  "<head>",
+  `<head><script>window.global = window;</script>`
+);
+```
+
+---
+
+### Issue 3: Service Worker Not Covered by Global Polyfill (Medium)
+
+**Location**: `apps/web/vite.config.ts:6-16`
+
+**Problem**: The `transformIndexHtml` hook only affects HTML files. If the service worker imports code that uses `@opentelemetry/api` (transitively through `ai` package), it won't have the global polyfill.
+
+**Impact**: Service worker might fail at runtime if it loads modules expecting `global` to be defined.
+
+**Proposal**: Verify service worker doesn't import `ai` package transitively. If it does, add a similar polyfill at service worker entry point:
+```typescript
+// At top of service-worker.ts
+self.global = self;
+```
+
+---
+
+### Issue 4: No Unit Tests for parseAsks (Medium)
+
+**Location**: `packages/proto/src/ask-parser.ts`
+
+**Problem**: The parseAsks function has no unit tests. It handles JSON parsing and has multiple code paths:
+- Empty string input
+- Plain string input
+- Valid JSON with question and options
+- Valid JSON with question only
+- Invalid JSON fallback
+
+**Proposal**: Add test file `packages/proto/src/ask-parser.test.ts`:
+```typescript
+describe('parseAsks', () => {
+  it('returns empty question for empty string', () => {
+    expect(parseAsks('')).toEqual({ question: '' });
+  });
+
+  it('returns plain string as question', () => {
+    expect(parseAsks('What color?')).toEqual({ question: 'What color?' });
+  });
+
+  it('parses JSON with question and options', () => {
+    const input = JSON.stringify({ question: 'Pick one', options: ['A', 'B'] });
+    expect(parseAsks(input)).toEqual({ question: 'Pick one', options: ['A', 'B'] });
+  });
+
+  // ... more test cases
+});
+```
+
+---
+
+### Issue 5: Missing Newline at End of proto/index.ts (Trivial)
+
+**Location**: `packages/proto/src/index.ts:5`
+
+```typescript
+export * from './ask-parser';
+```
+
+**Problem**: File doesn't end with a newline, which can cause issues with some tools and diff displays.
+
+**Proposal**: Add trailing newline.
+
+---
+
+## Why the Old Approach Broke @opentelemetry/api
+
+**Background**: The previous vite config used:
+```typescript
+define: { global: "globalThis" }
+```
+
+This performed naive string replacement, which broke `@opentelemetry/api`'s platform detection:
+
+```javascript
+// Original code in @opentelemetry/api
+typeof global === 'object' ? global : {}
+
+// After string replacement (BROKEN)
+typeof globalThis === 'object' ? globalThis : {}
+```
+
+The library already checks `globalThis` first, so the replaced code created a duplicate condition. The new approach avoids this by setting `window.global = window` at runtime without text transformation.
+
+---
+
+## Verification Checklist
+
+- ✅ No other imports of `parseAsks` from `@app/agent` remain (besides re-export)
+- ✅ `@app/proto` package follows established conventions
+- ✅ `StructuredAsk` type is re-exported from `@app/agent` for backward compatibility
+- ✅ `ask-parser.ts` is self-contained (no Node.js dependencies)
+- ✅ ChatPage.tsx imports from `@app/proto` (correct)
+- ✅ Build configuration correctly marks `@app/proto` as external
+- ✅ Generated TypeScript declarations properly reference `@app/proto`
+
+---
+
+## Positive Observations
+
+1. **Clean separation**: Browser-compatible code properly moved to @app/proto package.
+2. **Backward compatibility**: Re-export pattern prevents breaking existing consumers.
+3. **Root cause fix**: Addressed the @opentelemetry/api issue at its source rather than working around it.
+4. **Package structure**: New file follows established conventions in @app/proto.
+
+---
+
+## Overall Assessment
+
+**Quality**: Good fix that properly addresses the build failure with a clean architectural solution.
+
+**Recommendations Priority**:
+1. (Medium) Verify service worker doesn't need global polyfill
+2. (Medium) Add unit tests for parseAsks
+3. (Low) Add @deprecated JSDoc to re-export
+4. (Trivial) Add trailing newline to index.ts
+
+The migration is well-executed and follows best practices for code organization. The vite config change properly fixes the @opentelemetry/api issue without the collateral damage of aggressive string replacement.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Missing @deprecated JSDoc on Re-export) - created specs/remove-parseasks-reexport.md
+- Issue #2 (Vite Global Polyfill Uses Simple String Replace) - skipped
+- Issue #3 (Service Worker Not Covered by Global Polyfill) - skipped
+- Issue #4 (No Unit Tests for parseAsks) - skipped
+- Issue #5 (Missing Newline at End of proto/index.ts) - skipped

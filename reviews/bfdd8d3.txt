@@ -1,0 +1,269 @@
+# Code Review: Commit bfdd8d3
+
+## Commit: Implement retry action and dropdown menus for event groups
+**Date:** 2026-01-16
+**Author:** Claude Agent
+
+---
+
+## Summary of Changes
+
+This commit adds dropdown menus to event group components and implements the "Retry" action for workflows. When a user clicks "Retry" on a workflow event, it sets `next_run_timestamp` to the current time, which triggers the scheduler to re-execute the workflow.
+
+### Files Modified:
+1. `apps/web/src/components/WorkflowEventGroup.tsx` - Added dropdown with Retry and View workflow options
+2. `apps/web/src/components/TaskEventGroup.tsx` - Added dropdown with View task option
+3. `apps/web/src/components/EventItem.tsx` - Added dropdown with View details option
+4. `IMPLEMENTATION_PLAN.md` - Updated to mark features complete
+
+---
+
+## Detailed Change Analysis
+
+### 1. WorkflowEventGroup.tsx
+- Added `useNavigate` from react-router-dom
+- Added `useUpdateWorkflow` mutation hook
+- Added `successMessage` state for user feedback
+- Implemented `handleRetry()` - sets `next_run_timestamp` to current ISO timestamp
+- Implemented `handleViewWorkflow()` - navigates to `/workflows/${workflowId}`
+- Added dropdown menu with "Retry" and "View workflow" options
+- Retry button shows loading state during mutation
+
+### 2. TaskEventGroup.tsx
+- Added `useNavigate` from react-router-dom
+- Replaced `handleTaskMenuClick` console.log with actual `handleViewTask()` navigation
+- Added dropdown menu with "View task" option
+- **Note:** Dropdown menu code is duplicated in two places (for Link and non-Link variants)
+
+### 3. EventItem.tsx
+- Added dropdown menu imports from UI package
+- Implemented `handleViewEntity()` - navigates using config's `getEntityPath`
+- Added dropdown menu with "View details" option (or "No actions available" when no navigation)
+
+---
+
+## Issues Identified
+
+### ISSUE 1: Success Message Timeout Not Cleaned Up (MEDIUM)
+**Location:** `apps/web/src/components/WorkflowEventGroup.tsx` lines 81-84
+
+**Problem:** The setTimeout for clearing success message is never cleaned up:
+```typescript
+onSuccess: () => {
+  setSuccessMessage("Retry scheduled");
+  setTimeout(() => setSuccessMessage(""), 3000);
+}
+```
+
+If the component unmounts before the 3-second timeout, React will warn about setting state on unmounted component.
+
+**Proposal:** Use useEffect for cleanup:
+```typescript
+const [successMessage, setSuccessMessage] = useState<string>("");
+
+useEffect(() => {
+  if (successMessage) {
+    const timer = setTimeout(() => setSuccessMessage(""), 3000);
+    return () => clearTimeout(timer);
+  }
+}, [successMessage]);
+
+// In onSuccess:
+onSuccess: () => setSuccessMessage("Retry scheduled"),
+```
+
+---
+
+### ISSUE 2: No Workflow Status Validation Before Retry (HIGH)
+**Location:** `apps/web/src/components/WorkflowEventGroup.tsx` lines 68-85
+
+**Problem:** The retry handler only checks if workflow exists, not if it's in a valid state:
+```typescript
+const handleRetry = (e: React.MouseEvent) => {
+  if (!workflow) return;  // Only check
+  // Sets next_run_timestamp...
+}
+```
+
+The scheduler only executes workflows where `status === 'active'` (workflow-scheduler.ts line 181). If the workflow is paused/disabled/in-error, the retry will:
+- Update the database successfully
+- Show "Retry scheduled" success message
+- **Never actually execute** (scheduler ignores non-active workflows)
+
+This gives users false positive feedback.
+
+**Proposal:** Add status validation and user feedback:
+```typescript
+const handleRetry = (e: React.MouseEvent) => {
+  if (!workflow) return;
+
+  if (workflow.status !== 'active') {
+    setSuccessMessage("Enable workflow first to retry");
+    setTimeout(() => setSuccessMessage(""), 3000);
+    return;
+  }
+
+  // Proceed with retry...
+}
+```
+
+---
+
+### ISSUE 3: Scheduler Latency Not Communicated (LOW)
+**Location:** `apps/web/src/components/WorkflowEventGroup.tsx` line 82
+
+**Problem:** The success message says "Retry scheduled" but the scheduler polls every 10 seconds. Users might think nothing happened.
+
+**Proposal:** Update message to set expectations:
+```typescript
+setSuccessMessage("Retry scheduled (runs within 10s)");
+```
+
+---
+
+### ISSUE 4: Duplicate Header Rendering Code in TaskEventGroup (MEDIUM)
+**Location:** `apps/web/src/components/TaskEventGroup.tsx` lines 178-298
+
+**Problem:** The component renders the header twice with 99% identical code:
+- Lines 178-240: Wrapped in `<Link>` component
+- Lines 242-298: Wrapped in plain `<div>`
+
+This is ~120 lines of duplicated code.
+
+**Proposal:** Extract shared content to a subcomponent or use conditional wrapper pattern:
+```typescript
+const HeaderContent = () => (
+  <>
+    {/* All the shared header content */}
+  </>
+);
+
+const Wrapper = taskRunId || scriptRunId ? Link : 'div';
+return <Wrapper {...props}><HeaderContent /></Wrapper>;
+```
+
+---
+
+### ISSUE 5: Duplicate Helper Functions Across Components (MEDIUM)
+**Location:**
+- `apps/web/src/components/TaskEventGroup.tsx` lines 20-45
+- `apps/web/src/components/WorkflowEventGroup.tsx` (similar code)
+
+**Problem:** Both components contain identical copies of:
+- `transformGmailMethod()` function
+- `formatDuration()` function
+
+**Proposal:** Extract to shared utility:
+```typescript
+// apps/web/src/lib/event-helpers.ts
+export function transformGmailMethod(method: string): string { ... }
+export function formatDuration(durationMs: number): string { ... }
+```
+
+---
+
+### ISSUE 6: Poor UX for EventItem Empty Menu State (LOW)
+**Location:** `apps/web/src/components/EventItem.tsx` lines 88-93
+
+**Problem:** When an event has no navigation, the dropdown shows "No actions available" - a disabled item. Users must click to discover there are no actions.
+
+The "···" button provides misleading affordance suggesting actions exist.
+
+**Proposal:** Hide the dropdown button entirely when no actions available:
+```typescript
+{hasNavigation && (
+  <DropdownMenu>
+    {/* Only render when there are actual actions */}
+  </DropdownMenu>
+)}
+{!hasNavigation && (
+  <div className="ml-2 px-2 py-1 w-8" /> {/* Spacer to maintain layout */}
+)}
+```
+
+---
+
+### ISSUE 7: Missing Menu Items Compared to Design (LOW)
+**Location:** `apps/web/src/components/TaskEventGroup.tsx`
+
+**Problem:** TaskEventGroup dropdown only has "View task", while WorkflowEventGroup has both "Retry" and "View workflow" with a separator. Missing items that might be expected:
+- "Run task now" (similar to workflow retry)
+- "Pause task"
+- "Mute task notifications"
+
+**Note:** IMPLEMENTATION_PLAN.md lists "Mute this task" and "Mute workflow" as pending items, so this is a known gap.
+
+---
+
+### ISSUE 8: Potential Double Execution Race Condition (MEDIUM)
+**Location:** Scheduler behavior when retry triggered during execution
+
+**Problem:** If a user clicks "Retry" while the workflow is already executing:
+1. `next_run_timestamp` is updated to "now"
+2. Current execution continues and completes
+3. Scheduler picks up the workflow again due to the new timestamp
+4. Workflow executes twice
+
+The scheduler has no per-workflow execution lock, only a global `isRunning` flag for the scheduler itself.
+
+**Proposal:** Track currently executing workflow IDs and skip retry for in-progress workflows:
+```typescript
+// In WorkflowEventGroup:
+if (workflow.isCurrentlyExecuting) {
+  setSuccessMessage("Already running - will complete shortly");
+  return;
+}
+```
+
+Or add a check in the scheduler to skip workflows that recently completed (within last N seconds).
+
+---
+
+### ISSUE 9: DropdownMenuSeparator Not Imported in TaskEventGroup (TRIVIAL)
+**Location:** `apps/web/src/components/TaskEventGroup.tsx` line 17
+
+**Problem:** `DropdownMenuSeparator` is imported in WorkflowEventGroup but not in TaskEventGroup. While not currently needed (only one menu item), it should be added for consistency when more items are added.
+
+---
+
+## Positive Observations
+
+1. **Proper Event Handling:** All click handlers correctly use `e.preventDefault()` and `e.stopPropagation()`
+2. **Loading States:** Retry button properly shows "Retrying..." during mutation
+3. **Radix UI Components:** Using well-tested Radix dropdown components
+4. **Mutation Hook Pattern:** Correctly using React Query mutation with onSuccess callback
+5. **Accessibility:** Dropdown triggers have proper `aria-label` attributes
+
+---
+
+## How Retry Actually Works (Reference)
+
+1. User clicks "Retry" → sets `next_run_timestamp = now()`
+2. WorkflowScheduler polls every 10 seconds (workflow-scheduler.ts line 125)
+3. Scheduler finds workflows where `next_run_timestamp <= currentTime` AND `status === 'active'`
+4. Scheduler executes workflow via WorkflowWorker
+5. After execution, scheduler updates `next_run_timestamp` based on cron (or clears it if no cron)
+
+---
+
+## Files Referenced
+
+- `/home/artur/src/nostr.band/keep.ai/apps/web/src/components/WorkflowEventGroup.tsx`
+- `/home/artur/src/nostr.band/keep.ai/apps/web/src/components/TaskEventGroup.tsx`
+- `/home/artur/src/nostr.band/keep.ai/apps/web/src/components/EventItem.tsx`
+- `/home/artur/src/nostr.band/keep.ai/apps/web/src/hooks/dbWrites.ts`
+- `/home/artur/src/nostr.band/keep.ai/packages/agent/src/workflow-scheduler.ts`
+- `/home/artur/src/nostr.band/keep.ai/packages/db/src/script-store.ts`
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Success message timeout not cleaned up) - created specs/cleanup-success-message-timeout.md
+- Issue #2 (No workflow status validation before retry) - created specs/validate-workflow-status-before-retry.md
+- Issue #3 (Scheduler latency not communicated) - skipped (scheduler triggered immediately on db changes)
+- Issue #4 (Duplicate header rendering in TaskEventGroup) - created specs/deduplicate-task-event-group-header.md
+- Issue #5 (Duplicate helper functions) - created specs/extract-event-helper-functions.md
+- Issue #6 (Poor UX for empty menu state) - created specs/hide-empty-event-dropdown.md
+- Issue #7 (Missing menu items) - skipped
+- Issue #8 (Double execution race condition) - skipped
+- Issue #9 (DropdownMenuSeparator not imported) - skipped

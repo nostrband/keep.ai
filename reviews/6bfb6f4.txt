@@ -1,0 +1,88 @@
+# Review: Commit 6bfb6f4
+
+**Title**: Cleanup and standardization (P2 specs 37, 39, 40, 42, 43)
+
+## Summary of Changes
+
+This commit addresses 5 P2 cleanup specs in a single batch:
+
+### 1. Standardize dev mode check (#37)
+- `worker.ts`, `shared-worker.ts`: Replaced `__DEV__` with `import.meta.env.DEV`
+- `vite.config.ts`: Removed `__DEV__` define constant
+
+### 2. Standardize cost display format (#39)
+- `ScriptRunDetailPage.tsx`, `WorkflowDetailPage.tsx`: Changed `$${(cost/1000000).toFixed(4)}` to `{(cost/1000000).toFixed(2)}`
+
+### 3. Use consistent sync trigger pattern (#40)
+- `server.ts`: Changed `await peer.checkLocalChanges()` to `triggerLocalSync()` in `/api/connect` endpoint
+
+### 4. Centralize tray badge updates (#42)
+- `MainPage.tsx`: Removed redundant tray badge useEffect since `WorkflowNotifications.ts` handles it
+
+### 5. Fix connection string regex test (#43)
+- `nostr-transport.test.ts`: Made nonce required (32 hex chars), removed optional `(&exp=\d+)?`
+
+## Analysis
+
+### Change #1: Dev mode standardization - VERIFIED CORRECT
+- `import.meta.env.DEV` is the standard Vite pattern
+- Already used in `main.tsx`, confirming it works correctly
+- No other files use `__DEV__` anymore
+- Works correctly in worker context with Vite's worker build
+
+### Change #2: Cost display format - VERIFIED CORRECT
+- New format `.toFixed(2)` without `$` prefix matches other components:
+  - `EventItem.tsx`: `{usage.cost.toFixed(2)}`
+  - `WorkflowEventGroup.tsx`: `{totalCost.toFixed(2)}`
+  - `TaskEventGroup.tsx`: `{totalCost.toFixed(2)}`
+  - `CollapsedEventSummary.tsx`: `{totalCost.toFixed(2)}`
+- Provides consistency across the entire app
+
+### Change #3: Sync trigger pattern - VERIFIED CORRECT (IMPROVEMENT)
+- `triggerLocalSync()` is a wrapper that calls `peer.checkLocalChanges()` non-blocking with error handling:
+```javascript
+const triggerLocalSync = () => {
+  peer.checkLocalChanges().catch((error) => {
+    debugServer("Error checking local changes:", error);
+  });
+};
+```
+- This is an improvement: avoids blocking the request/response cycle
+- Same pattern used in other endpoints (lines 938, 1548, 1708)
+
+### Change #4: Tray badge centralization - VERIFIED CORRECT
+- `WorkflowNotifications.ts` (line 98-102) handles badge updates:
+```javascript
+await window.electronAPI.updateTrayBadge(workflowsNeedingAttention.length);
+```
+- WorkflowNotifications reacts to DB changes, making it the single source of truth
+- Eliminates redundant updates without losing functionality
+
+### Change #5: Connection string regex - VERIFIED CORRECT
+- Verified against `NostrConnector.ts`:
+  - Line 68: `const nonce = bytesToHex(randomBytes(16));` - always 32 hex chars
+  - Line 75: nonce always included in URL
+  - `parseConnectionString()` validates nonce is required
+- Expiration stored in object but NOT in URL (line 75)
+- The old regex was overly permissive
+
+## Issues Found
+
+**No issues found.** All 5 changes are correctly implemented.
+
+## Minor Observations
+
+1. **Batch commit**: Bundling 5 unrelated changes in one commit makes git bisect harder. Individual commits would be more atomic. However, since all changes are small and correct, this is a minor style concern.
+
+2. **Cost precision reduction**: Going from 4 decimal places to 2 loses some precision. For micro-costs (e.g., $0.0001), this would display as $0.00. This is likely intentional for UI cleanliness, but worth noting.
+
+3. **Comment added in MainPage**: The comment "Note: Tray badge updates are centralized in WorkflowNotifications.ts" is helpful for future maintainers.
+
+## Verdict
+
+**APPROVED** - Clean batch of standardization changes. All 5 specs correctly addressed with no bugs or regressions.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+No issues to address - review approved.

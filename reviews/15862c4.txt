@@ -1,0 +1,240 @@
+# Review: Commit 15862c4 - Add test run feature for workflow scripts
+
+## Summary of Changes
+
+This commit adds the ability for users to test automation scripts safely before enabling scheduled runs:
+
+1. **New API endpoint**: `/api/workflow/test-run` in `apps/server/src/server.ts` that executes a workflow immediately for testing purposes.
+
+2. **WorkflowWorker modifications**: `executeWorkflow()` now accepts a `runType` parameter ("workflow" or "test"). Test runs:
+   - Are stored with `type="test"` in script_runs table
+   - Skip workflow timestamp updates
+   - Skip maintenance mode and scheduler signals
+   - Skip auto-retry logic
+
+3. **UI updates in WorkflowDetailPage**:
+   - Added "Test run" button with amber styling
+   - Added "Test" badge on test runs in the runs list
+   - Added warning message display for failed tests
+
+---
+
+## Potential Issues
+
+### Issue 1: Missing Authentication/Authorization (Critical)
+
+**Location**: `apps/server/src/server.ts:1590-1669`
+
+**Problem**: The `/api/workflow/test-run` endpoint has no authentication or authorization checks. Any caller can trigger test runs for any workflow_id.
+
+**Impact**: Unauthorized users could:
+- Execute workflows without permission
+- Cause resource exhaustion
+- Trigger paid API calls (costs)
+
+**Proposal**: Add authentication check consistent with other secured endpoints (if the app has an auth system), or document that this is a local-only API not exposed to the internet.
+
+---
+
+### Issue 2: No Rate Limiting (Critical)
+
+**Location**: `apps/server/src/server.ts:1590-1669`
+
+**Problem**: No rate limiting on test run requests. Users can trigger unlimited test runs rapidly.
+
+**Impact**:
+- Resource exhaustion (CPU, memory, disk)
+- Cost overruns if workflows call paid APIs
+- Potential DoS vector
+
+**Proposal**: Add workflow-level or global rate limiting:
+```typescript
+// Simple approach: Check if a test is already running for this workflow
+const runningTests = await api.scriptStore.getRunningTestRuns(workflow.id);
+if (runningTests.length > 0) {
+  return reply.status(429).send({ error: "Test run already in progress" });
+}
+```
+
+---
+
+### Issue 3: Synchronous 5-Minute Wait (High)
+
+**Location**: `apps/server/src/server.ts:1636`
+
+```typescript
+await executePromise;
+```
+
+**Problem**: The endpoint blocks the HTTP connection for up to 5 minutes while waiting for workflow execution. The comment on line 1591-1592 says "return immediately with confirmation" but the code contradicts this.
+
+**Impact**:
+- Ties up Fastify worker threads
+- HTTP clients must maintain long connections
+- Poor user experience with no progress feedback
+
+**Proposal**: Return HTTP 202 Accepted immediately with the scriptRunId, then provide a polling endpoint:
+```typescript
+// Return immediately
+return reply.status(202).send({
+  message: "Test run started",
+  scriptRunId: scriptRunId,
+  pollUrl: `/api/script-run/${scriptRunId}/status`
+});
+```
+
+---
+
+### Issue 4: HTTP Status Code Inconsistency (Medium)
+
+**Location**: `apps/server/src/server.ts:1655-1660`
+
+```typescript
+return reply.send({
+  success: false,
+  message: "Test run failed",
+  error: error instanceof Error ? error.message : "Unknown error",
+  scriptRunId: latestRun?.id,
+});
+```
+
+**Problem**: Returns HTTP 200 with `success: false` when execution fails. HTTP semantics expect 4xx/5xx for failures.
+
+**Proposal**: Use appropriate status codes:
+```typescript
+return reply.status(500).send({
+  error: "Test run failed",
+  message: error instanceof Error ? error.message : "Unknown error",
+  scriptRunId: latestRun?.id,
+});
+```
+
+---
+
+### Issue 5: Race Condition in scriptRunId Retrieval (Medium)
+
+**Location**: `apps/server/src/server.ts:1640-1641, 1652-1653`
+
+```typescript
+const runs = await api.scriptStore.getScriptRunsByWorkflowId(workflow.id);
+const latestRun = runs.length > 0 ? runs[0] : null;
+```
+
+**Problem**: If multiple test runs execute concurrently for the same workflow, the "latest" run might not be the one just created due to timestamp ordering or database sync delays.
+
+**Proposal**: Generate the scriptRunId upfront and pass it to executeWorkflow, then return it directly:
+```typescript
+const scriptRunId = generateId();
+// Pass scriptRunId to the worker
+await testWorker.executeWorkflowWithRunId(workflow, scriptRunId, 'test');
+return reply.send({ success: true, scriptRunId });
+```
+
+---
+
+### Issue 6: No runType Validation (Medium)
+
+**Location**: `packages/agent/src/workflow-worker.ts:66`
+
+```typescript
+runType: string = 'workflow'
+```
+
+**Problem**: The `runType` parameter is a free-form string with no validation. Future maintainers might accidentally pass invalid values.
+
+**Proposal**: Define a TypeScript type:
+```typescript
+type RunType = 'workflow' | 'test';
+```
+
+---
+
+### Issue 7: Implicit Default Parameter in WorkflowScheduler (Low)
+
+**Location**: `packages/agent/src/workflow-scheduler.ts:258`
+
+```typescript
+await this.worker.executeWorkflow(
+  workflow,
+  retryState?.originalRunId || '',
+  retryState?.retryCount || 0
+  // Missing: runType parameter - silently defaults to 'workflow'
+);
+```
+
+**Problem**: The runType parameter is implicitly defaulted. While correct behavior, it's not obvious from the call site.
+
+**Proposal**: Add explicit parameter for clarity:
+```typescript
+await this.worker.executeWorkflow(
+  workflow,
+  retryState?.originalRunId || '',
+  retryState?.retryCount || 0,
+  'workflow'  // Explicit run type for scheduled executions
+);
+```
+
+---
+
+### Issue 8: Response Format Inconsistency (Low)
+
+**Location**: `apps/server/src/server.ts:1643-1667`
+
+**Problem**: Different response formats for different cases:
+- Success: `{ success: true, message: "...", scriptRunId: "..." }`
+- Failure: `{ success: false, message: "...", error: "...", scriptRunId: "..." }`
+- Outer error: `{ error: "...", message: "..." }`
+
+**Proposal**: Standardize response format across all cases.
+
+---
+
+### Issue 9: No Deduplication of Concurrent Test Runs (Low)
+
+**Location**: `apps/server/src/server.ts:1590-1669`
+
+**Problem**: If user clicks "test run" multiple times rapidly, multiple executions will be triggered.
+
+**Proposal**: Add workflow-level lock or in-progress check before starting a test run.
+
+---
+
+## Positive Observations
+
+1. **Proper isolation**: Test runs correctly skip workflow state updates, maintenance mode, and scheduler signals.
+2. **Error handling in test mode**: The `isTestRun` flag properly gates all workflow-affecting operations.
+3. **UI distinction**: "Test" badge clearly identifies test runs in the UI.
+4. **Amber styling**: Good visual distinction for test-related buttons.
+
+---
+
+## Overall Assessment
+
+**Quality**: Good feature implementation with proper isolation of test run behavior from production workflows.
+
+**Critical Issues**:
+1. Missing authentication/authorization - should be addressed before production
+2. No rate limiting - potential abuse vector
+3. Synchronous wait contradicts design comment
+
+**Recommendations Priority**:
+1. (Critical) Add authentication or document local-only usage
+2. (Critical) Add rate limiting
+3. (High) Convert to async pattern with polling
+4. (Medium) Fix HTTP status codes
+5. (Medium) Fix race condition in scriptRunId retrieval
+
+The feature concept is sound and addresses a real user need for safely testing automations. The implementation would benefit from security hardening and async handling improvements.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Missing Authentication/Authorization) - skipped
+- Issue #2 (No Rate Limiting) - skipped
+- Issue #3 (Synchronous 5-Minute Wait) - created specs/test-run-async-response.md
+- Issue #4 (HTTP Status Code Inconsistency) - skipped
+- Issue #5 (Race Condition in scriptRunId Retrieval) - created specs/test-run-id-upfront.md
+- Issue #6 (No runType Validation) - skipped
+- Issue #7 (Implicit Default Parameter in WorkflowScheduler) - skipped
+- Issue #8 (Response Format Inconsistency) - skipped
+- Issue #9 (No Deduplication of Concurrent Test Runs) - created specs/test-run-single-concurrent.md

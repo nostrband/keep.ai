@@ -1,0 +1,77 @@
+COMMIT REVIEW: b325366
+=======================
+Title: Update IMPLEMENTATION_PLAN.md with sandbox.ts cleanup
+Author: Claude Agent
+Date: 2026-01-16
+
+SUMMARY OF CHANGES
+------------------
+This commit updates IMPLEMENTATION_PLAN.md to document the sandbox.ts cleanup performed in the previous commit (4799ac4). Changes:
+
+1. Updated the "Last Updated" timestamp in the header to include "removed debug console.log from sandbox.ts"
+
+2. Added a new completed task entry under section 15 (Code Cleanup):
+   - [x] **Remove console.log from sandbox.ts** (COMPLETED 2026-01-16)
+   - File: `/packages/agent/src/sandbox/sandbox.ts`
+   - Lines 185-186 had always-on debug logging for result and state after every sandbox execution
+
+CONTEXT
+-------
+IMPLEMENTATION_PLAN.md serves as a living document tracking the project's implementation progress toward v1. It includes completed tasks, ongoing work, and planned improvements organized by priority.
+
+ASSESSMENT
+----------
+This is a documentation-only commit that accurately records the sandbox.ts cleanup. The line numbers (185-186) mentioned match the actual location of the removed code before cleanup.
+
+ISSUES FOUND
+------------
+
+Issue #1: Incorrect File Path in Existing Documentation
+Severity: Low
+Location: IMPLEMENTATION_PLAN.md line 450 (not introduced by this commit, but relevant context)
+
+The documentation contains an incorrect path for audio-explain.ts:
+- States: `/packages/agent/src/ai-tools/audio-explain.ts`
+- Actual: `/packages/agent/src/tools/audio-explain.ts`
+
+The directory is `tools/`, not `ai-tools/`. The `ai-tools/` directory does not exist.
+
+Note: This issue pre-dates this commit but is worth noting for overall documentation accuracy.
+
+Issue #2: Documentation Drift in packages/db/README.md
+Severity: Low (not introduced by this commit)
+Location: packages/db/README.md line 125
+
+The README still references the non-existent `getTodoTasks()` method:
+```typescript
+const todoTasks = await api.taskStore.getTodoTasks();
+```
+
+This method was removed previously. While not related to this commit, it indicates documentation maintenance could be improved.
+
+PROPOSALS
+---------
+
+Proposal for Issue #1:
+Update the audio-explain.ts path in IMPLEMENTATION_PLAN.md:
+```diff
+-- File: `/packages/agent/src/ai-tools/audio-explain.ts`
++- File: `/packages/agent/src/tools/audio-explain.ts`
+```
+
+Proposal for Issue #2:
+Update packages/db/README.md to use current API methods:
+```diff
+-- const todoTasks = await api.taskStore.getTodoTasks();
++- const tasks = await api.taskStore.listTasks();
+```
+
+OVERALL VERDICT
+---------------
+Good documentation update. Accurately records the sandbox.ts cleanup. Minor documentation inconsistencies exist elsewhere in the project (not introduced by this commit) that could be addressed separately.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Incorrect file path in existing docs) - skipped (pre-existing, not from this commit)
+- Issue #2 (Documentation drift in README) - skipped (pre-existing, not from this commit)

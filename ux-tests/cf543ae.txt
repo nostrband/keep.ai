@@ -1,0 +1,147 @@
+# UX Test Report: cf543ae - Complete tray menu with new automation, pause all, and global shortcut
+
+## Commit Summary
+- Date: Fri Jan 16 17:51:03 2026
+- Author: Claude Agent
+- Files changed: main.ts, preload.ts, IMPLEMENTATION_PLAN.md
+
+## Changes Made
+1. Add "New automation..." menu item with CmdOrCtrl+N accelerator
+2. Add "Pause all automations" menu item for pausing workflows
+3. Add globalShortcut import and registerGlobalShortcuts() function
+4. Register CmdOrCtrl+N global shortcut to show window and focus input
+5. Unregister global shortcuts on will-quit for proper cleanup
+6. Expose onFocusInput listener in preload for renderer
+7. Expose onPauseAllAutomations listener in preload for renderer
+
+## Test Environment
+- Platform: Web via Playwright (Electron-specific features not testable)
+- Server: localhost:3001
+
+## Testing Status: PARTIAL (Electron-only features)
+
+### Not Testable via Web Playwright
+The following features require Electron runtime:
+- Tray menu rendering and clicks
+- Global shortcut registration (CmdOrCtrl+N)
+- IPC message delivery from main to renderer
+- Window show/focus behavior
+
+### Code Review Findings
+
+#### Implementation Quality: 8/10
+
+**Strengths:**
+- Clean separation between Electron main and renderer
+- Proper globalShortcut cleanup on will-quit
+- Uses ensureWindowReady() to prevent race conditions (added in commit 80465ba)
+- Proper IPC listener cleanup with unsubscribe functions
+
+**Initial Implementation Issue (FIXED in 80465ba):**
+
+The original commit (cf543ae) had a critical gap:
+- Exposed `onFocusInput` and `onPauseAllAutomations` in preload
+- BUT no React component was listening to these IPC events
+- Result: Menu items did nothing when clicked
+
+**Fix Applied in commit 80465ba:**
+- Added `ElectronIPCHandler` component in App.tsx
+- Implements `handleFocusInput()` - navigates to "/" and dispatches custom event
+- Implements `handlePauseAllAutomations()` - pauses all active workflows
+- MainPage listens for FOCUS_INPUT_EVENT to focus textarea
+
+#### Verified Implementation Flow
+
+1. **"New automation..." Menu Click Flow:**
+   ```
+   Tray menu click → main.ts handler → ensureWindowReady() 
+   → mainWindow.show() → webContents.send('focus-input')
+   → preload.ts → App.tsx ElectronIPCHandler 
+   → Navigate to "/" → dispatch FOCUS_INPUT_EVENT
+   → MainPage focuses textarea
+   ```
+
+2. **"Pause all automations" Flow:**
+   ```
+   Tray menu click → main.ts handler 
+   → webContents.send('pause-all-automations')
+   → preload.ts → App.tsx handlePauseAllAutomations()
+   → api.scriptStore.listWorkflows()
+   → filter active → updateWorkflow status='disabled' for each
+   ```
+
+### Issues Identified
+
+1. **Global Shortcut Only Works When App Focused (EXPECTED BEHAVIOR)**
+   - CmdOrCtrl+N is a common shortcut
+   - Electron's globalShortcut intercepts when registered
+   - Won't work when other apps have focus
+   - This is standard behavior, not a bug
+
+2. **"Pause all automations" Missing ensureWindowReady() (MINOR)**
+   - Location: main.ts:301-307
+   - Issue: Unlike "New automation...", pause-all doesn't wait for window ready
+   - Impact: If clicked before window loads, IPC message is lost
+   - Recommendation: Add `await ensureWindowReady()` before sending
+
+3. **No User Feedback for Pause Operation (UX)**
+   - Issue: User clicks "Pause all automations" but gets no confirmation
+   - Current: Silent operation, UI updates reactively after DB sync
+   - Recommendation: Add toast notification for success/failure
+
+4. **Workflows List Potentially Limited to 100 (DATA)**
+   - Location: App.tsx:87 - listWorkflows() likely has default limit
+   - Impact: Users with >100 workflows may not have all paused
+   - Recommendation: Paginate or request unlimited
+
+## Web App Integration Verification
+
+Tested via Playwright:
+- ✅ MainPage loads correctly
+- ✅ Settings page accessible
+- ✅ Workflows page accessible
+- ✅ Navigation between pages works
+- ✅ Input textarea exists and is focusable
+- ⚠️ Cannot verify IPC handlers without Electron
+
+## Potential Issues Found
+
+### ISSUE #1: Pause-all Missing Window Ready Check (LOW)
+- **Description**: IPC sent before window may be ready
+- **Location**: main.ts tray menu handler
+- **Expected**: Wait for window ready before sending IPC
+- **Actual**: Directly sends IPC if mainWindow exists
+- **Impact**: Rare edge case during cold start
+
+### ISSUE #2: No Pause Confirmation (UX)
+- **Description**: User has no feedback that pause completed
+- **Location**: ElectronIPCHandler.handlePauseAllAutomations()
+- **Expected**: Toast or visual feedback
+- **Actual**: Silent operation
+
+## Security Analysis
+
+- IPC communication uses contextBridge (secure)
+- Only exposes specific methods in preload
+- No data passed through IPC besides strings
+- Follows Electron security best practices
+
+## Recommendations
+
+1. Add `ensureWindowReady()` to pause-all handler
+2. Add toast notification for pause completion
+3. Consider paginating workflow list for users with many automations
+4. Write tests for Electron IPC functionality
+
+## Conclusion
+
+The implementation correctly adds tray menu functionality with "New automation..." and "Pause all automations" options, plus global keyboard shortcut. The initial commit was incomplete (missing React handlers) but was properly fixed in commit 80465ba. The architecture is clean and follows Electron best practices. Full verification requires Electron testing.
+
+**Overall Assessment**: PASSES (after fix in 80465ba, Electron testing required for full verification)
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #2 (Pause-all Missing ensureWindowReady()) - created specs/pause-all-ensure-window-ready.md
+- Issue #3 (No User Feedback for Pause Operation) - created specs/pause-all-user-feedback.md
+- Issue #4 (Workflows List Potentially Limited to 100) - skipped

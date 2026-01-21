@@ -2,7 +2,33 @@
   "permissions": {
     "allow": [
       "Bash(ls:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(for f in /home/artur/src/nostr.band/keep.ai/reviews/*.txt)",
+      "Bash(do if ! grep -q \"ISSUE REVIEW\" \"$f\")",
+      "Bash(fi)",
+      "Bash(done)",
+      "mcp__playwright__browser_navigate",
+      "mcp__playwright__browser_wait_for",
+      "Bash(git show:*)",
+      "Bash(npm run build:*)",
+      "Bash(PORT=3001 npm start)",
+      "mcp__playwright__browser_click",
+      "mcp__playwright__browser_evaluate",
+      "mcp__playwright__browser_press_key",
+      "mcp__playwright__browser_snapshot",
+      "mcp__playwright__browser_console_messages",
+      "mcp__playwright__browser_network_requests",
+      "mcp__playwright__browser_type",
+      "mcp__playwright__browser_navigate_back",
+      "mcp__playwright__browser_close",
+      "Bash(then echo \"$f\")",
+      "Bash(for f in /home/artur/src/nostr.band/keep.ai/ux-tests/*.txt)",
+      "Bash(do)",
+      "Bash(if ! grep -q \"ISSUE REVIEW\" \"$f\")",
+      "Bash(then)",
+      "Bash(for:*)",
+      "Bash(echo:*)",
+      "Bash(if grep -qi \"issue\\\\|severity\\\\|bug\" \"$f\")"
     ]
   }
 }

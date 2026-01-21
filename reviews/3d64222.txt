@@ -1,0 +1,186 @@
+COMMIT REVIEW: 3d64222
+=======================
+
+Commit: 3d64222b406813943704c5e1106e4aaca0ab3451
+Date: Fri Jan 16 20:25:47 2026 +0000
+Author: Claude Agent
+Message: Fix mutations not triggering immediate sync
+
+Files Changed:
+- IMPLEMENTATION_PLAN.md (documentation update)
+- apps/server/src/server.ts (code change)
+
+================================================================================
+CHANGE SUMMARY
+================================================================================
+
+This commit addresses a synchronization performance issue where local database
+mutations weren't immediately propagated to peers - they relied on a 1-second
+polling interval instead.
+
+Key Changes:
+
+1. **Added `triggerLocalSync()` helper function** (lines 760-764 in server.ts)
+   - Calls `peer.checkLocalChanges()` in a non-blocking manner
+   - Uses `.catch()` to handle errors without blocking the request/response cycle
+   - Logs errors via `debugServer()` for debugging
+
+2. **Added sync triggers after mutation endpoints:**
+   - After `/api/set_config` inbox write (line 937) - only triggered on first
+     config when onboarding message is written to inbox
+   - After `/api/file/upload` file storage (line 1626)
+
+3. **Increased fallback polling interval** from 1s to 5s (line 770)
+   - Justified because mutations now trigger sync immediately
+   - The poll serves as a safety net for edge cases only
+
+4. **Updated IMPLEMENTATION_PLAN.md:**
+   - Marked "Fix mutations not triggering sync" as completed
+   - Removed the timezone FIXME item (see issues below)
+   - Updated the Last Updated timestamp
+
+================================================================================
+ISSUES IDENTIFIED
+================================================================================
+
+ISSUE 1: Misleading Commit Message About Timezone FIXME
+-------------------------------------------------------
+Severity: Low (documentation only)
+
+The commit message states "removed timezone FIXME that didn't exist" but this
+is misleading. The timezone FIXME DID exist in the IMPLEMENTATION_PLAN.md at:
+  - File: `/packages/db/src/task-store.ts` line 379
+  - Comment: "This assumes the server's timezone is the user's local timezone"
+
+However, the FIXME was inside COMMENTED CODE (the `getNextMidnightTimestamp`
+function). When the commented code was removed in cleanup commits, the FIXME
+naturally went with it. The IMPLEMENTATION_PLAN.md item was orphaned - it
+referenced code that no longer exists.
+
+The commit message should have said "removed orphaned timezone FIXME item -
+referenced commented code that was already removed" for clarity.
+
+Proposal: No action needed since the outcome is correct - just noting for
+future reference that commit messages should be more precise.
+
+
+ISSUE 2: Incomplete Sync Trigger Coverage
+-----------------------------------------
+Severity: Medium
+
+Not all database mutation endpoints have sync triggers. Analysis of server.ts:
+
+Endpoints with sync triggers:
+- `/api/set_config` - YES (triggerLocalSync after inbox write, line 937)
+- `/api/file/upload` - YES (triggerLocalSync, line 1626)
+- `/api/connect` - YES (peer.checkLocalChanges directly, line 1547)
+
+Endpoints without sync triggers:
+- `/api/fetch_api_key_from_backend` - Writes to `.env` file only, NO DB write
+  -> No sync needed (correct)
+
+Analysis: Current coverage appears adequate since:
+- The only DB writes in mutation endpoints DO have sync triggers
+- The `/api/fetch_api_key_from_backend` only writes to `.env` file (file system),
+  which doesn't need database sync
+- The worker routes (`/api/worker/sync`, `/api/worker/data`) ARE the sync
+  mechanism itself
+
+However, if new mutation endpoints are added in the future, developers may
+forget to add sync triggers.
+
+Proposal: Add a code comment near `triggerLocalSync()` definition noting that
+any new endpoint writing to the database should call this function:
+```typescript
+// Helper to trigger sync after local mutations
+// IMPORTANT: Call this after any endpoint that writes to the database
+// to ensure changes propagate to peers immediately
+const triggerLocalSync = () => { ... }
+```
+
+
+ISSUE 3: Inconsistent Sync Trigger Pattern in /api/connect
+----------------------------------------------------------
+Severity: Low
+
+The `/api/connect` endpoint (lines 1474-1562) uses a different pattern for
+triggering sync compared to other endpoints:
+
+```typescript
+// In async callback (line 1547):
+await peer.checkLocalChanges();
+```
+
+While `/api/set_config` and `/api/file/upload` use:
+```typescript
+triggerLocalSync();  // Non-blocking
+```
+
+The difference is that `/api/connect` awaits the sync inside an already-async
+callback that runs after the response is sent, so blocking there doesn't affect
+response time. However, the inconsistency makes the codebase harder to
+understand and maintain.
+
+Proposal: Consider using `triggerLocalSync()` even in async callbacks for
+consistency. The fire-and-forget nature is still beneficial as it prevents the
+async callback from failing if sync fails.
+
+
+ISSUE 4: 5-Second Fallback May Be Too Long for Edge Cases
+---------------------------------------------------------
+Severity: Low
+
+The polling interval was increased from 1s to 5s. While this is justified when
+triggers are working correctly, if an edge case mutation is missed, users would
+experience up to 5 seconds delay instead of 1 second.
+
+Potential edge cases that might be missed:
+1. Direct database modifications bypassing the API
+2. Background workers writing to the database
+3. Future endpoints that forget to add sync triggers
+
+Proposal: Consider a middle ground of 2-3 seconds, or document the 5-second
+interval prominently so future developers understand the tradeoff.
+
+
+================================================================================
+POSITIVE ASPECTS
+================================================================================
+
+1. **Non-blocking design**: The `triggerLocalSync()` helper properly uses
+   fire-and-forget pattern with `.catch()` to avoid blocking HTTP responses.
+
+2. **Proper error handling**: Errors are logged via `debugServer()` which
+   integrates with the project's debug library.
+
+3. **Clear comments**: The code includes helpful comments explaining the
+   purpose ("Helper to trigger sync after local mutations", "fallback for any
+   edge cases").
+
+4. **Documentation update**: IMPLEMENTATION_PLAN.md was properly updated to
+   reflect the completed work.
+
+5. **Appropriate scope**: Only mutation endpoints with actual database writes
+   were given sync triggers - `.env` file writes correctly don't trigger sync.
+
+================================================================================
+CONCLUSION
+================================================================================
+
+This is a solid commit that addresses a real performance issue. The
+implementation is correct and the non-blocking pattern is appropriate. The
+issues identified are minor - mainly around documentation accuracy and
+consistency. The sync mechanism now properly triggers on mutations, reducing
+propagation delay from up to 1 second to nearly immediate.
+
+Overall Quality: GOOD
+Recommendation: No blocking issues, but consider the proposals for future
+improvements.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Misleading commit message about timezone FIXME) - skipped
+- Issue #2 (Incomplete sync trigger coverage) - skipped
+- Issue #3 (Inconsistent sync trigger pattern in /api/connect) - created specs/consistent-sync-trigger-pattern.md
+- Issue #4 (5-second fallback may be too long) - skipped (sqlite-update-callback solution planned)

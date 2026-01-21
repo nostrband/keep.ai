@@ -1,0 +1,216 @@
+# Code Review: Commit d6a0efe
+
+## Summary
+Revert context building and consolidate mermaid rendering
+
+**Author:** Claude Agent
+**Date:** 2026-01-19
+
+## Changes Description
+
+This commit contains two logically separate changes:
+
+### Part 1: Revert buildContext() in agent-env.ts
+
+**Previous behavior (from commit fde4661):**
+- `buildContext()` loaded chat history from chatStore
+- Applied token limits (1000 for workers, 5000 for others)
+- Fetched events with before/since pagination
+- Converted ChatEvents to AssistantUIMessage format
+- Added stats (current time, message/note/file counts)
+
+**New behavior:**
+- `buildContext()` returns empty array
+- Agents receive only inbox messages, not chat history context
+- Removed ChatEvent import
+
+### Part 2: Remove MermaidDiagram component
+
+**Previous implementation:**
+- Dedicated MermaidDiagram.tsx component (67 lines)
+- Used mermaid library directly with `securityLevel: "loose"`
+- Custom error handling showing raw diagram on failure
+- Used `dangerouslySetInnerHTML` to inject SVG
+
+**New implementation:**
+- Deleted MermaidDiagram.tsx entirely
+- WorkflowDetailPage now uses Response component with markdown code fence
+- Mermaid rendered via Streamdown's built-in mermaid support
+- Removed direct mermaid dependency from package.json (available via streamdown transitive)
+
+### Files Changed:
+- `packages/agent/src/agent-env.ts` - Reverted buildContext to return empty array
+- `apps/web/src/components/MermaidDiagram.tsx` - Deleted
+- `apps/web/src/components/WorkflowDetailPage.tsx` - Changed from MermaidDiagram to Response
+- `apps/web/package.json` - Removed mermaid dependency
+- `IMPLEMENTATION_PLAN.md` - Updated specs #32 and #33
+
+## Issues Identified
+
+### ISSUE 1: Loss of Agent Context Awareness (MEDIUM SEVERITY)
+
+**Location:** packages/agent/src/agent-env.ts, lines 90-94
+
+**Problem:** Agents now have no access to chat history. They only receive:
+- Task metadata (goal, plan, notes, asks) via buildUser()
+- Inbox messages from the caller
+- Workflow/script context (for planners)
+
+This design choice may reduce agent effectiveness for:
+- Multi-turn conversations requiring historical awareness
+- Retry scenarios where agent should know about previous attempts
+- Complex workflows where context from other threads is relevant
+
+**Mitigating factors:**
+- Task state (goal, plan, notes) is explicitly maintained
+- Inbox messages can include relevant history if caller provides it
+- Reduces token waste and potential duplicate message issues from fde4661
+
+**Proposal:** Consider adding a minimal context option for specific agent types:
+```typescript
+async buildContext(input: StepInput): Promise<AssistantUIMessage[]> {
+  // Workers get minimal context (last 3 messages) for retry awareness
+  if (this.type === "worker") {
+    const recent = await this.#api.chatStore.getChatEvents({
+      chatId: this.task.thread_id || "main",
+      limit: 3,
+    });
+    // Convert to messages...
+  }
+  return [];
+}
+```
+
+Or simply monitor agent success rates to determine if this is actually a problem in practice.
+
+### ISSUE 2: Missing Tailwind Source for Streamdown (POTENTIALLY CRITICAL)
+
+**Location:** apps/web/tailwind.config.js
+
+**Problem:** Streamdown documentation requires adding a @source directive for proper CSS inclusion:
+```css
+@source "../node_modules/streamdown/dist/*.js";
+```
+
+The current tailwind.config.js only includes:
+```javascript
+content: ["./src/**/*.{js,ts,jsx,tsx}"]
+```
+
+**Risk:** Streamdown's mermaid diagram styles may not be included in production CSS build, causing unstyled or broken diagrams.
+
+**Proposal:** Verify mermaid rendering works in production build. If styles are missing, update tailwind.config.js:
+```javascript
+content: [
+  "./src/**/*.{js,ts,jsx,tsx}",
+  "./node_modules/streamdown/dist/*.js",
+]
+```
+
+### ISSUE 3: Unknown Mermaid Configuration Defaults (LOW SEVERITY)
+
+**Location:** apps/web/src/components/WorkflowDetailPage.tsx, lines 579-583
+
+**Problem:** The old MermaidDiagram had explicit configuration:
+```typescript
+mermaid.initialize({
+  startOnLoad: false,
+  theme: "neutral",
+  securityLevel: "loose",
+  flowchart: { useMaxWidth: true, htmlLabels: true, curve: "basis" }
+});
+```
+
+The new Response component uses Streamdown's defaults without explicit configuration. The visual appearance may differ.
+
+**Proposal:** If diagram appearance is important, pass mermaid configuration to Streamdown:
+```tsx
+<Streamdown
+  mermaid={{
+    config: {
+      theme: "neutral",
+      flowchart: { useMaxWidth: true, curve: "basis" }
+    }
+  }}
+>
+```
+
+Or verify visually that Streamdown defaults are acceptable.
+
+### ISSUE 4: Error Handling Regression (LOW SEVERITY)
+
+**Location:** apps/web/src/components/WorkflowDetailPage.tsx
+
+**Problem:** The old MermaidDiagram had explicit error state rendering that showed both the error message and the raw diagram code for debugging:
+```tsx
+if (error) {
+  return (
+    <div className="p-4 border border-red-200 bg-red-50 rounded-lg">
+      <p className="text-sm text-red-600">Failed to render diagram: {error}</p>
+      <pre className="mt-2 text-xs text-gray-600 overflow-auto">{diagram}</pre>
+    </div>
+  );
+}
+```
+
+The new Streamdown-based approach delegates error handling entirely to Streamdown, which may not display the raw diagram code.
+
+**Proposal:** Test with invalid mermaid syntax to verify error handling is acceptable. If needed, Streamdown accepts a custom error component:
+```tsx
+<Streamdown
+  mermaid={{
+    errorComponent: ({ error, code }) => (
+      <div className="text-red-600">
+        <p>Failed to render: {error}</p>
+        <pre>{code}</pre>
+      </div>
+    )
+  }}
+>
+```
+
+### ISSUE 5: Security Level Change (INFORMATIONAL)
+
+**Location:** Deleted MermaidDiagram.tsx
+
+**Observation:** The old component used `securityLevel: "loose"` which allows:
+- Click events on nodes
+- Scripts in markdown
+- HTML labels with full HTML content
+
+The new Streamdown-based rendering likely uses stricter defaults (probably "strict" or default mermaid settings). This is generally a security IMPROVEMENT, but may break diagrams that relied on loose security features like click handlers or HTML labels.
+
+**Proposal:** If any diagrams use advanced features, verify they still render correctly. If not, this change is a security improvement with no action needed.
+
+## Positive Aspects
+
+1. **Reduced Bundle Size:** Removed direct mermaid dependency (available via streamdown transitive), reducing duplicate code.
+
+2. **Consistent Rendering:** All markdown content (including mermaid) now renders through the same Streamdown/Response pipeline.
+
+3. **Improved Security:** Moving away from `securityLevel: "loose"` and `dangerouslySetInnerHTML` is a security improvement.
+
+4. **Code Simplification:** Deleted 67 lines of custom mermaid handling code.
+
+5. **Clear Intent:** The revert is explicitly documented with reference to the spec (revert-context-building.md).
+
+6. **Avoids Duplicate Messages:** The original fde4661 commit may have caused duplicate message loading; this revert eliminates that risk.
+
+## Verdict
+
+This commit makes two architectural decisions:
+
+1. **Agents are now stateless per execution** - They rely on explicit task state rather than loaded chat history. This is a reasonable design choice that trades context awareness for simplicity and token efficiency. Worth monitoring agent success rates.
+
+2. **Mermaid consolidation via Streamdown** - This is a clean simplification that improves code consistency and security. The main concern is verifying Tailwind CSS includes Streamdown styles and that visual appearance is acceptable.
+
+Both changes are reasonable for a v1 product. The main action item is to verify mermaid rendering works correctly in production builds.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Loss of Agent Context Awareness) - skipped
+- Issue #2 (Missing Tailwind Source for Streamdown) - created specs/streamdown-tailwind-source.md
+- Issue #3 (Unknown Mermaid Configuration Defaults) - skipped
+- Issue #4 (Error Handling Regression) - skipped
+- Issue #5 (Security Level Change) - skipped

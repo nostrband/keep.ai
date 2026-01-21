@@ -1,0 +1,143 @@
+COMMIT REVIEW: bd596cf
+=======================
+Title: Remove debug console.log statements for production readiness
+Date: Fri Jan 16 20:13:00 2026 +0000
+
+CHANGES SUMMARY
+===============
+
+This commit removes debug console.log statements across multiple files:
+
+1. apps/server/src/server.ts:
+   - Removed 2 console.log statements that exposed environment configuration
+
+2. apps/web/src/components/ConsolePage.tsx:
+   - Removed 18 debug console.log statements (SQL validation, query execution, modal handling)
+
+3. apps/web/src/QueryProvider.tsx:
+   - Removed 14 debug console.log statements (ping/pong, sync events, worker communication)
+   - Kept error handling console.error statements
+
+4. apps/web/src/main.tsx:
+   - Removed console.log for service worker registration
+   - Removed console.log for service worker update notification
+   - Left empty statechange handler with comment
+
+5. packages/sync/src/Peer.ts:
+   - Changed 6 console.error statements to this.debug() calls
+
+FILES MODIFIED
+==============
+- IMPLEMENTATION_PLAN.md (documentation update)
+- apps/server/src/server.ts
+- apps/web/src/QueryProvider.tsx
+- apps/web/src/components/ConsolePage.tsx
+- apps/web/src/main.tsx
+- packages/sync/src/Peer.ts
+
+ISSUES FOUND
+============
+
+ISSUE 1: CRITICAL - console.error changed to this.debug() in Peer.ts
+--------------------------------------------------------------------
+Location: packages/sync/src/Peer.ts, lines 194, 198, 295, 299, 496, 915
+
+The commit changed 6 console.error statements to this.debug() calls:
+- Line 194: "onSync for unknown peer" (before throwing error)
+- Line 198: "onSync wrong transport for peer" (before throwing error)
+- Line 295: "onReceive for unknown peer" (before throwing error)
+- Line 299: "onReceive wrong transport for peer" (before throwing error)
+- Line 496: "Error initializing last db version" (in catch block, re-throws)
+- Line 915: "Error in queued callback" (in catch block for queue errors)
+
+Problem: The debug module (npm debug package) is DISABLED BY DEFAULT. It only outputs messages
+when the DEBUG environment variable matches the namespace pattern (e.g., DEBUG="sync:Peer*").
+
+In production and most development environments without DEBUG env var set:
+- These 6 critical error messages will be completely SILENT
+- Operators will have no visibility into peer synchronization failures
+- Debugging production issues will be significantly harder
+
+The code still throws errors after some of these logs, but:
+- The diagnostic context (peer ID, transport info) is lost
+- Line 915 in queue callback catches errors to prevent queue stalling - these errors
+  are now completely hidden
+
+Impact: HIGH - Peer synchronization errors become invisible in production.
+
+PROPOSAL 1:
+Revert the console.error calls in Peer.ts. Keep console.error for critical error paths
+and reserve this.debug() for informational/diagnostic messages only.
+
+Alternative: Use both - log to debug for detailed diagnostics AND console.error for visibility:
+  this.debug("onSync for unknown peer", peerId);
+  console.error("[Peer] onSync for unknown peer:", peerId);
+
+
+ISSUE 2: Empty service worker update handler (LOW)
+--------------------------------------------------
+Location: apps/web/src/main.tsx, lines 65-67
+
+The service worker statechange handler now only has a comment:
+```typescript
+newWorker.addEventListener("statechange", () => {
+  // Service worker update detected
+});
+```
+
+Analysis: This is SAFE but could be improved.
+
+The service worker uses skipWaiting() and clients.claim(), so updates activate automatically.
+QueryProviderEmbedded.tsx has a controllerchange listener that handles re-sending keys to the
+new worker. No manual refresh is required.
+
+However:
+- Developer visibility is lost (no console indication of updates)
+- No user notification of app updates
+
+Impact: LOW - Functionally safe but loses debug visibility.
+
+PROPOSAL 2 (optional enhancement):
+Consider adding lightweight telemetry or a subtle UI notification for app updates.
+Not a bug, but a potential UX improvement.
+
+
+VERIFIED SAFE CHANGES
+=====================
+
+1. server.ts console.log removals (lines 893, 1056):
+   - Removed logs that exposed environment configuration including API keys
+   - Good security improvement
+
+2. ConsolePage.tsx console.log removals:
+   - Removed 18 debug statements for SQL validation, query execution, modal handling
+   - These were verbose debugging aids not needed in production
+   - Safe removal
+
+3. QueryProvider.tsx console.log removals:
+   - Removed 14 debug statements for ping/pong, sync status, worker communication
+   - Kept console.error for actual errors (e.g., line 233: "Connection error")
+   - Kept console.error for reconnection status
+   - Safe removal
+
+
+STYLING/CODE QUALITY NOTES
+==========================
+
+- Good: Kept error handling console.error statements where appropriate
+- Good: Removed sensitive environment logging from server.ts
+- Concern: Inconsistent error logging strategy (some files keep console.error, Peer.ts converts to debug)
+
+SUMMARY
+=======
+The commit successfully removes debug console.log statements for production readiness.
+However, the Peer.ts change from console.error to this.debug() is a CRITICAL issue that
+will hide important error information in production. This should be reverted.
+The debug module requires explicit DEBUG env var to output, making these error messages
+invisible by default.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (console.error changed to debug in Peer.ts) - created specs/restore-peer-error-logging.md
+- Issue #2 (Empty service worker update handler) - created specs/app-update-notification.md

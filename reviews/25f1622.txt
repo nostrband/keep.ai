@@ -1,0 +1,103 @@
+# Review: Commit 25f1622
+
+**Title**: Highlight significant events with visual distinction
+
+## Summary of Changes
+
+This commit implements a visual significance system for events in the chat timeline:
+
+### 1. EventSignificance Type System (events.ts)
+- Added `EventSignificance` union type: `'normal'`, `'write'`, `'error'`, `'success'`, `'user'`, `'state'`
+- Added `significance` field to `EventConfig` interface
+- Updated all `EVENT_CONFIGS` entries with appropriate significance values:
+  - **'write'** (13 events): CREATE_NOTE, UPDATE_NOTE, DELETE_NOTE, ADD_TASK, ADD_TASK_CRON, SEND_TO_TASK_INBOX, TASK_UPDATE, IMAGES_GENERATE, IMAGES_TRANSFORM, TEXT_GENERATE, WEB_DOWNLOAD, FILE_SAVE, ADD_SCRIPT
+  - **'normal'** (12 events): WEB_SEARCH, WEB_FETCH, GET_WEATHER, IMAGES_EXPLAIN, PDF_EXPLAIN, AUDIO_EXPLAIN, TEXT_EXTRACT, TEXT_CLASSIFY, TEXT_SUMMARIZE, TASK_RUN, TASK_RUN_END, GMAIL_API_CALL
+  - **'state'** (1 event): CANCEL_THIS_TASK_CRON
+- Added `GMAIL_WRITE_METHODS` array for dynamic detection
+- Added `getEventSignificance()` function for dynamic Gmail method detection
+
+### 2. EventItem.tsx Styling
+- Added `significanceStyles` map with Tailwind classes per significance level:
+  ```typescript
+  normal: 'border-gray-100 bg-gray-50 text-gray-500',
+  write: 'border-gray-200 bg-white text-gray-700',
+  error: 'border-red-200 bg-red-50 text-red-700',
+  success: 'border-green-200 bg-green-50 text-green-700',
+  user: 'border-blue-200 bg-blue-50 text-blue-700',
+  state: 'border-yellow-200 bg-yellow-50 text-yellow-700',
+  ```
+- Changed hover effect from `hover:bg-gray-100` to `hover:brightness-95`
+
+### 3. Error Styling in Event Groups
+- **TaskEventGroup.tsx**: Added red left border (`border-l-4 border-l-red-500`) and red header (`bg-red-50`) for runs with errors
+- **WorkflowEventGroup.tsx**: Same error styling, plus new `useScriptRun` hook to detect script run errors
+
+## Analysis
+
+### Type System Design - CORRECT
+- Well-designed union type with documented significance levels
+- 'error', 'success', 'user' reserved for future use (acceptable)
+- Logical categorization: write operations stand out, read operations are subtle
+
+### Gmail Dynamic Detection - CORRECT
+```typescript
+const isWriteMethod = GMAIL_WRITE_METHODS.some(
+  method => gmailPayload.method?.includes(method)
+);
+```
+- Correctly identifies Gmail write methods (send, modify, delete, etc.)
+- Uses `.includes()` to match method names within full method path
+
+### Tailwind Classes - VALID
+- All classes exist in Tailwind v4.1.16
+- `hover:brightness-95` is a valid filter utility
+- Consistent pattern: `border-X-200 bg-X-50 text-X-700`
+
+### Visual Hierarchy - SENSIBLE
+- **write** (white background): Highest contrast, draws attention to modifications
+- **normal** (gray): Subtle, doesn't distract from important events
+- **state** (yellow): Attention-drawing for state changes
+- Good UX design that helps users scan activity quickly
+
+### Error Detection Logic - CORRECT
+```typescript
+const hasError = run?.error && run.error.length > 0;
+```
+- Defensive check with optional chaining
+- Handles null/undefined and empty string cases
+
+### useScriptRun Hook Safety - CORRECT
+```typescript
+const { data: scriptRun } = useScriptRun(scriptRunId || "");
+```
+- Hook has `enabled: !!api && !!runId` guard
+- Empty string evaluates to falsy, so hook is disabled when scriptRunId missing
+- Returns null when disabled (no errors or unnecessary queries)
+
+## Issues Found
+
+**No significant issues found.**
+
+### Minor Observations
+
+1. **Unused significance values**: `'error'`, `'success'`, and `'user'` are defined but not currently assigned to any events. This is documented as "reserved for future use" which is acceptable.
+
+2. **Duplicated Gmail logic**: The Gmail method checking logic exists in both:
+   - `events.ts:getEventSignificance()` - for visual styling
+   - `eventSignal.ts:getEventSignalLevel()` - for collapsibility
+
+   This duplication is acceptable since:
+   - Functions have different purposes (styling vs collapsibility)
+   - Logic is simple and unlikely to change
+   - Centralizing would couple unrelated concerns
+
+3. **Removed comment in EventItem.tsx**: The comment `${/* Desktop: single line */ ''}` was removed. This was a no-op anyway (empty template expression).
+
+## Verdict
+
+**APPROVED** - Well-designed feature that improves visual scannability of events. Type system is clean, styling is consistent, and error detection is correctly implemented. No bugs introduced.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+No issues to address - review approved with only minor acceptable observations.

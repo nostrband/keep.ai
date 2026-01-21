@@ -17,6 +17,7 @@
   "devDependencies": {
     "@types/debug": "^4.1.12",
     "@types/mime-types": "^3.0.1",
+    "playwright": "^1.57.0",
     "rimraf": "^6.1.2",
     "tsup": "^8.5.0",
     "turbo": "^2.6.0",

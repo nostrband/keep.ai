@@ -1,0 +1,122 @@
+COMMIT REVIEW: b5ebf07
+=======================
+Title: Remove commented code blocks for code cleanliness
+Date: Fri Jan 16 20:16:11 2026 +0000
+
+CHANGES SUMMARY
+===============
+
+This commit removes ~155 lines of obsolete commented-out code from three files:
+
+1. packages/agent/src/agent-env.ts:
+   - Removed ~30 lines of commented task listing code (previously lines 180-206)
+   - Removed ~5 lines of commented tools prompt in toolsPrompt() method
+
+2. packages/db/src/task-store.ts:
+   - Removed ~55 lines of three commented methods:
+     - getTodoTasks(): Query for tasks ready to execute
+     - hasCronTaskOfType(): Check for existing cron tasks
+     - getNextMidnightTimestamp(): Calculate next midnight (had incomplete FIXME for timezone)
+
+3. packages/tests/src/nostr-transport-sync.test.ts:
+   - Removed ~70 lines of commented test helper code:
+     - Private key constants
+     - Console.log statements
+     - establishPeerConnection3() helper function
+
+FILES MODIFIED
+==============
+- IMPLEMENTATION_PLAN.md (documentation update)
+- packages/agent/src/agent-env.ts
+- packages/db/src/task-store.ts
+- packages/tests/src/nostr-transport-sync.test.ts
+
+VERIFICATION RESULTS
+====================
+
+All removed code verified as SAFE to remove:
+
+1. agent-env.ts task listing code:
+   - Was superseded by commit fde4661 ("Enable context building for agents")
+   - The new buildContext() implementation properly loads chat history and action events
+   - No references to the old task listing pattern in codebase
+   - VERIFIED SAFE
+
+2. agent-env.ts toolsPrompt() method:
+   - Method still exists, now returns empty string ""
+   - The commented code described an old 'eval' tool
+   - Actual tool descriptions are now in jsPrompt() method (lines 286-346)
+   - VERIFIED SAFE
+
+3. task-store.ts getTodoTasks():
+   - Searched entire codebase - no references found in active code
+   - Only reference is in packages/db/README.md (outdated documentation example)
+   - Current code uses listTasks() with application-level filtering
+   - VERIFIED SAFE
+
+4. task-store.ts hasCronTaskOfType():
+   - No references found in codebase
+   - VERIFIED SAFE
+
+5. task-store.ts getNextMidnightTimestamp():
+   - No references found in codebase
+   - Had incomplete FIXME about timezone handling
+   - VERIFIED SAFE
+
+6. nostr-transport-sync.test.ts test helpers:
+   - Private key constants were unused (commented out)
+   - establishPeerConnection3() was never called by any active test
+   - VERIFIED SAFE
+
+
+ISSUES FOUND
+============
+
+No issues found. All removals are appropriate cleanup of dead code.
+
+
+MINOR OBSERVATIONS
+==================
+
+1. packages/db/README.md still references getTodoTasks() as an example:
+   - This is outdated documentation that wasn't updated
+   - Not a bug, but documentation drift
+   - Low priority to fix
+
+2. agent-env.ts toolsPrompt() method now just returns "":
+   - Method could be deleted entirely
+   - Or kept as placeholder for future use
+   - Very minor, no action needed
+
+
+CODE QUALITY ASSESSMENT
+=======================
+
+This is a clean, well-executed code cleanup commit:
+
+Positives:
+- Removed genuinely dead code (verified no references)
+- Removed code that was superseded by newer implementations
+- Removed incomplete code with FIXMEs that was never finished
+- Preserved test functionality (55 passed, 28 skipped as noted in commit message)
+- Clear commit message explaining what was removed and why
+
+The removal improves code maintainability by:
+- Reducing noise in files
+- Removing misleading commented code that might confuse future developers
+- Eliminating the temptation to resurrect incomplete implementations
+
+
+SUMMARY
+=======
+This is a safe, clean code cleanup commit. All ~155 lines of commented code removed were
+verified to be dead code with no active references in the codebase. The task-store.ts methods
+were superseded by different patterns, the agent-env.ts code was replaced by a new context
+building implementation (commit fde4661), and the test helpers were unused.
+
+No issues to address. Good code hygiene.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+No issues identified in this commit.

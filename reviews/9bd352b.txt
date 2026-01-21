@@ -1,0 +1,94 @@
+COMMIT REVIEW: 9bd352b
+=======================
+"Update IMPLEMENTATION_PLAN.md with additional code cleanup details"
+Author: Claude Agent
+Date: Fri Jan 16 21:05:55 2026 +0000
+
+================================================================================
+CHANGES SUMMARY
+================================================================================
+
+This is a documentation-only commit that updates IMPLEMENTATION_PLAN.md with
+additional details about code cleanup work that was previously completed.
+
+FILES MODIFIED:
+- IMPLEMENTATION_PLAN.md (6 insertions, 2 deletions)
+
+CHANGES IN DETAIL:
+
+1. Updated "Last Updated" timestamp to include new cleanup work
+   - Added "removed ~43 more lines of commented-out code" to the changelog
+
+2. Added four new completed cleanup items under section 16 (Code Cleanup):
+   - /packages/db/src/nostr-peer-store.ts - Removed unused listNostrPeerCursors() method (~10 lines)
+   - /packages/agent/src/task-worker.ts - Removed unused startStatusUpdater() method (~26 lines)
+   - /packages/agent/src/task-scheduler.ts - Removed deprecated getTodoTasks() references (~4 lines)
+   - /packages/agent/src/index.ts - Removed unused Memory type export (~3 lines)
+
+3. Updated total count from ~155 to ~198 lines of commented code removed
+
+================================================================================
+POTENTIAL ISSUES
+================================================================================
+
+ISSUE #1: Documentation Only - No Verification of Claims
+---------------------------------------------------------
+Severity: Low
+Location: IMPLEMENTATION_PLAN.md
+
+The commit claims that ~43 additional lines were removed from the listed files,
+but this commit does NOT actually make those code changes - it only documents them.
+
+Potential Problem:
+- The actual code cleanup may have been done in a previous commit that was not
+  properly documented
+- Or the documentation may be incorrect/aspirational
+
+Verification Needed:
+- Confirm that listNostrPeerCursors() was actually removed from nostr-peer-store.ts
+- Confirm that startStatusUpdater() was actually removed from task-worker.ts
+- Confirm that getTodoTasks() references were actually removed from task-scheduler.ts
+- Confirm that Memory type export was actually removed from index.ts
+
+================================================================================
+PROPOSALS
+================================================================================
+
+PROPOSAL #1: Verify Documentation Accuracy
+------------------------------------------
+Before merging documentation claims, verify the actual code changes exist:
+
+1. Search for listNostrPeerCursors in nostr-peer-store.ts - should NOT exist
+2. Search for startStatusUpdater in task-worker.ts - should NOT exist
+3. Search for getTodoTasks in task-scheduler.ts - should have minimal references
+4. Search for Memory type export in packages/agent/src/index.ts - should NOT exist
+
+If any of these still exist, either:
+- The documentation is premature and should be reverted
+- The code cleanup was incomplete and should be finished
+
+PROPOSAL #2: Consider Atomic Documentation Updates
+--------------------------------------------------
+For better traceability, documentation updates about code changes should ideally
+be committed together with the actual code changes, not as separate commits.
+This prevents documentation drift and makes code review easier.
+
+================================================================================
+OVERALL ASSESSMENT
+================================================================================
+
+Risk Level: LOW
+Impact: Documentation only - no runtime impact
+
+This commit is acceptable as a documentation update, but the claims should be
+verified against actual codebase state. Documentation-only commits that describe
+code changes are a potential sign of process issues (code and docs not being
+committed atomically).
+
+The commit itself is well-structured and follows the existing IMPLEMENTATION_PLAN.md
+format conventions.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Documentation only - no verification of claims) - skipped (informational, doc-only commit)

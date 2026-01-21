@@ -1,0 +1,170 @@
+COMMIT REVIEW: cea1604 - Add automatic thread title generation from first user message
+======================================================================================
+
+COMMIT SUMMARY
+--------------
+Author: Claude Agent
+Date: Fri Jan 16 19:15:50 2026 +0000
+
+This commit adds automatic thread title generation based on the first user message,
+improving UI/UX by showing descriptive titles instead of generic placeholders like
+"Worker" or "Planner" in thread lists.
+
+FILES CHANGED
+-------------
+1. IMPLEMENTATION_PLAN.md - Updated timestamp, marked FIXME as completed
+2. packages/agent/src/task-worker.ts - Added generateTitleFromInbox() function, modified ensureThread()
+
+DETAILED CHANGES
+----------------
+
+1. New Function: generateTitleFromInbox() (task-worker.ts:26-70)
+
+   Purpose: Extract a concise title from the first inbox message
+
+   Algorithm:
+   - Parse first inbox item as JSON
+   - Extract text content from message parts (type="text")
+   - Handle edge case: if message is a plain string, use it directly
+   - Trim and check for empty content
+   - Truncate to 60 characters max at word boundary
+   - If last space is found after position 20, truncate there and add "..."
+   - Otherwise, hard truncate at position 57 and add "..."
+   - Return undefined on any parse error (graceful fallback)
+
+2. Modified: ensureThread() (task-worker.ts:694-717)
+
+   Changes:
+   - Added inbox parameter to method signature
+   - Title priority: task.title > generateTitleFromInbox(inbox) > task type fallback
+   - Fallback is "Worker" for worker tasks, "Planner" for planner tasks
+
+3. Updated: executeTask() (task-worker.ts:162-163)
+
+   Changes:
+   - Passes inbox array to ensureThread() call
+
+POTENTIAL ISSUES
+----------------
+
+ISSUE 1: ONLY FIRST MESSAGE CONSIDERED [INFO - ACCEPTABLE]
+Location: task-worker.ts:30-35
+
+Description:
+Only the first inbox message is used for title generation. If the first message is
+empty or very short (e.g., "hi"), the title may not be descriptive.
+
+Assessment: This is acceptable behavior. The first message typically represents the
+task initiation and is usually the most representative. Using subsequent messages
+could be more confusing (e.g., follow-up questions changing the apparent title).
+
+ISSUE 2: POTENTIAL DEAD CODE - STRING FALLBACK [INFO - HARMLESS]
+Location: task-worker.ts:45-47
+
+Description:
+```typescript
+} else if (typeof firstMessage === "string") {
+  text = firstMessage;
+}
+```
+This handles the case where firstMessage is already a string. However, inbox items
+are always JSON-stringified objects per the inbox message protocol. This fallback
+is likely never executed in practice.
+
+Assessment: Harmless defensive code. It doesn't cause any issues and handles an
+unexpected edge case gracefully.
+
+ISSUE 3: NON-TEXT FIRST MESSAGES [INFO - HANDLED CORRECTLY]
+Location: task-worker.ts:38-44
+
+Description:
+If the first message only contains file parts (no text parts), the extracted text
+will be empty, resulting in undefined being returned.
+
+Assessment: This is correct behavior. The function properly falls back to the
+task type ("Worker" or "Planner") when no text can be extracted. A file-only
+message doesn't provide a meaningful title anyway.
+
+ISSUE 4: NO MESSAGE ROLE CHECK [INFO - ACCEPTABLE]
+Location: task-worker.ts:35
+
+Description:
+The function doesn't verify that the message role is "user". For worker tasks,
+inbox messages should always be from users. For planner tasks receiving
+worker-to-planner messages, the role could be "assistant".
+
+Assessment: This is acceptable. The title is generated from content regardless
+of role, which works fine for both cases. A worker-to-planner message about
+"Email processing failed" makes a reasonable title.
+
+ISSUE 5: THREAD TITLE NOT UPDATED FOR EXISTING THREADS [INFO - BY DESIGN]
+Location: task-worker.ts:707-716
+
+Description:
+```typescript
+let thread = await this.api.memoryStore.getThread(threadId);
+if (!thread) {
+  thread = { id: threadId, ..., title };
+  await this.api.memoryStore.saveThread(thread);
+}
+```
+If a thread already exists but has an empty title, it won't be updated with the
+newly generated title.
+
+Assessment: This is by design. Threads are created with a title at creation time.
+An existing thread would already have a title from when it was first created.
+Changing titles later could be confusing for the user.
+
+PROPOSALS
+---------
+
+No significant issues requiring proposals. The implementation is solid.
+
+MINOR SUGGESTIONS (Optional):
+
+1. Add JSDoc for edge cases:
+```typescript
+/**
+ * Generate a concise title from the first user message.
+ * Extracts text content and truncates to ~60 chars at word boundary.
+ *
+ * @returns undefined if inbox is empty, parse fails, or no text content
+ */
+```
+
+2. Consider trimming individual parts before concatenating:
+```typescript
+if (part.type === "text" && part.text) {
+  text += part.text.trim() + " ";  // Trim each part
+}
+```
+This would handle parts with leading/trailing whitespace more consistently.
+However, the current implementation handles this at the end with text.trim().
+
+VERDICT
+-------
+This is a clean, well-implemented feature. The code handles edge cases properly:
+- Empty inbox: returns undefined, falls back to task type
+- Parse errors: caught and returns undefined
+- Empty text content: returns undefined
+- Long text: truncated at word boundary with ellipsis
+- Very long words: hard truncated with ellipsis
+
+The truncation logic at 60 characters with word-boundary awareness is user-friendly.
+The fallback hierarchy (task.title > inbox content > task type) is sensible.
+
+Good aspects:
+- Graceful error handling with try/catch
+- Word-boundary-aware truncation
+- Reasonable max length (60 chars)
+- Clear fallback hierarchy
+- No breaking changes to existing behavior
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Only first message considered) - not an issue (acceptable design)
+- Issue #2 (Potential dead code - string fallback) - not an issue (harmless defensive code)
+- Issue #3 (Non-text first messages) - not an issue (handled correctly)
+- Issue #4 (No message role check) - not an issue (acceptable)
+- Issue #5 (Thread title not updated for existing) - not an issue (by design)

@@ -1,0 +1,98 @@
+# Review: 1687cb8 - Extract event helper functions to shared module
+
+## Summary of Changes
+
+This commit extracts duplicate utility functions from TaskEventGroup.tsx and WorkflowEventGroup.tsx into a new shared module `apps/web/src/lib/event-helpers.ts`.
+
+**Files Changed:**
+- Created `apps/web/src/lib/event-helpers.ts` (+27 lines)
+- Modified `apps/web/src/components/TaskEventGroup.tsx` (-27 lines)
+- Modified `apps/web/src/components/WorkflowEventGroup.tsx` (-27 lines)
+- Updated `IMPLEMENTATION_PLAN.md` (status tracking)
+
+**Functions Extracted:**
+1. `transformGmailMethod(method: string): string` - Converts Gmail API method names to user-friendly labels (e.g., "users.messages.get" → "read messages")
+2. `formatDuration(milliseconds: number): string` - Formats milliseconds to short duration strings (e.g., "2h", "30m")
+
+**Behavior Change:**
+- The `transformGmailMethod` labels were standardized to use "read X" prefix (e.g., "messages" → "read messages") for better UX consistency.
+
+---
+
+## Potential Issues
+
+### Issue 1: formatDuration() edge cases (Medium Priority)
+
+**Description:** The `formatDuration` function does not handle edge cases:
+- Negative milliseconds (if end_timestamp < start_timestamp due to clock skew)
+- Sub-second durations (< 1000ms shows as "0s")
+- Very large durations (years display as thousands of days like "11574d")
+
+**Location:** `apps/web/src/lib/event-helpers.ts:17-27`
+
+**Impact:** Incorrect or confusing UI output in edge cases.
+
+**Evidence:** In TaskEventGroup.tsx:81, `formatDuration(endTime - startTime)` could receive negative values if timestamps are inconsistent.
+
+**Proposal:** Add defensive handling:
+```typescript
+export function formatDuration(milliseconds: number): string {
+  if (milliseconds < 0) return "0s";  // Handle negative
+  if (milliseconds < 1000) return "<1s";  // Sub-second
+
+  const seconds = Math.floor(milliseconds / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+  const days = Math.floor(hours / 24);
+
+  if (days > 365) return `${Math.floor(days / 365)}y`;  // Cap at years
+  if (days > 0) return `${days}d`;
+  if (hours > 0) return `${hours}h`;
+  if (minutes > 0) return `${minutes}m`;
+  return `${seconds}s`;
+}
+```
+
+### Issue 2: transformGmailMethod incomplete for future write methods (Low Priority)
+
+**Description:** The method map only includes 7 read methods. Gmail write methods (send, modify, trash, etc.) defined in `apps/web/src/types/events.ts` GMAIL_WRITE_METHODS are not mapped.
+
+**Location:** `apps/web/src/lib/event-helpers.ts:3-11`
+
+**Impact:** If write methods are ever enabled in the Gmail tool, they'll display raw method names like "send" instead of "send message".
+
+**Proposal:** Currently low priority since the Gmail tool only exposes read methods. The fallback (`method.split(".").pop()`) provides reasonable output. Consider expanding the map when write methods are added.
+
+### Issue 3: WorkflowEventGroup doesn't import formatDuration (Not an Issue)
+
+**Description:** WorkflowEventGroup only imports `transformGmailMethod`, not `formatDuration`.
+
+**Verification:** This is correct behavior. WorkflowEventGroup doesn't have run-level timing data (start_timestamp/end_timestamp) available, so it doesn't need formatDuration. TaskEventGroup has this data via its `run` prop.
+
+### Issue 4: Remaining duplication between components (Low Priority)
+
+**Description:** While the helper functions were extracted, significant duplication remains between TaskEventGroup and WorkflowEventGroup:
+- Gmail event consolidation logic (~30 lines)
+- Event filtering and partitioning logic (~10 lines)
+- Event rendering loop structure (~35 lines)
+
+**Impact:** Future maintenance burden; changes need to be made in multiple places.
+
+**Proposal:** Consider extracting more shared logic in a follow-up, but this is beyond the scope of this commit's goal (extracting helper functions).
+
+---
+
+## Assessment
+
+**Quality:** Good
+**Risk:** Low
+
+The commit successfully eliminates duplicate code for the two utility functions and improves consistency by standardizing the Gmail method labels. The edge case issues in formatDuration are pre-existing (from the original duplicated code) and are minor concerns for typical usage.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (formatDuration() edge cases) - skipped
+- Issue #2 (transformGmailMethod incomplete for future write methods) - skipped
+- Issue #3 (WorkflowEventGroup doesn't import formatDuration) - not an issue
+- Issue #4 (Remaining duplication between components) - created specs/reduce-event-group-duplication.md

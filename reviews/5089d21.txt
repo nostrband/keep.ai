@@ -1,0 +1,137 @@
+# Code Review: Commit 5089d21
+
+## Summary
+Add app update notification banner when service worker updates
+
+**Author:** Claude Agent
+**Date:** 2026-01-19
+
+## Changes Description
+
+This commit implements a user notification system for PWA updates:
+
+1. **main.tsx Changes:**
+   - Added `APP_UPDATE_EVENT` constant ('keep-ai-app-updated') exported for cross-component communication
+   - Extended service worker registration to detect when a new service worker activates
+   - Dispatches custom event only when there was a previous service worker controller (to skip first install notifications)
+
+2. **App.tsx Changes:**
+   - Added `AppUpdateBanner` component that listens for the APP_UPDATE_EVENT
+   - Banner shows "App updated to a new version" with dismiss button
+   - Auto-dismisses after 10 seconds
+   - Only rendered in web/PWA mode (not Electron)
+   - Uses fixed positioning at top of screen with z-50
+
+3. **IMPLEMENTATION_PLAN.md:**
+   - Updated spec #46 status to COMPLETED
+
+## Issues Identified
+
+### ISSUE 1: Memory Leak in AppUpdateBanner (MEDIUM SEVERITY)
+
+**Location:** App.tsx, lines 144-148
+
+**Problem:** The `setTimeout` callback is not cleaned up when the component unmounts. If the banner shows and the component unmounts before 10 seconds elapse, the timeout continues running and may attempt to update state on an unmounted component.
+
+**Code:**
+```tsx
+useEffect(() => {
+  const handleAppUpdate = () => {
+    setShowBanner(true);
+    // Auto-dismiss after 10 seconds
+    setTimeout(() => setShowBanner(false), 10000);  // ← Not cleaned up
+  };
+  // ...
+}, []);
+```
+
+**Proposal:** Store the timeout ID and clear it in the cleanup function:
+```tsx
+useEffect(() => {
+  let timeoutId: NodeJS.Timeout | null = null;
+
+  const handleAppUpdate = () => {
+    setShowBanner(true);
+    timeoutId = setTimeout(() => setShowBanner(false), 10000);
+  };
+
+  window.addEventListener(APP_UPDATE_EVENT, handleAppUpdate);
+  return () => {
+    window.removeEventListener(APP_UPDATE_EVENT, handleAppUpdate);
+    if (timeoutId) clearTimeout(timeoutId);
+  };
+}, []);
+```
+
+### ISSUE 2: Race Condition on Multiple Rapid Updates (LOW SEVERITY)
+
+**Location:** App.tsx, lines 144-148
+
+**Problem:** If two service worker updates occur in rapid succession, each calls `setShowBanner(true)` and schedules a new `setTimeout`. The first timeout isn't cancelled, potentially causing unexpected hide/show behavior.
+
+**Proposal:** Track the timeout ID in a ref and clear previous timeout before setting new one:
+```tsx
+const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+useEffect(() => {
+  const handleAppUpdate = () => {
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    setShowBanner(true);
+    timeoutRef.current = setTimeout(() => setShowBanner(false), 10000);
+  };
+  // ...
+}, []);
+```
+
+### ISSUE 3: Missing Reload Mechanism (LOW SEVERITY / UX)
+
+**Location:** App.tsx, AppUpdateBanner component
+
+**Problem:** The banner notifies users of an update but doesn't provide any action to activate it. Users may not know that a page reload will use the new version.
+
+**Proposal:** Add a "Reload" button next to the dismiss button:
+```tsx
+<button
+  onClick={() => window.location.reload()}
+  className="ml-2 px-2 py-1 bg-blue-700 hover:bg-blue-800 rounded text-xs"
+>
+  Reload
+</button>
+```
+
+Or at minimum, update the text to "App updated. Reload to activate."
+
+### ISSUE 4: Hard-coded Magic Number (MINOR)
+
+**Location:** App.tsx, line 147
+
+**Problem:** The 10000ms auto-dismiss timeout is a magic number with no explanation.
+
+**Proposal:** Extract to a named constant at the top of the file:
+```tsx
+const UPDATE_BANNER_AUTO_DISMISS_MS = 10000;
+```
+
+## Positive Aspects
+
+1. **First-Install Protection:** Correctly checks `navigator.serviceWorker.controller` to avoid showing notification on first install.
+
+2. **Proper Event Listener Cleanup:** Removes event listener on component unmount (though timeout cleanup is missing).
+
+3. **Platform-Specific Rendering:** Only shows banner in web mode, not Electron (which has different update mechanisms).
+
+4. **Clean UI:** Blue banner with dismiss button is unobtrusive and follows common PWA patterns.
+
+5. **Immediate Activation:** The service worker uses `skipWaiting()` + `clients.claim()` ensuring the new version takes control immediately.
+
+## Verdict
+
+The implementation is functional and follows PWA best practices. The main issue is the missing timeout cleanup which could cause memory leaks and React warnings about state updates on unmounted components. This should be fixed before the code is considered production-ready.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Memory Leak in AppUpdateBanner) - created specs/app-update-banner-timeout-cleanup.md
+- Issue #2 (Race Condition on Multiple Rapid Updates) - covered by specs/app-update-banner-timeout-cleanup.md
+- Issue #3 (Missing Reload Mechanism) - created specs/app-update-banner-reload-button.md
+- Issue #4 (Hard-coded Magic Number) - skipped

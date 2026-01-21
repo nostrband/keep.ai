@@ -1,0 +1,172 @@
+COMMIT REVIEW: 483ecdc - Add debug mode toggle in settings for production debugging
+
+================================================================================
+SUMMARY
+================================================================================
+
+This commit adds a debug mode toggle in the Settings page that allows users to
+enable verbose debug output in production without rebuilding the app.
+
+Files changed:
+- apps/web/src/components/SettingsPage.tsx (+41 lines) - Toggle UI
+- apps/web/src/components/SharedHeader.tsx (+10 lines) - DEBUG badge
+- apps/web/src/main.tsx (+3 lines, -2 lines) - Enable debug module
+- IMPLEMENTATION_PLAN.md (+17 lines, -4 lines) - Documentation
+
+================================================================================
+CHANGES IN PLAIN ENGLISH
+================================================================================
+
+1. SettingsPage.tsx: Adds a new "Advanced" section with a checkbox toggle for
+   "Debug Mode". When enabled, stores "true" to localStorage key
+   "keep-ai-debug-mode". When disabled, removes the key. Shows a warning that
+   page refresh is required.
+
+2. SharedHeader.tsx: Reads the debug mode setting from localStorage and shows
+   an amber "DEBUG" badge in the header when enabled.
+
+3. main.tsx: At app initialization, checks both import.meta.env.DEV (dev mode)
+   and the localStorage setting. If either is true, calls debug.enable("*") to
+   enable all debug namespaces.
+
+================================================================================
+POTENTIAL ISSUES
+================================================================================
+
+ISSUE #1: localStorage pattern inconsistent with recent refactoring
+Severity: MEDIUM
+
+Recent commit cc5ccad removed localStorage usage for autonomy preference in
+favor of database-only persistence. The commit message stated this "eliminates
+potential sync issues between localStorage and db."
+
+Debug mode uses localStorage-only persistence with no database backing,
+creating inconsistency with the established pattern.
+
+--------------------------------------------------------------------------------
+
+ISSUE #2: localStorage read on every SharedHeader render
+Severity: MEDIUM
+
+SharedHeader reads localStorage synchronously at render time:
+
+  const debugMode = localStorage.getItem("keep-ai-debug-mode") === "true";
+
+This is not memoized or wrapped in useState. SharedHeader renders on every page
+and could cause:
+- Synchronous blocking on every render
+- No batching of state updates if debug mode changes
+
+Compare to SettingsPage which properly uses useState with initializer:
+
+  const [debugMode, setDebugMode] = useState(() =>
+    localStorage.getItem("keep-ai-debug-mode") === "true"
+  );
+
+--------------------------------------------------------------------------------
+
+ISSUE #3: debug.enable("*") exposes all internal system details
+Severity: HIGH (Security)
+
+The code enables ALL debug namespaces with the "*" wildcard:
+
+  if (import.meta.env.DEV || debugModeEnabled) {
+    debug.enable("*");
+  }
+
+In production, this exposes:
+- All @app/* package internals (agent, db, sync, browser)
+- All transitive dependency debug output (60+ packages)
+- Database operations and queries
+- API calls and responses
+- Email content (Gmail integration)
+- Workflow execution details
+- Authentication flows
+
+Should use a scoped pattern like "keep:*" to limit to app-specific output.
+
+--------------------------------------------------------------------------------
+
+ISSUE #4: Workers don't respect the debug mode setting
+Severity: LOW
+
+The worker files (worker.ts, shared-worker.ts) only check import.meta.env.DEV:
+
+  if (import.meta.env.DEV) {
+    debug.enable("*");
+  }
+
+They don't read localStorage, so enabling debug mode in settings won't enable
+debug output in the workers. The UI notes "Requires page refresh" but even
+after refresh, workers won't pick up the setting.
+
+--------------------------------------------------------------------------------
+
+ISSUE #5: No error handling for localStorage access
+Severity: LOW
+
+localStorage access can fail in:
+- Private/incognito browsing mode
+- When storage quota is exceeded
+- When localStorage is disabled
+
+No try-catch around localStorage.getItem() calls.
+
+================================================================================
+PROPOSALS
+================================================================================
+
+PROPOSAL #1: Use scoped debug namespace instead of "*"
+Change debug.enable("*") to debug.enable("keep:*") or app-specific namespaces.
+This prevents exposing third-party library internals and sensitive data.
+
+PROPOSAL #2: Memoize SharedHeader debug mode check
+Use useState or useMemo for the debug mode value:
+
+  const [debugMode] = useState(() =>
+    localStorage.getItem("keep-ai-debug-mode") === "true"
+  );
+
+Or create a reusable hook useDebugMode().
+
+PROPOSAL #3: Add warning about sensitive data exposure
+Show a prominent warning in the settings UI that debug mode may expose
+sensitive information in the browser console.
+
+PROPOSAL #4: Update workers to check debug mode setting (optional)
+Have workers check localStorage during initialization, similar to main.tsx.
+This requires worker script restarts but would be consistent with the feature.
+
+PROPOSAL #5: Add try-catch for localStorage access (optional)
+Wrap localStorage calls in try-catch to handle private browsing gracefully:
+
+  const debugMode = (() => {
+    try {
+      return localStorage.getItem("keep-ai-debug-mode") === "true";
+    } catch {
+      return false;
+    }
+  })();
+
+================================================================================
+VERDICT
+================================================================================
+
+The implementation achieves its goal of enabling production debugging, but has
+several concerns:
+
+1. Security: The "*" debug scope is too broad and could expose sensitive data
+2. Performance: SharedHeader reads localStorage on every render
+3. Consistency: Uses localStorage when recent refactoring moved away from it
+
+Highest priority is changing debug.enable("*") to a scoped pattern to prevent
+information disclosure. The render performance issue should also be addressed.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (localStorage pattern inconsistent with recent refactoring) - skipped
+- Issue #2 (localStorage read on every SharedHeader render) - created specs/shared-header-debug-mode-memoize.md
+- Issue #3 (debug.enable("*") exposes all internal system details) - skipped
+- Issue #4 (Workers don't respect the debug mode setting) - skipped
+- Issue #5 (No error handling for localStorage access) - created specs/localstorage-error-handling.md

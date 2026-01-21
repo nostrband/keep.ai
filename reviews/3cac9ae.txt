@@ -1,0 +1,294 @@
+COMMIT: 3cac9ae
+TITLE: Add cost tracking and display for script runs
+DATE: 2026-01-16
+
+==============================================================================
+SUMMARY OF CHANGES
+==============================================================================
+
+This commit adds cost tracking for script (workflow) runs, storing accumulated
+LLM API costs and displaying them in the UI. Costs are stored in microdollars
+(cost * 1,000,000) as integers to avoid floating-point precision issues.
+
+FILES CHANGED (11 files, +122/-26 lines):
+- IMPLEMENTATION_PLAN.md - Documentation updates
+- apps/cli/src/commands/agent.ts - Added cost: 0 to context
+- apps/cli/src/commands/sandbox.ts - Added cost: 0 to context
+- apps/web/src/components/ScriptRunDetailPage.tsx - Display cost
+- apps/web/src/components/WorkflowDetailPage.tsx - Display cost in run list
+- packages/agent/src/sandbox/sandbox.ts - Added cost field to EvalContext
+- packages/agent/src/task-worker.ts - Added cost tracking in createEvent
+- packages/agent/src/workflow-worker.ts - Cost tracking and saving
+- packages/db/src/database.ts - Registered migration v24
+- packages/db/src/migrations/v24.ts - Added cost column to script_runs
+- packages/db/src/script-store.ts - Updated interface and methods for cost
+
+==============================================================================
+DETAILED ANALYSIS
+==============================================================================
+
+1. DATABASE MIGRATION v24 (packages/db/src/migrations/v24.ts)
+
+   Adds cost column to script_runs table:
+   - Uses proper crsql_begin_alter/crsql_commit_alter wrapper for CRR table
+   - Column: INTEGER NOT NULL DEFAULT 0
+   - Stores cost in microdollars (cost * 1,000,000)
+
+   This matches the pattern used for task_runs.cost (added in v13).
+
+2. EVALCONTEXT INTERFACE (packages/agent/src/sandbox/sandbox.ts)
+
+   Added new field:
+     cost: number;  // Accumulated cost from tool calls (in dollars)
+
+   The cost is accumulated during execution and converted to microdollars
+   when saved to the database.
+
+3. COST ACCUMULATION (workflow-worker.ts and task-worker.ts)
+
+   Both workers track cost in the createEvent callback:
+
+     if (content?.usage?.cost != null && typeof content.usage.cost === 'number') {
+       sandbox.context!.cost += content.usage.cost;
+     }
+
+   This accumulates costs from tools that report usage.cost (text_generate,
+   images_generate, etc.).
+
+4. COST SAVING (workflow-worker.ts)
+
+   Success path (lines 161-172):
+     const costMicrodollars = Math.ceil((sandbox.context?.cost || 0) * 1000000);
+     await this.api.scriptStore.finishScriptRun(..., costMicrodollars);
+
+   Error path (lines 213-224):
+     Uses optional chaining sandbox?.context?.cost to handle cases where
+     sandbox wasn't created before the error.
+
+5. SCRIPT-STORE CHANGES (packages/db/src/script-store.ts)
+
+   - Added cost: number to ScriptRun interface
+   - Updated finishScriptRun() to accept cost parameter (with default 0)
+   - Updated all 5 query methods to include cost column with fallback:
+     cost: (row.cost as number) || 0
+
+6. UI DISPLAY (ScriptRunDetailPage.tsx, WorkflowDetailPage.tsx)
+
+   Shows cost when > 0 with format:
+     {run.cost > 0 && (
+       <span>$((run.cost / 1000000).toFixed(4))</span>
+     )}
+
+   Uses money emoji and 4 decimal places for precision.
+
+7. CLI COMMANDS (agent.ts, sandbox.ts)
+
+   Added cost: 0 initialization but with no-op createEvent callbacks,
+   so costs won't actually accumulate in CLI mode. This is acceptable
+   for dev/testing purposes.
+
+==============================================================================
+POTENTIAL ISSUES
+==============================================================================
+
+ISSUE 1: AUDIO-EXPLAIN TOOL DOESN'T TRACK COST [CRITICAL]
+Severity: High (Lost Cost Data)
+Location: packages/agent/src/tools/audio-explain.ts:227
+
+The audio-explain tool creates events with the full usage object instead
+of wrapping it:
+
+  await getContext().createEvent("audio_explain", {
+    ...
+    usage  // WRONG: should be usage: { cost: usage.cost }
+  });
+
+All other tools use the pattern: usage: { cost: usage.cost }
+
+The cost accumulation code checks: content?.usage?.cost
+With the current audio-explain pattern, content.usage is the full object
+(with total_tokens, prompt_tokens, etc.), and content.usage.cost may be
+undefined depending on object structure.
+
+Impact: Audio processing costs may not be tracked in workflow runs.
+Audio transcription can be expensive, so this is significant.
+
+ISSUE 2: TASK-WORKER SAVES WRONG COST SOURCE [CRITICAL]
+Severity: High (Incomplete Cost Data)
+Location: packages/agent/src/task-worker.ts:551
+
+Task worker saves only agent LLM costs, NOT tool costs:
+
+  cost: Math.ceil((opts.agent.openRouterUsage.cost || 0) * 1000000),
+
+While sandbox.context.cost accumulates tool costs in createEvent, this
+value is NEVER saved. Only the agent's own LLM orchestration costs are
+saved via opts.agent.openRouterUsage.cost.
+
+Compare to workflow-worker (correct):
+  const costMicrodollars = Math.ceil((sandbox.context?.cost || 0) * 1000000);
+
+Impact: task_runs.cost shows incomplete costs (missing text_generate,
+images_generate, etc. tool costs). Users see misleading cost information
+for task runs while workflow runs show correct totals.
+
+ISSUE 3: INCONSISTENT DECIMAL PRECISION IN UI
+Severity: Low (UX Inconsistency)
+Location: Multiple UI files
+
+Different components use different precision:
+- ScriptRunDetailPage.tsx: .toFixed(4) with $ prefix
+- WorkflowDetailPage.tsx: .toFixed(4) with $ prefix
+- EventItem.tsx: .toFixed(2) without $ prefix
+- TaskEventGroup.tsx: .toFixed(2) without $ prefix
+- WorkflowEventGroup.tsx: .toFixed(2) without $ prefix
+
+The new code follows the .toFixed(4) pattern, which is correct for
+run-level totals stored in microdollars. The .toFixed(2) pattern is
+used for event-level costs in dollars. This is actually reasonable
+but could be documented.
+
+Impact: Minor UX inconsistency, but the logic is sound.
+
+ISSUE 4: NO VALIDATION OF NEGATIVE COSTS
+Severity: Low (Defensive Coding)
+Location: workflow-worker.ts:712-714, task-worker.ts:616-618
+
+The cost accumulation code doesn't check for negative values:
+
+  if (content?.usage?.cost != null && typeof content.usage.cost === 'number') {
+    sandbox.context!.cost += content.usage.cost;
+  }
+
+A negative cost could theoretically reduce the total. While unlikely
+from OpenRouter, it's not validated.
+
+Impact: Theoretical - negative costs could corrupt totals.
+
+ISSUE 5: FLOATING-POINT PRECISION FOR SMALL COSTS
+Severity: Low (Edge Case)
+Location: workflow-worker.ts:162, 214
+
+Accumulating many small floating-point numbers can lead to precision
+errors. For example:
+  0.001 + 0.002 + 0.003 + ... (many times)
+May not equal the exact sum due to floating-point representation.
+
+The final Math.ceil() conversion helps mitigate this, but costs could
+be slightly off (always rounded up, so users aren't undercharged).
+
+Impact: Minor precision variance, biased toward overcharging.
+
+ISSUE 6: CLI COST TRACKING IS NON-FUNCTIONAL
+Severity: Low (Expected for Dev Tools)
+Location: apps/cli/src/commands/agent.ts:167, sandbox.ts:67
+
+The CLI commands have no-op createEvent callbacks:
+  createEvent: async () => {},
+
+This means even though cost: 0 is initialized, it will never accumulate.
+This is acceptable for dev/testing but could confuse developers who
+expect cost tracking to work in CLI mode.
+
+Impact: Costs not tracked in CLI - acceptable for dev tools.
+
+==============================================================================
+PROPOSALS
+==============================================================================
+
+PROPOSAL 1: Fix audio-explain cost tracking [HIGH PRIORITY]
+Simplicity: Very Simple
+
+--- a/packages/agent/src/tools/audio-explain.ts
++++ b/packages/agent/src/tools/audio-explain.ts
+@@ -224,7 +224,7 @@ export function defineAudioExplain(
+     await getContext().createEvent("audio_explain", {
+       transcript: result.transcript,
+       explanation: result.explanation,
+-      usage
++      usage: { cost: usage.cost }
+     });
+
+PROPOSAL 2: Fix task-worker to include tool costs [HIGH PRIORITY]
+Simplicity: Medium
+
+The task-worker needs to combine both agent LLM costs and tool costs:
+
+--- a/packages/agent/src/task-worker.ts
++++ b/packages/agent/src/task-worker.ts
+@@ -548,7 +548,9 @@ export class TaskWorker {
+       input_tokens: usage.input_tokens,
+       output_tokens: usage.output_tokens,
+       total_tokens: usage.total_tokens,
+-      cost: Math.ceil((opts.agent.openRouterUsage.cost || 0) * 1000000),
++      // Combine agent LLM costs with tool costs from sandbox context
++      cost: Math.ceil(((opts.agent.openRouterUsage.cost || 0) +
++                       (opts.sandboxCost || 0)) * 1000000),
+       logs: opts.logs.join("\n"),
+     });
+
+This requires passing sandbox.context.cost to finishTaskRun. Update the
+finishTaskRun signature to accept sandboxCost:
+
+  async finishTaskRun(opts: {
+    ...
+    sandboxCost?: number;  // Tool costs accumulated in sandbox
+  })
+
+And when calling:
+  await this.finishTaskRun({
+    ...
+    sandboxCost: sandbox.context?.cost || 0,
+  });
+
+PROPOSAL 3: Add cost validation [LOW PRIORITY]
+Simplicity: Simple
+
+--- a/packages/agent/src/workflow-worker.ts
++++ b/packages/agent/src/workflow-worker.ts
+@@ -710,7 +710,8 @@ export class WorkflowWorker {
+       cost: 0,
+       createEvent: async (type: string, content: any, tx?: any) => {
+         // Accumulate cost from events that have usage.cost
+-        if (content?.usage?.cost != null && typeof content.usage.cost === 'number') {
++        const eventCost = content?.usage?.cost;
++        if (eventCost != null && typeof eventCost === 'number' && eventCost > 0) {
+           sandbox.context!.cost += content.usage.cost;
+         }
+
+PROPOSAL 4: Document UI precision conventions [LOW PRIORITY]
+Simplicity: Simple
+
+Add a comment or documentation explaining:
+- Run-level costs (from DB): .toFixed(4) with $ prefix (microdollar precision)
+- Event-level costs (in-memory): .toFixed(2) without $ prefix (dollar precision)
+
+==============================================================================
+VERDICT
+==============================================================================
+
+MEDIUM-RISK COMMIT: The core implementation is sound and follows existing
+patterns. However, two critical issues need attention:
+
+1. audio-explain tool won't track costs (Issue 1) - Easy fix
+2. task_runs.cost is incomplete (Issue 2) - More involved fix
+
+The cost tracking for workflow/script runs is correct. The issue is that
+task runs (which use the agent loop) only save LLM orchestration costs,
+not tool execution costs.
+
+RECOMMENDED ACTIONS:
+1. CRITICAL: Fix audio-explain.ts to use usage: { cost: usage.cost }
+2. HIGH: Update task-worker to combine agent and tool costs
+3. LOW: Add validation for non-negative costs
+4. LOW: Document UI precision conventions
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Audio-explain cost tracking) - created specs/fix-audio-explain-cost-tracking.md
+- Issue #2 (Task-worker saves wrong cost source) - created specs/task-worker-include-tool-costs.md
+- Issue #3 (Inconsistent decimal precision) - created specs/standardize-cost-display-format.md
+- Issue #4 (No validation of negative costs) - skipped (negatives ok for future discounts/rebates)
+- Issue #5 (Floating-point precision) - skipped
+- Issue #6 (CLI cost tracking non-functional) - skipped (acceptable for dev tools)

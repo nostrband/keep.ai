@@ -1,0 +1,284 @@
+COMMIT REVIEW: 46c3dac
+========================
+Title: Implement retry tracking with lineage for failed runs
+Date: Fri Jan 16 17:47:23 2026 +0000
+Author: Claude Agent
+
+FILES CHANGED:
+- IMPLEMENTATION_PLAN.md (+21/-23 lines)
+- apps/web/src/components/ScriptRunDetailPage.tsx (+38/-7 lines)
+- apps/web/src/components/WorkflowDetailPage.tsx (+6 lines)
+- packages/agent/src/workflow-scheduler.ts (+23/-3 lines)
+- packages/agent/src/workflow-worker-signal.ts (+6/-2 lines)
+- packages/agent/src/workflow-worker.ts (+37/-7 lines)
+- packages/db/src/database.ts (+2 lines)
+- packages/db/src/migrations/v20.ts (+16 lines, NEW FILE)
+- packages/db/src/script-store.ts (+39/-6 lines)
+
+================================================================================
+SUMMARY OF CHANGES
+================================================================================
+
+This commit implements retry chain tracking per Spec 10 (Retry Failed Run),
+enabling users to see which runs are retries and link back to original failures.
+
+1. DATABASE MIGRATION (v20.ts)
+   - Added two new fields to script_runs table:
+     * retry_of TEXT NOT NULL DEFAULT '' (ID of original failed run)
+     * retry_count INTEGER NOT NULL DEFAULT 0 (which retry attempt)
+   - Properly uses crsql_begin_alter/crsql_commit_alter for CR-SQLite compatibility
+
+2. TYPE DEFINITIONS (script-store.ts)
+   - Extended ScriptRun interface with retry_of and retry_count fields
+   - Updated startScriptRun() signature to accept retry parameters
+   - Updated all 5 query methods to SELECT the new fields
+   - Added proper type casting with fallback defaults in all queries
+
+3. SIGNAL INTERFACE (workflow-worker-signal.ts)
+   - Added scriptRunId to WorkflowExecutionSignal
+   - Added originalRunId to WorkflowRetryState
+   - Enables tracking which specific run triggered a retry
+
+4. SCHEDULER CHANGES (workflow-scheduler.ts)
+   - Tracks originalRunId in retry state (lines 55-68)
+   - Passes retry info (originalRunId, retryCount) to worker on execution
+   - Enhanced debug logging to show retry chain info
+
+5. WORKER CHANGES (workflow-worker.ts)
+   - Updated executeWorkflow() to accept retryOf and retryCount params
+   - Updated processWorkflowScript() to pass retry info to startScriptRun()
+   - Added scriptRunId to all emitted signals (done, retry, needs_attention, etc.)
+   - This enables the scheduler to track which run triggered each signal
+
+6. UI CHANGES
+   - ScriptRunDetailPage.tsx: Shows "Retry #N" badge, link to original run
+   - WorkflowDetailPage.tsx: Shows "Retry #N" badge in runs list
+
+================================================================================
+POTENTIAL ISSUES
+================================================================================
+
+ISSUE 1: Empty String vs Proper Null Handling for originalRunId
+Severity: LOW
+Location: packages/agent/src/workflow-scheduler.ts:55-68
+
+The retry state initialization uses:
+```typescript
+const currentState = this.workflowRetryState.get(signal.workflowId) || {
+  retryCount: 0,
+  nextStart: 0,
+  originalRunId: signal.scriptRunId || '',  // <-- empty string fallback
+};
+```
+
+And the condition to set originalRunId:
+```typescript
+if (!currentState.originalRunId && signal.scriptRunId) {
+  currentState.originalRunId = signal.scriptRunId;
+}
+```
+
+EDGE CASE: If the first 'retry' signal arrives without scriptRunId (shouldn't
+happen with this commit, but could if code changes), originalRunId becomes
+empty string. Empty string is falsy, so subsequent signals with scriptRunId
+would update originalRunId - breaking the "track first failure" intent.
+
+The current code adds scriptRunId to all signals (lines 174, 218, 229, 265,
+279, 307, 319 in workflow-worker.ts), so this is unlikely to manifest. But
+the logic is fragile if signals ever get sent without scriptRunId.
+
+--------------------------------------------------------------------------------
+
+ISSUE 2: Potential Confusion in Debug Logs After Success
+Severity: VERY LOW
+Location: packages/agent/src/workflow-scheduler.ts:234
+
+The debug message shows:
+```typescript
+retryState ? `(retry #${retryState.retryCount} of ${retryState.originalRunId})` : '(fresh run)'
+```
+
+This checks retryState BEFORE execution. If a workflow:
+1. Fails (retryState set with originalRunId=A)
+2. Succeeds on retry (retryState cleared)
+3. Runs again via schedule and fails (new retryState with originalRunId=B)
+
+On step 3's first failure, retryState won't exist yet (it gets created on
+the 'retry' signal, not before execution), so it correctly shows "(fresh run)".
+
+However, on the SECOND retry of step 3, retryState exists and shows:
+`(retry #1 of B)` which is correct.
+
+Actually, reviewing more carefully, this works correctly. The retryState is
+checked before execution, and at that point it reflects whether THIS execution
+is a scheduled retry. The concern about stale data is unfounded.
+
+RESOLUTION: No issue, the logic is sound.
+
+--------------------------------------------------------------------------------
+
+ISSUE 3: Badge Conditional Has Redundant Check
+Severity: TRIVIAL
+Location: apps/web/src/components/ScriptRunDetailPage.tsx:51-53
+         apps/web/src/components/WorkflowDetailPage.tsx:526-528
+
+Both locations check:
+```typescript
+{run.retry_of && run.retry_count > 0 && (
+  <Badge>Retry #{run.retry_count}</Badge>
+)}
+```
+
+The `run.retry_count > 0` check is redundant because:
+- If retry_of is non-empty (truthy), retry_count should be >= 1
+- retry_count defaults to 0 only when retry_of is empty
+
+The condition works correctly but could be simplified to just:
+```typescript
+{run.retry_of && (
+  <Badge>Retry #{run.retry_count}</Badge>
+)}
+```
+
+However, the redundant check provides defensive programming against data
+inconsistency, which is arguably good practice.
+
+--------------------------------------------------------------------------------
+
+ISSUE 4: Missing Link from Original Run to Retries
+Severity: LOW (UX Gap)
+Location: apps/web/src/components/ScriptRunDetailPage.tsx
+
+The UI shows:
+- On retry run: Link to original run ("Retry of Run: <link>")
+
+But there's NO reverse navigation:
+- On original run: No list of retries that occurred
+
+If a user views the original failed run, they can't see which retries
+happened after. They must scroll through the run list to find them.
+
+--------------------------------------------------------------------------------
+
+ISSUE 5: No Index on retry_of Column
+Severity: LOW (Performance)
+Location: packages/db/src/migrations/v20.ts
+
+The migration adds columns but no index:
+```typescript
+await tx.exec(`ALTER TABLE script_runs ADD COLUMN retry_of text not null default ''`);
+```
+
+If future features query "find all retries of run X", this would require a
+full table scan. However, current code never filters by retry_of (confirmed
+by search), so this is a forward-looking concern only.
+
+================================================================================
+PROPOSALS
+================================================================================
+
+PROPOSAL 1: Defensive originalRunId Initialization
+Simplicity: Simple (1 line change)
+
+Change line 58 from:
+```typescript
+originalRunId: signal.scriptRunId || '',
+```
+To:
+```typescript
+originalRunId: '',  // Will be set below if this is first failure
+```
+
+This makes the initialization explicit and relies on the existing condition
+(lines 66-68) to set originalRunId from the first signal that has scriptRunId.
+
+The current code works, but this change makes intent clearer.
+
+--------------------------------------------------------------------------------
+
+PROPOSAL 2: Add Reverse Navigation (Retries of This Run)
+Simplicity: Medium (requires query + UI)
+
+1. Add method to script-store.ts:
+```typescript
+async getRetriesOfRun(originalRunId: string): Promise<ScriptRun[]> {
+  return this.db.db.execO<ScriptRun>(
+    `SELECT * FROM script_runs WHERE retry_of = ? ORDER BY retry_count ASC`,
+    [originalRunId]
+  );
+}
+```
+
+2. In ScriptRunDetailPage.tsx, if run.error exists and retry_of is empty
+   (meaning this is an original failed run), query for retries and display:
+   "Retries: Run #1, Run #2, ..." with links.
+
+This completes the bidirectional navigation of retry chains.
+
+NOTE: If implementing this, consider adding an index per Proposal 3.
+
+--------------------------------------------------------------------------------
+
+PROPOSAL 3: Add Index on retry_of (If Implementing Proposal 2)
+Simplicity: Simple (add to migration v20 or create v21)
+
+Create new migration:
+```typescript
+await tx.exec(`CREATE INDEX idx_script_runs_retry_of ON script_runs(retry_of)`);
+```
+
+Only needed if queries filter by retry_of. Not urgent for current codebase.
+
+--------------------------------------------------------------------------------
+
+PROPOSAL 4: Simplify Badge Condition (Optional)
+Simplicity: Trivial
+
+Change from:
+```typescript
+{run.retry_of && run.retry_count > 0 && (
+```
+To:
+```typescript
+{run.retry_of && (
+```
+
+The retry_count > 0 check is logically redundant when retry_of is set.
+However, keeping it as defensive programming is also reasonable.
+
+================================================================================
+OVERALL ASSESSMENT
+================================================================================
+
+This is a well-executed implementation of retry chain tracking. The changes
+span all necessary layers:
+- Database schema with proper CR-SQLite migration
+- Type definitions with correct types (string for retry_of, number for retry_count)
+- Signal interface extensions to pass scriptRunId
+- Scheduler state management for originalRunId tracking
+- Worker changes to pass retry info through to database
+- UI to display retry badges and links
+
+The implementation is consistent across all layers:
+- All 5 query methods in script-store.ts properly include the new fields
+- All signal emissions include scriptRunId
+- Type conversions use proper fallback defaults
+
+The identified issues are minor:
+- Redundant badge condition is defensive, not a bug
+- Missing reverse navigation is a UX enhancement, not a bug
+- No index on retry_of is only a concern if filtering is added later
+
+Quality: GOOD
+Completeness: HIGH
+Type Consistency: EXCELLENT
+Data Model: SOUND
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Empty string vs null for originalRunId) - skipped
+- Issue #2 (Debug log confusion) - not an issue after investigation
+- Issue #3 (Redundant badge check) - skipped
+- Issue #4 (Missing reverse navigation) - created specs/retry-reverse-navigation.md
+- Issue #5 (No index on retry_of column) - skipped
