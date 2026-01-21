@@ -628,14 +628,15 @@ This document tracks remaining work for a simple, lovable, and complete v1 relea
 
 ### 29. Chat Scroll Position Save Cleanup
 **Spec**: `chat-scroll-position-save-cleanup.md`
-**Status**: DEAD CODE STILL PRESENT
+**Status**: PARTIALLY FIXED (2026-01-21)
 
-**Action Items**:
-1. Add React Router's `<ScrollRestoration />` component
-2. Remove manual sessionStorage scroll save code
-3. Remove dead `handleBeforeUnload` function
+**Fix Applied**:
+1. Removed dead `handleBeforeUnload` function that was defined but never attached to any event listener
+2. Simplified the useEffect to only have the cleanup function that actually saves scroll position
 
-**Files**: `apps/web/src/App.tsx`, `apps/web/src/components/ChatInterface.tsx`
+**Note**: Full ScrollRestoration would require migrating from BrowserRouter/HashRouter to the data router API (createBrowserRouter), which is a significant refactor. The current sessionStorage-based approach works for in-app navigation and is kept intentionally.
+
+**Files**: `apps/web/src/components/ChatInterface.tsx`
 **Complexity**: Medium (2-3 hours)
 
 ---

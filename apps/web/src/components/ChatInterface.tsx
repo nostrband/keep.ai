@@ -127,17 +127,10 @@ export default function ChatInterface({
     }
   }, [chatId]);
 
-  // Save scroll position when navigating away
+  // Save scroll position when navigating away (cleanup runs on route change)
   useEffect(() => {
     const storageKey = getScrollStorageKey(chatId);
 
-    // Save current scroll position before navigating away
-    const handleBeforeUnload = () => {
-      const scrollTop = document.documentElement.scrollTop;
-      sessionStorage.setItem(storageKey, String(scrollTop));
-    };
-
-    // Also save when location changes (in-app navigation)
     return () => {
       const scrollTop = document.documentElement.scrollTop;
       sessionStorage.setItem(storageKey, String(scrollTop));
