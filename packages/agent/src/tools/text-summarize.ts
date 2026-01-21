@@ -4,7 +4,7 @@ import { EvalContext } from "../sandbox/sandbox";
 import { getEnv } from "../env";
 import { getTextModelName } from "../model";
 import debug from "debug";
-import { AuthError, LogicError, NetworkError, classifyHttpError, classifyGenericError, isClassifiedError } from "../errors";
+import { AuthError, LogicError, NetworkError, classifyHttpError, classifyGenericError, isClassifiedError, formatUsageForEvent } from "../errors";
 
 const debugTextSummarize = debug("TextSummarize");
 
@@ -118,7 +118,7 @@ ${text}`;
           inputLength: text.length,
           summaryLength: content.length,
           maxChars: max_chars,
-          usage: { cost: usage.cost },
+          ...formatUsageForEvent(usage),
         });
 
         return { summary: content };

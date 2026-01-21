@@ -349,3 +349,40 @@ export function classifyGoogleApiError(
 
   return classifyGenericError(err instanceof Error ? err : new Error(String(err)), source);
 }
+
+/**
+ * Type-safe usage data structure for tool events.
+ *
+ * This interface enforces the correct nested structure for cost tracking.
+ * The cost is accumulated from tool calls and saved with the event.
+ */
+export interface EventUsageData {
+  usage: {
+    cost: number;
+  };
+}
+
+/**
+ * Format usage data for tool events in a type-safe way.
+ *
+ * This helper enforces the correct nested structure `{ usage: { cost: number } }`
+ * that the cost tracking system expects. Using this helper prevents accidentally
+ * passing `usage` directly instead of the nested structure.
+ *
+ * @param usage The usage object from API response (e.g., OpenRouter)
+ * @returns Properly formatted usage data for createEvent
+ *
+ * @example
+ * // In a tool that makes API calls:
+ * await getContext().createEvent("text_generate", {
+ *   promptLength: prompt.length,
+ *   ...formatUsageForEvent(usage),
+ * });
+ */
+export function formatUsageForEvent(usage: { cost?: number } | undefined): EventUsageData {
+  return {
+    usage: {
+      cost: usage?.cost ?? 0,
+    },
+  };
+}

@@ -8,7 +8,7 @@ import { fileUtils } from "@app/node";
 import { detectBufferMime, mimeToExt } from "@app/node";
 import fs from "fs";
 import debug from "debug";
-import { AuthError, LogicError, NetworkError, PermissionError, classifyHttpError, classifyGenericError, isClassifiedError } from "../errors";
+import { AuthError, LogicError, NetworkError, PermissionError, classifyHttpError, classifyGenericError, isClassifiedError, formatUsageForEvent } from "../errors";
 
 const debugImg = debug("ImagesGenerate");
 
@@ -213,7 +213,7 @@ Generates images and saves them to files. Returns information about the generate
           aspect_ratio,
           count: generatedFiles.length,
           files: generatedFiles.map((f) => f.path),
-          usage: { cost: usage.cost },
+          ...formatUsageForEvent(usage),
         });
 
         return {

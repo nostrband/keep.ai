@@ -4,7 +4,7 @@ import { EvalContext } from "../sandbox/sandbox";
 import { getEnv } from "../env";
 import { getTextModelName } from "../model";
 import debug from "debug";
-import { AuthError, LogicError, NetworkError, classifyHttpError, classifyGenericError } from "../errors";
+import { AuthError, LogicError, NetworkError, classifyHttpError, classifyGenericError, formatUsageForEvent } from "../errors";
 
 const debugTextExtract = debug("TextExtract");
 
@@ -114,7 +114,7 @@ Output only valid JSON matching the schema, no additional text or markdown forma
           await getContext().createEvent("text_extract", {
             inputLength: text.length,
             output: data,
-            usage: { cost: usage.cost },
+            ...formatUsageForEvent(usage),
           });
 
           return { result: data };

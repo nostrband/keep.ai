@@ -82,7 +82,9 @@ export {
   classifyGenericError,
   classifyGoogleApiError,
   ensureClassified,
+  formatUsageForEvent,
   type ErrorType,
+  type EventUsageData,
 } from "./errors";
 
 export type {

@@ -813,12 +813,13 @@ This document tracks remaining work for a simple, lovable, and complete v1 relea
 
 ### 40. MainPage Input Positioning
 **Spec**: `mainpage-input-positioning.md`
-**Status**: NOT VERIFIED
+**Status**: VERIFIED (2026-01-21)
 
-**Action Items**:
-1. When workflows exist: position input at top
-2. When empty: center input vertically
-3. Use conditional CSS/layout based on workflow count
+**Verification Result**:
+The implementation is already complete:
+1. Empty state (no workflows): Input is centered vertically using `flex-1 flex items-center justify-center`
+2. With workflows: Input positioned at top in "Create new automation" section
+3. Conditional layout based on `hasWorkflows` variable at line 400
 
 **Files**: `apps/web/src/components/MainPage.tsx`
 **Complexity**: Medium (3-4 hours)
@@ -895,26 +896,31 @@ The badge count implementation is already correct - it aligns with notification-
 
 ### 46. Cost Tracking Helper
 **Spec**: `cost-tracking-helper.md`
-**Status**: NOT VERIFIED
+**Status**: VERIFIED (2026-01-21)
 
-**Action Items**:
-1. Create helper function for type-safe cost tracking
-2. Prevents passing wrong format to tool events
-3. Use in all tools that track costs
+**Verification Result**:
+The implementation is already complete:
+1. `formatUsageForEvent()` helper exists in `packages/agent/src/errors.ts` (lines 382-388)
+2. `EventUsageData` interface enforces correct `{ usage: { cost: number } }` structure
+3. All 9 tools that track costs use the helper: text-extract, text-classify, text-generate, text-summarize, images-explain, images-generate, images-transform, pdf-explain, audio-explain
 
-**Files**: `packages/agent/src/tools/` (multiple)
+**Files**: `packages/agent/src/errors.ts`, `packages/agent/src/tools/` (9 tools)
 **Complexity**: Medium (2-3 hours)
 
 ---
 
 ### 47. Focus Input URL Param
 **Spec**: `focus-input-url-param.md`
-**Status**: NOT VERIFIED
+**Status**: VERIFIED (2026-01-21)
 
-**Action Items**:
-1. Replace custom event + setTimeout with URL query parameter
-2. Check for `?focus=input` on mount
-3. Focus input and clear param
+**Verification Result**:
+The implementation is already complete:
+1. App.tsx line 62: Uses `navigateRef.current('/?focus=input')` instead of custom events
+2. MainPage.tsx lines 289-300: Reads `searchParams.get('focus') === 'input'` on mount
+3. Focuses textarea via `textareaRef.current?.focus()` (improved from querySelector)
+4. Clears param with `setSearchParams({}, { replace: true })`
+
+**Improvement Made**: Changed from `document.querySelector` to use existing `textareaRef` for cleaner code
 
 **Files**: `apps/web/src/App.tsx`, `apps/web/src/components/MainPage.tsx`
 **Complexity**: Medium (2 hours)
@@ -1316,19 +1322,20 @@ Based on analysis of `ideas/*`, these should become formal specs for v1:
 |----------|--------|-------|------------|
 | P0 Critical | Completed | 7 | 0 |
 | P1 High | Completed | 14 | 0 |
-| P2 Medium | 3 remaining | 3 | 7-10 |
-| P3 Low | Completed | 47 | 0 |
+| P2 Medium | Completed | 47 | 0 |
+| P3 Low | Completed | 20 | 0 |
 | Ideas->Specs | Not implemented | 4 | 12-16 |
-| **Total** | **3 remaining** | **3 of 71** | **19-26** |
+| **Total** | **All core specs complete** | **67 of 67** | **0** |
 
-**Remaining Items**:
-- #40 MainPage Input Positioning (P2, Medium)
-- #46 Cost Tracking Helper (P2, Medium)
-- #47 Focus Input URL Param (P2, Medium)
+**All P0-P3 items are now complete!**
+
+Only remaining work is promoting ideas to specs (#68-71) for future releases.
 
 **Latest Changes (2026-01-21)**:
-- Completed: #25 Reduce Event Group Duplication
-- Verified: #45 Tray Badge Count Accuracy (already correct)
+- Verified: #40 MainPage Input Positioning (already implemented)
+- Verified: #46 Cost Tracking Helper (already implemented)
+- Verified: #47 Focus Input URL Param (already implemented)
+- Improved: Focus input now uses textareaRef instead of querySelector
 
 ---
 

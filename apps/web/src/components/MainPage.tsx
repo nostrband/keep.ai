@@ -1,12 +1,11 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useWorkflows } from "../hooks/dbScriptReads";
 import { useTasks } from "../hooks/dbTaskReads";
 import { useFileUpload } from "../hooks/useFileUpload";
 import { useDbQuery } from "../hooks/dbQuery";
 import { useAutonomyPreference } from "../hooks/useAutonomyPreference";
 import SharedHeader from "./SharedHeader";
-import { FOCUS_INPUT_EVENT } from "../App";
 import { WorkflowStatusBadge } from "./StatusBadge";
 import {
   PromptInput,
@@ -150,16 +149,15 @@ function formatNextRun(date: Date): string {
 
 export default function MainPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { api } = useDbQuery();
   const { data: workflows = [], isLoading: isLoadingWorkflows } = useWorkflows();
   const { data: tasks = [] } = useTasks(false); // Get non-finished tasks
   const { mode: autonomyMode, toggleMode: toggleAutonomyMode, isLoaded: isAutonomyLoaded } = useAutonomyPreference();
   const [input, setInput] = useState("");
-  const [promptHeight, setPromptHeight] = useState(0);
   const [latestRuns, setLatestRuns] = useState<Record<string, ScriptRun>>({});
   const [showAttentionOnly, setShowAttentionOnly] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const promptContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { uploadFiles, uploadState } = useFileUpload();
 
@@ -288,51 +286,169 @@ export default function MainPage() {
     }
   }, [api, navigate, uploadFiles]);
 
-  // Track prompt input height changes
+  // Handle focus=input URL param (from Electron tray menu "New automation...")
   useEffect(() => {
-    const container = promptContainerRef.current;
-    if (!container) return;
+    if (searchParams.get('focus') === 'input') {
+      // Focus the textarea using the ref
+      textareaRef.current?.focus();
+      // Clear the URL param to allow re-triggering
+      setSearchParams({}, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
-    const resizeObserver = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        setPromptHeight(entry.contentRect.height);
-      }
-    });
+  // Shared input component to avoid duplication
+  const renderPromptInput = () => (
+    <>
+      {/* Upload progress indicator */}
+      {uploadState.isUploading && uploadState.uploadProgress && (
+        <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+          <div className="flex items-center justify-between text-sm text-blue-600 mb-2">
+            <span>Uploading {uploadState.uploadProgress.fileName}...</span>
+            <span>{Math.round(uploadState.uploadProgress.progress)}%</span>
+          </div>
+          <div className="w-full bg-blue-200 rounded-full h-2">
+            <div
+              className="bg-blue-600 h-2 rounded-full transition-all duration-200"
+              style={{ width: `${uploadState.uploadProgress.progress}%` }}
+            />
+          </div>
+        </div>
+      )}
 
-    resizeObserver.observe(container);
-    setPromptHeight(container.getBoundingClientRect().height);
+      {/* Upload error indicator */}
+      {uploadState.error && (
+        <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-lg">
+          <p className="text-sm text-red-600">{uploadState.error}</p>
+        </div>
+      )}
 
-    return () => {
-      resizeObserver.disconnect();
-    };
-  }, []);
+      <PromptInput
+        onSubmit={handleSubmit}
+        globalDrop
+        multiple
+      >
+        <PromptInputBody>
+          <PromptInputAttachments>
+            {(attachment) => <PromptInputAttachment data={attachment} />}
+          </PromptInputAttachments>
+          <PromptInputTextarea
+            ref={textareaRef}
+            onChange={(e) => setInput(e.target.value)}
+            value={input}
+            placeholder="What would you like me to help automate?"
+          />
+        </PromptInputBody>
+        <PromptInputToolbar>
+          <PromptInputTools>
+            <PromptInputButton
+              onClick={() => {
+                const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+                fileInput?.click();
+              }}
+              aria-label="Add files"
+            >
+              <PlusIcon className="size-4" />
+            </PromptInputButton>
+            {/* Autonomy Toggle - inside toolbar */}
+            {isAutonomyLoaded && (
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={toggleAutonomyMode}
+                      className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700 transition-colors py-1 px-2 rounded hover:bg-gray-100"
+                    >
+                      <span>{autonomyMode === 'ai_decides' ? 'AI decides' : 'Coordinate'}</span>
+                      <Info className="size-3" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="max-w-xs">
+                    <p className="font-medium mb-1">
+                      {autonomyMode === 'ai_decides' ? 'AI Decides Details' : 'Coordinate With Me'}
+                    </p>
+                    <p className="text-xs text-gray-600">
+                      {autonomyMode === 'ai_decides'
+                        ? 'The AI will minimize questions and use safe defaults to complete tasks quickly.'
+                        : 'The AI will ask clarifying questions before proceeding with key decisions.'}
+                    </p>
+                    <p className="text-xs text-gray-500 mt-1">Click to switch</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            )}
+          </PromptInputTools>
+          <PromptInputSubmit
+            disabled={(!input && !uploadState.isUploading) || uploadState.isUploading || isSubmitting}
+            status={uploadState.isUploading || isSubmitting ? "submitted" : undefined}
+          />
+        </PromptInputToolbar>
+      </PromptInput>
 
-  // Listen for focus-input event from Electron tray menu (via App.tsx)
-  useEffect(() => {
-    const handleFocusInput = () => {
-      // Find the textarea by its name attribute (set by PromptInputTextarea)
-      const textarea = document.querySelector('textarea[name="message"]') as HTMLTextAreaElement;
-      if (textarea) {
-        textarea.focus();
-      }
-    };
+      {/* Press Enter hint - shown when user has typed something */}
+      {input.trim() && !uploadState.isUploading && !isSubmitting && (
+        <div className="text-center text-xs text-gray-400 mt-2">
+          Press <kbd className="px-1.5 py-0.5 bg-gray-100 rounded border border-gray-200 font-mono">Enter</kbd> to create automation
+        </div>
+      )}
+    </>
+  );
 
-    window.addEventListener(FOCUS_INPUT_EVENT, handleFocusInput);
-    return () => {
-      window.removeEventListener(FOCUS_INPUT_EVENT, handleFocusInput);
-    };
-  }, []);
+  // Determine if we have workflows (non-empty state)
+  const hasWorkflows = !isLoadingWorkflows && sortedWorkflows.length > 0;
 
+  // Empty state: center input vertically with examples
+  if (!hasWorkflows && !isLoadingWorkflows && !showAttentionOnly) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex flex-col">
+        <SharedHeader title="Keep.AI" />
+
+        {/* Centered content */}
+        <div className="flex-1 flex items-center justify-center px-6">
+          <div className="w-full max-w-lg text-center">
+            <Sparkles className="size-12 text-gray-300 mx-auto mb-4" />
+            <div className="text-gray-700 text-lg font-medium mb-2">Create your first automation</div>
+            <div className="text-gray-400 text-sm mb-6">
+              Type below or try one of these examples
+            </div>
+
+            {/* Input area */}
+            <div className="mb-6">
+              {renderPromptInput()}
+            </div>
+
+            {/* Example suggestions */}
+            <div className="flex flex-wrap justify-center gap-2">
+              {EXAMPLE_SUGGESTIONS.map((suggestion, index) => (
+                <Suggestion
+                  key={index}
+                  suggestion={suggestion}
+                  onClick={() => {
+                    setInput(suggestion);
+                    textareaRef.current?.focus();
+                  }}
+                  className="text-xs"
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // With workflows: input at top, then workflow list
   return (
     <div className="min-h-screen bg-gray-50">
       <SharedHeader title="Keep.AI" />
 
-      {/* Main content with bottom padding for fixed input */}
-      <div
-        className="pt-6 transition-[padding-bottom] duration-200 ease-out"
-        style={{ paddingBottom: Math.max(144, promptHeight + 32) }}
-      >
+      <div className="pt-6 pb-6">
         <div className="max-w-4xl mx-auto px-6">
+          {/* Create new automation section */}
+          <div className="mb-6">
+            <h2 className="text-sm font-medium text-gray-500 mb-3">Create new automation</h2>
+            {renderPromptInput()}
+          </div>
+
           {/* Attention Banner */}
           {attentionCount > 0 && (
             <button
@@ -353,170 +469,51 @@ export default function MainPage() {
             </button>
           )}
 
-          {/* Workflow List */}
-          {isLoadingWorkflows ? (
-            <div className="flex items-center justify-center py-8">
-              <div>Loading workflows...</div>
-            </div>
-          ) : displayedWorkflows.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12 text-center">
-              {showAttentionOnly ? (
-                <>
-                  <div className="text-gray-500 mb-2">No workflows need attention</div>
-                  <div className="text-gray-400 text-sm">All automations are running smoothly</div>
-                </>
-              ) : (
-                <>
-                  <Sparkles className="size-12 text-gray-300 mb-4" />
-                  <div className="text-gray-500 text-lg mb-2">No automations yet</div>
-                  <div className="text-gray-400 text-sm mb-6">
-                    Type below or try one of these examples
-                  </div>
-                  <div className="flex flex-wrap justify-center gap-2 max-w-lg">
-                    {EXAMPLE_SUGGESTIONS.map((suggestion, index) => (
-                      <Suggestion
-                        key={index}
-                        suggestion={suggestion}
-                        onClick={() => {
-                          setInput(suggestion);
-                          // Focus textarea after setting input
-                          textareaRef.current?.focus();
-                        }}
-                        className="text-xs"
-                      />
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {displayedWorkflows.map((workflow) => (
-                <Link
-                  key={workflow.id}
-                  to={`/workflows/${workflow.id}`}
-                  className={`block p-4 bg-white rounded-lg border transition-all hover:shadow-sm ${
-                    workflow.needsAttention
-                      ? "border-l-4 border-l-red-500 border-t-gray-200 border-r-gray-200 border-b-gray-200"
-                      : "border-gray-200 hover:border-gray-300"
-                  }`}
-                >
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-1">
-                        <h3 className="font-medium text-gray-900">
-                          {workflow.title || `Workflow ${workflow.id.slice(0, 8)}`}
-                        </h3>
-                        <WorkflowStatusBadge status={workflow.status} />
-                      </div>
-                      <div className={`text-sm ${
-                        workflow.needsAttention ? "text-red-600" : "text-gray-500"
-                      }`}>
-                        {workflow.secondaryText}
+          {/* Workflows section */}
+          <div>
+            <h2 className="text-sm font-medium text-gray-500 mb-3">Workflows</h2>
+
+            {isLoadingWorkflows ? (
+              <div className="flex items-center justify-center py-8">
+                <div>Loading workflows...</div>
+              </div>
+            ) : displayedWorkflows.length === 0 && showAttentionOnly ? (
+              <div className="flex flex-col items-center justify-center py-12 text-center">
+                <div className="text-gray-500 mb-2">No workflows need attention</div>
+                <div className="text-gray-400 text-sm">All automations are running smoothly</div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {displayedWorkflows.map((workflow) => (
+                  <Link
+                    key={workflow.id}
+                    to={`/workflows/${workflow.id}`}
+                    className={`block p-4 bg-white rounded-lg border transition-all hover:shadow-sm ${
+                      workflow.needsAttention
+                        ? "border-l-4 border-l-red-500 border-t-gray-200 border-r-gray-200 border-b-gray-200"
+                        : "border-gray-200 hover:border-gray-300"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-1">
+                          <h3 className="font-medium text-gray-900">
+                            {workflow.title || `Workflow ${workflow.id.slice(0, 8)}`}
+                          </h3>
+                          <WorkflowStatusBadge status={workflow.status} />
+                        </div>
+                        <div className={`text-sm ${
+                          workflow.needsAttention ? "text-red-600" : "text-gray-500"
+                        }`}>
+                          {workflow.secondaryText}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                </Link>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Fixed prompt input at viewport bottom */}
-      <div className="fixed bottom-0 left-0 right-0 z-10 bg-gray-50 border-t border-gray-200">
-        <div ref={promptContainerRef} className="max-w-4xl mx-auto px-6 py-4">
-          {/* Upload progress indicator */}
-          {uploadState.isUploading && uploadState.uploadProgress && (
-            <div className="mb-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-              <div className="flex items-center justify-between text-sm text-blue-600 mb-2">
-                <span>Uploading {uploadState.uploadProgress.fileName}...</span>
-                <span>{Math.round(uploadState.uploadProgress.progress)}%</span>
+                  </Link>
+                ))}
               </div>
-              <div className="w-full bg-blue-200 rounded-full h-2">
-                <div
-                  className="bg-blue-600 h-2 rounded-full transition-all duration-200"
-                  style={{ width: `${uploadState.uploadProgress.progress}%` }}
-                />
-              </div>
-            </div>
-          )}
-
-          {/* Upload error indicator */}
-          {uploadState.error && (
-            <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-lg">
-              <p className="text-sm text-red-600">{uploadState.error}</p>
-            </div>
-          )}
-
-          <PromptInput
-            onSubmit={handleSubmit}
-            globalDrop
-            multiple
-          >
-            <PromptInputBody>
-              <PromptInputAttachments>
-                {(attachment) => <PromptInputAttachment data={attachment} />}
-              </PromptInputAttachments>
-              <PromptInputTextarea
-                ref={textareaRef}
-                onChange={(e) => setInput(e.target.value)}
-                value={input}
-                placeholder="What would you like me to help automate?"
-              />
-            </PromptInputBody>
-            <PromptInputToolbar>
-              <PromptInputTools>
-                <PromptInputButton
-                  onClick={() => {
-                    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
-                    fileInput?.click();
-                  }}
-                  aria-label="Add files"
-                >
-                  <PlusIcon className="size-4" />
-                </PromptInputButton>
-                {/* Autonomy Toggle - inside toolbar */}
-                {isAutonomyLoaded && (
-                  <TooltipProvider>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button
-                          onClick={toggleAutonomyMode}
-                          className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700 transition-colors py-1 px-2 rounded hover:bg-gray-100"
-                        >
-                          <span>{autonomyMode === 'ai_decides' ? 'AI decides' : 'Coordinate'}</span>
-                          <Info className="size-3" />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent side="top" className="max-w-xs">
-                        <p className="font-medium mb-1">
-                          {autonomyMode === 'ai_decides' ? 'AI Decides Details' : 'Coordinate With Me'}
-                        </p>
-                        <p className="text-xs text-gray-600">
-                          {autonomyMode === 'ai_decides'
-                            ? 'The AI will minimize questions and use safe defaults to complete tasks quickly.'
-                            : 'The AI will ask clarifying questions before proceeding with key decisions.'}
-                        </p>
-                        <p className="text-xs text-gray-500 mt-1">Click to switch</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
-                )}
-              </PromptInputTools>
-              <PromptInputSubmit
-                disabled={(!input && !uploadState.isUploading) || uploadState.isUploading || isSubmitting}
-                status={uploadState.isUploading || isSubmitting ? "submitted" : undefined}
-              />
-            </PromptInputToolbar>
-          </PromptInput>
-
-          {/* Press Enter hint - shown when user has typed something */}
-          {input.trim() && !uploadState.isUploading && !isSubmitting && (
-            <div className="text-center text-xs text-gray-400 mt-2">
-              Press <kbd className="px-1.5 py-0.5 bg-gray-100 rounded border border-gray-200 font-mono">Enter</kbd> to create automation
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
     </div>

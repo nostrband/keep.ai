@@ -4,7 +4,7 @@ import { EvalContext } from "../sandbox/sandbox";
 import { getEnv } from "../env";
 import { getTextModelName } from "../model";
 import debug from "debug";
-import { AuthError, LogicError, NetworkError, classifyHttpError, classifyGenericError, isClassifiedError } from "../errors";
+import { AuthError, LogicError, NetworkError, classifyHttpError, classifyGenericError, isClassifiedError, formatUsageForEvent } from "../errors";
 
 const debugTextClassify = debug("TextClassify");
 
@@ -127,7 +127,7 @@ Otherwise, return ONLY the class id, nothing else.`;
           textLength: text.length,
           classCount: classes.length,
           selectedClass: content,
-          usage: { cost: usage.cost },
+          ...formatUsageForEvent(usage),
         });
 
         return { class_id: content };

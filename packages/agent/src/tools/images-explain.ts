@@ -5,7 +5,7 @@ import { EvalContext } from "../sandbox/sandbox";
 import { getEnv } from "../env";
 import { fileUtils } from "@app/node";
 import debug from "debug";
-import { AuthError, LogicError, NetworkError, PermissionError, classifyHttpError, classifyGenericError, isClassifiedError } from "../errors";
+import { AuthError, LogicError, NetworkError, PermissionError, classifyHttpError, classifyGenericError, isClassifiedError, formatUsageForEvent } from "../errors";
 
 const debugImgExplain = debug("ImagesExplain");
 
@@ -198,7 +198,7 @@ Supports png, jpeg, webp and gif image formats.`,
           explanation:
             explanation.substring(0, 200) +
             (explanation.length > 200 ? "..." : ""),
-          usage: { cost: usage.cost },
+          ...formatUsageForEvent(usage),
         });
 
         return {

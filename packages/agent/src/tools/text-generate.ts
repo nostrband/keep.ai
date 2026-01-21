@@ -4,7 +4,7 @@ import { EvalContext } from "../sandbox/sandbox";
 import { getEnv } from "../env";
 import { getModelName } from "../model";
 import debug from "debug";
-import { AuthError, LogicError, NetworkError, classifyHttpError, classifyGenericError, isClassifiedError } from "../errors";
+import { AuthError, LogicError, NetworkError, classifyHttpError, classifyGenericError, isClassifiedError, formatUsageForEvent } from "../errors";
 
 const debugTextGenerate = debug("TextGenerate");
 
@@ -118,7 +118,7 @@ If the prompt is malformed, unclear, inappropriate, or you cannot fulfill the re
           generatedLength: content.length,
           temperature,
           maxChars: max_chars,
-          usage: { cost: usage.cost },
+          ...formatUsageForEvent(usage),
         });
 
         return { text: content };

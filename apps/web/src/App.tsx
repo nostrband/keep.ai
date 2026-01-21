@@ -5,7 +5,6 @@ import {
   Route,
   Navigate,
   useNavigate,
-  useLocation,
 } from "react-router-dom";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { APP_UPDATE_EVENT } from "./main";
@@ -40,18 +39,13 @@ import { CLERK_PUBLISHABLE_KEY } from "./constants/auth";
 declare const __SERVERLESS__: boolean;
 declare const __ELECTRON__: boolean;
 
-// Custom event for focus-input - MainPage listens for this
-const FOCUS_INPUT_EVENT = 'keep-ai-focus-input';
-
 // Component to handle electron-specific IPC events (navigation, focus-input, pause-all)
 function ElectronIPCHandler() {
   const navigate = useNavigate();
-  const location = useLocation();
   const { api } = useDbQuery();
 
   // Use refs to hold current values so the effect doesn't re-run on every render
   const navigateRef = useRef(navigate);
-  const locationRef = useRef(location);
   const apiRef = useRef(api);
 
   // Keep refs updated with current values
@@ -59,23 +53,13 @@ function ElectronIPCHandler() {
     navigateRef.current = navigate;
   });
   useEffect(() => {
-    locationRef.current = location;
-  });
-  useEffect(() => {
     apiRef.current = api;
   });
 
   // Handle focus-input from tray menu "New automation..."
   const handleFocusInput = useCallback(() => {
-    // Navigate to main page if not already there
-    if (locationRef.current.pathname !== '/') {
-      navigateRef.current('/');
-    }
-    // Dispatch custom event for MainPage to focus the input
-    // Small delay to allow navigation to complete
-    setTimeout(() => {
-      window.dispatchEvent(new CustomEvent(FOCUS_INPUT_EVENT));
-    }, 100);
+    // Navigate to main page with focus param - MainPage will handle the focus
+    navigateRef.current('/?focus=input');
   }, []);
 
   // Handle pause-all-automations from tray menu
@@ -145,9 +129,6 @@ function ElectronIPCHandler() {
 
   return null;
 }
-
-// Export the custom event name for MainPage to use
-export { FOCUS_INPUT_EVENT };
 
 // Banner shown when the app has been updated via service worker
 function AppUpdateBanner() {
