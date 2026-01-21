@@ -88,12 +88,36 @@ function ElectronIPCHandler() {
 
       if (count === 0) {
         console.debug('No active workflows to pause');
+        // Show OS notification even for "no workflows to pause" case
+        if (window.electronAPI) {
+          await window.electronAPI.showNotification({
+            title: 'No automations to pause',
+            body: 'All automations are already paused or there are no active automations.',
+          });
+        }
         return;
       }
 
       console.debug(`Paused ${count} workflows`);
+
+      // Show OS notification with the count
+      if (window.electronAPI) {
+        const workflowWord = count === 1 ? 'automation' : 'automations';
+        await window.electronAPI.showNotification({
+          title: `Paused ${count} ${workflowWord}`,
+          body: `All ${workflowWord} have been paused. They will not run until you resume them.`,
+        });
+      }
     } catch (error) {
       console.error('Failed to pause all automations:', error);
+
+      // Show error notification
+      if (window.electronAPI) {
+        await window.electronAPI.showNotification({
+          title: 'Failed to pause automations',
+          body: error instanceof Error ? error.message : 'An unexpected error occurred.',
+        });
+      }
     }
   }, []);
 

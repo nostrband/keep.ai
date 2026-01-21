@@ -651,12 +651,21 @@ This document tracks remaining work for a simple, lovable, and complete v1 relea
 
 ### 31. Pause All User Feedback
 **Spec**: `pause-all-user-feedback.md`
-**Status**: NOT IMPLEMENTED
+**Status**: FIXED (2026-01-21)
+**Problem**: When user clicks "Pause all automations" from tray menu, there's no confirmation.
 
-**Action Items**:
-1. After pause-all completes, show toast notification
-2. Include count: "Paused N workflows"
-3. Consider using existing notification system
+**Fix Applied**:
+1. Added OS notifications via `window.electronAPI.showNotification()` in the pause-all handler
+2. Three cases handled:
+   - Success: "Paused N automations" with explanation
+   - No workflows: "No automations to pause" with explanation
+   - Error: "Failed to pause automations" with error message
+3. Used singular/plural form based on count ("1 automation" vs "5 automations")
+
+**Benefits**:
+- Users see confirmation of their action even if app window isn't visible
+- Clear feedback distinguishes between success, no-op, and error cases
+- Works from tray menu context where app window may be hidden
 
 **Files**: `apps/web/src/App.tsx`
 **Complexity**: Medium (2-3 hours)
