@@ -31,6 +31,82 @@ interface TaskEventGroupProps {
   events: TaskEvent[];
 }
 
+// Header content extracted to module scope to avoid recreation on every render
+// This allows React to recognize component identity across renders and enables memoization
+interface TaskHeaderContentProps {
+  taskType: string | undefined;
+  taskTitle: string;
+  duration: string | null;
+  steps: number | undefined;
+  totalCost: number;
+  onViewTask: (e: React.MouseEvent) => void;
+}
+
+function TaskHeaderContent({
+  taskType,
+  taskTitle,
+  duration,
+  steps,
+  totalCost,
+  onViewTask,
+}: TaskHeaderContentProps) {
+  return (
+    <>
+      <div className="flex items-center flex-1 min-w-0 gap-2">
+        <span className="text-sm text-gray-600">
+          {taskType === "worker" || taskType === "planner" ? (
+            <>
+              ⚙ {taskType === "worker" ? "Working" : "Planning"}:{" "}
+              <span className="text-gray-600">{taskTitle}</span>
+            </>
+          ) : (
+            <>💭 Replying</>
+          )}
+        </span>
+        {/* Metadata: time, steps, cost */}
+        <div className="flex items-center gap-2 text-xs text-gray-400">
+          {duration && (
+            <span className="flex items-center gap-1">
+              <span>🕐</span>
+              <span>{duration}</span>
+            </span>
+          )}
+          {steps != null && (
+            <span className="flex items-center gap-1">
+              <span>📈</span>
+              <span>{steps}</span>
+            </span>
+          )}
+          {totalCost > 0 && (
+            <span className="flex items-center gap-1">
+              <span>💵</span>
+              <span>{totalCost.toFixed(2)}</span>
+            </span>
+          )}
+        </div>
+      </div>
+
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            onClick={(e) => e.stopPropagation()}
+            className="ml-2 px-2 py-1 text-gray-400 hover:text-gray-600 flex-shrink-0"
+            aria-label="Task actions"
+          >
+            ···
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem onClick={onViewTask}>
+            <span className="mr-2">👁️</span>
+            View task
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </>
+  );
+}
+
 export function TaskEventGroup({ taskId, events }: TaskEventGroupProps) {
   const navigate = useNavigate();
   const { data: task } = useTask(taskId);
@@ -145,63 +221,6 @@ export function TaskEventGroup({ taskId, events }: TaskEventGroupProps) {
   // Check if this is an empty group (only task_run events)
   const isEmpty = allVisibleEvents.length === 0;
 
-  // Shared header content component to avoid duplication
-  const HeaderContent = () => (
-    <>
-      <div className="flex items-center flex-1 min-w-0 gap-2">
-        <span className="text-sm text-gray-600">
-          {task?.type === "worker" || task?.type === "planner" ? (
-            <>
-              ⚙ {task?.type === "worker" ? "Working" : "Planning"}:{" "}
-              <span className="text-gray-600">{taskTitle}</span>
-            </>
-          ) : (
-            <>💭 Replying</>
-          )}
-        </span>
-        {/* Metadata: time, steps, cost */}
-        <div className="flex items-center gap-2 text-xs text-gray-400">
-          {duration && (
-            <span className="flex items-center gap-1">
-              <span>🕐</span>
-              <span>{duration}</span>
-            </span>
-          )}
-          {steps != null && (
-            <span className="flex items-center gap-1">
-              <span>📈</span>
-              <span>{steps}</span>
-            </span>
-          )}
-          {totalCost > 0 && (
-            <span className="flex items-center gap-1">
-              <span>💵</span>
-              <span>{totalCost.toFixed(2)}</span>
-            </span>
-          )}
-        </div>
-      </div>
-
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button
-            onClick={(e) => e.stopPropagation()}
-            className="ml-2 px-2 py-1 text-gray-400 hover:text-gray-600 flex-shrink-0"
-            aria-label="Task actions"
-          >
-            ···
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuItem onClick={handleViewTask}>
-            <span className="mr-2">👁️</span>
-            View task
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </>
-  );
-
   // Error styling: red left border on container, error-tinted header
   const containerClass = `mx-0 my-3 border bg-gray-50 rounded-lg ${
     hasError ? "border-red-200 border-l-4 border-l-red-500" : "border-gray-200"
@@ -223,11 +242,25 @@ export function TaskEventGroup({ taskId, events }: TaskEventGroupProps) {
           }
           className={`${headerBaseClass} hover:bg-gray-100 cursor-pointer transition-colors duration-200`}
         >
-          <HeaderContent />
+          <TaskHeaderContent
+            taskType={task?.type}
+            taskTitle={taskTitle}
+            duration={duration}
+            steps={steps}
+            totalCost={totalCost}
+            onViewTask={handleViewTask}
+          />
         </Link>
       ) : (
         <div className={headerBaseClass}>
-          <HeaderContent />
+          <TaskHeaderContent
+            taskType={task?.type}
+            taskTitle={taskTitle}
+            duration={duration}
+            steps={steps}
+            totalCost={totalCost}
+            onViewTask={handleViewTask}
+          />
         </div>
       )}
 

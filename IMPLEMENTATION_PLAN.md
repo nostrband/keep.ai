@@ -963,11 +963,14 @@ This document tracks remaining work for a simple, lovable, and complete v1 relea
 
 ### 52. TaskEventGroup Header Refactor
 **Spec**: `taskeventgroup-header-refactor.md`
-**Status**: NOT VERIFIED
+**Status**: FIXED (2026-01-21)
+**Problem**: HeaderContent defined inline inside parent component, recreated on every render.
 
-**Action Items**:
-1. Extract inline HeaderContent component to module scope
-2. Prevents recreation on every render
+**Fix Applied**:
+1. Extracted `TaskHeaderContent` component to module scope
+2. Created `TaskHeaderContentProps` interface with explicit props for: taskType, taskTitle, duration, steps, totalCost, onViewTask
+3. Updated both usages (Link and div versions) to pass props explicitly
+4. Component identity is now stable across renders, enabling memoization if needed
 
 **Files**: `apps/web/src/components/TaskEventGroup.tsx`
 **Complexity**: Low (1 hour)
