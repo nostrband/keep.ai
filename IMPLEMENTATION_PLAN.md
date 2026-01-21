@@ -958,11 +958,10 @@ This document tracks remaining work for a simple, lovable, and complete v1 relea
 
 ### 59. App Update Banner Reload Button
 **Spec**: `app-update-banner-reload-button.md`
-**Status**: NOT VERIFIED
+**Status**: FIXED (2026-01-21)
 
-**Action Items**:
-1. Add "Reload" button to update banner
-2. Button calls `window.location.reload()`
+**Fix Applied**:
+Added "Reload" button to AppUpdateBanner that calls window.location.reload()
 
 **Files**: `apps/web/src/App.tsx` (AppUpdateBanner component)
 **Complexity**: Trivial (15 min)
@@ -971,10 +970,10 @@ This document tracks remaining work for a simple, lovable, and complete v1 relea
 
 ### 60. App Update Banner Z-Index
 **Spec**: `app-update-banner-z-index.md`
-**Status**: NOT VERIFIED
+**Status**: FIXED (2026-01-21)
 
-**Action Items**:
-1. Increase z-index above modal backdrop (z-60 or higher)
+**Fix Applied**:
+Changed z-index from z-50 to z-[60] to appear above modal dialogs
 
 **Files**: `apps/web/src/App.tsx`
 **Complexity**: Trivial (5 min)
@@ -996,11 +995,10 @@ This document tracks remaining work for a simple, lovable, and complete v1 relea
 
 ### 62. Workflow Detail Clear Success on Warning
 **Spec**: `workflow-detail-clear-success-on-warning.md`
-**Status**: NOT VERIFIED
+**Status**: FIXED (2026-01-21)
 
-**Action Items**:
-1. In showWarning(), also call setSuccessMessage(null)
-2. Prevents both messages appearing
+**Fix Applied**:
+Added setSuccessMessage("") to showWarning() function to clear success message when showing warning
 
 **Files**: `apps/web/src/components/WorkflowDetailPage.tsx`
 **Complexity**: Trivial (5 min)
@@ -1009,11 +1007,10 @@ This document tracks remaining work for a simple, lovable, and complete v1 relea
 
 ### 63. CodeBlock Timeout Null Assignment
 **Spec**: `codeblock-timeout-null-assignment.md`
-**Status**: NOT VERIFIED
+**Status**: ALREADY FIXED
 
-**Action Items**:
-1. Set timeout ref to null in callback
-2. Consistent with cleanup pattern
+**Fix Applied**:
+Verified that copyTimeoutRef.current = null is already present in the timeout callback at line 146
 
 **Files**: `apps/web/src/components/ui/code-block.tsx`
 **Complexity**: Trivial (5 min)

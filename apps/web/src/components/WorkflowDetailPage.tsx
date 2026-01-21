@@ -85,6 +85,7 @@ export default function WorkflowDetailPage() {
     if (warningTimeoutRef.current) {
       clearTimeout(warningTimeoutRef.current);
     }
+    setSuccessMessage(""); // Clear success message when showing warning
     setWarningMessage(message);
     warningTimeoutRef.current = setTimeout(() => {
       setWarningMessage("");

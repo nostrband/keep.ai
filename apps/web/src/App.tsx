@@ -143,17 +143,25 @@ function AppUpdateBanner() {
   if (!showBanner) return null;
 
   return (
-    <div className="fixed top-0 left-0 right-0 bg-blue-600 text-white px-4 py-2 text-sm flex items-center justify-between z-50 shadow-md">
+    <div className="fixed top-0 left-0 right-0 bg-blue-600 text-white px-4 py-2 text-sm flex items-center justify-between z-[60] shadow-md">
       <span>App updated to a new version</span>
-      <button
-        onClick={() => setShowBanner(false)}
-        className="ml-4 p-1 hover:bg-blue-700 rounded"
-        aria-label="Dismiss"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-          <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-        </svg>
-      </button>
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => window.location.reload()}
+          className="px-3 py-1 bg-white text-blue-600 rounded hover:bg-blue-50 font-medium"
+        >
+          Reload
+        </button>
+        <button
+          onClick={() => setShowBanner(false)}
+          className="p-1 hover:bg-blue-700 rounded"
+          aria-label="Dismiss"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+            <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+          </svg>
+        </button>
+      </div>
     </div>
   );
 }
