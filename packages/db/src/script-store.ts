@@ -735,4 +735,28 @@ export class ScriptStore {
       values
     );
   }
+
+  /**
+   * Pause all active workflows in a single atomic database operation.
+   * Returns the number of workflows that were paused.
+   * This is more efficient than fetching and updating one-by-one and avoids race conditions.
+   */
+  async pauseAllWorkflows(tx?: DBInterface): Promise<number> {
+    const db = tx || this.db.db;
+
+    // First count how many will be affected
+    const countResult = await db.execO<{ count: number }>(
+      `SELECT COUNT(*) as count FROM workflows WHERE status = 'active'`
+    );
+    const count = countResult && countResult.length > 0 ? countResult[0].count : 0;
+
+    if (count === 0) return 0;
+
+    // Single atomic update
+    await db.exec(
+      `UPDATE workflows SET status = 'disabled' WHERE status = 'active'`
+    );
+
+    return count;
+  }
 }

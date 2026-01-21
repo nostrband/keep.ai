@@ -292,19 +292,17 @@ This document tracks remaining work for a simple, lovable, and complete v1 relea
 
 ### 13. Pause All Workflows SQL Optimization
 **Spec**: `pause-all-workflows-sql.md`
-**Status**: NOT IMPLEMENTED
+**Status**: FIXED (2026-01-21)
 **Problem**: Pause-all in App.tsx lines 82-109 fetches then updates one-by-one. Slow, race conditions, 100 workflow limit.
 
-**Action Items**:
-1. Add `pauseAllWorkflows()` method to ScriptStore
-2. Use single SQL: `UPDATE workflows SET status='disabled' WHERE status='active'`
-3. Update App.tsx to use new method
-4. Remove loop-based update
+**Fix Applied**:
+1. Added pauseAllWorkflows() method to script-store.ts
+2. Uses single atomic SQL UPDATE for all active workflows
+3. Returns count of paused workflows
+4. Updated App.tsx to use the new method instead of the loop
 
 **Files**: `packages/db/src/script-store.ts`, `apps/web/src/App.tsx`
 **Complexity**: Medium (2-3 hours)
-
----
 
 ### 14. Database Indexes
 **Specs**: `script-runs-workflow-id-index.md`, `script-runs-retry-of-index.md`

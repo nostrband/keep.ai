@@ -83,26 +83,15 @@ function ElectronIPCHandler() {
     if (!apiRef.current) return;
 
     try {
-      // Get all workflows (default limit of 100 should be sufficient)
-      const workflows = await apiRef.current.scriptStore.listWorkflows();
+      // Use atomic SQL operation to pause all active workflows
+      const count = await apiRef.current.scriptStore.pauseAllWorkflows();
 
-      // Filter to active workflows only
-      const activeWorkflows = workflows.filter((w: { status: string }) => w.status === 'active');
-
-      if (activeWorkflows.length === 0) {
+      if (count === 0) {
         console.debug('No active workflows to pause');
         return;
       }
 
-      // Pause each active workflow
-      for (const workflow of activeWorkflows) {
-        await apiRef.current.scriptStore.updateWorkflow({
-          ...workflow,
-          status: 'disabled',
-        });
-      }
-
-      console.debug(`Paused ${activeWorkflows.length} workflows`);
+      console.debug(`Paused ${count} workflows`);
     } catch (error) {
       console.error('Failed to pause all automations:', error);
     }
