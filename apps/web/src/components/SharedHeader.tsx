@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   Button,
 } from "../ui";
+import { HeaderAuthNotice } from "./HeaderAuthNotice";
 
 // Access build-time constants
 declare const __SERVERLESS__: boolean;
@@ -96,13 +97,17 @@ export default function SharedHeader({ title, subtitle }: SharedHeaderProps) {
               )}
             </div>
           </div>
-          <div className="relative" ref={dropdownRef}>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 w-8 p-0 cursor-pointer"
-              onClick={() => setIsOpen(!isOpen)}
-            >
+          <div className="flex items-center gap-2">
+            {/* Auth notice - shows when authentication is required */}
+            <HeaderAuthNotice />
+
+            <div className="relative" ref={dropdownRef}>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 w-8 p-0 cursor-pointer"
+                onClick={() => setIsOpen(!isOpen)}
+              >
               <svg
                 className="h-4 w-4"
                 fill="none"
@@ -195,6 +200,7 @@ export default function SharedHeader({ title, subtitle }: SharedHeaderProps) {
                 </div>
               </div>
             )}
+            </div>
           </div>
         </div>
       </div>

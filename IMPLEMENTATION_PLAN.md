@@ -234,46 +234,47 @@ This document tracks remaining work for a simple, lovable, and complete v1 relea
 
 #### 12a. Auth Need Flag
 **Spec**: `auth-need-auth-flag.md`
-**Status**: NOT IMPLEMENTED
-**Problem**: No system-wide flag for LLM access unavailable. Scheduler doesn't pause when auth fails.
+**Status**: FIXED (2026-01-21)
 
-**Action Items**:
-1. Add `needAuth` key to agent_state table (use existing key-value pattern)
-2. Set `needAuth=true` when OpenRouter returns 401/403 or API key missing
-3. TaskScheduler/WorkflowScheduler check flag before processing
-4. Clear flag when API key is successfully validated
-5. Create `useNeedAuth()` hook for web app
+**Fix Applied**:
+1. Added `setNeedAuth(value: boolean)` and `getNeedAuth()` methods to KeepDbApi
+2. Uses existing agent_state table key-value pattern
+3. TaskScheduler and WorkflowScheduler now check needAuth flag before processing tasks/workflows
+4. Server endpoints clear needAuth on successful authentication
+5. Created `useNeedAuth()` hook for reactive auth state in web app
 
 **Files**:
-- `packages/db/src/api.ts` (add get/setNeedAuth methods)
+- `packages/db/src/api.ts`
 - `packages/agent/src/task-scheduler.ts`
 - `packages/agent/src/workflow-scheduler.ts`
+- `packages/agent/src/workflow-worker.ts`
+- `packages/agent/src/task-worker.ts`
 - `apps/server/src/server.ts`
 - `apps/web/src/hooks/useNeedAuth.ts` (new)
 
 #### 12b. Auth Popup with Clerk Hash
 **Spec**: `auth-popup-clerk-hash.md`
-**Status**: NOT IMPLEMENTED
-**Problem**: AuthDialog is full-page blocking, no dismiss option.
+**Status**: FIXED (2026-01-21)
 
-**Action Items**:
-1. Create `AuthPopup.tsx` as dismissable modal
-2. Configure Clerk for hash-based routes (`/#/signup`, `/#/signin`)
-3. Handle modal show/hide based on URL hash
-4. Replace AuthDialog usage with AuthPopup
+**Fix Applied**:
+1. Created `AuthPopup.tsx` as dismissable modal component
+2. Configured Clerk for hash-based routing (`/#/signup`, `/#/signin`)
+3. Modal shows/hides based on URL hash changes
+4. Users can dismiss the popup and continue using the app
 
 **Files**:
 - `apps/web/src/components/AuthPopup.tsx` (new)
-- `apps/web/src/App.tsx`
+- `apps/web/src/components/SharedHeader.tsx`
+- `apps/web/src/components/ChatInterface.tsx`
 
 #### 12c. Auth Header Notice
 **Spec**: `auth-header-notice.md`
-**Status**: NOT IMPLEMENTED
+**Status**: FIXED (2026-01-21)
 
-**Action Items**:
-1. Create `HeaderAuthNotice.tsx` component (warning icon)
-2. Add to SharedHeader, shown when `needAuth=true`
-3. Click opens AuthPopup
+**Fix Applied**:
+1. Created `HeaderAuthNotice.tsx` component with warning icon
+2. Integrated into SharedHeader, shown when `needAuth=true`
+3. Click opens AuthPopup via hash-based routing
 
 **Files**:
 - `apps/web/src/components/HeaderAuthNotice.tsx` (new)
@@ -281,16 +282,26 @@ This document tracks remaining work for a simple, lovable, and complete v1 relea
 
 #### 12d. Auth Chat Event Item
 **Spec**: `auth-chat-event-item.md`
-**Status**: NOT IMPLEMENTED
+**Status**: FIXED (2026-01-21)
 
-**Action Items**:
-1. Create `AuthEventItem.tsx` for chat display
-2. Show in chat when `needAuth=true`
-3. Auto-show popup on page load if needAuth
+**Fix Applied**:
+1. Created `AuthEventItem.tsx` for in-chat authentication notification
+2. Shows in chat timeline when `needAuth=true`
+3. Auto-shows popup on page load if needAuth flag is set
+4. Provides contextual authentication prompt within the chat flow
 
 **Files**:
 - `apps/web/src/components/AuthEventItem.tsx` (new)
 - `apps/web/src/components/ChatInterface.tsx`
+
+**Summary of Implementation**:
+- Added setNeedAuth/getNeedAuth methods to KeepDbApi for tracking auth state
+- TaskScheduler and WorkflowScheduler now check needAuth flag before processing
+- Server endpoints clear needAuth on successful authentication
+- Created AuthPopup dismissable modal component with hash-based Clerk routing
+- Created HeaderAuthNotice for header warning indicator
+- Created AuthEventItem for in-chat auth notification
+- Created useNeedAuth hook for reactive auth state
 
 **Total Complexity**: High (6-8 hours for all 4)
 

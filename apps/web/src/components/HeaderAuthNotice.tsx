@@ -1,0 +1,90 @@
+import { useState } from "react";
+import { useNeedAuth } from "../hooks/useNeedAuth";
+import { useConfig } from "../hooks/useConfig";
+import { AuthPopup } from "./AuthPopup";
+import { ClerkAuthProvider } from "./ClerkAuthProvider";
+import { CLERK_PUBLISHABLE_KEY } from "../constants/auth";
+
+interface HeaderAuthNoticeProps {
+  className?: string;
+}
+
+/**
+ * Shows a warning button in the header when authentication is required.
+ * When clicked, opens the AuthPopup modal.
+ */
+export function HeaderAuthNotice({ className = "" }: HeaderAuthNoticeProps) {
+  const { needAuth, reason, isLoaded: needAuthLoaded, refresh: refreshNeedAuth } = useNeedAuth();
+  const { isConfigValid, isLoading: configLoading, recheckConfig } = useConfig();
+  const [showAuthPopup, setShowAuthPopup] = useState(false);
+
+  // Determine if we need to show the notice
+  const shouldShow = needAuthLoaded && !configLoading && (needAuth || isConfigValid === false);
+
+  // Determine the button text based on state
+  const getButtonText = () => {
+    if (reason === 'api_key_missing' || isConfigValid === false) {
+      // First launch or no API key configured
+      return 'Sign up';
+    }
+    // Returning user needs to re-authenticate
+    return 'Sign in';
+  };
+
+  const handleAuthenticated = () => {
+    setShowAuthPopup(false);
+    recheckConfig();
+    refreshNeedAuth();
+  };
+
+  if (!shouldShow) {
+    return null;
+  }
+
+  return (
+    <>
+      <button
+        onClick={() => setShowAuthPopup(true)}
+        className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-amber-700 bg-amber-100 hover:bg-amber-200 rounded-md transition-colors ${className}`}
+        aria-label="Authentication required"
+      >
+        {/* Warning icon */}
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          className="h-4 w-4"
+          viewBox="0 0 20 20"
+          fill="currentColor"
+        >
+          <path
+            fillRule="evenodd"
+            d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
+            clipRule="evenodd"
+          />
+        </svg>
+        {getButtonText()}
+      </button>
+
+      {showAuthPopup && CLERK_PUBLISHABLE_KEY && (
+        <ClerkAuthProvider clerkPublishableKey={CLERK_PUBLISHABLE_KEY}>
+          <AuthPopup
+            isOpen={showAuthPopup}
+            onClose={() => setShowAuthPopup(false)}
+            onAuthenticated={handleAuthenticated}
+            clerkPublishableKey={CLERK_PUBLISHABLE_KEY}
+            mode={getButtonText() === 'Sign up' ? 'signup' : 'signin'}
+            canDismiss={true}
+          />
+        </ClerkAuthProvider>
+      )}
+
+      {showAuthPopup && !CLERK_PUBLISHABLE_KEY && (
+        <AuthPopup
+          isOpen={showAuthPopup}
+          onClose={() => setShowAuthPopup(false)}
+          onAuthenticated={handleAuthenticated}
+          canDismiss={true}
+        />
+      )}
+    </>
+  );
+}

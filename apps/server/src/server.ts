@@ -903,6 +903,14 @@ export async function createServer(config: ServerConfig = {}) {
       // Write updated .env file
       fs.writeFileSync(envPath, envContent, "utf8");
 
+      // Clear needAuth flag since we now have valid credentials
+      try {
+        await api.setNeedAuth(false);
+        debugServer("Cleared needAuth flag after successful config");
+      } catch (e) {
+        debugServer("Error clearing needAuth flag:", e);
+      }
+
       // First good config?
       if (!wasOk) {
         const messages = await api.chatStore.getChatMessages({
@@ -1067,6 +1075,14 @@ export async function createServer(config: ServerConfig = {}) {
 
       // Write updated .env file
       fs.writeFileSync(envPath, envContent, "utf8");
+
+      // Clear needAuth flag since we now have valid credentials
+      try {
+        await api.setNeedAuth(false);
+        debugServer("Cleared needAuth flag after successful backend auth");
+      } catch (e) {
+        debugServer("Error clearing needAuth flag:", e);
+      }
 
       return reply.send({
         success: true,

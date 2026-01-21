@@ -375,7 +375,7 @@ export class TaskWorker {
           });
         }
 
-        // Provider low balance
+        // Provider low balance - requires user to add credits/upgrade plan
         if (error === ERROR_PAYMENT_REQUIRED) {
           const pauseUntilMs = Date.now() + 10 * 60 * 1000; // 10 minutes from now
           this.debug(
@@ -383,6 +383,14 @@ export class TaskWorker {
               pauseUntilMs
             ).toISOString()}`
           );
+
+          // Set needAuth flag since payment required usually means re-authentication needed
+          try {
+            await this.api.setNeedAuth(true, "payment_required");
+            this.debug("Set needAuth flag due to payment required");
+          } catch (e) {
+            this.debug("Error setting needAuth flag:", e);
+          }
 
           // Signal global pause to scheduler
           this.emitSignal({

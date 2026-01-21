@@ -158,6 +158,18 @@ export class WorkflowScheduler {
       return;
     }
 
+    // Check if authentication is required (needAuth flag set in database)
+    try {
+      const needAuthState = await this.api.getNeedAuth();
+      if (needAuthState.needed) {
+        this.debug("Authentication required, pausing workflow processing (reason: %s)", needAuthState.reason);
+        return;
+      }
+    } catch (e) {
+      this.debug("Error checking needAuth state:", e);
+      // Continue processing if we can't check the flag
+    }
+
     this.debug(
       "checkWork, running",
       this.isRunning,

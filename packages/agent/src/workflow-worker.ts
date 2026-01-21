@@ -341,6 +341,17 @@ export class WorkflowWorker {
             // User must reconnect/grant access
             this.debug(`${classifiedError.type.toUpperCase()}: User action required, not retrying workflow`, workflow.id);
 
+            // Set needAuth flag if this is an LLM auth error (not tool-specific auth like Gmail)
+            // This pauses all schedulers until user re-authenticates
+            if (classifiedError.type === "auth" && classifiedError.source === "llm") {
+              try {
+                await this.api.setNeedAuth(true, "auth_error");
+                this.debug("Set needAuth flag due to LLM auth error");
+              } catch (e) {
+                this.debug("Error setting needAuth flag:", e);
+              }
+            }
+
             // Mark workflow as needing attention (error status)
             // Use updateWorkflowFields for atomic update to prevent overwriting concurrent changes
             try {

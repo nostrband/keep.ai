@@ -5,6 +5,7 @@ import { useAddMessage, useReadChat } from "../hooks/dbWrites";
 import { MessageItem } from "../ui/components/ai-elements/message-item";
 import { TaskEventGroup } from "./TaskEventGroup";
 import { WorkflowEventGroup } from "./WorkflowEventGroup";
+import { AuthEventItem } from "./AuthEventItem";
 import type { UseMutationResult } from "@tanstack/react-query";
 import React from "react";
 
@@ -352,6 +353,9 @@ export default function ChatInterface({
             Beginning of conversation
           </div>
         )}
+
+        {/* Auth notice - shows when authentication is required */}
+        <AuthEventItem autoShowPopup={chatId === "main"} />
       </div>
       <ScrollToBottomDetector chatId={chatId} readChat={readChat} />
     </div>

@@ -227,6 +227,48 @@ export class KeepDbApi {
     return 'ai_decides';
   }
 
+  /**
+   * Set the need_auth flag to indicate when LLM authentication is required.
+   * When set, the task scheduler will pause processing until auth is resolved.
+   * @param needed - Whether authentication is required
+   * @param reason - Optional reason for why auth is needed (e.g., 'api_key_missing', 'auth_error')
+   */
+  async setNeedAuth(needed: boolean, reason?: string): Promise<void> {
+    const timestamp = new Date().toISOString();
+    const value = JSON.stringify({ needed, reason, timestamp });
+    const sql = `
+      INSERT OR REPLACE INTO agent_state (key, value, timestamp)
+      VALUES ('need_auth', ?, ?)
+    `;
+    await this.db.db.exec(sql, [value, timestamp]);
+  }
+
+  /**
+   * Get the current need_auth state.
+   * @returns Object with needed flag, optional reason, and timestamp
+   */
+  async getNeedAuth(): Promise<{ needed: boolean; reason?: string; timestamp?: string }> {
+    const sql = `
+      SELECT value FROM agent_state WHERE key = 'need_auth'
+    `;
+    const result = await this.db.db.execO<{ value: string }>(sql);
+
+    if (!result || result.length === 0) {
+      return { needed: false };
+    }
+
+    try {
+      const parsed = JSON.parse(result[0].value);
+      return {
+        needed: parsed.needed === true,
+        reason: parsed.reason,
+        timestamp: parsed.timestamp,
+      };
+    } catch {
+      return { needed: false };
+    }
+  }
+
   async createTask(input: {
     content: string;
     files?: File[];
