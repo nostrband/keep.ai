@@ -1376,6 +1376,8 @@ Based on analysis of `ideas/*`, these should become formal specs for v1:
 - Implemented: #70 Prompt Stale Drafts (StaleDraftsBanner component, useAbandonedDrafts/useDraftActivitySummary hooks)
 - Verified: #71 Highlight Significant Events (already implemented - EventSignificance type, significanceStyles, getEventSignificance function)
 - Verified: #72 Collapse Low-Signal Events (already implemented - SignalLevel type, EventListWithCollapse component, partitionEventsBySignal functions)
+- Verified: `mainpage-enter-key-submit.md` - Already fixed by #1 (MainPage form now uses api.createTask() instead of addMessage.mutate())
+- Verified: `rollback-script-atomicity.md` - Superseded by #8 (useActivateScriptVersion just updates pointer, no race conditions)
 
 ---
 
