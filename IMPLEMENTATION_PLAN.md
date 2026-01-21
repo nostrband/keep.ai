@@ -209,17 +209,23 @@ This document tracks remaining work for a simple, lovable, and complete v1 relea
 
 ### 11. Script Diff Library Replacement
 **Spec**: `scriptdiff-use-diff-library.md`
-**Status**: NOT IMPLEMENTED
+**Status**: FIXED (2026-01-21)
 **Problem**: Custom LCS has O(n*m) memory (can crash browser on large scripts), tie-breaking bugs, empty string edge cases.
 
-**Action Items**:
-1. Add `diff` (jsdiff) package to apps/web dependencies
-2. Replace custom LCS implementation with `Diff.diffLines()`
-3. Map diff output to existing component format
-4. Test with edge cases: empty strings, large files, identical content
+**Fix Applied**:
+1. Added `diff` (jsdiff) package to apps/web dependencies
+2. Added `@types/diff` to devDependencies for TypeScript support
+3. Replaced custom LCS algorithm with `diffLines()` from the diff library (Myers algorithm)
+4. Added MAX_DIFF_LINES (50,000) safety check to prevent browser crashes on extremely large files
+5. Updated computeDiff() to use the library's output format while preserving existing UI
+
+**Benefits**:
+- Uses battle-tested Myers diff algorithm instead of O(n*m) LCS
+- Better memory characteristics for large files
+- Handles edge cases (empty strings, trailing newlines) correctly
+- Simpler, more maintainable code
 
 **Files**: `apps/web/src/components/ScriptDiff.tsx`, `apps/web/package.json`
-**Complexity**: Medium (3-4 hours)
 **Note**: Supersedes `scriptdiff-empty-string-handling.md`, `scriptdiff-lcs-tiebreaking.md`
 
 ---

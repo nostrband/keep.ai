@@ -1,4 +1,5 @@
 import React, { useMemo } from "react";
+import { diffLines } from "diff";
 
 interface ScriptDiffProps {
   oldCode: string;
@@ -14,65 +15,75 @@ interface DiffLine {
   newLineNum?: number;
 }
 
-// Simple line-by-line diff algorithm using longest common subsequence
-function computeDiff(oldLines: string[], newLines: string[]): DiffLine[] {
+// Maximum combined line count before refusing to diff (browser memory protection)
+const MAX_DIFF_LINES = 50000;
+
+function computeDiff(oldCode: string, newCode: string): DiffLine[] {
+  const oldLines = oldCode.split("\n");
+  const newLines = newCode.split("\n");
+
+  // Safety check: refuse to diff extremely large files
+  if (oldLines.length + newLines.length > MAX_DIFF_LINES) {
+    return [
+      {
+        type: "removed",
+        content: `[File too large to diff: ${oldLines.length} lines]`,
+        oldLineNum: 1,
+      },
+      {
+        type: "added",
+        content: `[File too large to diff: ${newLines.length} lines]`,
+        newLineNum: 1,
+      },
+    ];
+  }
+
+  // Use jsdiff library for battle-tested diffing with Myers algorithm
+  const changes = diffLines(oldCode, newCode);
+
   const result: DiffLine[] = [];
+  let oldLineNum = 1;
+  let newLineNum = 1;
 
-  // Build LCS matrix
-  const m = oldLines.length;
-  const n = newLines.length;
-  const lcs: number[][] = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
+  for (const change of changes) {
+    // diffLines returns chunks that can contain multiple lines
+    const lines = change.value.split("\n");
+    // Remove the trailing empty string from split if the value ends with \n
+    if (lines[lines.length - 1] === "") {
+      lines.pop();
+    }
 
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      if (oldLines[i - 1] === newLines[j - 1]) {
-        lcs[i][j] = lcs[i - 1][j - 1] + 1;
+    for (const line of lines) {
+      if (change.added) {
+        result.push({
+          type: "added",
+          content: line,
+          newLineNum: newLineNum++,
+        });
+      } else if (change.removed) {
+        result.push({
+          type: "removed",
+          content: line,
+          oldLineNum: oldLineNum++,
+        });
       } else {
-        lcs[i][j] = Math.max(lcs[i - 1][j], lcs[i][j - 1]);
+        // Unchanged
+        result.push({
+          type: "unchanged",
+          content: line,
+          oldLineNum: oldLineNum++,
+          newLineNum: newLineNum++,
+        });
       }
     }
   }
 
-  // Backtrack to find diff
-  let i = m;
-  let j = n;
-  const tempResult: DiffLine[] = [];
-
-  while (i > 0 || j > 0) {
-    if (i > 0 && j > 0 && oldLines[i - 1] === newLines[j - 1]) {
-      tempResult.unshift({
-        type: "unchanged",
-        content: oldLines[i - 1],
-        oldLineNum: i,
-        newLineNum: j,
-      });
-      i--;
-      j--;
-    } else if (j > 0 && (i === 0 || lcs[i][j - 1] >= lcs[i - 1][j])) {
-      tempResult.unshift({
-        type: "added",
-        content: newLines[j - 1],
-        newLineNum: j,
-      });
-      j--;
-    } else if (i > 0) {
-      tempResult.unshift({
-        type: "removed",
-        content: oldLines[i - 1],
-        oldLineNum: i,
-      });
-      i--;
-    }
-  }
-
-  return tempResult;
+  return result;
 }
 
 export default function ScriptDiff({ oldCode, newCode, oldVersion, newVersion }: ScriptDiffProps) {
   const diffLines = useMemo(() => {
-    const oldLines = oldCode.split("\n");
-    const newLines = newCode.split("\n");
-    return computeDiff(oldLines, newLines);
+    return computeDiff(oldCode, newCode);
   }, [oldCode, newCode]);
 
   const stats = useMemo(() => {
