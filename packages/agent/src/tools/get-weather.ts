@@ -2,6 +2,7 @@ import { tool } from "ai";
 import { z } from "zod";
 import debug from "debug";
 import { EvalContext } from "../sandbox/sandbox";
+import { LogicError, NetworkError, classifyHttpError, classifyGenericError, isClassifiedError } from "../errors";
 
 const debugGetWeather = debug("agent:get-weather");
 
@@ -83,7 +84,7 @@ export function makeGetWeatherTool(getContext: () => EvalContext) {
       }
 
       if (!place || typeof place !== "string") {
-        throw new Error("place must be a non-empty string");
+        throw new LogicError("place must be a non-empty string", { source: "Weather" });
       }
       const nDays = Math.max(1, Math.min(Number(days) || 1, 16)); // Open-Meteo: up to 16 days
 
@@ -93,15 +94,24 @@ export function makeGetWeatherTool(getContext: () => EvalContext) {
       geoUrl.searchParams.set("count", "1");
       geoUrl.searchParams.set("language", "en");
 
-      const geoRes = await fetch(geoUrl);
-      if (!geoRes.ok)
-        throw new Error(
-          `Geocoding failed: ${geoRes.status} ${geoRes.statusText}`
-        );
-      const geo = await geoRes.json();
+      let geo;
+      try {
+        const geoRes = await fetch(geoUrl);
+        if (!geoRes.ok) {
+          throw classifyHttpError(
+            geoRes.status,
+            `Geocoding failed: ${geoRes.status} ${geoRes.statusText}`,
+            { source: "Weather" }
+          );
+        }
+        geo = await geoRes.json();
+      } catch (error) {
+        if (isClassifiedError(error)) throw error;
+        throw classifyGenericError(error instanceof Error ? error : new Error(String(error)), "Weather");
+      }
 
       if (!geo.results || geo.results.length === 0) {
-        throw new Error(`No results for location: "${place}"`);
+        throw new LogicError(`No results for location: "${place}"`, { source: "Weather" });
       }
 
       const { latitude, longitude, timezone, name, country, admin1 } =
@@ -124,10 +134,21 @@ export function makeGetWeatherTool(getContext: () => EvalContext) {
         ].join(",")
       );
 
-      const wxRes = await fetch(wxUrl);
-      if (!wxRes.ok)
-        throw new Error(`Forecast failed: ${wxRes.status} ${wxRes.statusText}`);
-      const data = await wxRes.json();
+      let data;
+      try {
+        const wxRes = await fetch(wxUrl);
+        if (!wxRes.ok) {
+          throw classifyHttpError(
+            wxRes.status,
+            `Forecast failed: ${wxRes.status} ${wxRes.statusText}`,
+            { source: "Weather" }
+          );
+        }
+        data = await wxRes.json();
+      } catch (error) {
+        if (isClassifiedError(error)) throw error;
+        throw classifyGenericError(error instanceof Error ? error : new Error(String(error)), "Weather");
+      }
 
       // Optional: tiny weathercode → text mapper
       const codeText = (code: number) =>

@@ -254,7 +254,7 @@ export class WorkflowWorker {
       if (error === ERROR_BAD_REQUEST) {
         errorType = 'internal'; // BAD_REQUEST indicates a bug in our code
       } else if (error === ERROR_PAYMENT_REQUIRED) {
-        errorType = ''; // PAYMENT_REQUIRED is not a classified error type
+        errorType = 'auth'; // PAYMENT_REQUIRED treated as auth since it requires user action (payment/authentication)
       } else if (isClassifiedError(error)) {
         errorType = (error as ClassifiedError).type;
       }

@@ -2,6 +2,8 @@
 module.exports = {
   content: [
     "./src/**/*.{js,ts,jsx,tsx}",
+    // Include Streamdown's distribution files to ensure its Tailwind classes are not purged
+    "./node_modules/streamdown/dist/**/*.{js,ts,jsx,tsx}",
   ],
   theme: {
     extend: {

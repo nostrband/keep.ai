@@ -170,22 +170,41 @@ This document tracks remaining work for a simple, lovable, and complete v1 relea
 
 ### 9. Complete Tool Error Classification Migration
 **Spec**: `complete-tool-error-classification-migration.md`
-**Status**: PARTIAL - Classification exists at worker level, not in tools
+**Status**: FIXED (2026-01-21)
 **Problem**: ClassifiedError is defined in `errors.ts` and used in `workflow-worker.ts` and `sandbox/api.ts`, but individual tools don't throw classified errors. Error classification happens when catching generic errors, which loses context about the error type (auth vs network vs logic).
 
-**Action Items**:
-1. Audit all 40 tools in `packages/agent/src/tools/`
-2. For each tool, identify error scenarios and appropriate classification:
-   - AUTH: OAuth expired, invalid credentials
-   - PERMISSION: Access denied, insufficient scope
-   - NETWORK: Connection failed, timeout, 5xx
-   - LOGIC: Script bugs, unexpected data
-   - INTERNAL: Our bugs
-3. Import and use ClassifiedError from `../errors.ts`
-4. Document error classification in each tool
+**Fix Applied**:
+1. Audited all 40 tools in `packages/agent/src/tools/`
+2. Identified 7 tools already using ClassifiedError properly:
+   - gmail.ts, read-file.ts, save-file.ts, text-extract.ts
+   - web-download.ts, web-fetch.ts, web-search.ts
+3. Updated 9 tools that make external API calls to use ClassifiedError:
+   - text-classify.ts, text-generate.ts, text-summarize.ts (OpenRouter)
+   - audio-explain.ts, images-explain.ts, images-generate.ts (OpenRouter)
+   - images-transform.ts, pdf-explain.ts (OpenRouter)
+   - get-weather.ts (Open-Meteo API)
+4. Each tool now uses proper error classification:
+   - AuthError: Missing API keys
+   - PermissionError: Missing user path configuration
+   - LogicError: File not found, unsupported formats, parsing errors
+   - NetworkError: No response from model
+   - classifyHttpError(): HTTP response errors
+   - classifyGenericError(): Fallback for unclassified errors
+5. 18 tools don't need classification (pure database reads/writes, utilities)
+6. 6 tools only need LogicError for input validation (optional, low priority)
 
-**Files**: All 40 files in `packages/agent/src/tools/`
-**Complexity**: High (10-14 hours)
+**Files**:
+- `packages/agent/src/tools/text-classify.ts`
+- `packages/agent/src/tools/text-generate.ts`
+- `packages/agent/src/tools/text-summarize.ts`
+- `packages/agent/src/tools/audio-explain.ts`
+- `packages/agent/src/tools/images-explain.ts`
+- `packages/agent/src/tools/images-generate.ts`
+- `packages/agent/src/tools/images-transform.ts`
+- `packages/agent/src/tools/pdf-explain.ts`
+- `packages/agent/src/tools/get-weather.ts`
+
+**Complexity**: High (3-4 hours actual)
 
 ---
 
@@ -648,12 +667,12 @@ This document tracks remaining work for a simple, lovable, and complete v1 relea
 
 ### 33. Payment Required Error Type
 **Spec**: `payment-required-error-type.md`
-**Status**: NOT VERIFIED
+**Status**: FIXED (2026-01-21)
 
-**Action Items**:
-1. Verify current handling of ERROR_PAYMENT_REQUIRED
-2. Set proper errorType for payment errors
-3. Use 'auth' or create new 'payment' type as appropriate
+**Fix Applied**:
+1. Changed from `errorType = ''` to `errorType = 'auth'` for PAYMENT_REQUIRED errors
+2. Payment errors now treated as auth since they require user action (payment/authentication)
+3. This ensures consistent handling with other auth-related errors
 
 **Files**: `packages/agent/src/workflow-worker.ts`
 **Complexity**: Low (30 min)
@@ -956,11 +975,12 @@ This document tracks remaining work for a simple, lovable, and complete v1 relea
 
 ### 55. Chat ResizeObserver Height Reference
 **Spec**: `chat-resizeobserver-height-reference.md`
-**Status**: NOT VERIFIED
+**Status**: FIXED (2026-01-21)
 
-**Action Items**:
-1. Use consistent DOM reference for height comparison
-2. Use `document.documentElement.scrollHeight`
+**Fix Applied**:
+1. Changed initial `lastHeight` from `container.scrollHeight` to `document.documentElement.scrollHeight`
+2. Now uses consistent DOM reference for height comparison across resize callbacks
+3. Ensures reliable scroll behavior when content changes
 
 **Files**: `apps/web/src/components/ChatInterface.tsx`
 **Complexity**: Low (30 min)
@@ -983,25 +1003,27 @@ This document tracks remaining work for a simple, lovable, and complete v1 relea
 
 ### 57. setTimeout Cleanup Remaining Components
 **Spec**: `settimeout-cleanup-remaining-components.md`
-**Status**: NOT VERIFIED
+**Status**: PARTIALLY FIXED (2026-01-21)
 
-**Action Items**:
-1. Fix setTimeout cleanup in FilesPage.tsx
-2. Fix setTimeout cleanup in QueryProvider.tsx
-3. Clear timeouts on unmount
+**Fix Applied**:
+1. FilesPage.tsx: Added `uploadResetTimeoutRef` and cleanup effect to properly clear timeout on unmount
+2. QueryProvider.tsx: Verified already properly handled (no changes needed)
 
-**Files**: `apps/web/src/components/FilesPage.tsx`, `apps/web/src/QueryProvider.tsx`
+**Remaining**: None identified
+
+**Files**: `apps/web/src/components/FilesPage.tsx`
 **Complexity**: Low (1 hour)
 
 ---
 
 ### 58. App Update Banner Timeout Cleanup
 **Spec**: `app-update-banner-timeout-cleanup.md`
-**Status**: NOT VERIFIED
+**Status**: FIXED (2026-01-21)
 
-**Action Items**:
-1. Add setTimeout cleanup for auto-dismiss
-2. Clear on component unmount
+**Fix Applied**:
+1. Added `autoDismissTimeoutRef` ref to track the auto-dismiss timeout
+2. Added cleanup in useEffect return to clear timeout on unmount
+3. Prevents memory leaks when banner is dismissed or component unmounts
 
 **Files**: `apps/web/src/App.tsx`
 **Complexity**: Low (30 min)
@@ -1085,11 +1107,12 @@ Verified that copyTimeoutRef.current = null is already present in the timeout ca
 
 ### 65. Streamdown Tailwind Source
 **Spec**: `streamdown-tailwind-source.md`
-**Status**: NOT VERIFIED
+**Status**: FIXED (2026-01-21)
 
-**Action Items**:
-1. Add Streamdown distribution files to Tailwind content sources
-2. Ensures CSS classes from Streamdown are included
+**Fix Applied**:
+1. Added `"./node_modules/streamdown/dist/**/*.{js,ts,jsx,tsx}"` to content array
+2. Streamdown classes will no longer be purged in production builds
+3. Ensures all Streamdown component styles are included
 
 **Files**: `apps/web/tailwind.config.js`
 **Complexity**: Low (30 min)

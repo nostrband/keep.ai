@@ -128,16 +128,26 @@ export { FOCUS_INPUT_EVENT };
 // Banner shown when the app has been updated via service worker
 function AppUpdateBanner() {
   const [showBanner, setShowBanner] = useState(false);
+  const autoDismissTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const handleAppUpdate = () => {
       setShowBanner(true);
       // Auto-dismiss after 10 seconds
-      setTimeout(() => setShowBanner(false), 10000);
+      autoDismissTimeoutRef.current = setTimeout(() => {
+        setShowBanner(false);
+        autoDismissTimeoutRef.current = null;
+      }, 10000);
     };
 
     window.addEventListener(APP_UPDATE_EVENT, handleAppUpdate);
-    return () => window.removeEventListener(APP_UPDATE_EVENT, handleAppUpdate);
+    return () => {
+      window.removeEventListener(APP_UPDATE_EVENT, handleAppUpdate);
+      // Clean up timeout on unmount
+      if (autoDismissTimeoutRef.current) {
+        clearTimeout(autoDismissTimeoutRef.current);
+      }
+    };
   }, []);
 
   if (!showBanner) return null;

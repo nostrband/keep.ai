@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo } from "react";
+import React, { useState, useRef, useMemo, useEffect } from "react";
 import { useFiles } from "../hooks/dbFileReads";
 import { useNostrPeers, useLocalSiteId } from "../hooks/dbNostrPeerReads";
 import { useQueryProvider } from "../QueryProviderEmbedded";
@@ -101,6 +101,16 @@ export default function FilesPage() {
   const [isDragOver, setIsDragOver] = useState(false);
   const [downloadingFiles, setDownloadingFiles] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const uploadResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (uploadResetTimeoutRef.current) {
+        clearTimeout(uploadResetTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const handleFileSelect = () => {
     fileInputRef.current?.click();
@@ -219,9 +229,10 @@ export default function FilesPage() {
           // Upload successful, refresh the file list
           refetch();
           setUploadProgress(100);
-          setTimeout(() => {
+          uploadResetTimeoutRef.current = setTimeout(() => {
             setIsUploading(false);
             setUploadProgress(0);
+            uploadResetTimeoutRef.current = null;
           }, 1000);
           resolve();
         } else {
@@ -260,9 +271,10 @@ export default function FilesPage() {
       
       // Success
       setUploadProgress(100);
-      setTimeout(() => {
+      uploadResetTimeoutRef.current = setTimeout(() => {
         setIsUploading(false);
         setUploadProgress(0);
+        uploadResetTimeoutRef.current = null;
       }, 1000);
       
     } catch (error) {

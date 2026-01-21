@@ -264,14 +264,14 @@ export default function ChatInterface({
     if (!container) return;
 
     // Track the last height so we can detect growth vs shrinkage
-    let lastHeight = container.scrollHeight;
+    // Use document.documentElement for consistent height measurement across resize callbacks
+    let lastHeight = document.documentElement.scrollHeight;
 
     const observer = new ResizeObserver(() => {
       // Only act if user was already at bottom before content changed
       if (!wasAtBottomRef.current) return;
 
-      const el = document.documentElement;
-      const newHeight = el.scrollHeight;
+      const newHeight = document.documentElement.scrollHeight;
 
       // Content grew - scroll to stay at bottom
       if (newHeight > lastHeight) {
