@@ -27,7 +27,7 @@ import {
 } from "../ui";
 import { PlusIcon, AlertCircle, Info, Sparkles } from "lucide-react";
 import type { FileUIPart } from "ai";
-import type { File as DbFile } from "@app/db";
+import type { File as DbFile, ScriptRun, Workflow, Task } from "@app/db";
 
 type PromptInputMessage = {
   text?: string;
@@ -47,7 +47,7 @@ const EXAMPLE_SUGGESTIONS = [
 ];
 
 // Compute secondary line text for workflow
-function getSecondaryLine(workflow: any, latestRun: any, task: any): { text: string; isAttention: boolean } {
+function getSecondaryLine(workflow: Workflow, latestRun: ScriptRun | undefined, task: Task | undefined): { text: string; isAttention: boolean } {
   // Check if task is waiting for input
   if (task && (task.state === "wait" || task.state === "asks")) {
     return { text: "Waiting for your input", isAttention: true };
@@ -156,7 +156,7 @@ export default function MainPage() {
   const { mode: autonomyMode, toggleMode: toggleAutonomyMode, isLoaded: isAutonomyLoaded } = useAutonomyPreference();
   const [input, setInput] = useState("");
   const [promptHeight, setPromptHeight] = useState(0);
-  const [latestRuns, setLatestRuns] = useState<Record<string, any>>({});
+  const [latestRuns, setLatestRuns] = useState<Record<string, ScriptRun>>({});
   const [showAttentionOnly, setShowAttentionOnly] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const promptContainerRef = useRef<HTMLDivElement>(null);
@@ -177,7 +177,7 @@ export default function MainPage() {
         if (cancelled) return;
 
         // Convert Map to Record for state
-        const runs: Record<string, any> = {};
+        const runs: Record<string, ScriptRun> = {};
         for (const [workflowId, run] of runsMap) {
           runs[workflowId] = run;
         }
@@ -197,7 +197,7 @@ export default function MainPage() {
 
   // Create a map of task_id to task for quick lookup
   const taskMap = useMemo(() => {
-    const map: Record<string, any> = {};
+    const map: Record<string, Task> = {};
     for (const task of tasks) {
       map[task.id] = task;
     }
@@ -470,6 +470,33 @@ export default function MainPage() {
                 >
                   <PlusIcon className="size-4" />
                 </PromptInputButton>
+                {/* Autonomy Toggle - inside toolbar */}
+                {isAutonomyLoaded && (
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          onClick={toggleAutonomyMode}
+                          className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700 transition-colors py-1 px-2 rounded hover:bg-gray-100"
+                        >
+                          <span>{autonomyMode === 'ai_decides' ? 'AI decides' : 'Coordinate'}</span>
+                          <Info className="size-3" />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="max-w-xs">
+                        <p className="font-medium mb-1">
+                          {autonomyMode === 'ai_decides' ? 'AI Decides Details' : 'Coordinate With Me'}
+                        </p>
+                        <p className="text-xs text-gray-600">
+                          {autonomyMode === 'ai_decides'
+                            ? 'The AI will minimize questions and use safe defaults to complete tasks quickly.'
+                            : 'The AI will ask clarifying questions before proceeding with key decisions.'}
+                        </p>
+                        <p className="text-xs text-gray-500 mt-1">Click to switch</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                )}
               </PromptInputTools>
               <PromptInputSubmit
                 disabled={(!input && !uploadState.isUploading) || uploadState.isUploading || isSubmitting}
@@ -482,36 +509,6 @@ export default function MainPage() {
           {input.trim() && !uploadState.isUploading && !isSubmitting && (
             <div className="text-center text-xs text-gray-400 mt-2">
               Press <kbd className="px-1.5 py-0.5 bg-gray-100 rounded border border-gray-200 font-mono">Enter</kbd> to create automation
-            </div>
-          )}
-
-          {/* Autonomy Toggle */}
-          {isAutonomyLoaded && (
-            <div className="mt-2 flex justify-center">
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      onClick={toggleAutonomyMode}
-                      className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-700 transition-colors py-1 px-2 rounded hover:bg-gray-100"
-                    >
-                      <span>{autonomyMode === 'ai_decides' ? 'AI decides details' : 'Coordinate with me'}</span>
-                      <Info className="size-3.5" />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent side="top" className="max-w-xs text-center">
-                    <p className="font-medium mb-1">
-                      {autonomyMode === 'ai_decides' ? 'AI Decides Details' : 'Coordinate With Me'}
-                    </p>
-                    <p className="text-xs text-gray-600">
-                      {autonomyMode === 'ai_decides'
-                        ? 'The AI will minimize questions and use safe defaults to complete tasks quickly.'
-                        : 'The AI will ask clarifying questions before proceeding with key decisions.'}
-                    </p>
-                    <p className="text-xs text-gray-500 mt-1">Click to switch</p>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
             </div>
           )}
         </div>

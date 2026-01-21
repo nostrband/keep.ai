@@ -57,30 +57,29 @@ export const APP_UPDATE_EVENT = 'keep-ai-app-updated';
 
 // Register service worker for PWA and push notifications
 if (!isElectron && "serviceWorker" in navigator) {
+  // Track whether we've had a controller before (to distinguish first install from updates)
+  let hadController = !!navigator.serviceWorker.controller;
+
+  // Listen for controller changes - this fires exactly when a new SW takes control
+  // This is more reliable than listening to 'activated' state which may fire
+  // before the controller actually changes
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    // Only notify if there was a previous controller (not first install)
+    if (hadController) {
+      window.dispatchEvent(new CustomEvent(APP_UPDATE_EVENT));
+    }
+    // Update the flag for future controller changes
+    hadController = true;
+  });
+
   window.addEventListener("load", async () => {
     try {
-      const registration = await navigator.serviceWorker.register(
+      await navigator.serviceWorker.register(
         "/service-worker.js",
         {
           type: "module",
         }
       );
-
-      // Update service worker if needed
-      registration.addEventListener("updatefound", () => {
-        const newWorker = registration.installing;
-        if (newWorker) {
-          newWorker.addEventListener("statechange", () => {
-            // When the new service worker is activated, notify the app
-            if (newWorker.state === "activated") {
-              // Only notify if there was a previous controller (not first install)
-              if (navigator.serviceWorker.controller) {
-                window.dispatchEvent(new CustomEvent(APP_UPDATE_EVENT));
-              }
-            }
-          });
-        }
-      });
     } catch (error) {
       console.error("Service Worker registration failed:", error);
     }

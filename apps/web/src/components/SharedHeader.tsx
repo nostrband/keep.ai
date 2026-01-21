@@ -21,11 +21,12 @@ interface SharedHeaderProps {
 
 export default function SharedHeader({ title, subtitle }: SharedHeaderProps) {
   const [isOpen, setIsOpen] = useState(false);
+  // Read debug mode once on mount to avoid reading localStorage on every render
+  const [debugMode] = useState(() => localStorage.getItem("keep-ai-debug-mode") === "true");
   const dropdownRef = useRef<HTMLDivElement>(null);
   const location = useLocation();
   const navigate = useNavigate();
   const isServerless = __SERVERLESS__;
-  const debugMode = localStorage.getItem("keep-ai-debug-mode") === "true";
   
   const isRootPage = location.pathname === '/';
   

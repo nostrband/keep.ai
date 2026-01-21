@@ -394,19 +394,19 @@ This document tracks remaining work for a simple, lovable, and complete v1 relea
 
 ### 19. Service Worker Update Detection
 **Spec**: `service-worker-update-detection.md`
-**Status**: NEEDS VERIFICATION
+**Status**: FIXED (2026-01-21)
 **Problem**: May check `activated` state but controller might be old. Possible false positives/negatives.
 
-**Action Items**:
-1. Verify current implementation in main.tsx
-2. Listen to `controllerchange` event instead if needed
-3. Remove `statechange` handler for update detection if redundant
-4. Test: Update service worker, verify banner appears correctly
+**Fix Applied**:
+1. Changed from listening to 'statechange' and checking 'activated' state to listening to 'controllerchange' event
+2. Added hadController flag to distinguish first install from updates
+3. More reliable detection of service worker updates
 
 **Files**: `apps/web/src/main.tsx`
 **Complexity**: Medium (2 hours)
 
 ---
+
 
 ### 20. Notification Grouping for Batch Errors
 **Spec**: `notification-grouping-batch-errors.md`
@@ -452,14 +452,17 @@ This document tracks remaining work for a simple, lovable, and complete v1 relea
 
 ## P2 - MEDIUM PRIORITY (Quality & UX)
 
+## P2 - MEDIUM PRIORITY (Quality & UX)
+
 ### 22. MainPage Autonomy Toggle Positioning
 **Spec**: `mainpage-autonomy-toggle-positioning.md`
-**Status**: CONFIRMED - toggle is outside toolbar
+**Status**: FIXED (2026-01-21)
+**Problem**: Toggle was outside toolbar
 
-**Action Items**:
-1. Move toggle inside input toolbar
-2. Position right of + button
-3. Adjust styling for toolbar context
+**Fix Applied**:
+1. Moved toggle inside PromptInputTools section of the toolbar
+2. Positioned right of the + (attach file) button
+3. Shortened text to "AI decides" / "Coordinate" to fit in toolbar
 
 **Files**: `apps/web/src/components/MainPage.tsx`
 **Complexity**: Low (1 hour)
@@ -467,25 +470,19 @@ This document tracks remaining work for a simple, lovable, and complete v1 relea
 ---
 
 ### 23. MainPage Type Safety Issues
-**Status**: NEW ISSUE
+**Status**: FIXED (2026-01-21)
 **Problem**: Uses `Record<string, any>` for latestRuns at 3 places (lines 160, 181, 201). Type safety issue allowing runtime errors.
 
-**Action Items**:
-1. Define proper `ScriptRun` type import
-2. Replace `Record<string, any>` with `Record<string, ScriptRun>`
-3. Add proper typing throughout the file
+**Fix Applied**:
+1. Imported ScriptRun, Workflow, Task types from @app/db
+2. Replaced all `Record<string, any>` with proper types
+3. Updated getSecondaryLine function signature with proper types
 
 **Files**: `apps/web/src/components/MainPage.tsx`
 **Complexity**: Low (30 min)
 
 ---
 
-### 24. Extract Auto-Hiding Message Hook
-**Spec**: `extract-auto-hiding-message-hook.md`
-**Status**: NOT IMPLEMENTED
-
-**Action Items**:
-1. Create `useAutoHidingMessage()` hook in shared location
 2. Handle: state, setTimeout, cleanup, clear functions
 3. Update 4 components to use hook
 4. Remove duplicated ~100 lines
@@ -862,12 +859,14 @@ This document tracks remaining work for a simple, lovable, and complete v1 relea
 
 ### 51. MainPage Autonomy Tooltip Styling
 **Spec**: `mainpage-autonomy-tooltip-styling.md`
-**Status**: NOT VERIFIED
+**Status**: FIXED (2026-01-21)
+**Problem**: Tooltip styling inconsistent
 
-**Action Items**:
-1. Add solid background to tooltip
-2. Left-align text
-3. Remove arrow if present
+**Fix Applied**:
+1. Updated tooltip.tsx to use solid white background with gray border and shadow
+2. Removed arrow element
+3. Changed text alignment to left (removed text-balance)
+4. Added default sideOffset of 4px for better spacing
 
 **Files**: `apps/web/src/components/ui/tooltip.tsx`, `apps/web/src/components/MainPage.tsx`
 **Complexity**: Low (30 min)
@@ -889,11 +888,13 @@ This document tracks remaining work for a simple, lovable, and complete v1 relea
 
 ### 53. Mermaid Diagram useMemo
 **Spec**: `mermaid-diagram-usememo.md`
-**Status**: NOT VERIFIED
+**Status**: FIXED (2026-01-21)
+**Problem**: Mermaid markdown string recreated every render
 
-**Action Items**:
-1. Wrap mermaid markdown string creation in useMemo
-2. Makes Response component memo effective
+**Fix Applied**:
+1. Added useMemo for diagramMarkdown in WorkflowDetailPage.tsx
+2. Maintains referential stability for Response component's memo
+3. Mermaid diagram only re-renders when actual content changes
 
 **Files**: `apps/web/src/components/WorkflowDetailPage.tsx`
 **Complexity**: Trivial (10 min)
@@ -902,11 +903,12 @@ This document tracks remaining work for a simple, lovable, and complete v1 relea
 
 ### 54. SharedHeader Debug Mode Memoize
 **Spec**: `shared-header-debug-mode-memoize.md`
-**Status**: NOT VERIFIED
+**Status**: FIXED (2026-01-21)
+**Problem**: localStorage read for debug mode happening every render
 
-**Action Items**:
-1. Memoize localStorage read for debug mode
-2. Use useMemo or state instead of reading every render
+**Fix Applied**:
+1. Changed from reading localStorage on every render to using useState initializer
+2. Debug mode value is now only read once on component mount
 
 **Files**: `apps/web/src/components/SharedHeader.tsx`
 **Complexity**: Low (30 min)

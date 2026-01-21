@@ -48,6 +48,12 @@ export default function WorkflowDetailPage() {
     return scriptVersions.find((s: any) => s.id === workflow.active_script_id) || latestScript;
   }, [workflow?.active_script_id, scriptVersions, latestScript]);
 
+  // Memoize mermaid markdown to maintain referential stability for Response memo
+  const diagramMarkdown = useMemo(
+    () => activeScript?.diagram ? `\`\`\`mermaid\n${activeScript.diagram}\n\`\`\`` : null,
+    [activeScript?.diagram]
+  );
+
   // Clear workflow notifications when viewing this workflow
   // This prevents re-notifying user for errors they've already seen
   useEffect(() => {
@@ -587,9 +593,9 @@ export default function WorkflowDetailPage() {
                 )}
 
                 {/* Mermaid Diagram - rendered via markdown code fence */}
-                {activeScript.diagram && (
+                {diagramMarkdown && (
                   <div className="mt-4 p-4 bg-gray-50 rounded-lg">
-                    <Response>{`\`\`\`mermaid\n${activeScript.diagram}\n\`\`\``}</Response>
+                    <Response>{diagramMarkdown}</Response>
                   </div>
                 )}
               </div>
