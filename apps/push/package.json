@@ -22,7 +22,7 @@
     "@app/db": "file:../../packages/db",
     "@app/node": "file:../../packages/node",
     "@app/sync": "file:../../packages/sync",
-    "debug": "^4.3.4",
+    "debug": "^4.4.3",
     "dotenv": "^16.0.0",
     "nostr-tools": "^2.7.2",
     "web-push": "^3.6.7"

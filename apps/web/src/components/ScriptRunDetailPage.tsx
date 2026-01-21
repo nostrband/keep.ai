@@ -45,6 +45,12 @@ export default function ScriptRunDetailPage() {
                 </h2>
                 <div className="flex flex-wrap items-center gap-2">
                   <ScriptRunStatusBadge error={run.error} endTimestamp={run.end_timestamp} />
+                  {/* Show test badge if this is a test run */}
+                  {run.type === 'test' && (
+                    <Badge variant="outline" className="text-amber-700 border-amber-300 bg-amber-50">
+                      Test
+                    </Badge>
+                  )}
                   {/* Show retry badge if this is a retry run */}
                   {run.retry_of && run.retry_count > 0 && (
                     <Badge variant="outline" className="text-orange-700 border-orange-300 bg-orange-50">

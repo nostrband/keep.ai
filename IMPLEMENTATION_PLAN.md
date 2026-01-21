@@ -1034,11 +1034,12 @@ Changed z-index from z-50 to z-[60] to appear above modal dialogs
 
 ### 61. Script Run Detail Test Badge
 **Spec**: `script-run-detail-test-badge.md`
-**Status**: NOT VERIFIED
+**Status**: FIXED (2026-01-21)
 
-**Action Items**:
-1. Add test badge to ScriptRunDetailPage header
-2. Show when run.type === 'test'
+**Fix Applied**:
+Added test badge to ScriptRunDetailPage header, positioned after status badge:
+- Shows when `run.type === 'test'`
+- Uses same amber styling as WorkflowDetailPage for consistency
 
 **Files**: `apps/web/src/components/ScriptRunDetailPage.tsx`
 **Complexity**: Trivial (10 min)
@@ -1097,11 +1098,18 @@ Verified that copyTimeoutRef.current = null is already present in the timeout ca
 
 ### 66. Standardize Debug Version
 **Spec**: `standardize-debug-version.md`
-**Status**: NOT VERIFIED
+**Status**: FIXED (2026-01-21)
 
-**Action Items**:
-1. Update all packages to use `debug: ^4.4.3`
-2. Run npm install to align versions
+**Fix Applied**:
+Updated all packages from `debug: ^4.3.4` to `debug: ^4.4.3`:
+- packages/browser/package.json
+- packages/agent/package.json
+- packages/sync/package.json
+- packages/db/package.json
+- packages/node/package.json
+- apps/server/package.json
+- apps/web/package.json
+- apps/push/package.json
 
 **Files**: Multiple `package.json` files
 **Complexity**: Trivial (15 min)
@@ -1110,10 +1118,10 @@ Verified that copyTimeoutRef.current = null is already present in the timeout ca
 
 ### 67. Add @types/debug Dependency
 **Spec**: `add-types-debug-dependency.md`
-**Status**: NOT VERIFIED
+**Status**: FIXED (2026-01-21)
 
-**Action Items**:
-1. Add `@types/debug` to apps/web devDependencies
+**Fix Applied**:
+Added `@types/debug: ^4.1.12` to apps/web devDependencies
 
 **Files**: `apps/web/package.json`
 **Complexity**: Trivial (5 min)

@@ -20,7 +20,7 @@
   "dependencies": {
     "@app/db": "file:../db",
     "@app/proto": "file:../proto",
-    "debug": "^4.3.4",
+    "debug": "^4.4.3",
     "nostr-tools": "^2.17.0",
     "tseep": "^1.3.1"
   },

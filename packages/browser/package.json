@@ -24,7 +24,7 @@
     "@app/sync": "file:../sync",
     "@vlcn.io/crsqlite-wasm": "^0.16.0",
     "broadcast-channel": "^7.0.0",
-    "debug": "^4.3.4"
+    "debug": "^4.4.3"
   },
   "devDependencies": {
     "tsup": "^8.5.0",
