@@ -76,13 +76,19 @@ describe('Database', () => {
       const crypto = require('crypto');
       const keyString = 'test-key-string';
       const keyHash = crypto.createHash('sha256').update(keyString).digest('hex');
-      
-      // Manually update the key hash for testing
-      await (database as any).db.run(
-        'UPDATE api_keys SET key_hash = ? WHERE id = ?',
-        [keyHash, apiKey.id]
-      );
-      
+
+      // Manually update the key hash for testing (db.run is callback-based, need to promisify)
+      await new Promise<void>((resolve, reject) => {
+        (database as any).db.run(
+          'UPDATE api_keys SET key_hash = ? WHERE id = ?',
+          [keyHash, apiKey.id],
+          (err: Error | null) => {
+            if (err) reject(err);
+            else resolve();
+          }
+        );
+      });
+
       const found = await database.findApiKey(keyHash);
       expect(found).not.toBeNull();
       expect(found!.user_id).toBe(userId);
