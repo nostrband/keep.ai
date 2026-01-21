@@ -498,9 +498,10 @@ export default function WorkflowDetailPage() {
                       <div className="text-sm text-gray-500">Loading versions...</div>
                     ) : (
                       <div className="space-y-2">
-                        {scriptVersions.map((version: any, index: number) => {
+                        {scriptVersions.map((version: any) => {
                           const isActive = version.id === activeScript.id;
-                          const previousVersion = scriptVersions[index + 1];
+                          // Find previous version by version number, not array index (more robust)
+                          const previousVersion = scriptVersions.find((v: any) => v.version === version.version - 1);
                           const canShowDiff = previousVersion !== undefined;
                           const isShowingDiff = diffVersions?.oldId === previousVersion?.id && diffVersions?.newId === version.id;
 

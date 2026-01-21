@@ -30,6 +30,7 @@ export default function ChatPage() {
   const id = "main"; // Static chat ID
   const [input, setInput] = useState("");
   const [promptHeight, setPromptHeight] = useState(0);
+  const [isQuickReplySubmitting, setIsQuickReplySubmitting] = useState(false);
   const promptContainerRef = useRef<HTMLDivElement>(null);
   const addMessage = useAddMessage();
   const { uploadFiles, uploadState } = useFileUpload();
@@ -101,12 +102,20 @@ export default function ChatPage() {
 
   // Handle quick-reply button selection
   const handleQuickReply = useCallback((option: string) => {
+    // Set local state immediately to prevent double-clicks
+    setIsQuickReplySubmitting(true);
+
     // Send the selected option as a user message
     addMessage.mutate({
       chatId: id,
       role: "user",
       content: option,
       files: [],
+    }, {
+      onSettled: () => {
+        // Reset local state when mutation completes (success or error)
+        setIsQuickReplySubmitting(false);
+      }
     });
   }, [addMessage]);
 
@@ -174,7 +183,7 @@ export default function ChatPage() {
             <QuickReplyButtons
               options={quickReplyOptions}
               onSelect={handleQuickReply}
-              disabled={addMessage.isPending || uploadState.isUploading}
+              disabled={addMessage.isPending || isQuickReplySubmitting || uploadState.isUploading}
             />
           )}
 

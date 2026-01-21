@@ -730,11 +730,11 @@ This document tracks remaining work for a simple, lovable, and complete v1 relea
 
 ### 41. MainPage Suggestion Focus
 **Spec**: `mainpage-suggestion-focus-textarea.md`
-**Status**: NOT VERIFIED
+**Status**: FIXED (2026-01-21)
 
-**Action Items**:
-1. After clicking suggestion button, call `inputRef.focus()`
-2. Optionally position cursor at end of text
+**Fix Applied**:
+1. Added textareaRef to MainPage component
+2. Updated suggestion click handler to call textareaRef.current?.focus() after setting input
 
 **Files**: `apps/web/src/components/MainPage.tsx`
 **Complexity**: Low (1 hour)
@@ -743,12 +743,12 @@ This document tracks remaining work for a simple, lovable, and complete v1 relea
 
 ### 42. Quick Reply Double-Click Prevention
 **Spec**: `quick-reply-double-click-prevention.md`
-**Status**: NOT VERIFIED
+**Status**: FIXED (2026-01-21)
 
-**Action Items**:
-1. Add local disabled state to quick reply buttons
-2. Disable immediately on click
-3. Re-enable after mutation completes
+**Fix Applied**:
+1. Added isQuickReplySubmitting local state for immediate feedback
+2. Set state immediately on click, reset in onSettled callback
+3. Updated disabled prop to include local state: disabled={addMessage.isPending || isQuickReplySubmitting || uploadState.isUploading}
 
 **Files**: `apps/web/src/components/ChatPage.tsx`
 **Complexity**: Low (1 hour)
@@ -757,11 +757,11 @@ This document tracks remaining work for a simple, lovable, and complete v1 relea
 
 ### 43. Script Run Retry Link Script Mismatch
 **Spec**: `script-run-retry-link-script-mismatch.md`
-**Status**: NOT VERIFIED
+**Status**: FIXED (2026-01-21)
 
-**Action Items**:
-1. Query original run's script_id
-2. Use that for retry navigation link instead of current run's
+**Fix Applied**:
+1. Added useScriptRun(run?.retry_of || "") to fetch original run
+2. Updated link to use originalRun?.script_id || run.script_id
 
 **Files**: `apps/web/src/components/ScriptRunDetailPage.tsx`
 **Complexity**: Medium (2 hours)
@@ -770,11 +770,11 @@ This document tracks remaining work for a simple, lovable, and complete v1 relea
 
 ### 44. ScriptDiff Find Version By Number
 **Spec**: `scriptdiff-find-version-by-number.md`
-**Status**: NOT VERIFIED
+**Status**: FIXED (2026-01-21)
 
-**Action Items**:
-1. Find previous version by version number, not array index
-2. Prevents issues if versions are not contiguous
+**Fix Applied**:
+1. Changed from array index lookup (scriptVersions[index + 1]) to version number lookup
+2. Now uses scriptVersions.find(v => v.version === version.version - 1)
 
 **Files**: `apps/web/src/components/WorkflowDetailPage.tsx`
 **Complexity**: Low (30 min)

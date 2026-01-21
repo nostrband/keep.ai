@@ -11,6 +11,8 @@ export default function ScriptRunDetailPage() {
   const { data: run, isLoading } = useScriptRun(runId!);
   const { data: script, isLoading: isLoadingScript } = useScript(run?.script_id || "");
   const { data: retries } = useRetriesOfRun(runId!);
+  // Fetch original run if this is a retry (to get correct script_id for link)
+  const { data: originalRun } = useScriptRun(run?.retry_of || "");
 
   if (!id || !runId) {
     return <div>Script run ID not found</div>;
@@ -124,7 +126,7 @@ export default function ScriptRunDetailPage() {
                   <div>
                     <h3 className="text-sm font-medium text-gray-700 mb-2">Retry of Run</h3>
                     <Link
-                      to={`/scripts/${run.script_id}/runs/${run.retry_of}`}
+                      to={`/scripts/${originalRun?.script_id || run.script_id}/runs/${run.retry_of}`}
                       className="text-blue-600 hover:text-blue-800 underline font-mono text-sm"
                     >
                       {run.retry_of.slice(0, 16)}...

@@ -160,6 +160,7 @@ export default function MainPage() {
   const [showAttentionOnly, setShowAttentionOnly] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const promptContainerRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { uploadFiles, uploadState } = useFileUpload();
 
   // Fetch latest run for each workflow using batch query
@@ -376,7 +377,11 @@ export default function MainPage() {
                       <Suggestion
                         key={index}
                         suggestion={suggestion}
-                        onClick={() => setInput(suggestion)}
+                        onClick={() => {
+                          setInput(suggestion);
+                          // Focus textarea after setting input
+                          textareaRef.current?.focus();
+                        }}
                         className="text-xs"
                       />
                     ))}
@@ -454,6 +459,7 @@ export default function MainPage() {
                 {(attachment) => <PromptInputAttachment data={attachment} />}
               </PromptInputAttachments>
               <PromptInputTextarea
+                ref={textareaRef}
                 onChange={(e) => setInput(e.target.value)}
                 value={input}
                 placeholder="What would you like me to help automate?"
