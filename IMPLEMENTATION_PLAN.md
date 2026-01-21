@@ -494,9 +494,23 @@ This document tracks remaining work for a simple, lovable, and complete v1 relea
 
 ---
 
-2. Handle: state, setTimeout, cleanup, clear functions
-3. Update 4 components to use hook
-4. Remove duplicated ~100 lines
+### 24. Extract Auto-Hiding Message Hook
+**Spec**: `extract-auto-hiding-message-hook.md`
+**Status**: FIXED (2026-01-21)
+
+**Fix Applied**:
+1. Created `useAutoHidingMessage` hook in `apps/web/src/hooks/useAutoHidingMessage.ts`:
+   - Handles state management for message
+   - Timeout tracking with refs
+   - Cleanup on unmount
+   - `show(message)` and `clear()` methods
+   - Configurable duration via options
+2. Updated 4 components to use the hook:
+   - WorkflowDetailPage.tsx - using `success` and `warning` hook instances
+   - TaskDetailPage.tsx - using `success` and `warning` hook instances
+   - ScriptDetailPage.tsx - using `success` and `warning` hook instances
+   - WorkflowEventGroup.tsx - using `success` hook instance
+3. Removed ~100 lines of duplicated code across the 4 components
 
 **Files**:
 - `apps/web/src/hooks/useAutoHidingMessage.ts` (new)

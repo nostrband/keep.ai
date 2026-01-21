@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useWorkflow, useScriptRun } from "../hooks/dbScriptReads";
 import { useUpdateWorkflow } from "../hooks/dbWrites";
@@ -19,6 +19,7 @@ import {
 } from "../ui";
 import { transformGmailMethod } from "../lib/event-helpers";
 import { partitionEventsBySignal } from "../lib/eventSignal";
+import { useAutoHidingMessage } from "../hooks/useAutoHidingMessage";
 
 interface WorkflowEvent {
   id: string;
@@ -39,31 +40,8 @@ export function WorkflowEventGroup({ workflowId, scriptId, scriptRunId, events }
   const { data: workflow } = useWorkflow(workflowId);
   const { data: scriptRun } = useScriptRun(scriptRunId || "");
   const updateWorkflowMutation = useUpdateWorkflow();
-  const [successMessage, setSuccessMessage] = useState<string>("");
+  const success = useAutoHidingMessage({ duration: 3000 });
   const [isLowSignalCollapsed, setIsLowSignalCollapsed] = useState(true);
-  const successTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Cleanup timeout on unmount
-  useEffect(() => {
-    return () => {
-      if (successTimeoutRef.current) {
-        clearTimeout(successTimeoutRef.current);
-      }
-    };
-  }, []);
-
-  // Helper to show success message with auto-clear
-  const showSuccessMessage = (message: string) => {
-    // Clear any existing timeout
-    if (successTimeoutRef.current) {
-      clearTimeout(successTimeoutRef.current);
-    }
-    setSuccessMessage(message);
-    successTimeoutRef.current = setTimeout(() => {
-      setSuccessMessage("");
-      successTimeoutRef.current = null;
-    }, 3000);
-  };
 
   const handleRetry = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -73,7 +51,7 @@ export function WorkflowEventGroup({ workflowId, scriptId, scriptRunId, events }
 
     // Only allow retry for active workflows - scheduler only executes where status === 'active'
     if (workflow.status !== 'active') {
-      showSuccessMessage("Enable workflow first to retry");
+      success.show("Enable workflow first to retry");
       return;
     }
 
@@ -85,7 +63,7 @@ export function WorkflowEventGroup({ workflowId, scriptId, scriptRunId, events }
       next_run_timestamp: now,
     }, {
       onSuccess: () => {
-        showSuccessMessage("Retry scheduled");
+        success.show("Retry scheduled");
       },
     });
   };
@@ -183,9 +161,9 @@ export function WorkflowEventGroup({ workflowId, scriptId, scriptRunId, events }
           </span>
           {/* Metadata: cost and success message */}
           <div className="flex items-center gap-2 text-xs text-gray-400">
-            {successMessage && (
+            {success.message && (
               <span className="text-green-600 bg-green-50 px-2 py-0.5 rounded border border-green-200">
-                {successMessage}
+                {success.message}
               </span>
             )}
             {totalCost > 0 && (

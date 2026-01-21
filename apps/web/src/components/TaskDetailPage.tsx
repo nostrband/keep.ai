@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React from "react";
 import { useParams, Link } from "react-router-dom";
 import { useTask, useTaskState, useTaskRuns } from "../hooks/dbTaskReads";
 import { useLatestScriptByTaskId, useWorkflowByTaskId } from "../hooks/dbScriptReads";
@@ -8,6 +8,7 @@ import SharedHeader from "./SharedHeader";
 import { Badge, Button } from "../ui";
 import { Response } from "../ui/components/ai-elements/response";
 import { TaskStatusBadge, WorkflowStatusBadge, TaskRunStatusBadge } from "./StatusBadge";
+import { useAutoHidingMessage } from "../hooks/useAutoHidingMessage";
 
 export default function TaskDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -17,49 +18,16 @@ export default function TaskDetailPage() {
   const { data: latestScript } = useLatestScriptByTaskId(id!);
   const { data: workflow } = useWorkflowByTaskId(id!);
   const { data: chat } = useChat(task?.chat_id || "");
-  const [warning, setWarning] = useState<string>("");
-  const [successMessage, setSuccessMessage] = useState<string>("");
-  const warningTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const successTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const success = useAutoHidingMessage({ duration: 3000 });
+  const warning = useAutoHidingMessage({ duration: 3000 });
 
   const updateTaskMutation = useUpdateTask();
   const pauseTaskMutation = usePauseTask();
 
-  // Cleanup timeouts on unmount
-  useEffect(() => {
-    return () => {
-      if (warningTimeoutRef.current) {
-        clearTimeout(warningTimeoutRef.current);
-      }
-      if (successTimeoutRef.current) {
-        clearTimeout(successTimeoutRef.current);
-      }
-    };
-  }, []);
-
-  // Helper to show warning with auto-clear
+  // Helper to show warning (clears success message first)
   const showWarning = (message: string) => {
-    if (warningTimeoutRef.current) {
-      clearTimeout(warningTimeoutRef.current);
-    }
-    setWarning(message);
-    setSuccessMessage("");
-    warningTimeoutRef.current = setTimeout(() => {
-      setWarning("");
-      warningTimeoutRef.current = null;
-    }, 3000);
-  };
-
-  // Helper to show success message with auto-clear
-  const showSuccessMessage = (message: string) => {
-    if (successTimeoutRef.current) {
-      clearTimeout(successTimeoutRef.current);
-    }
-    setSuccessMessage(message);
-    successTimeoutRef.current = setTimeout(() => {
-      setSuccessMessage("");
-      successTimeoutRef.current = null;
-    }, 3000);
+    success.clear();
+    warning.show(message);
   };
 
   const handleRunNow = async () => {
@@ -75,8 +43,8 @@ export default function TaskDetailPage() {
     }
 
     // Clear any previous messages
-    setWarning("");
-    setSuccessMessage("");
+    warning.clear();
+    success.clear();
 
     // Update task timestamp to now (in seconds)
     const nowTimestamp = Math.floor(Date.now() / 1000);
@@ -85,7 +53,7 @@ export default function TaskDetailPage() {
       timestamp: nowTimestamp,
     }, {
       onSuccess: () => {
-        showSuccessMessage("Task will run soon");
+        success.show("Task will run soon");
       },
       onError: () => {
         showWarning("Failed to restart task");
@@ -97,14 +65,14 @@ export default function TaskDetailPage() {
     if (!task) return;
 
     // Clear any previous messages
-    setWarning("");
-    setSuccessMessage("");
+    warning.clear();
+    success.clear();
 
     pauseTaskMutation.mutate({
       taskId: task.id,
     }, {
       onSuccess: () => {
-        showSuccessMessage("Task paused");
+        success.show("Task paused");
       },
       onError: () => {
         showWarning("Failed to pause task");
@@ -153,14 +121,14 @@ export default function TaskDetailPage() {
                   >
                     {updateTaskMutation.isPending ? "Running..." : "Run now"}
                   </Button>
-                  {warning && (
+                  {warning.message && (
                     <div className="text-sm text-red-600 bg-red-50 px-2 py-1 rounded border border-red-200">
-                      {warning}
+                      {warning.message}
                     </div>
                   )}
-                  {successMessage && (
+                  {success.message && (
                     <div className="text-sm text-green-600 bg-green-50 px-2 py-1 rounded border border-green-200">
-                      {successMessage}
+                      {success.message}
                     </div>
                   )}
                 </div>

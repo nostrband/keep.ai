@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -16,6 +16,7 @@ import ScriptDiff from "./ScriptDiff";
 import { Badge, Button } from "../ui";
 import { workflowNotifications } from "../lib/WorkflowNotifications";
 import { WorkflowStatusBadge, ScriptRunStatusBadge } from "./StatusBadge";
+import { useAutoHidingMessage } from "../hooks/useAutoHidingMessage";
 import { API_ENDPOINT } from "../const";
 
 export default function WorkflowDetailPage() {
@@ -28,13 +29,11 @@ export default function WorkflowDetailPage() {
   const { data: latestScript } = useLatestScriptByWorkflowId(id!);
   const { data: scriptRuns = [], isLoading: isLoadingRuns } = useScriptRunsByWorkflowId(id!);
   const { data: scriptVersions = [], isLoading: isLoadingVersions } = useScriptVersionsByWorkflowId(id!);
-  const [successMessage, setSuccessMessage] = useState<string>("");
-  const [warningMessage, setWarningMessage] = useState<string>("");
+  const success = useAutoHidingMessage({ duration: 3000 });
+  const warning = useAutoHidingMessage({ duration: 5000 });
   const [isTestRunning, setIsTestRunning] = useState(false);
   const [showVersionHistory, setShowVersionHistory] = useState(false);
   const [diffVersions, setDiffVersions] = useState<{ oldId: string; newId: string } | null>(null);
-  const successTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const warningTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const updateWorkflowMutation = useUpdateWorkflow();
   const activateMutation = useActivateScriptVersion();
@@ -62,41 +61,10 @@ export default function WorkflowDetailPage() {
     }
   }, [id]);
 
-  // Cleanup timeouts on unmount
-  useEffect(() => {
-    return () => {
-      if (successTimeoutRef.current) {
-        clearTimeout(successTimeoutRef.current);
-      }
-      if (warningTimeoutRef.current) {
-        clearTimeout(warningTimeoutRef.current);
-      }
-    };
-  }, []);
-
-  // Helper to show success message with auto-clear
-  const showSuccessMessage = (message: string) => {
-    if (successTimeoutRef.current) {
-      clearTimeout(successTimeoutRef.current);
-    }
-    setSuccessMessage(message);
-    successTimeoutRef.current = setTimeout(() => {
-      setSuccessMessage("");
-      successTimeoutRef.current = null;
-    }, 3000);
-  };
-
-  // Helper to show warning message with auto-clear
+  // Helper to show warning (clears success message first)
   const showWarning = (message: string) => {
-    if (warningTimeoutRef.current) {
-      clearTimeout(warningTimeoutRef.current);
-    }
-    setSuccessMessage(""); // Clear success message when showing warning
-    setWarningMessage(message);
-    warningTimeoutRef.current = setTimeout(() => {
-      setWarningMessage("");
-      warningTimeoutRef.current = null;
-    }, 5000);
+    success.clear();
+    warning.show(message);
   };
 
   // Get next run time from workflow.next_run_timestamp
@@ -122,7 +90,7 @@ export default function WorkflowDetailPage() {
       status: "active",
     }, {
       onSuccess: () => {
-        showSuccessMessage("Automation activated!");
+        success.show("Automation activated!");
       },
     });
   };
@@ -135,7 +103,7 @@ export default function WorkflowDetailPage() {
       status: "disabled",
     }, {
       onSuccess: () => {
-        showSuccessMessage("Automation paused");
+        success.show("Automation paused");
       },
     });
   };
@@ -148,7 +116,7 @@ export default function WorkflowDetailPage() {
       status: "active",
     }, {
       onSuccess: () => {
-        showSuccessMessage("Automation resumed");
+        success.show("Automation resumed");
       },
     });
   };
@@ -164,7 +132,7 @@ export default function WorkflowDetailPage() {
       next_run_timestamp: now,
     }, {
       onSuccess: () => {
-        showSuccessMessage("Workflow scheduled to run now");
+        success.show("Workflow scheduled to run now");
       },
     });
   };
@@ -173,8 +141,8 @@ export default function WorkflowDetailPage() {
     if (!workflow || !activeScript) return;
 
     setIsTestRunning(true);
-    setWarningMessage("");
-    setSuccessMessage("");
+    warning.clear();
+    success.clear();
 
     try {
       const response = await fetch(`${API_ENDPOINT}/workflow/test-run`, {
@@ -188,7 +156,7 @@ export default function WorkflowDetailPage() {
       const result = await response.json();
 
       if (result.success) {
-        showSuccessMessage("Test completed successfully");
+        success.show("Test completed successfully");
       } else {
         showWarning(`Test failed: ${result.error || 'Unknown error'}`);
       }
@@ -216,7 +184,7 @@ export default function WorkflowDetailPage() {
       scriptId: scriptId,
     }, {
       onSuccess: () => {
-        showSuccessMessage(`Activated v${version}`);
+        success.show(`Activated v${version}`);
         setShowVersionHistory(false);
         setDiffVersions(null);
       },
@@ -349,14 +317,14 @@ export default function WorkflowDetailPage() {
                       Script required to activate
                     </div>
                   )}
-                  {successMessage && (
+                  {success.message && (
                     <div className="text-sm text-green-600 bg-green-50 px-2 py-1 rounded border border-green-200">
-                      {successMessage}
+                      {success.message}
                     </div>
                   )}
-                  {warningMessage && (
+                  {warning.message && (
                     <div className="text-sm text-amber-700 bg-amber-50 px-2 py-1 rounded border border-amber-200">
-                      {warningMessage}
+                      {warning.message}
                     </div>
                   )}
                 </div>
