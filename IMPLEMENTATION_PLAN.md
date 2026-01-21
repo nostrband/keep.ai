@@ -748,12 +748,20 @@ This document tracks remaining work for a simple, lovable, and complete v1 relea
 
 ### 38. Test Run Single Concurrent
 **Spec**: `test-run-single-concurrent.md`
-**Status**: NOT IMPLEMENTED
+**Status**: FIXED (2026-01-21)
+**Problem**: If a user clicks "test run" multiple times rapidly, multiple test executions are triggered for the same workflow, wasting resources.
 
-**Action Items**:
-1. Track running test per workflow_id
-2. Reject concurrent requests for same workflow
-3. Return existing run_id or error
+**Fix Applied**:
+1. Added `inProgressTestRuns` Map at module level to track workflow_id -> scriptRunId
+2. Before starting a test run, check if one is already in progress for the workflow
+3. If in progress, return HTTP 409 (Conflict) with error message and existing scriptRunId
+4. Added `.finally()` handler to clean up tracking after test run completes (success or failure)
+5. Added appropriate debug logging for tracking lifecycle
+
+**Benefits**:
+- Only one test run can be in progress per workflow at a time
+- UI can show appropriate feedback when a test is already running
+- Returns the existing scriptRunId so UI can navigate to the in-progress run
 
 **Files**: `apps/server/src/server.ts`
 **Complexity**: Low (1 hour)

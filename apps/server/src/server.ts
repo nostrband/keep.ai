@@ -63,6 +63,10 @@ import { google } from "googleapis";
 
 const debugServer = debug("server:server");
 
+// Track in-progress test runs per workflow to prevent concurrent executions
+// Key: workflow_id, Value: scriptRunId
+const inProgressTestRuns = new Map<string, string>();
+
 // Setup configuration directory and environment
 const configDir = path.join(os.homedir(), ".keep.ai");
 const envPath = path.join(configDir, ".env");
@@ -1614,6 +1618,18 @@ export async function createServer(config: ServerConfig = {}) {
         return reply.status(400).send({ error: "workflow_id is required" });
       }
 
+      // Check if a test run is already in progress for this workflow
+      // This prevents wasting resources and confusion from multiple concurrent test runs
+      const existingRunId = inProgressTestRuns.get(body.workflow_id);
+      if (existingRunId) {
+        debugServer("Test run already in progress for workflow:", body.workflow_id, "scriptRunId:", existingRunId);
+        return reply.status(409).send({
+          error: "Test run already in progress",
+          message: "A test run is already running for this workflow. Please wait for it to complete.",
+          scriptRunId: existingRunId,
+        });
+      }
+
       // Get the workflow from the database
       const workflow = await api.scriptStore.getWorkflow(body.workflow_id);
       if (!workflow) {
@@ -1630,6 +1646,9 @@ export async function createServer(config: ServerConfig = {}) {
       // This avoids race conditions when querying for "latest" run after execution
       const { generateId } = await import("ai");
       const scriptRunId = generateId();
+
+      // Mark this workflow as having an in-progress test run
+      inProgressTestRuns.set(workflow.id, scriptRunId);
 
       // Create a standalone WorkflowWorker for test execution
       const gmailOAuth2Client = await createGmailOAuth2Client(userPath);
@@ -1654,6 +1673,10 @@ export async function createServer(config: ServerConfig = {}) {
         debugServer("Test run completed successfully for workflow:", workflow.id, "scriptRunId:", scriptRunId);
       }).catch((error) => {
         debugServer("Test run failed for workflow:", workflow.id, "scriptRunId:", scriptRunId, error);
+      }).finally(() => {
+        // Always clean up the in-progress tracking, whether success or failure
+        inProgressTestRuns.delete(workflow.id);
+        debugServer("Test run tracking cleared for workflow:", workflow.id);
       });
 
       // Return immediately with HTTP 202 (Accepted) and the run ID
