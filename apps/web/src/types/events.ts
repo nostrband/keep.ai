@@ -26,6 +26,9 @@ export const EVENT_TYPES = {
   TEXT_CLASSIFY: "text_classify",
   TEXT_SUMMARIZE: "text_summarize",
   TEXT_GENERATE: "text_generate",
+  MAINTENANCE_STARTED: "maintenance_started",
+  MAINTENANCE_ESCALATED: "maintenance_escalated",
+  MAINTENANCE_FIXED: "maintenance_fixed",
 } as const;
 
 export type EventType = (typeof EVENT_TYPES)[keyof typeof EVENT_TYPES];
@@ -190,6 +193,30 @@ export interface AddScriptEventPayload extends BaseEventPayload {
   version: number;
 }
 
+// Maintenance event payloads - used when workflows enter/exit maintenance mode
+export interface MaintenanceStartedEventPayload extends BaseEventPayload {
+  workflow_id: string;
+  script_run_id: string;
+  error_type: string;
+  error_message: string;
+}
+
+export interface MaintenanceEscalatedEventPayload extends BaseEventPayload {
+  workflow_id: string;
+  script_run_id: string;
+  error_type: string;
+  error_message: string;
+  fix_attempts: number;
+  max_fix_attempts: number;
+}
+
+export interface MaintenanceFixedEventPayload extends BaseEventPayload {
+  workflow_id: string;
+  script_id: string;
+  fix_comment: string;
+  version: number;
+}
+
 // Union type for all event payloads
 export type EventPayload =
   | CreateNoteEventPayload
@@ -217,7 +244,10 @@ export type EventPayload =
   | GmailApiCallEventPayload
   | WebDownloadEventPayload
   | FileSaveEventPayload
-  | AddScriptEventPayload;
+  | AddScriptEventPayload
+  | MaintenanceStartedEventPayload
+  | MaintenanceEscalatedEventPayload
+  | MaintenanceFixedEventPayload;
 
 // Event interface that matches the database structure
 export interface ChatEvent {
@@ -491,6 +521,39 @@ export const EVENT_CONFIGS: Record<EventType, EventConfig> = {
     getEntityPath: (payload) =>
       `/scripts/${(payload as AddScriptEventPayload).script_id}`,
     significance: 'write',
+  },
+  [EVENT_TYPES.MAINTENANCE_STARTED]: {
+    emoji: "🔧",
+    title: (payload) => {
+      const maintenancePayload = payload as MaintenanceStartedEventPayload;
+      return `Maintenance started: ${maintenancePayload.error_type}`;
+    },
+    hasId: true,
+    getEntityPath: (payload) =>
+      `/automations/${(payload as MaintenanceStartedEventPayload).workflow_id}`,
+    significance: 'state',
+  },
+  [EVENT_TYPES.MAINTENANCE_ESCALATED]: {
+    emoji: "⚠️",
+    title: (payload) => {
+      const escalatedPayload = payload as MaintenanceEscalatedEventPayload;
+      return `Maintenance escalated after ${escalatedPayload.fix_attempts} attempts`;
+    },
+    hasId: true,
+    getEntityPath: (payload) =>
+      `/automations/${(payload as MaintenanceEscalatedEventPayload).workflow_id}`,
+    significance: 'error',
+  },
+  [EVENT_TYPES.MAINTENANCE_FIXED]: {
+    emoji: "✅",
+    title: (payload) => {
+      const fixedPayload = payload as MaintenanceFixedEventPayload;
+      return `Maintenance fixed: ${fixedPayload.fix_comment}`;
+    },
+    hasId: true,
+    getEntityPath: (payload) =>
+      `/automations/${(payload as MaintenanceFixedEventPayload).workflow_id}`,
+    significance: 'success',
   },
 };
 

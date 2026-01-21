@@ -327,17 +327,20 @@ This document tracks remaining work for a simple, lovable, and complete v1 relea
 
 ### 15. Maintenance Event Types Registration
 **Spec**: `maintenance-event-types-registration.md`
-**Status**: NOT IMPLEMENTED
-**Problem**: `maintenance_started` and `maintenance_escalated` events aren't in EVENT_TYPES - causes UI rendering issues.
+**Status**: FIXED (2026-01-21)
+**Problem**: `maintenance_started` and `maintenance_escalated` events weren't in EVENT_TYPES - causes UI rendering issues.
 
-**Action Items**:
-1. Add event types to EVENT_TYPES enum
-2. Add entries to EVENT_CONFIGS map with icons/labels
-3. Style appropriately (yellow/warning for maintenance)
+**Fix Applied**:
+- Added MAINTENANCE_STARTED, MAINTENANCE_ESCALATED, MAINTENANCE_FIXED to EVENT_TYPES
+- Added payload interfaces for each type
+- Added EVENT_CONFIGS entries with appropriate emojis and significance levels:
+  - maintenance_started: wrench emoji, 'state' significance
+  - maintenance_escalated: warning emoji, 'error' significance
+  - maintenance_fixed: checkmark emoji, 'success' significance
+- Events now render properly in the timeline with navigation to workflow page
 
 **Files**: `apps/web/src/types/events.ts` (or similar)
 **Complexity**: Low (1 hour)
-
 ---
 
 ### 16. Workflow Timestamp Bug
