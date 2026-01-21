@@ -542,13 +542,12 @@ This document tracks remaining work for a simple, lovable, and complete v1 relea
 
 ### 28. Remove parseAsks Re-export
 **Spec**: `remove-parseasks-reexport.md`
-**Status**: STILL PRESENT (line 5 of ask.ts)
+**Status**: FIXED (2026-01-21)
 
-**Action Items**:
-1. Remove backward compatibility re-export from @app/agent (line 5: `export { parseAsks, type StructuredAsk } from "@app/proto";`)
-2. Search for any imports and update to use @app/proto directly
+- Removed re-export line from packages/agent/src/ai-tools/ask.ts
+- Removed re-export from packages/agent/src/index.ts
+- Verified no imports were using parseAsks/StructuredAsk from @app/agent (all already use @app/proto)
 
-**Files**: `packages/agent/src/ai-tools/ask.ts`
 **Complexity**: Low (30 min)
 
 ---

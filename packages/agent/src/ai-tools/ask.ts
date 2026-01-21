@@ -1,9 +1,6 @@
 import { z } from "zod";
 import { tool } from "ai";
 
-// Re-export from @app/proto for backward compatibility
-export { parseAsks, type StructuredAsk } from "@app/proto";
-
 const AskInfoSchema = z.object({
   asks: z.string().describe("Question for user. Keep it short and specific."),
   options: z
