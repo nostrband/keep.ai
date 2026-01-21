@@ -1234,11 +1234,24 @@ Added `@types/debug: ^4.1.12` to apps/web devDependencies
 
 ---
 
+### 68. User-Server Database Test Async Fix
+**Status**: FIXED (2026-01-21)
+**Problem**: The test "should find valid API key" in `apps/user-server/src/__tests__/database.test.ts` was failing because it incorrectly used `await` with sqlite3's callback-based `db.run()` method. The UPDATE query wasn't completing before the test tried to find the API key.
+
+**Fix Applied**:
+1. Wrapped the `db.run()` call in a Promise to properly wait for the UPDATE query to complete
+2. Added proper callback handling with resolve/reject pattern
+
+**Files**: `apps/user-server/src/__tests__/database.test.ts`
+**Complexity**: Trivial (5 min)
+
+---
+
 ## IDEAS TO PROMOTE TO SPECS
 
 Based on analysis of `ideas/*`, these should become formal specs for v1:
 
-### 68. Detect Abandoned Drafts
+### 69. Detect Abandoned Drafts
 **Idea**: `ideas/detect-abandoned-drafts.md`
 **Status**: IMPLEMENTED (2026-01-21)
 **Rationale**: Foundation for draft management system
@@ -1260,11 +1273,11 @@ Based on analysis of `ideas/*`, these should become formal specs for v1:
 
 ---
 
-### 69. Prompt Stale Drafts
+### 70. Prompt Stale Drafts
 **Idea**: `ideas/prompt-stale-drafts.md`
 **Status**: IMPLEMENTED (2026-01-21)
 **Rationale**: User engagement improvement
-**Dependencies**: #68 (Detect Abandoned Drafts)
+**Dependencies**: #69 (Detect Abandoned Drafts)
 
 **Implementation Details**:
 1. Added `StaleDraftsBanner` component to MainPage - shows amber banner when drafts need attention
@@ -1285,7 +1298,7 @@ Based on analysis of `ideas/*`, these should become formal specs for v1:
 
 ---
 
-### 70. Highlight Significant Events
+### 71. Highlight Significant Events
 **Idea**: `ideas/highlight-significant-events.md`
 **Status**: ALREADY IMPLEMENTED (2026-01-21)
 
@@ -1303,7 +1316,7 @@ Based on analysis of `ideas/*`, these should become formal specs for v1:
 
 ---
 
-### 71. Collapse Low-Signal Events
+### 72. Collapse Low-Signal Events
 **Idea**: `ideas/collapse-low-signal-events.md`
 **Status**: ALREADY IMPLEMENTED (2026-01-21)
 
@@ -1328,9 +1341,9 @@ Based on analysis of `ideas/*`, these should become formal specs for v1:
 | P0 Critical | Completed | 7 | 0 |
 | P1 High | Completed | 14 | 0 |
 | P2 Medium | Completed | 47 | 0 |
-| P3 Low | Completed | 20 | 0 |
+| P3 Low | Completed | 21 | 0 |
 | Ideas->Specs | Implemented | 4 | 0 |
-| **Total** | **All items complete** | **71 of 71** | **0** |
+| **Total** | **All items complete** | **72 of 72** | **0** |
 
 **ALL ITEMS ARE NOW COMPLETE!**
 
@@ -1339,10 +1352,11 @@ Based on analysis of `ideas/*`, these should become formal specs for v1:
 - Verified: #46 Cost Tracking Helper (already implemented)
 - Verified: #47 Focus Input URL Param (already implemented)
 - Improved: Focus input now uses textareaRef instead of querySelector
-- Verified: #70 Highlight Significant Events (already implemented - EventSignificance type, significanceStyles, getEventSignificance function)
-- Verified: #71 Collapse Low-Signal Events (already implemented - SignalLevel type, EventListWithCollapse component, partitionEventsBySignal functions)
-- Implemented: #68 Detect Abandoned Drafts (getAbandonedDrafts, getDraftActivitySummary, DRAFT_THRESHOLDS, AbandonedDraft/DraftActivitySummary interfaces)
-- Implemented: #69 Prompt Stale Drafts (StaleDraftsBanner component, useAbandonedDrafts/useDraftActivitySummary hooks)
+- Fixed: #68 User-Server Database Test Async Fix (wrapped sqlite3 db.run() in Promise for proper async handling)
+- Implemented: #69 Detect Abandoned Drafts (getAbandonedDrafts, getDraftActivitySummary, DRAFT_THRESHOLDS, AbandonedDraft/DraftActivitySummary interfaces)
+- Implemented: #70 Prompt Stale Drafts (StaleDraftsBanner component, useAbandonedDrafts/useDraftActivitySummary hooks)
+- Verified: #71 Highlight Significant Events (already implemented - EventSignificance type, significanceStyles, getEventSignificance function)
+- Verified: #72 Collapse Low-Signal Events (already implemented - SignalLevel type, EventListWithCollapse component, partitionEventsBySignal functions)
 
 ---
 
