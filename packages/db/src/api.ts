@@ -1,4 +1,4 @@
-import { AssistantUIMessage } from "@app/proto";
+import { AssistantUIMessage, AutonomyMode } from "@app/proto";
 import { ChatStore } from "./chat-store";
 import { KeepDb } from "./database";
 import { MemoryStore, Thread } from "./memory-store";
@@ -195,9 +195,9 @@ export class KeepDbApi {
 
   /**
    * Set the user's autonomy preference.
-   * @param mode - 'ai_decides' or 'coordinate'
+   * @param mode - AutonomyMode ('ai_decides' or 'coordinate')
    */
-  async setAutonomyMode(mode: 'ai_decides' | 'coordinate'): Promise<void> {
+  async setAutonomyMode(mode: AutonomyMode): Promise<void> {
     const timestamp = new Date().toISOString();
     const sql = `
       INSERT OR REPLACE INTO agent_state (key, value, timestamp)
@@ -210,7 +210,7 @@ export class KeepDbApi {
    * Get the user's autonomy preference.
    * Defaults to 'ai_decides' if not set.
    */
-  async getAutonomyMode(): Promise<'ai_decides' | 'coordinate'> {
+  async getAutonomyMode(): Promise<AutonomyMode> {
     const sql = `
       SELECT value FROM agent_state WHERE key = 'autonomy_mode'
     `;

@@ -6,7 +6,7 @@ import {
   ReplAgent,
   Sandbox,
 } from "./index";
-import { AssistantUIMessage } from "@app/proto";
+import { AssistantUIMessage, AutonomyMode } from "@app/proto";
 import debug from "debug";
 import {
   DBInterface,
@@ -577,7 +577,7 @@ export class TaskWorker {
 
     // Get user's autonomy preference for agent behavior
     // Fallback to 'ai_decides' if DB query fails - autonomy mode is a preference, not critical
-    let autonomyMode: 'ai_decides' | 'coordinate' = 'ai_decides';
+    let autonomyMode: AutonomyMode = 'ai_decides';
     try {
       autonomyMode = await this.api.getAutonomyMode();
     } catch (error) {

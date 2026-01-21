@@ -526,15 +526,11 @@ This document tracks remaining work for a simple, lovable, and complete v1 relea
 
 ### 27. Complete AutonomyMode Type Consolidation
 **Spec**: `complete-autonomymode-consolidation.md`
-**Status**: NOT IMPLEMENTED
+**Status**: FIXED (2026-01-21)
 
-**Action Items**:
-1. Update 2 files to import from `@app/proto`
-2. Remove inline type definitions
-
-**Files**:
-- `packages/agent/src/task-worker.ts`
-- `packages/db/src/api.ts`
+- Updated packages/db/src/api.ts to import AutonomyMode from @app/proto
+- Updated packages/agent/src/task-worker.ts to import AutonomyMode from @app/proto
+- Replaced all inline 'ai_decides' | 'coordinate' type annotations with AutonomyMode type
 
 **Complexity**: Low (30 min)
 
