@@ -371,4 +371,56 @@ export class ChatStore {
     if (!results || results.length === 0) return null;
     return results[0].notified_at;
   }
+
+  /**
+   * Get the timestamp of the most recent chat event for a chat.
+   * Used for determining "last activity" for abandoned draft detection.
+   *
+   * @param chatId - The chat ID to check
+   * @returns The ISO timestamp of the last chat event, or null if no events exist
+   */
+  async getLastChatActivity(chatId: string): Promise<string | null> {
+    const results = await this.db.db.execO<{ max_ts: string }>(
+      `SELECT MAX(timestamp) as max_ts
+       FROM chat_events
+       WHERE chat_id = ?`,
+      [chatId]
+    );
+
+    if (!results || results.length === 0 || !results[0].max_ts) return null;
+    return results[0].max_ts;
+  }
+
+  /**
+   * Get the last activity timestamps for multiple chats in a single query.
+   * More efficient than calling getLastChatActivity() in a loop.
+   *
+   * @param chatIds - Array of chat IDs to check
+   * @returns Map from chatId to last activity timestamp (or undefined if no events)
+   */
+  async getLastChatActivities(chatIds: string[]): Promise<Map<string, string>> {
+    if (chatIds.length === 0) {
+      return new Map();
+    }
+
+    const placeholders = chatIds.map(() => '?').join(', ');
+    const results = await this.db.db.execO<{ chat_id: string; max_ts: string }>(
+      `SELECT chat_id, MAX(timestamp) as max_ts
+       FROM chat_events
+       WHERE chat_id IN (${placeholders})
+       GROUP BY chat_id`,
+      chatIds
+    );
+
+    const activityMap = new Map<string, string>();
+    if (!results) return activityMap;
+
+    for (const row of results) {
+      if (row.max_ts) {
+        activityMap.set(row.chat_id, row.max_ts);
+      }
+    }
+
+    return activityMap;
+  }
 }

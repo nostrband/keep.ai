@@ -1,6 +1,34 @@
 import { CRSqliteDB } from "./database";
 import { DBInterface, validateInClauseLength } from "./interfaces";
 
+// Draft inactivity thresholds in days
+export const DRAFT_THRESHOLDS = {
+  STALE_DAYS: 3,           // Show subtle indicator
+  ABANDONED_DAYS: 7,       // Prompt user
+  ARCHIVE_DAYS: 30,        // Offer to archive
+};
+
+/**
+ * Represents a draft workflow that has been abandoned (no recent activity).
+ */
+export interface AbandonedDraft {
+  workflow: Workflow;
+  lastActivity: string;      // ISO timestamp of the most recent activity
+  daysSinceActivity: number; // Computed days since last activity
+  hasScript: boolean;        // Whether any script exists for this workflow
+  isWaitingForInput: boolean; // Whether the associated task is in 'wait' or 'asks' state
+}
+
+/**
+ * Summary of draft workflow states for UI display.
+ */
+export interface DraftActivitySummary {
+  totalDrafts: number;        // All drafts (status='')
+  staleDrafts: number;        // 3-7 days inactive
+  abandonedDrafts: number;    // 7+ days inactive
+  waitingForInput: number;    // Drafts where agent asked a question
+}
+
 export interface Script {
   id: string;
   task_id: string;
@@ -759,5 +787,164 @@ export class ScriptStore {
     );
 
     return count;
+  }
+
+  /**
+   * Get draft workflows that have had no activity for more than the specified number of days.
+   *
+   * A draft is considered abandoned when:
+   * 1. Status is draft (status = '')
+   * 2. No chat events, script saves, or workflow updates within the threshold period
+   *
+   * Last activity is calculated as the most recent of:
+   * - Chat event timestamp (from chat_events table where chat_id = workflow.task_id)
+   * - Script save timestamp (from scripts table where workflow_id = workflow.id)
+   * - Workflow timestamp (from workflows table)
+   *
+   * @param thresholdDays - Number of days of inactivity to consider a draft abandoned (default: 7)
+   * @returns Array of abandoned drafts sorted by lastActivity ascending (oldest first)
+   */
+  async getAbandonedDrafts(
+    thresholdDays: number = DRAFT_THRESHOLDS.ABANDONED_DAYS
+  ): Promise<AbandonedDraft[]> {
+    // Calculate the threshold timestamp
+    const thresholdDate = new Date();
+    thresholdDate.setDate(thresholdDate.getDate() - thresholdDays);
+    const thresholdTimestamp = thresholdDate.toISOString();
+    const now = new Date();
+
+    // Single query to get drafts with their last activity and related data
+    // Uses COALESCE to find the most recent of: chat events, script saves, or workflow timestamp
+    const results = await this.db.db.execO<Record<string, unknown>>(
+      `SELECT
+        w.id, w.title, w.task_id, w.timestamp, w.cron, w.events, w.status,
+        w.next_run_timestamp, w.maintenance, w.maintenance_fix_count, w.active_script_id,
+        COALESCE(
+          MAX(ce.timestamp),
+          MAX(s.timestamp),
+          w.timestamp
+        ) as last_activity,
+        (SELECT COUNT(*) FROM scripts WHERE workflow_id = w.id) > 0 as has_script,
+        t.state as task_state
+      FROM workflows w
+      LEFT JOIN chat_events ce ON ce.chat_id = w.task_id
+      LEFT JOIN scripts s ON s.workflow_id = w.id
+      LEFT JOIN tasks t ON t.id = w.task_id
+      WHERE w.status = ''
+      GROUP BY w.id
+      HAVING last_activity < ?
+      ORDER BY last_activity ASC`,
+      [thresholdTimestamp]
+    );
+
+    if (!results) return [];
+
+    return results.map((row) => {
+      const workflow: Workflow = {
+        id: row.id as string,
+        title: row.title as string,
+        task_id: row.task_id as string,
+        timestamp: row.timestamp as string,
+        cron: row.cron as string,
+        events: row.events as string,
+        status: row.status as string,
+        next_run_timestamp: row.next_run_timestamp as string,
+        maintenance: Boolean(row.maintenance),
+        maintenance_fix_count: (row.maintenance_fix_count as number) || 0,
+        active_script_id: (row.active_script_id as string) || '',
+      };
+
+      const lastActivity = row.last_activity as string;
+      const lastActivityDate = new Date(lastActivity);
+      const daysSinceActivity = Math.floor(
+        (now.getTime() - lastActivityDate.getTime()) / (1000 * 60 * 60 * 24)
+      );
+
+      const taskState = row.task_state as string;
+      const isWaitingForInput = taskState === 'wait' || taskState === 'asks';
+
+      return {
+        workflow,
+        lastActivity,
+        daysSinceActivity,
+        hasScript: Boolean(row.has_script),
+        isWaitingForInput,
+      };
+    });
+  }
+
+  /**
+   * Get a summary of draft workflow activity states.
+   * Useful for displaying in the main page attention banner.
+   *
+   * @returns Summary object with counts of drafts in different states
+   */
+  async getDraftActivitySummary(): Promise<DraftActivitySummary> {
+    const now = new Date();
+
+    // Calculate threshold timestamps
+    const staleThreshold = new Date(now);
+    staleThreshold.setDate(staleThreshold.getDate() - DRAFT_THRESHOLDS.STALE_DAYS);
+
+    const abandonedThreshold = new Date(now);
+    abandonedThreshold.setDate(abandonedThreshold.getDate() - DRAFT_THRESHOLDS.ABANDONED_DAYS);
+
+    // Get all drafts with their last activity in one query
+    const results = await this.db.db.execO<Record<string, unknown>>(
+      `SELECT
+        w.id,
+        COALESCE(
+          MAX(ce.timestamp),
+          MAX(s.timestamp),
+          w.timestamp
+        ) as last_activity,
+        t.state as task_state
+      FROM workflows w
+      LEFT JOIN chat_events ce ON ce.chat_id = w.task_id
+      LEFT JOIN scripts s ON s.workflow_id = w.id
+      LEFT JOIN tasks t ON t.id = w.task_id
+      WHERE w.status = ''
+      GROUP BY w.id`
+    );
+
+    if (!results) {
+      return {
+        totalDrafts: 0,
+        staleDrafts: 0,
+        abandonedDrafts: 0,
+        waitingForInput: 0,
+      };
+    }
+
+    let staleDrafts = 0;
+    let abandonedDrafts = 0;
+    let waitingForInput = 0;
+
+    const staleTimestamp = staleThreshold.toISOString();
+    const abandonedTimestamp = abandonedThreshold.toISOString();
+
+    for (const row of results) {
+      const lastActivity = row.last_activity as string;
+      const taskState = row.task_state as string;
+
+      // Count waiting for input
+      if (taskState === 'wait' || taskState === 'asks') {
+        waitingForInput++;
+      }
+
+      // Count stale (3-7 days) and abandoned (7+ days)
+      if (lastActivity < abandonedTimestamp) {
+        abandonedDrafts++;
+      } else if (lastActivity < staleTimestamp) {
+        staleDrafts++;
+      }
+    }
+
+    return {
+      totalDrafts: results.length,
+      staleDrafts,
+      abandonedDrafts,
+      waitingForInput,
+    };
   }
 }

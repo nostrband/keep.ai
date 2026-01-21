@@ -36,8 +36,8 @@ export { FileStore } from "./file-store";
 export type { File } from "./file-store";
 
 // Script store
-export { ScriptStore } from "./script-store";
-export type { Script, ScriptRun, Workflow } from "./script-store";
+export { ScriptStore, DRAFT_THRESHOLDS } from "./script-store";
+export type { Script, ScriptRun, Workflow, AbandonedDraft, DraftActivitySummary } from "./script-store";
 
 // Api
 export * from "./api";

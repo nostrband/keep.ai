@@ -7,6 +7,7 @@ import { useDbQuery } from "../hooks/dbQuery";
 import { useAutonomyPreference } from "../hooks/useAutonomyPreference";
 import SharedHeader from "./SharedHeader";
 import { WorkflowStatusBadge } from "./StatusBadge";
+import { StaleDraftsBanner } from "./StaleDraftsBanner";
 import {
   PromptInput,
   PromptInputAttachment,
@@ -448,6 +449,9 @@ export default function MainPage() {
             <h2 className="text-sm font-medium text-gray-500 mb-3">Create new automation</h2>
             {renderPromptInput()}
           </div>
+
+          {/* Stale Drafts Banner - prompts user about incomplete automations */}
+          <StaleDraftsBanner />
 
           {/* Attention Banner */}
           {attentionCount > 0 && (

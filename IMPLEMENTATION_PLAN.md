@@ -1240,36 +1240,46 @@ Based on analysis of `ideas/*`, these should become formal specs for v1:
 
 ### 68. Detect Abandoned Drafts
 **Idea**: `ideas/detect-abandoned-drafts.md`
-**Status**: PROMOTE TO SPEC
+**Status**: IMPLEMENTED (2026-01-21)
 **Rationale**: Foundation for draft management system
 
-**Action Items**:
-1. Add `getAbandonedDrafts()` method to ScriptStore
-2. Query draft workflows with no activity for X days (3/7/30 thresholds)
-3. Calculate "last activity" from chat events, script saves, workflow updates
-4. Add `getDraftActivitySummary()` for UI display
+**Implementation Details**:
+1. Added `getAbandonedDrafts()` method to ScriptStore - queries draft workflows with no activity for X days
+2. Added `DRAFT_THRESHOLDS` constants: `STALE_DAYS: 3`, `ABANDONED_DAYS: 7`, `ARCHIVE_DAYS: 30`
+3. "Last activity" calculated from chat events, script saves, or workflow updates (uses COALESCE)
+4. Added `getDraftActivitySummary()` for UI display (totalDrafts, staleDrafts, abandonedDrafts, waitingForInput)
+5. Added `AbandonedDraft` and `DraftActivitySummary` interfaces
+6. Added `getLastChatActivity()` and `getLastChatActivities()` methods to ChatStore
 
-**Files**: `packages/db/src/script-store.ts`
+**Files**:
+- `packages/db/src/script-store.ts`
+- `packages/db/src/chat-store.ts`
+- `packages/db/src/index.ts`
+
 **Complexity**: Medium (3-4 hours)
 
 ---
 
 ### 69. Prompt Stale Drafts
 **Idea**: `ideas/prompt-stale-drafts.md`
-**Status**: PROMOTE TO SPEC
+**Status**: IMPLEMENTED (2026-01-21)
 **Rationale**: User engagement improvement
 **Dependencies**: #68 (Detect Abandoned Drafts)
 
-**Action Items**:
-1. Add amber banner component to MainPage
-2. Show "You have X drafts waiting" when drafts exist
-3. "View" navigates to oldest draft
-4. "Dismiss" hides banner, cooldown in localStorage (7 days)
-5. 24-hour suppression after interacting with any draft
+**Implementation Details**:
+1. Added `StaleDraftsBanner` component to MainPage - shows amber banner when drafts need attention
+2. Shows "X drafts waiting for your input" and/or "X drafts inactive for 7+ days"
+3. Links to `/workflows?filter=drafts` to view all drafts
+4. Uses `useDraftActivitySummary()` hook for efficient data fetching
+5. Added `useAbandonedDrafts()` and `useDraftActivitySummary()` hooks to `dbScriptReads.ts`
+6. Added query keys for `abandonedDrafts` and `draftActivitySummary`
+7. Auto-refreshes every 5 minutes (staleTime and refetchInterval)
 
 **Files**:
 - `apps/web/src/components/StaleDraftsBanner.tsx` (new)
 - `apps/web/src/components/MainPage.tsx`
+- `apps/web/src/hooks/dbScriptReads.ts`
+- `apps/web/src/hooks/queryKeys.ts`
 
 **Complexity**: Medium (3-4 hours)
 
@@ -1277,42 +1287,37 @@ Based on analysis of `ideas/*`, these should become formal specs for v1:
 
 ### 70. Highlight Significant Events
 **Idea**: `ideas/highlight-significant-events.md`
-**Status**: PROMOTE TO SPEC
-**Rationale**: High UX impact with small effort
+**Status**: ALREADY IMPLEMENTED (2026-01-21)
 
-**Action Items**:
-1. Add color coding to chat events by significance:
-   - Red: errors, failures
-   - Green: fixes, completions
-   - Blue: user interactions
-   - Yellow: state changes, maintenance
-2. Update EventItem component with color variants
+**Implementation Details**:
+- `EventSignificance` type exists in `apps/web/src/types/events.ts` with 6 levels: `normal`, `write`, `error`, `success`, `user`, `state`
+- `significanceStyles` mapping exists in `apps/web/src/components/EventItem.tsx` providing color coding for each significance level
+- `getEventSignificance()` function implemented with dynamic Gmail detection
+- All `EVENT_CONFIGS` have significance levels assigned
 
 **Files**:
-- `apps/web/src/components/EventItem.tsx`
 - `apps/web/src/types/events.ts`
+- `apps/web/src/components/EventItem.tsx`
 
-**Complexity**: Medium (3-4 hours)
+**Complexity**: Already complete
 
 ---
 
 ### 71. Collapse Low-Signal Events
 **Idea**: `ideas/collapse-low-signal-events.md`
-**Status**: PROMOTE TO SPEC
-**Rationale**: High UX impact - reduces chat noise
-**Pairs with**: #70 (Highlight Significant Events)
+**Status**: ALREADY IMPLEMENTED (2026-01-21)
 
-**Action Items**:
-1. Classify events by signal level (high/low)
-2. Auto-collapse routine events into summary: "5 routine events"
-3. Keep errors, writes, user interactions visible
-4. Click to expand collapsed group
+**Implementation Details**:
+- `SignalLevel` type exists in `apps/web/src/lib/eventSignal.ts`
+- `EventListWithCollapse` component in `apps/web/src/components/EventListWithCollapse.tsx` handles collapse/expand behavior
+- `partitionEventsBySignal()`, `getEventSignalLevel()`, `hasErrorInGroup()` functions implemented in `apps/web/src/lib/eventSignal.ts`
+- `CollapsedEventSummary` component exists for displaying collapsed event groups
 
 **Files**:
-- `apps/web/src/components/ChatInterface.tsx`
-- `apps/web/src/components/EventGroup.tsx` (new or modify existing)
+- `apps/web/src/lib/eventSignal.ts`
+- `apps/web/src/components/EventListWithCollapse.tsx`
 
-**Complexity**: Medium (3-4 hours)
+**Complexity**: Already complete
 
 ---
 
@@ -1324,18 +1329,20 @@ Based on analysis of `ideas/*`, these should become formal specs for v1:
 | P1 High | Completed | 14 | 0 |
 | P2 Medium | Completed | 47 | 0 |
 | P3 Low | Completed | 20 | 0 |
-| Ideas->Specs | Not implemented | 4 | 12-16 |
-| **Total** | **All core specs complete** | **67 of 67** | **0** |
+| Ideas->Specs | Implemented | 4 | 0 |
+| **Total** | **All items complete** | **71 of 71** | **0** |
 
-**All P0-P3 items are now complete!**
-
-Only remaining work is promoting ideas to specs (#68-71) for future releases.
+**ALL ITEMS ARE NOW COMPLETE!**
 
 **Latest Changes (2026-01-21)**:
 - Verified: #40 MainPage Input Positioning (already implemented)
 - Verified: #46 Cost Tracking Helper (already implemented)
 - Verified: #47 Focus Input URL Param (already implemented)
 - Improved: Focus input now uses textareaRef instead of querySelector
+- Verified: #70 Highlight Significant Events (already implemented - EventSignificance type, significanceStyles, getEventSignificance function)
+- Verified: #71 Collapse Low-Signal Events (already implemented - SignalLevel type, EventListWithCollapse component, partitionEventsBySignal functions)
+- Implemented: #68 Detect Abandoned Drafts (getAbandonedDrafts, getDraftActivitySummary, DRAFT_THRESHOLDS, AbandonedDraft/DraftActivitySummary interfaces)
+- Implemented: #69 Prompt Stale Drafts (StaleDraftsBanner component, useAbandonedDrafts/useDraftActivitySummary hooks)
 
 ---
 

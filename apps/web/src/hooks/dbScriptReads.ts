@@ -1,5 +1,6 @@
 // Database script read hooks using TanStack Query
 import { useQuery } from "@tanstack/react-query";
+import { DRAFT_THRESHOLDS } from "@app/db";
 import { qk } from "./queryKeys";
 import { useDbQuery } from "./dbQuery";
 
@@ -226,5 +227,69 @@ export function useScriptVersionsByWorkflowId(workflowId: string) {
     },
     meta: { tables: ["scripts"] },
     enabled: !!api && !!workflowId,
+  });
+}
+
+/**
+ * Hook to get abandoned drafts (workflows with no recent activity).
+ *
+ * @param thresholdDays - Number of days to consider a draft abandoned (default: 7)
+ * @returns Query result containing array of abandoned drafts
+ */
+export function useAbandonedDrafts(thresholdDays: number = DRAFT_THRESHOLDS.ABANDONED_DAYS) {
+  const { api } = useDbQuery();
+  return useQuery({
+    queryKey: qk.abandonedDrafts(thresholdDays),
+    queryFn: async () => {
+      if (!api) return [];
+      try {
+        const drafts = await api.scriptStore.getAbandonedDrafts(thresholdDays);
+        return drafts;
+      } catch (error) {
+        return [];
+      }
+    },
+    meta: { tables: ["workflows", "scripts", "chat_events", "tasks"] },
+    enabled: !!api,
+    // Refresh every 5 minutes since this is based on time calculations
+    staleTime: 5 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
+  });
+}
+
+/**
+ * Hook to get a summary of draft activity states.
+ * Useful for displaying attention indicators in the UI.
+ *
+ * @returns Query result containing draft activity summary
+ */
+export function useDraftActivitySummary() {
+  const { api } = useDbQuery();
+  return useQuery({
+    queryKey: qk.draftActivitySummary(),
+    queryFn: async () => {
+      if (!api) return {
+        totalDrafts: 0,
+        staleDrafts: 0,
+        abandonedDrafts: 0,
+        waitingForInput: 0,
+      };
+      try {
+        const summary = await api.scriptStore.getDraftActivitySummary();
+        return summary;
+      } catch (error) {
+        return {
+          totalDrafts: 0,
+          staleDrafts: 0,
+          abandonedDrafts: 0,
+          waitingForInput: 0,
+        };
+      }
+    },
+    meta: { tables: ["workflows", "scripts", "chat_events", "tasks"] },
+    enabled: !!api,
+    // Refresh every 5 minutes since this is based on time calculations
+    staleTime: 5 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
   });
 }

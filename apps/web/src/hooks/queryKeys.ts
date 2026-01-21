@@ -57,4 +57,8 @@ export const qk = {
   workflowScripts: (workflowId: string) => [{ scope: "workflowScripts", workflowId }] as const,
   workflowScriptRuns: (workflowId: string) => [{ scope: "workflowScriptRuns", workflowId }] as const,
   latestWorkflowScript: (workflowId: string) => [{ scope: "latestWorkflowScript", workflowId }] as const,
+
+  // Draft activity queries (for abandoned draft detection)
+  abandonedDrafts: (thresholdDays: number) => [{ scope: "abandonedDrafts", thresholdDays }] as const,
+  draftActivitySummary: () => [{ scope: "draftActivitySummary" }] as const,
 };
