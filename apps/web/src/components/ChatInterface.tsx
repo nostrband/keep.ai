@@ -8,6 +8,7 @@ import { WorkflowEventGroup } from "./WorkflowEventGroup";
 import { AuthEventItem } from "./AuthEventItem";
 import type { UseMutationResult } from "@tanstack/react-query";
 import React from "react";
+import { safeSessionStorageGet, safeSessionStorageSet } from "../lib/safe-storage";
 
 // Helper to get sessionStorage key for scroll position
 const getScrollStorageKey = (chatId: string) => `chat-scroll-${chatId}`;
@@ -116,7 +117,7 @@ export default function ChatInterface({
   // Check for saved scroll position on mount - runs before first load effect
   useEffect(() => {
     const storageKey = getScrollStorageKey(chatId);
-    const savedPosition = sessionStorage.getItem(storageKey);
+    const savedPosition = safeSessionStorageGet(storageKey);
 
     if (savedPosition) {
       const position = parseInt(savedPosition, 10);
@@ -133,7 +134,7 @@ export default function ChatInterface({
 
     return () => {
       const scrollTop = document.documentElement.scrollTop;
-      sessionStorage.setItem(storageKey, String(scrollTop));
+      safeSessionStorageSet(storageKey, String(scrollTop));
     };
   }, [chatId, location.pathname]);
 

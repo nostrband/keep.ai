@@ -4,6 +4,7 @@ import {
   Button,
 } from "../ui";
 import { HeaderAuthNotice } from "./HeaderAuthNotice";
+import { safeLocalStorageGet } from "../lib/safe-storage";
 
 // Access build-time constants
 declare const __SERVERLESS__: boolean;
@@ -23,7 +24,8 @@ interface SharedHeaderProps {
 export default function SharedHeader({ title, subtitle }: SharedHeaderProps) {
   const [isOpen, setIsOpen] = useState(false);
   // Read debug mode once on mount to avoid reading localStorage on every render
-  const [debugMode] = useState(() => localStorage.getItem("keep-ai-debug-mode") === "true");
+  // Uses safe localStorage access for incognito/private mode compatibility
+  const [debugMode] = useState(() => safeLocalStorageGet("keep-ai-debug-mode") === "true");
   const dropdownRef = useRef<HTMLDivElement>(null);
   const location = useLocation();
   const navigate = useNavigate();

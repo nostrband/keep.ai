@@ -4,6 +4,7 @@ import SharedHeader from "./SharedHeader";
 import { Button } from "../ui";
 import { SUPPORTED_LANGUAGES, getBrowserLanguage, getLanguageDisplayName } from "../lib/language-utils";
 import { openUrl } from "../lib/url-utils";
+import { safeLocalStorageGet, safeLocalStorageSet, safeLocalStorageRemove } from "../lib/safe-storage";
 // import { DEFAULT_AGENT_MODEL } from "@app/agent";
 
 interface OpenRouterModel {
@@ -72,7 +73,7 @@ export default function SettingsPage() {
   const [gmailChecking, setGmailChecking] = useState(false);
   const [gmailCheckResult, setGmailCheckResult] = useState<string>("");
   const [debugMode, setDebugMode] = useState(() =>
-    localStorage.getItem("keep-ai-debug-mode") === "true"
+    safeLocalStorageGet("keep-ai-debug-mode") === "true"
   );
 
   const [formData, setFormData] = useState({
@@ -631,9 +632,9 @@ export default function SettingsPage() {
                       const enabled = e.target.checked;
                       setDebugMode(enabled);
                       if (enabled) {
-                        localStorage.setItem("keep-ai-debug-mode", "true");
+                        safeLocalStorageSet("keep-ai-debug-mode", "true");
                       } else {
-                        localStorage.removeItem("keep-ai-debug-mode");
+                        safeLocalStorageRemove("keep-ai-debug-mode");
                       }
                     }}
                     className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
