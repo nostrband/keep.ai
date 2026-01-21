@@ -15,7 +15,7 @@ import { Response } from "../ui";
 import ScriptDiff from "./ScriptDiff";
 import { Badge, Button } from "../ui";
 import { workflowNotifications } from "../lib/WorkflowNotifications";
-import { WorkflowStatusBadge } from "./StatusBadge";
+import { WorkflowStatusBadge, ScriptRunStatusBadge } from "./StatusBadge";
 import { API_ENDPOINT } from "../const";
 
 export default function WorkflowDetailPage() {
@@ -625,9 +625,11 @@ export default function WorkflowDetailPage() {
                         <div className="flex-1">
                           <div className="flex items-center gap-2 mb-1">
                             <span className="font-medium text-gray-900">Run {run.id.slice(0, 8)}</span>
-                            <Badge variant={run.error ? 'destructive' : run.end_timestamp ? 'default' : 'secondary'}>
-                              {run.error ? 'error' : run.end_timestamp ? 'completed' : 'running'}
-                            </Badge>
+                            <ScriptRunStatusBadge
+                              error={run.error}
+                              endTimestamp={run.end_timestamp}
+                              labels={{ error: "error", success: "completed", running: "running" }}
+                            />
                             {/* Show test badge if this is a test run */}
                             {run.type === 'test' && (
                               <Badge variant="outline" className="text-amber-700 border-amber-300 bg-amber-50 text-xs">

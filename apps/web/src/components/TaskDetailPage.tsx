@@ -7,7 +7,7 @@ import { useUpdateTask, usePauseTask } from "../hooks/dbWrites";
 import SharedHeader from "./SharedHeader";
 import { Badge, Button } from "../ui";
 import { Response } from "../ui/components/ai-elements/response";
-import { TaskStatusBadge } from "./StatusBadge";
+import { TaskStatusBadge, WorkflowStatusBadge, TaskRunStatusBadge } from "./StatusBadge";
 
 export default function TaskDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -250,13 +250,7 @@ export default function TaskDetailPage() {
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-2">
                         <span className="font-medium text-gray-900">{workflow.title || `Workflow ${workflow.id.slice(0, 8)}`}</span>
-                        {workflow.status === 'active' ? (
-                          <Badge className="bg-green-100 text-green-800">Running</Badge>
-                        ) : workflow.status === 'disabled' ? (
-                          <Badge className="bg-yellow-100 text-yellow-800">Paused</Badge>
-                        ) : (
-                          <Badge variant="outline">Draft</Badge>
-                        )}
+                        <WorkflowStatusBadge status={workflow.status} />
                       </div>
                       <div className="flex items-center gap-4 text-xs text-gray-500">
                         {workflow.cron && <span>Cron: {workflow.cron}</span>}
@@ -347,9 +341,7 @@ export default function TaskDetailPage() {
                         <div className="flex-1">
                           <div className="flex items-center gap-2 mb-1">
                             <span className="font-medium text-gray-900">Run {run.id.slice(0, 8)}</span>
-                            <Badge variant={run.state === 'done' ? 'default' : run.error ? 'destructive' : 'secondary'}>
-                              {run.state || run.error || 'pending'}
-                            </Badge>
+                            <TaskRunStatusBadge state={run.state || (run.error ? 'error' : 'pending')} />
                           </div>
                           <div className="flex items-center gap-4 text-xs text-gray-500">
                             <span>Started: {new Date(run.start_timestamp).toLocaleString()}</span>

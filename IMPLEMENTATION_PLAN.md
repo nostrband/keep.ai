@@ -528,16 +528,30 @@ This document tracks remaining work for a simple, lovable, and complete v1 relea
 
 ### 26. Complete StatusBadge Consolidation
 **Spec**: `complete-statusbadge-consolidation.md`
-**Status**: 84% DONE
+**Status**: FIXED (2026-01-21)
 
-**Action Items**:
-1. Create ScriptRunStatusBadge component
-2. Update remaining inline badge logic in TaskDetailPage
-3. Ensure consistent styling across all pages
+**Fix Applied**:
+1. Created `ScriptRunStatusBadge` component in StatusBadge.tsx with:
+   - `error` and `endTimestamp` props for status detection
+   - `size` prop for compact lists vs headers
+   - `labels` prop for customizable text (Error/Completed/Running or Failed/Success/Running)
+2. Updated TaskDetailPage.tsx:
+   - Replaced inline workflow badge with `WorkflowStatusBadge`
+   - Replaced inline task run badge with `TaskRunStatusBadge`
+3. Updated ScriptRunDetailPage.tsx:
+   - Replaced header badge with `ScriptRunStatusBadge`
+   - Replaced retry list badges with `ScriptRunStatusBadge` (small size, custom labels)
+4. Updated ScriptDetailPage.tsx:
+   - Replaced inline script run badges with `ScriptRunStatusBadge`
+5. Updated WorkflowDetailPage.tsx:
+   - Replaced inline script run badges with `ScriptRunStatusBadge`
 
 **Files**:
-- `apps/web/src/components/ui/ScriptRunStatusBadge.tsx` (new)
+- `apps/web/src/components/StatusBadge.tsx` (added ScriptRunStatusBadge)
 - `apps/web/src/components/TaskDetailPage.tsx`
+- `apps/web/src/components/ScriptRunDetailPage.tsx`
+- `apps/web/src/components/ScriptDetailPage.tsx`
+- `apps/web/src/components/WorkflowDetailPage.tsx`
 
 **Complexity**: Medium (3-4 hours)
 

@@ -8,6 +8,7 @@ import {
   Badge,
   Button,
 } from "../ui";
+import { ScriptRunStatusBadge } from "./StatusBadge";
 
 export default function ScriptDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -257,13 +258,7 @@ export default function ScriptDetailPage() {
                         <div className="flex-1">
                           <div className="flex items-center gap-2 mb-1">
                             <span className="font-medium text-gray-900">Run {run.id.slice(0, 8)}</span>
-                            {run.error ? (
-                              <Badge variant="destructive">Error</Badge>
-                            ) : run.end_timestamp ? (
-                              <Badge variant="default" className="bg-green-100 text-green-800">Completed</Badge>
-                            ) : (
-                              <Badge variant="secondary">Running</Badge>
-                            )}
+                            <ScriptRunStatusBadge error={run.error} endTimestamp={run.end_timestamp} />
                           </div>
                           <div className="flex items-center gap-4 text-xs text-gray-500">
                             <span>Started: {new Date(run.start_timestamp).toLocaleString()}</span>

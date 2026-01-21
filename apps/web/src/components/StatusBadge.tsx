@@ -40,3 +40,28 @@ export function TaskRunStatusBadge({ state }: { state: string }) {
     return <Badge variant="outline">Pending</Badge>;
   }
 }
+
+// Script run status badge - based on script run's error/end_timestamp fields
+// Supports optional size prop for different contexts (compact lists vs headers)
+// Labels can be customized for context (e.g., "Failed"/"Success" for retry lists)
+export function ScriptRunStatusBadge({
+  error,
+  endTimestamp,
+  size = "default",
+  labels = { error: "Error", success: "Completed", running: "Running" }
+}: {
+  error?: string | null;
+  endTimestamp?: string | null;
+  size?: "default" | "small";
+  labels?: { error: string; success: string; running: string };
+}) {
+  const sizeClass = size === "small" ? "text-xs" : "";
+
+  if (error) {
+    return <Badge variant="destructive" className={sizeClass}>{labels.error}</Badge>;
+  } else if (endTimestamp) {
+    return <Badge variant="default" className={`bg-green-100 text-green-800 ${sizeClass}`}>{labels.success}</Badge>;
+  } else {
+    return <Badge variant="secondary" className={sizeClass}>{labels.running}</Badge>;
+  }
+}

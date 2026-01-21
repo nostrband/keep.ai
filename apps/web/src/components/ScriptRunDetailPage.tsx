@@ -5,6 +5,7 @@ import SharedHeader from "./SharedHeader";
 import {
   Badge,
 } from "../ui";
+import { ScriptRunStatusBadge } from "./StatusBadge";
 
 export default function ScriptRunDetailPage() {
   const { id, runId } = useParams<{ id: string; runId: string }>();
@@ -43,13 +44,7 @@ export default function ScriptRunDetailPage() {
                   Run {run.id.slice(0, 8)}
                 </h2>
                 <div className="flex flex-wrap items-center gap-2">
-                  {run.error ? (
-                    <Badge variant="destructive">Error</Badge>
-                  ) : run.end_timestamp ? (
-                    <Badge variant="default" className="bg-green-100 text-green-800">Completed</Badge>
-                  ) : (
-                    <Badge variant="secondary">Running</Badge>
-                  )}
+                  <ScriptRunStatusBadge error={run.error} endTimestamp={run.end_timestamp} />
                   {/* Show retry badge if this is a retry run */}
                   {run.retry_of && run.retry_count > 0 && (
                     <Badge variant="outline" className="text-orange-700 border-orange-300 bg-orange-50">
@@ -152,13 +147,12 @@ export default function ScriptRunDetailPage() {
                           >
                             Retry #{retry.retry_count}
                           </Link>
-                          {retry.error ? (
-                            <Badge variant="destructive" className="text-xs">Failed</Badge>
-                          ) : retry.end_timestamp ? (
-                            <Badge variant="default" className="bg-green-100 text-green-800 text-xs">Success</Badge>
-                          ) : (
-                            <Badge variant="secondary" className="text-xs">Running</Badge>
-                          )}
+                          <ScriptRunStatusBadge
+                            error={retry.error}
+                            endTimestamp={retry.end_timestamp}
+                            size="small"
+                            labels={{ error: "Failed", success: "Success", running: "Running" }}
+                          />
                           <span className="text-xs text-gray-500">
                             {new Date(retry.start_timestamp).toLocaleString()}
                           </span>
