@@ -57,6 +57,12 @@ export function makeSaveTool(opts: {
       };
       await opts.scriptStore.addScript(newScript);
 
+      // Update workflow's active_script_id to point to the new script
+      // New script versions automatically become active
+      await opts.scriptStore.updateWorkflowFields(workflow.id, {
+        active_script_id: newScript.id,
+      });
+
       await opts.chatStore.saveChatEvent(generateId(), opts.chatId, "add_script", {
         task_id: opts.taskId,
         task_run_id: opts.taskRunId,

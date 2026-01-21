@@ -189,52 +189,57 @@ export function useDeletePeer() {
   });
 }
 
-export function useRollbackScript() {
+/**
+ * Activate a specific script version for a workflow.
+ * Instead of creating a new script version (rollback), this just updates
+ * the workflow's active_script_id pointer to the target script.
+ *
+ * Benefits over the old "rollback" approach:
+ * - No duplicate script content
+ * - No version number inflation
+ * - No race conditions on version computation
+ * - Idempotent operation (double-click safe)
+ * - Better performance (just a pointer update)
+ */
+export function useActivateScriptVersion() {
   const { api } = useDbQuery();
 
   return useMutation({
     mutationFn: async (input: {
       workflowId: string;
-      targetScriptId: string;  // The script version to rollback to
+      scriptId: string;  // The script version to activate
     }) => {
       if (!api) throw new Error("Script store not available");
 
-      // Get the target script to rollback to
-      const targetScript = await api.scriptStore.getScript(input.targetScriptId);
-      if (!targetScript) throw new Error("Target script not found");
+      // Validate the script exists and belongs to this workflow
+      const script = await api.scriptStore.getScript(input.scriptId);
+      if (!script) throw new Error("Script not found");
+      if (script.workflow_id !== input.workflowId) {
+        throw new Error("Script does not belong to this workflow");
+      }
 
-      // Get the latest script to determine the next version number
-      const latestScript = await api.scriptStore.getLatestScriptByWorkflowId(input.workflowId);
-      const nextVersion = latestScript ? latestScript.version + 1 : 1;
-
-      // Generate a new ID for the rollback script
-      const { bytesToHex } = await import("@noble/ciphers/utils");
-      const { randomBytes } = await import("@noble/ciphers/crypto");
-      const newId = bytesToHex(randomBytes(16));
-
-      // Create the new script version with the old code
-      await api.scriptStore.addScript({
-        id: newId,
-        task_id: targetScript.task_id,
-        version: nextVersion,
-        timestamp: new Date().toISOString(),
-        code: targetScript.code,
-        change_comment: `Rolled back to v${targetScript.version}`,
-        workflow_id: input.workflowId,
-        type: targetScript.type,
-        summary: targetScript.summary,
-        diagram: targetScript.diagram,
+      // Just update the pointer - no new script creation needed
+      await api.scriptStore.updateWorkflowFields(input.workflowId, {
+        active_script_id: input.scriptId,
       });
 
-      return { newScriptId: newId, version: nextVersion };
+      return { scriptId: input.scriptId, version: script.version };
     },
     onSuccess: (_result, { workflowId }) => {
-      // Invalidate script-related queries to get fresh data
+      // Invalidate workflow queries since active_script_id changed
+      queryClient.invalidateQueries({ queryKey: qk.workflow(workflowId) });
+      queryClient.invalidateQueries({ queryKey: qk.allWorkflows() });
+      // Also invalidate script queries for UI consistency
       queryClient.invalidateQueries({ queryKey: qk.workflowScripts(workflowId) });
       queryClient.invalidateQueries({ queryKey: qk.latestWorkflowScript(workflowId) });
-      queryClient.invalidateQueries({ queryKey: qk.allScripts() });
 
-      notifyTablesChanged(["scripts"], true, api!);
+      notifyTablesChanged(["workflows"], true, api!);
     },
   });
 }
+
+/**
+ * @deprecated Use useActivateScriptVersion instead.
+ * This alias is provided for backward compatibility during transition.
+ */
+export const useRollbackScript = useActivateScriptVersion;

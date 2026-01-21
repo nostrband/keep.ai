@@ -210,7 +210,6 @@ export class WorkflowScheduler {
 
       // Check which workflows should run based on next_run_timestamp
       const currentTime = Date.now();
-      const currentTimeISO = new Date(currentTime).toISOString();
       const dueWorkflows = [];
 
       for (const workflow of activeWorkflows) {
@@ -275,9 +274,10 @@ export class WorkflowScheduler {
               const nextRun = cronJob.nextRun();
 
               if (nextRun) {
+                // Note: Only update next_run_timestamp, not timestamp.
+                // workflow.timestamp is the creation time; script_runs track execution times.
                 await this.api.scriptStore.updateWorkflowFields(workflow.id, {
                   next_run_timestamp: nextRun.toISOString(),
-                  timestamp: currentTimeISO, // Update last run timestamp
                 });
                 this.debug(
                   `Updated workflow ${workflow.id} next_run_timestamp to ${nextRun.toISOString()}`
@@ -286,7 +286,6 @@ export class WorkflowScheduler {
                 // Clear next_run_timestamp if cron has no next run
                 await this.api.scriptStore.updateWorkflowFields(workflow.id, {
                   next_run_timestamp: '',
-                  timestamp: currentTimeISO,
                 });
               }
             } catch (error) {
@@ -295,14 +294,12 @@ export class WorkflowScheduler {
               await this.api.scriptStore.updateWorkflowFields(workflow.id, {
                 status: 'error',
                 next_run_timestamp: '',
-                timestamp: currentTimeISO,
               });
             }
           } else {
             // No cron expression, clear next_run_timestamp
             await this.api.scriptStore.updateWorkflowFields(workflow.id, {
               next_run_timestamp: '',
-              timestamp: currentTimeISO,
             });
           }
         } catch (error) {

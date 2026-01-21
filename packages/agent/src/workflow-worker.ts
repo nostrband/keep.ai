@@ -69,20 +69,18 @@ export class WorkflowWorker {
     this.debug("Execute workflow", workflow, "retryOf:", retryOf, "retryCount:", retryCount, "runType:", runType, "scriptRunId:", scriptRunId);
 
     try {
-      // Find scripts by workflow_id
-      const scripts = await this.api.scriptStore.getScriptsByWorkflowId(workflow.id);
-
-      if (scripts.length === 0) {
-        this.debug("No scripts found for workflow", workflow.id);
-        throw new Error(`No scripts found for workflow ${workflow.id}`);
+      // Use the active script pointed to by the workflow
+      // This is more efficient than querying for "latest" and supports version switching
+      if (!workflow.active_script_id) {
+        this.debug("No active script ID for workflow", workflow.id);
+        throw new Error(`No active script for workflow ${workflow.id}. Please save a script first.`);
       }
 
-      if (scripts.length > 1) {
-        this.debug(`Warning: Multiple scripts (${scripts.length}) found for workflow ${workflow.id}, using latest version`);
+      const script = await this.api.scriptStore.getScript(workflow.active_script_id);
+      if (!script) {
+        this.debug("Active script not found", workflow.active_script_id, "for workflow", workflow.id);
+        throw new Error(`Active script ${workflow.active_script_id} not found for workflow ${workflow.id}`);
       }
-
-      // Use the latest script (first one, since getScriptsByWorkflowId orders by version DESC)
-      const script = scripts[0];
 
       await this.processWorkflowScript(workflow, script, retryOf, retryCount, runType, scriptRunId);
     } catch (error) {
@@ -186,13 +184,11 @@ export class WorkflowWorker {
         costMicrodollars
       );
 
-      // For test runs, skip workflow timestamp update and scheduler signals
+      // For test runs, skip scheduler signals
       if (!isTestRun) {
-        // Update workflow timestamp to mark last successful run
-        // Use updateWorkflowFields for atomic update to prevent overwriting concurrent changes
-        await this.api.scriptStore.updateWorkflowFields(workflow.id, {
-          timestamp: new Date().toISOString(),
-        });
+        // Note: workflow.timestamp is the creation time, not last run time.
+        // Script runs track actual execution times via script_runs table.
+        // The next_run_timestamp field is used for scheduling.
 
         // Reset maintenance fix count on successful run (the fix worked!)
         // This prevents old fix counts from persisting after issues are resolved

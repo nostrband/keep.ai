@@ -130,25 +130,40 @@ This document tracks remaining work for a simple, lovable, and complete v1 relea
 
 ### 8. Active Script Version Pointer (Architectural Fix)
 **Spec**: `active-script-version-pointer.md`
-**Status**: NOT IMPLEMENTED
+**Status**: FIXED (2026-01-21)
 **Problem**: No `active_script_id` column in workflows table. Still uses `getLatestScriptByWorkflowId()` which causes: duplicate content on rollback, inflated version numbers, race conditions, double-click creates duplicates.
 
-**Action Items**:
-1. Create migration adding `active_script_id TEXT` to workflows table
-2. Backfill: Set `active_script_id` to latest script_id for each workflow
-3. Update workflow-scheduler to use `active_script_id` instead of querying latest
-4. Update rollback mutation to update pointer instead of duplicating code
-5. Update WorkflowDetailPage to show script from `active_script_id`
-6. Add index on `scripts.workflow_id` if not exists
+**Fix Applied**:
+1. Created migration v26.ts adding `active_script_id TEXT NOT NULL DEFAULT ''` to workflows table
+2. Migration backfills existing workflows with their latest script ID using correlated subquery
+3. Updated Workflow interface to include `active_script_id` field
+4. Updated all SQL queries (getWorkflow, listWorkflows, etc.) to include active_script_id
+5. Updated updateWorkflowFields() to support active_script_id updates
+6. Updated workflow-worker.ts to use `workflow.active_script_id` instead of querying latest
+7. Renamed `useRollbackScript` to `useActivateScriptVersion` - now just updates pointer, no script duplication
+8. Updated WorkflowDetailPage.tsx:
+   - Changed "Current" badge to "Active"
+   - Changed "Rollback" button to "Activate"
+   - Shows script from workflow.active_script_id
+9. Updated save.ts to set active_script_id when new script is saved
+
+**Benefits**:
+- No duplicate script content on version switch
+- No version number inflation
+- Idempotent operations (double-click safe)
+- Better performance (direct ID lookup vs "latest" query)
+- No race conditions computing next version
 
 **Files**:
-- `packages/db/migrations/v25-active-script-pointer.ts` (new)
-- `packages/agent/src/workflow-scheduler.ts`
-- `packages/db/src/script-store.ts`
-- `apps/web/src/components/WorkflowDetailPage.tsx`
-- `apps/web/src/hooks/dbWrites.ts`
+- `packages/db/src/migrations/v26.ts` (new)
+- `packages/db/src/database.ts` (import migration)
+- `packages/db/src/script-store.ts` (interface, queries, updateWorkflowFields)
+- `packages/db/src/api.ts` (workflow creation)
+- `packages/agent/src/workflow-worker.ts` (executeWorkflow)
+- `packages/agent/src/ai-tools/save.ts` (set active_script_id)
+- `apps/web/src/hooks/dbWrites.ts` (useActivateScriptVersion)
+- `apps/web/src/components/WorkflowDetailPage.tsx` (UI changes)
 
-**Complexity**: High (8-12 hours)
 **Note**: Supersedes `rollback-script-atomicity.md` and `rollback-script-query-invalidation.md`
 
 ---
@@ -327,16 +342,15 @@ This document tracks remaining work for a simple, lovable, and complete v1 relea
 
 ### 16. Workflow Timestamp Bug
 **Spec**: `workflow-timestamp-as-creation-time.md`
-**Status**: CONFIRMED BUG
+**Status**: FIXED (2026-01-21)
 **Problem**: UI shows "Created" but scheduler updates timestamp on EVERY execution at 4 places: lines 275, 284, 293, 300.
 
-**Action Items**:
-1. In workflow-scheduler.ts, remove all `timestamp: currentTimeISO` updates
-2. Ensure `next_run_timestamp` is used for scheduling, not `timestamp`
-3. Verify UI displays timestamp as true creation time
-4. Consider adding separate `last_run_timestamp` field if needed
+**Fix Applied**:
+1. In workflow-worker.ts lines 187-193, removed timestamp update that was incorrectly marking "last successful run"
+2. In workflow-scheduler.ts, removed `timestamp: currentTimeISO` updates from 4 places (lines 280, 289, 298, 305) where it was corrupting the creation timestamp
+3. Added comments explaining that workflow.timestamp is the creation time, script_runs table tracks execution times, and next_run_timestamp is used for scheduling
 
-**Files**: `packages/agent/src/workflow-scheduler.ts`
+**Files**: `packages/agent/src/workflow-worker.ts`, `packages/agent/src/workflow-scheduler.ts`
 **Complexity**: Low (1 hour)
 
 ---
@@ -554,15 +568,10 @@ This document tracks remaining work for a simple, lovable, and complete v1 relea
 
 ### 30. Rollback Script Query Invalidation
 **Spec**: `rollback-script-query-invalidation.md`
-**Status**: NOT IMPLEMENTED
-**Note**: May be superseded by #8 (active-script-version-pointer)
-
-**Action Items**:
-1. Add `scriptVersions(taskId)` to query invalidation after rollback
-2. Ensure version list updates after rollback operation
+**Status**: SUPERSEDED by #8 (2026-01-21)
+**Note**: The `useActivateScriptVersion` hook (which replaced `useRollbackScript`) now properly invalidates both workflow queries and script queries in its onSuccess callback. No additional changes needed.
 
 **Files**: `apps/web/src/hooks/dbWrites.ts`
-**Complexity**: Low (30 min)
 
 ---
 

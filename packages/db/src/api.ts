@@ -304,6 +304,7 @@ export class KeepDbApi {
         next_run_timestamp: "",
         maintenance: false,
         maintenance_fix_count: 0,
+        active_script_id: "",  // No active script yet, will be set when first script is saved
       };
 
       // Create the matching workflow

@@ -9,7 +9,7 @@ import {
 } from "../hooks/dbScriptReads";
 import { useTask } from "../hooks/dbTaskReads";
 import { useChat } from "../hooks/dbChatReads";
-import { useUpdateWorkflow, useRollbackScript } from "../hooks/dbWrites";
+import { useUpdateWorkflow, useActivateScriptVersion } from "../hooks/dbWrites";
 import SharedHeader from "./SharedHeader";
 import { Response } from "../ui";
 import ScriptDiff from "./ScriptDiff";
@@ -37,7 +37,16 @@ export default function WorkflowDetailPage() {
   const warningTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const updateWorkflowMutation = useUpdateWorkflow();
-  const rollbackMutation = useRollbackScript();
+  const activateMutation = useActivateScriptVersion();
+
+  // Get the active script (pointed to by workflow.active_script_id)
+  // Falls back to latestScript for backwards compatibility during migration
+  const activeScript = useMemo(() => {
+    if (!workflow?.active_script_id || scriptVersions.length === 0) {
+      return latestScript; // Fallback for workflows without active_script_id set
+    }
+    return scriptVersions.find((s: any) => s.id === workflow.active_script_id) || latestScript;
+  }, [workflow?.active_script_id, scriptVersions, latestScript]);
 
   // Clear workflow notifications when viewing this workflow
   // This prevents re-notifying user for errors they've already seen
@@ -99,7 +108,7 @@ export default function WorkflowDetailPage() {
   }, [workflow?.next_run_timestamp, workflow?.status]);
 
   const handleActivate = async () => {
-    if (!workflow || !latestScript) return;
+    if (!workflow || !activeScript) return;
 
     updateWorkflowMutation.mutate({
       workflowId: workflow.id,
@@ -154,7 +163,7 @@ export default function WorkflowDetailPage() {
   };
 
   const handleTestRun = async () => {
-    if (!workflow || !latestScript) return;
+    if (!workflow || !activeScript) return;
 
     setIsTestRunning(true);
     setWarningMessage("");
@@ -192,15 +201,15 @@ export default function WorkflowDetailPage() {
     }
   };
 
-  const handleRollback = (scriptId: string, version: number) => {
+  const handleActivateVersion = (scriptId: string, version: number) => {
     if (!workflow) return;
 
-    rollbackMutation.mutate({
+    activateMutation.mutate({
       workflowId: workflow.id,
-      targetScriptId: scriptId,
+      scriptId: scriptId,
     }, {
       onSuccess: () => {
-        showSuccessMessage(`Rolled back to v${version}`);
+        showSuccessMessage(`Activated v${version}`);
         setShowVersionHistory(false);
         setDiffVersions(null);
       },
@@ -258,7 +267,7 @@ export default function WorkflowDetailPage() {
                 <div className="flex flex-col items-end gap-2">
                   <div className="flex gap-2">
                     {/* Show Activate button for Draft workflows with a script */}
-                    {workflow.status === "" && latestScript && (
+                    {workflow.status === "" && activeScript && (
                       <Button
                         onClick={handleActivate}
                         disabled={updateWorkflowMutation.isPending}
@@ -269,7 +278,7 @@ export default function WorkflowDetailPage() {
                       </Button>
                     )}
                     {/* Show Run now button for Draft workflows without cron, or for testing */}
-                    {(workflow.status === "" || workflow.status === "active") && latestScript && (
+                    {(workflow.status === "" || workflow.status === "active") && activeScript && (
                       <Button
                         onClick={handleRunNow}
                         disabled={updateWorkflowMutation.isPending}
@@ -281,7 +290,7 @@ export default function WorkflowDetailPage() {
                       </Button>
                     )}
                     {/* Show Test Run button for any workflow with a script - runs immediately without affecting workflow state */}
-                    {latestScript && (
+                    {activeScript && (
                       <Button
                         onClick={handleTestRun}
                         disabled={isTestRunning || updateWorkflowMutation.isPending}
@@ -328,7 +337,7 @@ export default function WorkflowDetailPage() {
                     )}
                   </div>
                   {/* Show hint if no script exists yet */}
-                  {workflow.status === "" && !latestScript && (
+                  {workflow.status === "" && !activeScript && (
                     <div className="text-sm text-gray-500">
                       Script required to activate
                     </div>
@@ -434,7 +443,7 @@ export default function WorkflowDetailPage() {
             )}
 
             {/* Script Section */}
-            {latestScript && (
+            {activeScript && (
               <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="text-lg font-semibold text-gray-900">Script</h2>
@@ -450,25 +459,25 @@ export default function WorkflowDetailPage() {
                   )}
                 </div>
 
-                {/* Latest Script */}
+                {/* Active Script */}
                 <Link
-                  to={`/scripts/${latestScript.id}`}
+                  to={`/scripts/${activeScript.id}`}
                   className="block p-4 border border-gray-200 rounded-lg hover:border-gray-300 hover:shadow-sm transition-all"
                 >
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-2">
-                        <span className="font-medium text-gray-900">Script {latestScript.id.slice(0, 8)}</span>
-                        <Badge variant="outline">v{latestScript.version}</Badge>
-                        <Badge className="bg-blue-100 text-blue-800">Current</Badge>
+                        <span className="font-medium text-gray-900">Script {activeScript.id.slice(0, 8)}</span>
+                        <Badge variant="outline">v{activeScript.version}</Badge>
+                        <Badge className="bg-blue-100 text-blue-800">Active</Badge>
                       </div>
-                      {latestScript.change_comment && (
+                      {activeScript.change_comment && (
                         <p className="text-sm text-gray-600 mb-2 line-clamp-2">
-                          {latestScript.change_comment}
+                          {activeScript.change_comment}
                         </p>
                       )}
                       <div className="text-xs text-gray-500">
-                        Updated: {new Date(latestScript.timestamp).toLocaleString()}
+                        Updated: {new Date(activeScript.timestamp).toLocaleString()}
                       </div>
                     </div>
                   </div>
@@ -483,7 +492,7 @@ export default function WorkflowDetailPage() {
                     ) : (
                       <div className="space-y-2">
                         {scriptVersions.map((version: any, index: number) => {
-                          const isLatest = version.id === latestScript.id;
+                          const isActive = version.id === activeScript.id;
                           const previousVersion = scriptVersions[index + 1];
                           const canShowDiff = previousVersion !== undefined;
                           const isShowingDiff = diffVersions?.oldId === previousVersion?.id && diffVersions?.newId === version.id;
@@ -492,7 +501,7 @@ export default function WorkflowDetailPage() {
                             <div key={version.id}>
                               <div
                                 className={`p-3 border rounded-lg ${
-                                  isLatest
+                                  isActive
                                     ? "border-blue-300 bg-blue-50"
                                     : "border-gray-200 hover:border-gray-300"
                                 }`}
@@ -506,8 +515,8 @@ export default function WorkflowDetailPage() {
                                       >
                                         v{version.version}
                                       </Link>
-                                      {isLatest && (
-                                        <Badge className="bg-blue-100 text-blue-800 text-xs">Current</Badge>
+                                      {isActive && (
+                                        <Badge className="bg-blue-100 text-blue-800 text-xs">Active</Badge>
                                       )}
                                     </div>
                                     {version.change_comment && (
@@ -530,15 +539,15 @@ export default function WorkflowDetailPage() {
                                         {isShowingDiff ? "Hide diff" : "Show diff"}
                                       </Button>
                                     )}
-                                    {!isLatest && (
+                                    {!isActive && (
                                       <Button
                                         variant="outline"
                                         size="sm"
-                                        onClick={() => handleRollback(version.id, version.version)}
-                                        disabled={rollbackMutation.isPending}
+                                        onClick={() => handleActivateVersion(version.id, version.version)}
+                                        disabled={activateMutation.isPending}
                                         className="cursor-pointer text-xs"
                                       >
-                                        {rollbackMutation.isPending ? "Rolling back..." : "Rollback"}
+                                        {activateMutation.isPending ? "Activating..." : "Activate"}
                                       </Button>
                                     )}
                                   </div>
@@ -567,19 +576,19 @@ export default function WorkflowDetailPage() {
             )}
 
             {/* What This Automation Does - Summary and Diagram */}
-            {latestScript && (latestScript.summary || latestScript.diagram) && (
+            {activeScript && (activeScript.summary || activeScript.diagram) && (
               <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
                 <h2 className="text-lg font-semibold text-gray-900 mb-4">What This Automation Does</h2>
 
                 {/* Summary */}
-                {latestScript.summary && (
-                  <p className="text-gray-700 mb-4">{latestScript.summary}</p>
+                {activeScript.summary && (
+                  <p className="text-gray-700 mb-4">{activeScript.summary}</p>
                 )}
 
                 {/* Mermaid Diagram - rendered via markdown code fence */}
-                {latestScript.diagram && (
+                {activeScript.diagram && (
                   <div className="mt-4 p-4 bg-gray-50 rounded-lg">
-                    <Response>{`\`\`\`mermaid\n${latestScript.diagram}\n\`\`\``}</Response>
+                    <Response>{`\`\`\`mermaid\n${activeScript.diagram}\n\`\`\``}</Response>
                   </div>
                 )}
               </div>
