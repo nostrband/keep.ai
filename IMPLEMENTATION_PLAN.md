@@ -930,10 +930,10 @@ The implementation is already complete:
 ## P3 - LOW PRIORITY (Polish)
 
 ### 48. Code Quality: `as any` Type Casts
-**Status**: NEW ISSUE
+**Status**: DEFERRED (not blocking v1)
 **Problem**: 58 occurrences of `as any` across 25 files. Type safety issues.
 
-**Action Items**:
+**Action Items** (post-v1):
 1. Audit all `as any` usages
 2. Replace with proper types where possible
 3. Document remaining intentional casts
@@ -944,7 +944,7 @@ The implementation is already complete:
 ---
 
 ### 49. Code Quality: FIXME Comments
-**Status**: NEW ISSUE
+**Status**: DEFERRED (not blocking v1)
 **Problem**: 4 FIXME comments in sync code needing attention.
 
 **Files**:
@@ -958,7 +958,7 @@ The implementation is already complete:
 ---
 
 ### 50. Code Quality: Skipped Tests
-**Status**: NEW ISSUE
+**Status**: DEFERRED (not blocking v1)
 **Problem**: 6 skipped tests due to environment constraints.
 
 **Files**:
@@ -1359,12 +1359,12 @@ Based on analysis of `ideas/*`, these should become formal specs for v1:
 |----------|--------|-------|------------|
 | P0 Critical | Completed | 7 | 0 |
 | P1 High | Completed | 14 | 0 |
-| P2 Medium | Completed | 47 | 0 |
-| P3 Low | Completed | 21 | 0 |
+| P2 Medium | Completed | 26 | 0 |
+| P3 Low | Completed (18) + Deferred (3) | 21 | 0 |
 | Ideas->Specs | Implemented | 5 | 0 |
-| **Total** | **All items complete** | **73 of 73** | **0** |
+| **Total** | **70 completed, 3 deferred** | **73** | **0** |
 
-**ALL ITEMS ARE NOW COMPLETE!**
+**V1 RELEASE READY** - All blocking items complete. Deferred items (#48-50) are code quality improvements for post-v1.
 
 **Latest Changes (2026-01-21)**:
 - Verified: #40 MainPage Input Positioning (already implemented)
