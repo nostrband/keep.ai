@@ -2,7 +2,7 @@
 
 **Goal:** Transform Keep.AI into a Simple, Lovable, Complete (SLC) v1 product focused on the core automation journey: Create -> Approve -> Run -> Handle Issues -> Tune
 
-**Last Updated:** 2026-01-22 (v1.0.0-alpha.10 tagged)
+**Last Updated:** 2026-01-22 (v1.0.0-alpha.11 tagged)
 **Verified Against Codebase:** 2026-01-22
 
 ---
@@ -954,6 +954,32 @@ The AI SDK (`ai` package) tool execute function signature changed to require two
 - Type-check passes (21 tasks successful)
 - Tests pass (216 in packages/tests, 37 in user-server)
 - Tagged v1.0.0-alpha.9
+
+---
+
+### OpenRouter Proxy Code Quality Fixes (2026-01-22)
+
+**Issues Found:**
+The `openrouter-proxy.ts` file had several code quality issues that could lead to billing data loss:
+
+1. **Unhandled Promise in Streaming**: `finalizeBilling()` was called without awaiting, causing `res.end()` to be called immediately - billing could be cut off
+2. **Silent JSON Parsing Errors**: JSON parse errors in streaming response were silently ignored with no logging
+3. **Inconsistent Logging**: Used `console.error` instead of the Logger instance
+4. **Weak Typing**: Used `any` type for user objects and headers instead of proper interfaces
+
+**Files Fixed:**
+1. `/home/artur/keep.ai/apps/user-server/src/openrouter-proxy.ts`
+
+**Changes Made:**
+- Added `OpenRouterMessage` and `UserInfo` interfaces to replace `any` types
+- Changed `finalizeBilling()` call to use `.then()/.catch()` pattern to ensure billing completes before response ends
+- Added logging for JSON parse errors in streaming (debug level) for debugging malformed chunks
+- Replaced all `console.error` calls with `this.logger.error` for consistent logging
+- Improved `filterHeaders()` method typing with `Record<string, string>` return type
+
+**Verification:**
+- Type-check passes (21 tasks successful)
+- Tests pass (216 in packages/tests, 37 in user-server)
 
 ---
 

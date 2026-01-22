@@ -12,13 +12,22 @@ interface OpenRouterUsage {
   cost?: number;
 }
 
+interface OpenRouterMessage {
+  role: string;
+  content: string;
+}
+
 interface OpenRouterResponse {
   choices?: Array<{
-    message?: any;
+    message?: OpenRouterMessage;
     finish_reason?: string;
   }>;
   usage?: OpenRouterUsage;
   model?: string;
+}
+
+interface UserInfo {
+  id: string;
 }
 
 export class OpenRouterProxy {
@@ -75,7 +84,7 @@ export class OpenRouterProxy {
   private async handleStreamingRequest(
     req: AuthenticatedRequest,
     res: Response,
-    user: any,
+    user: UserInfo,
     apiKeyId: string
   ): Promise<void> {
     res.writeHead(200, {
@@ -136,8 +145,13 @@ export class OpenRouterProxy {
           const data = line.slice(6);
           if (data === '[DONE]') {
             res.write('data: [DONE]\n\n');
-            this.finalizeBilling(user.id, apiKeyId, totalCost, totalTokens, model);
-            res.end();
+            // Await billing completion before ending response to prevent data loss
+            this.finalizeBilling(user.id, apiKeyId, totalCost, totalTokens, model)
+              .then(() => res.end())
+              .catch((err) => {
+                this.logger.error('Billing finalization failed', err);
+                res.end();
+              });
             return;
           }
 
@@ -152,7 +166,8 @@ export class OpenRouterProxy {
               model = parsed.model;
             }
           } catch (e) {
-            // Ignore JSON parse errors for malformed chunks
+            // Log JSON parse errors but continue processing - malformed chunks shouldn't break billing
+            this.logger.debug(`JSON parse error in streaming response: ${e}`);
           }
         }
       }
@@ -168,7 +183,7 @@ export class OpenRouterProxy {
       });
 
       proxyRes.on('error', (err) => {
-        console.error('Proxy response error:', err);
+        this.logger.error('Proxy response error', err);
         if (!res.headersSent) {
           res.write(`data: ${JSON.stringify({ error: 'Stream error' })}\n\n`);
           res.end();
@@ -177,7 +192,7 @@ export class OpenRouterProxy {
     });
 
     proxyReq.on('error', (err) => {
-      console.error('Proxy request error:', err);
+      this.logger.error('Proxy request error', err);
       if (!res.headersSent) {
         res.write(`data: ${JSON.stringify({ error: 'Request failed' })}\n\n`);
         res.end();
@@ -191,7 +206,7 @@ export class OpenRouterProxy {
   private async handleNonStreamingRequest(
     req: AuthenticatedRequest,
     res: Response,
-    user: any,
+    user: UserInfo,
     apiKeyId: string
   ): Promise<void> {
     const proxyReq = https.request({
@@ -242,14 +257,14 @@ export class OpenRouterProxy {
           }
           res.json(response);
         } catch (error) {
-          console.error('Response parsing error:', error);
+          this.logger.error('Response parsing error', error);
           res.status(proxyRes.statusCode || 500).json({ error: 'Invalid response from upstream' });
         }
       });
     });
 
     proxyReq.on('error', (err) => {
-      console.error('Proxy request error:', err);
+      this.logger.error('Proxy request error', err);
       if (!res.headersSent) {
         res.status(500).json({ error: 'Proxy request failed' });
       }
@@ -259,8 +274,8 @@ export class OpenRouterProxy {
     proxyReq.end();
   }
 
-  private filterHeaders(headers: any): any {
-    const filtered: any = {};
+  private filterHeaders(headers: Record<string, string | string[] | undefined>): Record<string, string> {
+    const filtered: Record<string, string> = {};
     for (const [key, value] of Object.entries(headers)) {
       const keyLower = key.toLowerCase();
       if (keyLower !== 'authorization' && keyLower !== 'host' && value !== undefined) {
@@ -308,7 +323,7 @@ export class OpenRouterProxy {
         });
       }
     } catch (error) {
-      console.error('Billing finalization error:', error);
+      this.logger.error('Billing finalization error', error);
     }
   }
 }
