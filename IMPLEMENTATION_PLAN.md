@@ -2,7 +2,7 @@
 
 **Goal:** Transform Keep.AI into a Simple, Lovable, Complete (SLC) v1 product focused on the core automation journey: Create -> Approve -> Run -> Handle Issues -> Tune
 
-**Last Updated:** 2026-01-22 (All specs complete, code paths verified, v1.0.0-alpha.4 tagged)
+**Last Updated:** 2026-01-22 (All specs complete, code paths verified, v1.0.0-alpha.5 tagged)
 **Verified Against Codebase:** 2026-01-22
 
 ---
@@ -17,7 +17,7 @@ A comprehensive verification of all 12 specs against the codebase was completed 
 - **P0 specs (07, 08, 09, 10, 11, 12):** COMPLETED - Core database foundation done
 - **P1 specs (01, 02):** COMPLETED - Event system and navigation refactored
 - **P2 specs (03, 04, 05, 06):** COMPLETED - All UI pages updated
-- **All 12 specs are COMPLETED** - v1.0.0-alpha.4 tagged
+- **All 12 specs are COMPLETED** - v1.0.0-alpha.5 tagged
 
 ### Infrastructure Gaps Confirmed
 1. ~~Latest migration is **v29** - migration v30 pending for Spec 10~~ **DONE** (Spec 10 - v30)
@@ -857,7 +857,11 @@ Final cleanup items (deferred for post-v1)
 These items are not strictly required for v1 but would improve quality:
 
 ### Test Coverage
-- Add tests for database stores (chat-store, script-store, etc.)
+- ~~Add tests for database stores (chat-store, script-store, etc.)~~ **Partial** - chat-store tests added (2026-01-22)
+  - Added 32 tests for ChatStore covering saveChatMessage, getNewChatMessages, getChatMessageById, countNewMessages, getLastMessageActivity
+  - Added tests for createChat, getChat, getChatByWorkflowId, updateChat, deleteChat, readChat, getAllChats
+  - Tests run in isolation with manual table creation (avoids CR-SQLite migration dependencies)
+  - script-store and task-store tests still pending
 - ~~Add tests for new notification-store and execution-log-store~~ **DONE** (2026-01-22)
   - Added 15 tests for NotificationStore covering save, get, filter, acknowledge, resolve, count
   - Added 15 tests for ExecutionLogStore covering save, get, list, filter, cost tracking, tool call counting
@@ -994,4 +998,4 @@ Per AGENTS.md: Run `cd packages/tests && npm test` and `cd apps/user-server && n
   - Type-check passes (all 18 packages)
   - All tests pass (122 total: 85 in packages/tests, 37 in user-server)
   - No TODOs/FIXMEs in codebase
-  - v1.0.0-alpha.4 tagged
+  - v1.0.0-alpha.5 tagged
