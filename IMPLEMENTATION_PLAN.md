@@ -858,12 +858,16 @@ These items are not strictly required for v1 but would improve quality:
 
 ### Test Coverage
 - Add tests for database stores (chat-store, script-store, etc.)
-- Add tests for new notification-store and execution-log-store
+- ~~Add tests for new notification-store and execution-log-store~~ **DONE** (2026-01-22)
+  - Added 15 tests for NotificationStore covering save, get, filter, acknowledge, resolve, count
+  - Added 15 tests for ExecutionLogStore covering save, get, list, filter, cost tracking, tool call counting
+  - Tests run in isolation with manual table creation (avoids CR-SQLite migration dependencies)
 - Add tests for agent tools
 - Fix skipped P2P sync tests
 
 ### Code Cleanup
-- Remove commented-out console.log statements in agent.ts, sandbox.ts
+- ~~Remove commented-out console.log statements in agent.ts, sandbox.ts~~ **DONE** (2026-01-22)
+  - Removed 3 commented console.log statements from agent.ts (lines 247, 261) and sandbox.ts (line 175)
 - Address FIXME reference in migrations/v23.ts (now handled by deprecation)
 
 ### Future Features (from ideas/)
@@ -934,8 +938,8 @@ Per AGENTS.md: Run `cd packages/tests && npm test` and `cd apps/user-server && n
 - [x] Fix any broken tests (fixed CLI type error for Task missing workflow_id and asks)
   - **Note:** `apps/cli/src/commands/agent.ts` needed `workflow_id` and `asks` fields added to the mock Task object to match the updated Task interface from Spec 10
 - [x] Type-check passes (`npm run type-check` - with BUILD_GMAIL_SECRET placeholder)
-- [x] Tests pass (55 passed in packages/tests, 37 passed in user-server)
+- [x] Tests pass (85 passed in packages/tests, 37 passed in user-server)
 - [x] Create git tag (v1.0.0-alpha.2)
 - [x] Code cleanup (TODOs, comments) - Fixed orphaned comment reference in v23.ts (2026-01-22)
-- [ ] Add tests for new functionality (deferred to post-v1)
+- [x] Add tests for new functionality - Added 30 tests for notification-store and execution-log-store (2026-01-22)
 - [ ] Final review and documentation

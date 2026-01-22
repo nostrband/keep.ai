@@ -172,7 +172,6 @@ export class Sandbox {
         this.injectInto(this.#ctx, { state: options.state }, this.#ctx.global);
       }
 
-      // console.log("code", wrappedSource);
       const evaluation = this.#ctx.evalCode(wrappedSource, filename, {
         type: "global",
       });

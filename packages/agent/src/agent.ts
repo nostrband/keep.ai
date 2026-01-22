@@ -244,8 +244,6 @@ export class Agent {
           // Consumed
           input.inbox.length = 0;
 
-          // console.log("step", input.step, "request", stepResult.request.body);
-
           if (stepResult.providerMetadata?.openrouter) {
             this.debug(
               "step",
@@ -258,7 +256,6 @@ export class Agent {
               // @ts-ignore
               stepResult.providerMetadata?.openrouter?.usage?.cost || 0;
           }
-          // console.log("response", stepResult.response.messages);
 
           if (stepResult.finishReason === "stop") {
             // If task doesn't call 'pause' or 'finish' then
