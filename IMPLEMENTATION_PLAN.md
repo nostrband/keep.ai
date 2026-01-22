@@ -935,6 +935,28 @@ This fix completes the Spec 12 migration and ensures all read/write operations u
 
 ---
 
+### Type Error Fixes in Agent Tool Tests (2026-01-22)
+
+**Issue Found:**
+The AI SDK (`ai` package) tool execute function signature changed to require two arguments `(input: INPUT, options: ToolCallOptions)`. The test files were calling `execute()` with only one argument, causing TypeScript errors.
+
+**Files Fixed:**
+1. `/home/artur/keep.ai/packages/tests/src/utility-tools.test.ts`
+2. `/home/artur/keep.ai/packages/tests/src/note-tools.test.ts`
+
+**Changes Made:**
+- Added `createToolCallOptions()` helper function providing required ToolCallOptions fields (`toolCallId`, `messages`, `abortSignal`)
+- Changed EvalContext `type` from `"chat"` to `"workflow"` to match valid TaskType values
+- Added type casts for array results from list/search tools (to handle `AsyncIterable` union type)
+- All `execute()` calls now pass the second argument with proper options
+
+**Verification:**
+- Type-check passes (21 tasks successful)
+- Tests pass (216 in packages/tests, 37 in user-server)
+- Tagged v1.0.0-alpha.9
+
+---
+
 ## Implementation Notes
 
 ### Migration Order
