@@ -2,7 +2,7 @@
 
 **Goal:** Transform Keep.AI into a Simple, Lovable, Complete (SLC) v1 product focused on the core automation journey: Create -> Approve -> Run -> Handle Issues -> Tune
 
-**Last Updated:** 2026-01-22 (All specs complete, code paths verified, v1.0.0-alpha.6 tagged)
+**Last Updated:** 2026-01-22 (All specs complete, code paths verified, agent tool tests added)
 **Verified Against Codebase:** 2026-01-22
 
 ---
@@ -867,7 +867,9 @@ These items are not strictly required for v1 but would improve quality:
   - Added 15 tests for NotificationStore covering save, get, filter, acknowledge, resolve, count
   - Added 15 tests for ExecutionLogStore covering save, get, list, filter, cost tracking, tool call counting
   - Tests run in isolation with manual table creation (avoids CR-SQLite migration dependencies)
-- Add tests for agent tools
+- ~~Add tests for agent tools~~ **DONE** (2026-01-22)
+  - note-tools.test.ts: 30 tests for note tools (create, update, delete, get, list, search)
+  - utility-tools.test.ts: 14 tests for utility tools (atob, console-log)
 - Fix skipped P2P sync tests
 
 ### Code Cleanup
@@ -1002,6 +1004,6 @@ Per AGENTS.md: Run `cd packages/tests && npm test` and `cd apps/user-server && n
 - [x] Final review and documentation - COMPLETED (2026-01-22)
   - All 12 specs verified implemented
   - Type-check passes (all 18 packages)
-  - All tests pass (209 total: 172 in packages/tests, 37 in user-server)
+  - All tests pass (253 total: 216 in packages/tests, 37 in user-server)
   - No TODOs/FIXMEs in codebase
   - v1.0.0-alpha.7 tagged

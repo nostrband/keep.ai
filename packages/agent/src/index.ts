@@ -10,6 +10,8 @@ export {
   makeWebSearchTool,
   makePdfExplainTool,
   makeAudioExplainTool,
+  makeAtobTool,
+  makeConsoleLogTool,
 } from "./tools";
 
 // Environment configuration
@@ -92,4 +94,5 @@ export type {
   SandboxOptions,
   EvalOptions,
   EvalResult,
+  EvalContext,
 } from "./sandbox/sandbox";
