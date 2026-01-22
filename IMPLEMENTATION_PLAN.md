@@ -2,7 +2,7 @@
 
 **Goal:** Transform Keep.AI into a Simple, Lovable, Complete (SLC) v1 product focused on the core automation journey: Create -> Approve -> Run -> Handle Issues -> Tune
 
-**Last Updated:** 2026-01-22 (Spec 06 Home Page Cleanup)
+**Last Updated:** 2026-01-22 (Spec 10 Tasks Table Cleanup)
 **Verified Against Codebase:** 2026-01-22
 
 ---
@@ -14,15 +14,14 @@
 A comprehensive verification of all 12 specs against the codebase was completed on 2026-01-22. Key findings:
 
 ### Summary
-- **P0 specs (07, 08, 09, 11):** COMPLETED - Core database foundation done
-- **P0 specs (10):** NOT STARTED - Large item pending
+- **P0 specs (07, 08, 09, 10, 11):** COMPLETED - Core database foundation done
 - **P0 specs (12):** COMPLETED (DB layer) - New tables created, stores implemented
 - **P1 specs (01):** COMPLETED - Event system now uses new tables
 - **P1 specs (02):** NOT STARTED - Navigation & header pending
 - **P2 specs (03, 04, 05, 06):** Partial progress (0-50%) - Some existing infrastructure
 
 ### Infrastructure Gaps Confirmed
-1. Latest migration is **v29** - migration v30 pending for Spec 10
+1. ~~Latest migration is **v29** - migration v30 pending for Spec 10~~ **DONE** (Spec 10 - v30)
 2. ~~`notification-store.ts` and `execution-log-store.ts` do not exist~~ **DONE** (Spec 12 - v29)
 3. ~~No direct chat<->workflow links~~ **DONE** (Spec 09 - v28)
 4. All event writes still go to monolithic `chat_events` table (Spec 01 will migrate writes)
@@ -47,7 +46,7 @@ A comprehensive verification of all 12 specs against the codebase was completed 
 | 07 | Remove chat_notifications | COMPLETED | All code removed | - |
 | 08 | Remove resources table | COMPLETED | All code removed | - |
 | 09 | Chats-Workflows Direct Link | COMPLETED | v28 migration, workflow.chat_id added | - |
-| 10 | Tasks Table Cleanup | NOT STARTED | TaskState still active | - |
+| 10 | Tasks Table Cleanup | COMPLETED | v30 migration, task.asks, useTaskState deprecated | - |
 | 11 | Workflows Status Cleanup | COMPLETED | v27 migration, explicit status values | - |
 | 12 | Split chat_events | ~90% (DB + Agent layer) | v29 migration, stores, agent code updated | - |
 | 01 | Event System Refactor | COMPLETED | Uses executionLogStore, notificationStore, saveChatMessage | 12 |
@@ -311,13 +310,27 @@ Final cleanup items (deferred for post-v1)
 
 ---
 
-### 5. Spec 10: Tasks Table Cleanup
+### 5. Spec 10: Tasks Table Cleanup - COMPLETED
 **Priority:** P0
 **Effort:** Large (6-8 hours)
 **Dependencies:** None
 **Blocks:** None (nice to have cleanup)
+**Status:** COMPLETED
 
-**Verified Current State:**
+**Completion Notes:**
+- Created migration v30 with workflow_id and asks columns on tasks table
+- Added getTaskByWorkflowId() and updateTaskAsks() methods to task-store.ts
+- Marked TaskState interface and related methods (saveState, getState, getStates) as deprecated
+- Updated agent-env.ts to only inject asks (removed goal/notes/plan context injection)
+- Simplified ask.ts and finish.ts tools to remove notes/plan fields
+- Updated task-worker.ts to use task.asks and updateTaskAsks() instead of TaskState
+- Updated ChatPage.tsx to use task.asks directly instead of useTaskState hook
+- Updated TaskDetailPage.tsx to show only asks (removed goal/notes/plan display)
+- Updated TaskRunDetailPage.tsx to show only input_asks/output_asks
+- Marked useTaskState hook as deprecated with JSDoc comment
+- Updated add-task.ts, add-task-recurring.ts, get-task.ts, list-tasks.ts tools
+
+**Original Verified Current State:**
 - Task interface missing `workflow_id` and `asks` fields (task-store.ts lines 6-18)
 - TaskState type exists in `task-store.ts` (lines 20-26) AND `agent-types.ts` (lines 7-12)
 - `saveState()` exists (lines 335-347)
@@ -326,7 +339,7 @@ Final cleanup items (deferred for post-v1)
 - `useTaskState` hook exists in `dbTaskReads.ts` (lines 38-54)
 - Migration v28 does NOT exist
 
-**Action Items:**
+**Action Items (All Completed):**
 1. Create migration v28 in `packages/db/src/migrations/v28.ts`:
    ```typescript
    export const v28 = async (db: DBInterface) => {
@@ -872,7 +885,7 @@ Migrations must be created in this order to maintain version sequence:
 1. v27 - Spec 11 (workflow status values) - COMPLETED
 2. v28 - Spec 09 (chat/workflow direct links) - COMPLETED
 3. v29 - Spec 12 (split chat_events - DB layer) - COMPLETED
-4. v30 - Spec 10 (tasks cleanup)
+4. v30 - Spec 10 (tasks cleanup) - COMPLETED
 
 ### Breaking Changes
 - Spec 07: MessageNotifications removal changes how browser notifications work
@@ -899,7 +912,7 @@ Per AGENTS.md: Run `cd packages/tests && npm test` and `cd apps/user-server && n
 - [x] Implement Spec 07 (remove chat_notifications code) - Small - COMPLETED
 - [x] Implement Spec 08 (remove resources code) - Small - COMPLETED
 - [x] Implement Spec 09 (v28 migration + code) - Medium, CRITICAL - COMPLETED
-- [ ] Implement Spec 10 (v29 migration + code) - Large
+- [x] Implement Spec 10 (v30 migration + code) - Large - COMPLETED
 - [x] Implement Spec 11 (v27 migration + code) - Medium, CRITICAL - COMPLETED
 - [x] Implement Spec 12 (v29 migration + stores) - Large, CRITICAL (partial - DB layer done)
 - [x] Verify migrations v27, v28, v29 run correctly
