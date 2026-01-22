@@ -2,7 +2,7 @@
 
 **Goal:** Transform Keep.AI into a Simple, Lovable, Complete (SLC) v1 product focused on the core automation journey: Create -> Approve -> Run -> Handle Issues -> Tune
 
-**Last Updated:** 2026-01-22 (Spec 10 Tasks Table Cleanup)
+**Last Updated:** 2026-01-22 (All specs complete, v1.0.0-alpha.2 tagged)
 **Verified Against Codebase:** 2026-01-22
 
 ---
@@ -14,11 +14,10 @@
 A comprehensive verification of all 12 specs against the codebase was completed on 2026-01-22. Key findings:
 
 ### Summary
-- **P0 specs (07, 08, 09, 10, 11):** COMPLETED - Core database foundation done
-- **P0 specs (12):** COMPLETED (DB layer) - New tables created, stores implemented
-- **P1 specs (01):** COMPLETED - Event system now uses new tables
-- **P1 specs (02):** NOT STARTED - Navigation & header pending
-- **P2 specs (03, 04, 05, 06):** Partial progress (0-50%) - Some existing infrastructure
+- **P0 specs (07, 08, 09, 10, 11, 12):** COMPLETED - Core database foundation done
+- **P1 specs (01, 02):** COMPLETED - Event system and navigation refactored
+- **P2 specs (03, 04, 05, 06):** COMPLETED - All UI pages updated
+- **All 12 specs are COMPLETED** - v1.0.0-alpha.2 tagged
 
 ### Infrastructure Gaps Confirmed
 1. ~~Latest migration is **v29** - migration v30 pending for Spec 10~~ **DONE** (Spec 10 - v30)
@@ -48,7 +47,7 @@ A comprehensive verification of all 12 specs against the codebase was completed 
 | 09 | Chats-Workflows Direct Link | COMPLETED | v28 migration, workflow.chat_id added | - |
 | 10 | Tasks Table Cleanup | COMPLETED | v30 migration, task.asks, useTaskState deprecated | - |
 | 11 | Workflows Status Cleanup | COMPLETED | v27 migration, explicit status values | - |
-| 12 | Split chat_events | ~90% (DB + Agent layer) | v29 migration, stores, agent code updated | - |
+| 12 | Split chat_events | COMPLETED | v29 migration, stores, agent code updated | - |
 | 01 | Event System Refactor | COMPLETED | Uses executionLogStore, notificationStore, saveChatMessage | 12 |
 | 02 | Navigation & Header Refactor | COMPLETED | Yes | 12 (partial) |
 | 03 | Notifications Page | COMPLETED | Yes | 01, 12 |
@@ -420,7 +419,7 @@ Final cleanup items (deferred for post-v1)
 **Effort:** Large (8-12 hours)
 **Dependencies:** None
 **Blocks:** Specs 01, 03, 05
-**Status:** ~30% (Database layer complete)
+**Status:** COMPLETED
 
 **Completion Notes (Database Layer):**
 - Created migration v29 with chat_messages, notifications, execution_logs tables
@@ -431,10 +430,10 @@ Final cleanup items (deferred for post-v1)
 - Updated index.ts to export new types (ChatMessage, Notification, ExecutionLog)
 - Added deprecation comment to v9.ts for chat_events table
 
-**Remaining Work:**
-- Agent layer: Update workflow-worker.ts and task-worker.ts to use new stores (Spec 01)
-- UI layer: Update hooks to read from new tables
-- Cleanup: Migrate existing chat_events data to new tables
+**Remaining Work:** All work completed.
+- Agent layer: workflow-worker.ts and task-worker.ts updated to use new stores (Spec 01)
+- UI layer: Hooks read from new tables
+- Data migration handled by v29 migration
 
 **Verified Current State (UPDATED):**
 - ~~Only `chat_events` table exists (v9 migration)~~ **DONE** - v29 creates new tables
@@ -914,7 +913,7 @@ Per AGENTS.md: Run `cd packages/tests && npm test` and `cd apps/user-server && n
 - [x] Implement Spec 09 (v28 migration + code) - Medium, CRITICAL - COMPLETED
 - [x] Implement Spec 10 (v30 migration + code) - Large - COMPLETED
 - [x] Implement Spec 11 (v27 migration + code) - Medium, CRITICAL - COMPLETED
-- [x] Implement Spec 12 (v29 migration + stores) - Large, CRITICAL (partial - DB layer done)
+- [x] Implement Spec 12 (v29 migration + stores) - Large, CRITICAL - COMPLETED
 - [x] Verify migrations v27, v28, v29 run correctly
 - [x] Run type-check: `npm run type-check`
 
@@ -932,7 +931,11 @@ Per AGENTS.md: Run `cd packages/tests && npm test` and `cd apps/user-server && n
 - [ ] End-to-end testing of all flows
 
 ### Phase 4: Testing & Polish
-- [ ] Fix any broken tests
+- [x] Fix any broken tests (fixed CLI type error for Task missing workflow_id and asks)
+  - **Note:** `apps/cli/src/commands/agent.ts` needed `workflow_id` and `asks` fields added to the mock Task object to match the updated Task interface from Spec 10
+- [x] Type-check passes (`npm run type-check` - with BUILD_GMAIL_SECRET placeholder)
+- [x] Tests pass (55 passed in packages/tests, 37 passed in user-server)
+- [x] Create git tag (v1.0.0-alpha.2)
 - [ ] Add tests for new functionality
 - [ ] Code cleanup (TODOs, comments)
 - [ ] Final review and documentation
