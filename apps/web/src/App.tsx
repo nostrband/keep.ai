@@ -10,7 +10,6 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { APP_UPDATE_EVENT } from "./main";
 import MainPage from "./components/MainPage";
 import ChatPage from "./components/ChatPage";
-import NewPage from "./components/NewPage";
 import ChatDetailPage from "./components/ChatDetailPage";
 import ThreadsPage from "./components/ThreadsPage";
 import ThreadDetailPage from "./components/ThreadDetailPage";
@@ -367,9 +366,9 @@ function App() {
       <Routes>
         <Route path="/" element={<MainPage />} />
         <Route path="/chat" element={<ChatPage />} />
-        {/* Legacy route - redirect to home */}
+        {/* Legacy routes - redirect to home */}
         <Route path="/chat/main" element={<Navigate to="/" replace />} />
-        <Route path="/new" element={<NewPage />} />
+        <Route path="/new" element={<Navigate to="/" replace />} />
         <Route path="/chats/:id" element={<ChatDetailPage />} />
         <Route path="/notifications" element={<NotificationsPage />} />
         <Route path="/notifications/:workflowId" element={<NotificationsPage />} />

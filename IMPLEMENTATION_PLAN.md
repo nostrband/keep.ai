@@ -2,7 +2,7 @@
 
 **Goal:** Transform Keep.AI into a Simple, Lovable, Complete (SLC) v1 product focused on the core automation journey: Create -> Approve -> Run -> Handle Issues -> Tune
 
-**Last Updated:** 2026-01-22 (Spec 05 Chat Page Update)
+**Last Updated:** 2026-01-22 (Spec 06 Home Page Cleanup)
 **Verified Against Codebase:** 2026-01-22
 
 ---
@@ -55,7 +55,7 @@ A comprehensive verification of all 12 specs against the codebase was completed 
 | 03 | Notifications Page | COMPLETED | Yes | 01, 12 |
 | 04 | Workflow Hub Page | COMPLETED | Yes (error alert added) | 01, 09, 11 |
 | 05 | Chat Page Update | COMPLETED | Yes (workflow info box added) | 04, 09, 12 |
-| 06 | Home Page Cleanup | ~50% | Creation works, /new not redirected | 05, 09 |
+| 06 | Home Page Cleanup | COMPLETED | Yes (/new redirects to /) | 05, 09 |
 
 ---
 
@@ -805,6 +805,14 @@ Final cleanup items (deferred for post-v1)
 **Effort:** Small (2-3 hours)
 **Dependencies:** Specs 05, 09
 **Blocks:** None
+**Status:** COMPLETED
+
+**Completion Notes:**
+- MainPage already had proper workflow cards with status badges and last run info
+- MainPage already has empty state with suggestions
+- MainPage already navigates to chat after creation
+- Changed /new route to redirect to / instead of showing NewPage
+- Removed NewPage import from App.tsx
 
 **Verified Current State (~50%):**
 - Creation flow works and navigates to chat (MainPage.tsx lines 240-288)
@@ -907,7 +915,7 @@ Per AGENTS.md: Run `cd packages/tests && npm test` and `cd apps/user-server && n
 - [x] Implement Spec 03 - COMPLETED
 - [x] Complete Spec 04 - COMPLETED
 - [x] Implement Spec 05 - COMPLETED
-- [ ] Complete Spec 06 (home page cleanup) - Small
+- [x] Complete Spec 06 - COMPLETED
 - [ ] End-to-end testing of all flows
 
 ### Phase 4: Testing & Polish
