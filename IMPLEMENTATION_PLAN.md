@@ -1,0 +1,873 @@
+# V1 SLC Refactor Implementation Plan
+
+**Goal:** Transform Keep.AI into a Simple, Lovable, Complete (SLC) v1 product focused on the core automation journey: Create -> Approve -> Run -> Handle Issues -> Tune
+
+**Last Updated:** 2026-01-22
+**Verified Against Codebase:** 2026-01-22
+
+---
+
+## Current Verification Status
+
+**VERIFIED AND READY FOR IMPLEMENTATION**
+
+A comprehensive verification of all 12 specs against the codebase was completed on 2026-01-22. Key findings:
+
+### Summary
+- **All P0 specs (07, 08, 09, 10, 11, 12):** NOT STARTED - All database foundation work pending
+- **All P1 specs (01, 02):** NOT STARTED - Core UX enablers pending
+- **P2 specs (03, 04, 05, 06):** Partial progress (0-50%) - Some existing infrastructure
+
+### Infrastructure Gaps Confirmed
+1. Latest migration is **v26** - migrations v27, v28, v29, v30 all missing
+2. `notification-store.ts` and `execution-log-store.ts` do not exist
+3. No direct chat<->workflow links (navigation goes through task)
+4. All event writes still go to monolithic `chat_events` table
+
+### Test Coverage Notes
+- Core packages (agent, db, proto, node, browser) have no test coverage
+- 5 test suites skipped due to environment limitations (WebSocket, WASM, IndexedDB)
+- Codebase is clean - minimal TODO/FIXME items found
+
+### Verification Confidence: HIGH
+- All specs verified against actual code locations
+- Line numbers and method names confirmed
+- No new specs needed - all research complete
+- Plan is accurate and actionable
+
+---
+
+## Implementation Status Summary
+
+| Spec | Title | Status | Verified | Blocked By |
+|------|-------|--------|----------|------------|
+| 07 | Remove chat_notifications | COMPLETED | All code removed | - |
+| 08 | Remove resources table | COMPLETED | All code removed | - |
+| 09 | Chats-Workflows Direct Link | NOT STARTED | No v27 migration, no chat_id field | - |
+| 10 | Tasks Table Cleanup | NOT STARTED | TaskState still active | - |
+| 11 | Workflows Status Cleanup | NOT STARTED | Still using "" and "disabled" | - |
+| 12 | Split chat_events | NOT STARTED | No new tables/stores | - |
+| 01 | Event System Refactor | NOT STARTED | Still uses saveChatEvent() | 12 |
+| 02 | Navigation & Header Refactor | NOT STARTED | No bell, flat menu | 12 (partial) |
+| 03 | Notifications Page | NOT STARTED | No page/components | 01, 12 |
+| 04 | Workflow Hub Page | ~40% | Missing error alert, status dropdown | 01, 09, 11 |
+| 05 | Chat Page Update | ~5% | No WorkflowInfoBox | 04, 09, 12 |
+| 06 | Home Page Cleanup | ~50% | Creation works, /new not redirected | 05, 09 |
+
+---
+
+## Priority Order
+
+Based on dependency analysis and impact assessment:
+
+### P0: Critical Path (Database Foundation)
+These must be done first and can be done in parallel:
+- Spec 07: Remove chat_notifications (small, no dependencies)
+- Spec 08: Remove resources table (small, no dependencies)
+- Spec 09: Direct Chat-Workflow Linking (medium, critical for UX)
+- Spec 10: Tasks Table Cleanup (large, nice-to-have)
+- Spec 11: Workflows Status Cleanup (medium, critical for UX)
+- Spec 12: Split chat_events (large, critical for notifications)
+
+### P1: Core UX Enablers
+These enable the main UX improvements:
+- Spec 01: Event System Refactor (requires Spec 12)
+- Spec 02: Navigation & Header Refactor (partial dependency on Spec 12)
+
+### P2: UX Implementation
+The user-facing changes:
+- Spec 03: Notifications Page (requires Specs 01, 12)
+- Spec 04: Workflow Hub Page completion (requires Specs 01, 09, 11)
+- Spec 05: Chat Page Update (requires Specs 04, 09, 12)
+- Spec 06: Home Page Cleanup completion (requires Specs 05, 09)
+
+### P3: Polish & Cleanup
+Final cleanup items (deferred for post-v1)
+
+---
+
+## P0: Database Foundation (Parallel Work)
+
+### 1. Spec 07: Remove chat_notifications Feature - COMPLETED
+**Priority:** P0-SMALL
+**Effort:** Small (2-4 hours)
+**Dependencies:** None
+**Blocks:** None
+**Status:** COMPLETED
+
+**Completion Notes:**
+- Removed `markChatNotifiedOnDevice()` and `getChatNotifiedAt()` from `chat-store.ts`
+- Removed `getDeviceId()` and `getNewAssistantMessagesForDevice()` from `api.ts`
+- Deleted `apps/web/src/lib/MessageNotifications.ts`
+- Updated `queryClient.ts` to remove MessageNotifications import and usage
+
+**Action Items:** All items completed.
+- [x] Add deprecation comment to `packages/db/src/migrations/v23.ts`
+- [x] Remove `markChatNotifiedOnDevice()` and `getChatNotifiedAt()` from `chat-store.ts`
+- [x] Remove `getDeviceId()` and `getNewAssistantMessagesForDevice()` from `api.ts`
+- [x] Delete `apps/web/src/lib/MessageNotifications.ts`
+- [x] Update `apps/web/src/queryClient.ts` to remove MessageNotifications
+
+**Constraints:**
+- Keep the table in database (will drop later)
+- Keep migration file for existing databases
+
+---
+
+### 2. Spec 08: Remove resources Table Feature - COMPLETED
+**Priority:** P0-SMALL
+**Effort:** Small (1-2 hours)
+**Dependencies:** None
+**Blocks:** None
+**Status:** COMPLETED
+
+**Completion Notes:**
+- Removed `Resource` type and `saveResource()`, `getResource()`, `setResource()` methods from `memory-store.ts`
+- Removed `StorageResourceType` export from `index.ts`
+
+**Action Items:** All items completed.
+- [x] Add deprecation comment to `packages/db/src/migrations/v1.ts` around resources table creation
+- [x] Remove `Resource` type from `memory-store.ts`
+- [x] Remove `saveResource()`, `getResource()`, `setResource()` methods from `memory-store.ts`
+- [x] Remove `StorageResourceType` export from `index.ts`
+
+**Constraints:**
+- Keep table in database (will drop later)
+- Verify no imports break after removal
+
+---
+
+### 3. Spec 09: Direct Chat-Workflow Linking
+**Priority:** P0-CRITICAL
+**Effort:** Medium (4-6 hours)
+**Dependencies:** None
+**Blocks:** Specs 04, 05, 06
+
+**Verified Current State:**
+- Workflow interface has NO `chat_id` field (script-store.ts lines 61-73)
+- Chat type has NO `workflow_id` field (only: id, created_at, updated_at, read_at, first_message_content, first_message_time)
+- `getWorkflowByChatId()` does NOT exist
+- `getChatByWorkflowId()` does NOT exist
+- `ChatSidebar.tsx` still exists (120 lines, uses deprecated chat fields)
+- Migration v27 does NOT exist (latest is v26)
+- Navigation still goes workflow -> task -> chat (indirect pattern)
+- `getAbandonedDrafts()` uses old join: `LEFT JOIN chat_events ce ON ce.chat_id = w.task_id`
+
+**Action Items:**
+1. Create migration v27 in `packages/db/src/migrations/v27.ts`:
+   ```typescript
+   export const v27 = async (db: DBInterface) => {
+     // Add chat_id to workflows
+     await db.exec(`SELECT crsql_begin_alter('workflows')`);
+     await db.exec(`ALTER TABLE workflows ADD COLUMN chat_id TEXT NOT NULL DEFAULT ''`);
+     await db.exec(`SELECT crsql_commit_alter('workflows')`);
+     await db.exec(`CREATE INDEX IF NOT EXISTS idx_workflows_chat_id ON workflows(chat_id)`);
+
+     // Add workflow_id to chats
+     await db.exec(`SELECT crsql_begin_alter('chats')`);
+     await db.exec(`ALTER TABLE chats ADD COLUMN workflow_id TEXT NOT NULL DEFAULT ''`);
+     await db.exec(`SELECT crsql_commit_alter('chats')`);
+     await db.exec(`CREATE INDEX IF NOT EXISTS idx_chats_workflow_id ON chats(workflow_id)`);
+
+     // Populate workflow.chat_id from task.chat_id
+     await db.exec(`
+       UPDATE workflows SET chat_id = (
+         SELECT t.chat_id FROM tasks t WHERE t.id = workflows.task_id
+       ) WHERE chat_id = ''
+     `);
+
+     // Populate chats.workflow_id from workflows
+     await db.exec(`
+       UPDATE chats SET workflow_id = (
+         SELECT w.id FROM workflows w WHERE w.chat_id = chats.id
+       ) WHERE workflow_id = ''
+     `);
+   };
+   ```
+
+2. Update `packages/db/src/script-store.ts`:
+   - Add `chat_id: string` to Workflow interface (after task_id)
+   - Update `addWorkflow()` to include chat_id in INSERT
+   - Add `getWorkflowByChatId(chatId: string)` method
+   - Update all SELECT queries to include chat_id
+   - Update `getAbandonedDrafts()` join: `LEFT JOIN chat_events ce ON ce.chat_id = w.chat_id`
+   - Update `getDraftActivitySummary()` similarly
+
+3. Update `packages/db/src/chat-store.ts`:
+   - Add `workflow_id: string` to Chat type
+   - Update `createChat()` to accept and store workflow_id
+   - Add `getChatByWorkflowId(workflowId: string)` method
+   - Add `getChatFirstMessage(chatId: string)` method
+   - Add deprecation comments to unused fields (updated_at, read_at, first_message_content, first_message_time)
+
+4. Update `packages/db/src/api.ts`:
+   - Update `createTask()` to set both chat_id and workflow_id bidirectionally
+
+5. Update `apps/web/src/components/WorkflowDetailPage.tsx`:
+   - Change navigation: `navigate(`/chats/${workflow.chat_id}`)` instead of through task
+   - Remove unnecessary task fetch for chat navigation
+
+6. Delete `apps/web/src/components/ChatSidebar.tsx`
+
+7. Add hooks to `apps/web/src/hooks/`:
+   - `useWorkflowByChatId(chatId)` in dbScriptReads.ts
+   - `useChatByWorkflowId(workflowId)` in dbChatReads.ts
+   - `useChatFirstMessage(chatId)` in dbChatReads.ts
+   - Add corresponding query keys
+
+8. Update `packages/agent/src/workflow-worker.ts`:
+   - Use `workflow.chat_id` directly instead of fetching task first
+
+**Constraints:**
+- Both links must be set at creation time
+- Migration must populate existing data correctly
+- Don't break existing task.chat_id relationships
+
+---
+
+### 4. Spec 11: Workflows Status Cleanup
+**Priority:** P0-CRITICAL
+**Effort:** Medium (3-5 hours)
+**Dependencies:** None
+**Blocks:** Specs 04, 06
+
+**Verified Current State:**
+- Empty string `""` used for draft status (script-store.ts line 833: `WHERE w.status = ''`)
+- `"disabled"` used for paused (script-store.ts line 786: `SET status = 'disabled'`)
+- StatusBadge only handles "disabled", "active", and falls back to "Draft" (StatusBadge.tsx)
+- workflow-worker escalation sets `"disabled"` at line 663 (should be "error")
+- workflow-worker correctly sets `"error"` for auth/permission errors (lines 301, 359)
+- save.ts does NOT transition draft->ready when first script saved
+- Migration v29 does NOT exist
+
+**Action Items:**
+1. Create migration v29 in `packages/db/src/migrations/v29.ts`:
+   ```typescript
+   export const v29 = async (db: DBInterface) => {
+     // Update existing status values
+     await db.exec(`UPDATE workflows SET status = 'draft' WHERE status = ''`);
+     await db.exec(`UPDATE workflows SET status = 'paused' WHERE status = 'disabled'`);
+
+     // Update workflows that have scripts but are still draft to 'ready'
+     await db.exec(`
+       UPDATE workflows SET status = 'ready'
+       WHERE status = 'draft' AND active_script_id != ''
+     `);
+   };
+   ```
+
+2. Update `packages/db/src/script-store.ts`:
+   - Update Workflow interface comment: `status: string; // 'draft' | 'ready' | 'active' | 'paused' | 'error'`
+   - Update `addWorkflow()` to default status to 'draft'
+   - Update `getStaleWorkflows()` (line 833): `WHERE w.status = ''` -> `WHERE w.status = 'draft'`
+   - Update `getDraftActivitySummary()` (line 906): same change
+   - Update `pauseAllWorkflows()` (line 786): `SET status = 'disabled'` -> `SET status = 'paused'`
+
+3. Update `packages/db/src/api.ts`:
+   - Change `status: ""` to `status: "draft"` in createTask()
+
+4. Update `packages/agent/src/workflow-worker.ts`:
+   - Line 663: Change `status: "disabled"` to `status: "error"` in escalateToUser()
+
+5. Update `packages/agent/src/ai-tools/save.ts`:
+   - After saving first script, transition status from 'draft' to 'ready':
+   ```typescript
+   if (workflow.status === 'draft') {
+     await opts.scriptStore.updateWorkflowFields(workflow.id, {
+       status: 'ready',
+       active_script_id: newScript.id,
+     });
+   }
+   ```
+
+6. Update `apps/web/src/components/StatusBadge.tsx`:
+   - Replace if/else with switch statement covering all 5 statuses:
+   ```typescript
+   switch (status) {
+     case "active": return <Badge className="bg-green-100 text-green-800">Running</Badge>;
+     case "paused": return <Badge className="bg-yellow-100 text-yellow-800">Paused</Badge>;
+     case "error": return <Badge className="bg-red-100 text-red-800">Error</Badge>;
+     case "ready": return <Badge className="bg-blue-100 text-blue-800">Ready</Badge>;
+     case "draft":
+     default: return <Badge variant="outline">Draft</Badge>;
+   }
+   ```
+
+7. Update `apps/web/src/components/WorkflowDetailPage.tsx`:
+   - All `"disabled"` -> `"paused"` checks
+   - All `status === ""` -> `status === "draft"` or `status === "ready"` as appropriate
+   - Resume button shows for `(status === "paused" || status === "error")`
+
+**Constraints:**
+- Migration must be idempotent
+- All status comparisons across codebase must be updated
+- 'maintenance' flag remains separate (orthogonal concern)
+
+---
+
+### 5. Spec 10: Tasks Table Cleanup
+**Priority:** P0
+**Effort:** Large (6-8 hours)
+**Dependencies:** None
+**Blocks:** None (nice to have cleanup)
+
+**Verified Current State:**
+- Task interface missing `workflow_id` and `asks` fields (task-store.ts lines 6-18)
+- TaskState type exists in `task-store.ts` (lines 20-26) AND `agent-types.ts` (lines 7-12)
+- `saveState()` exists (lines 335-347)
+- `getState()` exists (lines 350-370)
+- `getStates()` exists (lines 373-397)
+- `useTaskState` hook exists in `dbTaskReads.ts` (lines 38-54)
+- Migration v28 does NOT exist
+
+**Action Items:**
+1. Create migration v28 in `packages/db/src/migrations/v28.ts`:
+   ```typescript
+   export const v28 = async (db: DBInterface) => {
+     // Add workflow_id to tasks
+     await db.exec(`SELECT crsql_begin_alter('tasks')`);
+     await db.exec(`ALTER TABLE tasks ADD COLUMN workflow_id TEXT NOT NULL DEFAULT ''`);
+     await db.exec(`SELECT crsql_commit_alter('tasks')`);
+     await db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_workflow_id ON tasks(workflow_id)`);
+
+     // Add asks to tasks
+     await db.exec(`SELECT crsql_begin_alter('tasks')`);
+     await db.exec(`ALTER TABLE tasks ADD COLUMN asks TEXT NOT NULL DEFAULT ''`);
+     await db.exec(`SELECT crsql_commit_alter('tasks')`);
+
+     // Populate workflow_id from workflows
+     await db.exec(`
+       UPDATE tasks SET workflow_id = (
+         SELECT w.id FROM workflows w WHERE w.task_id = tasks.id
+       ) WHERE workflow_id = ''
+     `);
+
+     // Migrate asks from task_states
+     await db.exec(`
+       UPDATE tasks SET asks = COALESCE(
+         (SELECT ts.asks FROM task_states ts WHERE ts.id = tasks.id),
+         ''
+       ) WHERE asks = ''
+     `);
+   };
+   ```
+
+2. Update `packages/db/src/task-store.ts`:
+   - Add `workflow_id: string` and `asks: string` to Task interface
+   - Add `getTaskByWorkflowId(workflowId)` method
+   - Add `updateTaskAsks(taskId, asks)` method
+   - Remove `saveState()`, `getState()`, `getStates()` methods
+   - Remove TaskState type export
+
+3. Update `packages/agent/src/agent-types.ts`:
+   - Remove TaskState type entirely
+
+4. Update `packages/agent/src/agent-env.ts`:
+   - Remove lines 109-112 (GOAL/PLAN/ASKS/NOTES injection)
+
+5. Update `packages/agent/src/task-worker.ts`:
+   - Remove `getTaskState()` method
+   - Update asks handling to use `task.asks` and `updateTaskAsks()`
+   - Remove state loading/saving logic
+
+6. Update `packages/agent/src/agent.ts`:
+   - Remove notes/plan from patch, keep only asks
+
+7. Update tools:
+   - `packages/agent/src/tools/add-task.ts`: Remove saveState call
+   - `packages/agent/src/tools/get-task.ts`: Remove getState lookup
+   - `packages/agent/src/tools/list-tasks.ts`: Remove getStates lookup
+
+8. Update `apps/web/src/components/ChatPage.tsx`:
+   - Change `taskState.asks` to `task?.asks`
+   - Remove useTaskState import
+
+9. Update `apps/web/src/hooks/dbTaskReads.ts`:
+   - Remove `useTaskState` hook
+   - Add `useTaskByWorkflowId` hook
+
+10. Update `apps/web/src/components/TaskDetailPage.tsx`:
+    - Remove goal/notes/plan/asks display sections
+
+**Constraints:**
+- task_states table kept for backwards compatibility (no DROP)
+- task.asks must work exactly like task_states.asks did
+- Quick-reply buttons must continue to function
+
+---
+
+### 6. Spec 12: Split chat_events into Purpose-Specific Tables
+**Priority:** P0-CRITICAL
+**Effort:** Large (8-12 hours)
+**Dependencies:** None
+**Blocks:** Specs 01, 03, 05
+
+**Verified Current State:**
+- Only `chat_events` table exists (v9 migration)
+- `chat_messages` table does NOT exist
+- `notifications` table does NOT exist (only `chat_notifications` which is different)
+- `execution_logs` table does NOT exist
+- `notification-store.ts` does NOT exist
+- `execution-log-store.ts` does NOT exist
+- No `saveChatMessage()` method (only `saveChatMessages()` plural)
+- No ChatMessage type with metadata fields (task_run_id, script_id, failed_script_run_id)
+- Migration v30 does NOT exist
+
+**Action Items:**
+1. Create migration v30 in `packages/db/src/migrations/v30.ts`:
+   ```typescript
+   export const v30 = async (db: DBInterface) => {
+     // Create chat_messages table
+     await db.exec(`
+       CREATE TABLE IF NOT EXISTS chat_messages (
+         id TEXT PRIMARY KEY NOT NULL,
+         chat_id TEXT NOT NULL,
+         role TEXT NOT NULL,
+         content TEXT NOT NULL,
+         timestamp TEXT NOT NULL,
+         task_run_id TEXT NOT NULL DEFAULT '',
+         script_id TEXT NOT NULL DEFAULT '',
+         failed_script_run_id TEXT NOT NULL DEFAULT ''
+       )
+     `);
+     await db.exec(`CREATE INDEX IF NOT EXISTS idx_chat_messages_chat_id ON chat_messages(chat_id)`);
+     await db.exec(`CREATE INDEX IF NOT EXISTS idx_chat_messages_timestamp ON chat_messages(timestamp)`);
+     await db.exec(`SELECT crsql_as_crr('chat_messages')`);
+
+     // Create notifications table
+     await db.exec(`
+       CREATE TABLE IF NOT EXISTS notifications (
+         id TEXT PRIMARY KEY NOT NULL,
+         workflow_id TEXT NOT NULL,
+         type TEXT NOT NULL,
+         payload TEXT NOT NULL DEFAULT '',
+         timestamp TEXT NOT NULL,
+         acknowledged_at TEXT NOT NULL DEFAULT '',
+         resolved_at TEXT NOT NULL DEFAULT '',
+         workflow_title TEXT NOT NULL DEFAULT ''
+       )
+     `);
+     await db.exec(`CREATE INDEX IF NOT EXISTS idx_notifications_workflow_id ON notifications(workflow_id)`);
+     await db.exec(`CREATE INDEX IF NOT EXISTS idx_notifications_timestamp ON notifications(timestamp)`);
+     await db.exec(`CREATE INDEX IF NOT EXISTS idx_notifications_type ON notifications(type)`);
+     await db.exec(`SELECT crsql_as_crr('notifications')`);
+
+     // Create execution_logs table
+     await db.exec(`
+       CREATE TABLE IF NOT EXISTS execution_logs (
+         id TEXT PRIMARY KEY NOT NULL,
+         run_id TEXT NOT NULL,
+         run_type TEXT NOT NULL,
+         event_type TEXT NOT NULL,
+         tool_name TEXT NOT NULL DEFAULT '',
+         input TEXT NOT NULL DEFAULT '',
+         output TEXT NOT NULL DEFAULT '',
+         error TEXT NOT NULL DEFAULT '',
+         timestamp TEXT NOT NULL,
+         cost INTEGER NOT NULL DEFAULT 0
+       )
+     `);
+     await db.exec(`CREATE INDEX IF NOT EXISTS idx_execution_logs_run_id ON execution_logs(run_id)`);
+     await db.exec(`CREATE INDEX IF NOT EXISTS idx_execution_logs_timestamp ON execution_logs(timestamp)`);
+     await db.exec(`SELECT crsql_as_crr('execution_logs')`);
+
+     // Migrate existing messages
+     await db.exec(`
+       INSERT OR IGNORE INTO chat_messages (id, chat_id, role, content, timestamp)
+       SELECT id, chat_id, json_extract(content, '$.role'), content, timestamp
+       FROM chat_events WHERE type = 'message'
+     `);
+   };
+   ```
+
+2. Create `packages/db/src/notification-store.ts`:
+   - `Notification` interface
+   - `saveNotification(notification: Notification)`
+   - `getNotifications(opts?: {workflowId?, unresolvedOnly?, limit?})`
+   - `acknowledgeNotification(id: string)`
+   - `resolveNotification(id: string)`
+   - `getUnresolvedError(workflowId: string)`
+
+3. Create `packages/db/src/execution-log-store.ts`:
+   - `ExecutionLog` interface
+   - `saveExecutionLog(log: ExecutionLog)`
+   - `getExecutionLogs(runId: string, runType: 'script' | 'task')`
+
+4. Update `packages/db/src/chat-store.ts`:
+   - Add `ChatMessage` interface with metadata fields
+   - Add `saveChatMessage(message: ChatMessage)` method
+   - Add `getChatMessages(chatId: string, opts?)` method
+   - Add deprecation comment to `saveChatEvent()` and `getChatEvents()`
+
+5. Update `packages/db/src/api.ts`:
+   - Import and expose `notificationStore`
+   - Import and expose `executionLogStore`
+
+6. Update `packages/db/src/index.ts`:
+   - Export new types: `ChatMessage`, `Notification`, `ExecutionLog`
+
+**Constraints:**
+- Migration must be idempotent (handle existing data)
+- Keep `chat_events` table for backwards compatibility
+- All new tables must be CRR (sync-enabled)
+
+---
+
+## P1: Core UX Enablers
+
+### 7. Spec 01: Event System Refactor
+**Priority:** P1
+**Effort:** Large (8-12 hours)
+**Dependencies:** Spec 12 (tables must exist)
+**Blocks:** Specs 03, 04, 05
+
+**Verified Current State:**
+- `workflow-worker.ts` uses `saveChatEvent()` at lines 630, 686, 791 - NOT `saveNotification()`
+- `task-worker.ts` uses `saveChatEvent()` at lines 508, 562, 635 - NOT `saveChatMessage()`
+- `user-send.ts` uses `saveChatMessages()` at line 37 - NOT `saveNotification()`
+- `list-events.ts` tool still exists in `packages/agent/src/tools/`
+
+**Action Items:**
+1. Update `packages/agent/src/workflow-worker.ts`:
+   - Replace tool event creation (line 791) with `executionLogStore.saveExecutionLog()`
+   - Remove maintenance_started event creation (line 630) - internal state only
+   - Replace maintenance_escalated event (line 686) with `notificationStore.saveNotification({type: 'escalated'})`
+   - Replace error events with `notificationStore.saveNotification({type: 'error'})`
+
+2. Update `packages/agent/src/task-worker.ts`:
+   - Replace saveChatMessages with saveChatMessage (singular) with metadata
+   - Add task_run_id to saved messages
+   - Add script_id when save tool returns it
+   - Replace tool events (lines 508, 562, 635) with execution logs
+
+3. Update `packages/agent/src/ai-tools/save.ts`:
+   - Remove saveChatEvent calls for add_script and maintenance_fixed
+   - Return `{ success: true, script_id: string, was_maintenance_fix: boolean }`
+   - Let task-worker add script_id and failed_script_run_id to message metadata
+
+4. Update `packages/agent/src/tools/user-send.ts`:
+   - Replace saveChatMessages with `notificationStore.saveNotification({type: 'script_message'})`
+
+5. Delete `packages/agent/src/tools/list-events.ts`:
+   - Remove file entirely
+   - Remove from tool registration in `packages/agent/src/tools/index.ts`
+
+6. Update sandbox event creation in `packages/agent/src/sandbox/api.ts`:
+   - Route tool calls to `executionLogStore.saveExecutionLog()`
+
+**Constraints:**
+- Spec 12 must be implemented first
+- Messages must have correct metadata for UI rendering
+- Cost tracking must continue to work
+
+---
+
+### 8. Spec 02: Navigation & Header Refactor
+**Priority:** P1
+**Effort:** Medium (4-6 hours)
+**Dependencies:** Spec 12 (partial - for notification count)
+**Blocks:** Spec 03
+
+**Verified Current State:**
+- `NotificationBell.tsx` does NOT exist
+- No notification bell in SharedHeader (lines 102-105)
+- Menu is flat list with 10 items including "Assistant" -> `/chat/main` (line 131)
+- No "Home" menu item
+- No "Notifications" menu item
+- No "Advanced" submenu
+- `/notifications` routes do NOT exist in App.tsx
+- `useUnresolvedNotifications` hook does NOT exist
+
+**Action Items:**
+1. Create `apps/web/src/components/NotificationBell.tsx`:
+   ```tsx
+   export function NotificationBell() {
+     const { data } = useUnresolvedNotifications();
+     return (
+       <Link to="/notifications" className="relative">
+         <Bell className="h-5 w-5" />
+         {data?.count > 0 && (
+           <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-4 w-4 flex items-center justify-center">
+             {data.count > 9 ? '9+' : data.count}
+           </span>
+         )}
+       </Link>
+     );
+   }
+   ```
+
+2. Create `apps/web/src/hooks/useUnresolvedNotifications.ts`:
+   - Query notifications table for unresolved items
+   - Return count and list
+
+3. Update `apps/web/src/components/SharedHeader.tsx`:
+   - Add NotificationBell before menu button (line ~105)
+   - Remove "Assistant" menu item (line 131)
+   - Add "Home" menu item -> /
+   - Add "Notifications" menu item -> /notifications
+   - Restructure menu with "Advanced" submenu containing Tasks, Scripts, Threads, Notes, Files, Devices, Console
+
+4. Update `apps/web/src/App.tsx`:
+   - Add redirect: `/chat/main` -> `/` (or remove route entirely)
+   - Add `/notifications` route
+   - Add `/notifications/:workflowId` route
+
+5. Add query key for notifications in `apps/web/src/hooks/queryKeys.ts`
+
+**Constraints:**
+- Bell must appear on ALL pages
+- Badge count from notifications table (requires Spec 12)
+- Menu must be accessible on all viewport sizes
+
+---
+
+## P2: UX Implementation
+
+### 9. Spec 03: Notifications Page
+**Priority:** P2
+**Effort:** Medium (4-6 hours)
+**Dependencies:** Specs 01, 12
+**Blocks:** None
+
+**Verified Current State:**
+- `NotificationsPage.tsx` does NOT exist
+- `NotificationCard.tsx` does NOT exist
+- `useNotifications` hook does NOT exist
+- No `/notifications` routes in App.tsx
+
+**Action Items:**
+1. Create `apps/web/src/components/NotificationsPage.tsx`:
+   - Use useParams for optional workflowId filter
+   - Query notifications via useNotifications hook
+   - Render NotificationCard for each item
+   - Empty state: "All caught up!"
+   - "Load more" pagination
+
+2. Create `apps/web/src/components/NotificationCard.tsx`:
+   - Handle 4 types: error, escalated, script_message, script_ask
+   - Show icon, title, message, workflow_title, relative time
+   - Action buttons based on error type (Reconnect, Retry, etc.)
+   - "View workflow" link
+
+3. Create `apps/web/src/hooks/useNotifications.ts`:
+   - Infinite query for notifications
+   - Filter by workflowId if provided
+   - Support unresolvedOnly option
+
+4. Add action handlers for notification cards:
+   - acknowledgeNotification on dismiss
+   - resolveNotification after action completed
+
+**Constraints:**
+- Must work without Spec 01 by showing empty state initially
+- Action buttons must integrate with auth flow for reconnection
+
+---
+
+### 10. Spec 04: Workflow Hub Page (Complete)
+**Priority:** P2
+**Effort:** Medium (4-6 hours)
+**Dependencies:** Specs 01, 09, 11
+**Blocks:** Spec 05
+
+**Verified Current State (~40%):**
+- Has static status badge (WorkflowStatusBadge)
+- Has action buttons (Activate, Pause, Resume, Run now, Test run)
+- Has script runs list
+- Has script summary display
+- Missing: Status dropdown (has static badge + separate buttons)
+- Missing: Error alert from notifications table
+- Missing: Sub-components (all inline in one file)
+- Missing: Direct workflow.chat_id navigation (still uses task intermediary)
+- `useUnresolvedError` hook does NOT exist
+
+**Action Items:**
+1. Create sub-components in `apps/web/src/components/workflow/`:
+   - `WorkflowStatusDropdown.tsx` - status badge that opens dropdown with actions
+   - `WorkflowErrorAlert.tsx` - shows unresolved error from notifications table
+   - `WorkflowActions.tsx` - Talk to AI, Test Run, Pause/Resume buttons
+   - `WorkflowSummary.tsx` - "What it does" section
+   - `WorkflowActivity.tsx` - recent runs list
+
+2. Update `apps/web/src/components/WorkflowDetailPage.tsx`:
+   - Add error alert query: `useUnresolvedError(workflowId)`
+   - Show error alert banner when error exists
+   - Refactor into sub-components
+   - Use workflow.chat_id for navigation (from Spec 09)
+   - Remove task fetch for chat navigation
+
+3. Create `apps/web/src/hooks/useUnresolvedError.ts`:
+   - Query notifications table for latest unresolved error for workflow
+
+**Constraints:**
+- Error alert must support action buttons (Reconnect, Retry, etc.)
+- Status dropdown must show appropriate actions per status
+
+---
+
+### 11. Spec 05: Chat Page Update
+**Priority:** P2
+**Effort:** Medium (4-6 hours)
+**Dependencies:** Specs 04, 09, 12
+**Blocks:** Spec 06
+
+**Verified Current State (~5%):**
+- Basic chat pages exist (ChatPage.tsx, ChatDetailPage.tsx)
+- `useChatMessages` hook exists in dbChatReads.ts
+- `WorkflowInfoBox.tsx` does NOT exist
+- `ScriptSummaryBox.tsx` does NOT exist
+- `ExecutionInfoIcon.tsx` does NOT exist
+- `useWorkflowForChat` hook does NOT exist
+- No workflow info box in chat pages
+- No message metadata rendering (script_id, task_run_id, failed_script_run_id)
+
+**Action Items:**
+1. Create `apps/web/src/components/WorkflowInfoBox.tsx`:
+   - Display workflow title, status badge, schedule
+   - Tappable -> navigates to workflow hub
+   - Styling: light background, rounded, hover state
+
+2. Create `apps/web/src/components/ScriptSummaryBox.tsx`:
+   - Shows script version and summary inline in message
+   - Links to script detail page
+
+3. Create `apps/web/src/components/ExecutionInfoIcon.tsx`:
+   - Small info icon linking to execution detail modal/page
+
+4. Create `apps/web/src/hooks/useWorkflowForChat.ts`:
+   - Query workflow by chat_id (using Spec 09 link)
+
+5. Update `apps/web/src/components/ChatPage.tsx` and `ChatDetailPage.tsx`:
+   - Add WorkflowInfoBox below header
+   - Update back button to navigate to workflow hub
+
+6. Update message rendering (MessageItem or similar):
+   - If message.script_id -> show ScriptSummaryBox
+   - If message.task_run_id -> show ExecutionInfoIcon
+   - If message.failed_script_run_id -> show "Auto-fix" badge
+
+7. Update `apps/web/src/hooks/dbChatReads.ts`:
+   - Update `useChatMessages()` to read from chat_messages table with metadata
+
+**Constraints:**
+- Requires Spec 12 for chat_messages table with metadata
+- Requires Spec 09 for workflow.chat_id link
+- Back button always goes to workflow hub, not browser back
+
+---
+
+### 12. Spec 06: Home Page Cleanup (Complete)
+**Priority:** P2
+**Effort:** Small (2-3 hours)
+**Dependencies:** Specs 05, 09
+**Blocks:** None
+
+**Verified Current State (~50%):**
+- Creation flow works and navigates to chat (MainPage.tsx lines 240-288)
+- `/new` route still renders NewPage (App.tsx line 369) - should redirect to /
+- WorkflowCard is NOT a separate component (inline in MainPage)
+- Creation creates task+workflow but may not set bidirectional links properly
+
+**Action Items:**
+1. Update `apps/web/src/App.tsx`:
+   - Change `/new` route: `<Route path="/new" element={<Navigate to="/" replace />} />`
+
+2. Extract `apps/web/src/components/WorkflowCard.tsx`:
+   - Move card rendering from MainPage (lines 491-517) into reusable component
+   - Props: workflow, latestRun
+   - Display: title, status indicator, last run info
+
+3. Verify creation flow (after Spec 09):
+   - Submit creates workflow with chat_id/workflow_id links
+   - Navigates to `/chats/${chatId}`
+   - New workflow appears in list
+
+**Constraints:**
+- Existing MainPage functionality must be preserved
+- Attention system (workflows needing attention) must continue to work
+
+---
+
+## P3: Deferred Items (Post-V1)
+
+These items are not strictly required for v1 but would improve quality:
+
+### Test Coverage
+- Add tests for database stores (chat-store, script-store, etc.)
+- Add tests for new notification-store and execution-log-store
+- Add tests for agent tools
+- Fix skipped P2P sync tests
+
+### Code Cleanup
+- Remove commented-out console.log statements in agent.ts, sandbox.ts
+- Address FIXME reference in migrations/v23.ts (now handled by deprecation)
+
+### Future Features (from ideas/)
+- **Dry-run Testing** - Test automation safely before enabling (partially implemented via script_runs)
+- **Detect/Prompt/Archive Abandoned Drafts** - Help users complete or clean up drafts
+- **Agent Status from Active Runs** - Show what's currently running
+- **Collapse/Highlight Events** - Better event visibility in logs
+- **Script Diff View** - Visual comparison of script versions
+- **In-App Bug Report** - Contact support with context
+- **User Balance and Payments** - Billing infrastructure
+
+---
+
+## Implementation Notes
+
+### Migration Order
+Migrations must be created in this order to maintain version sequence:
+1. v27 - Spec 09 (chat/workflow direct links)
+2. v28 - Spec 10 (tasks cleanup)
+3. v29 - Spec 11 (workflow status values)
+4. v30 - Spec 12 (split chat_events)
+
+### Breaking Changes
+- Spec 07: MessageNotifications removal changes how browser notifications work
+- Spec 10: TaskState removal changes agent context format
+- Spec 12: New tables change how all events are stored
+
+### Rollback Strategy
+- Keep deprecated tables (chat_events, task_states, resources, chat_notifications)
+- Deprecation comments indicate future removal
+- No DROP TABLE until post-v1
+
+### Testing Approach
+Per AGENTS.md: Run `cd packages/tests && npm test` and `cd apps/user-server && npm test` after implementing. Tests may need updates to match new schema.
+
+### Shared Utilities Reference
+- **packages/node**: Database creation, user environment, file storage, MIME detection, compression, SSE transport
+- **packages/browser**: Browser database, web workers, leader election, compression, worker transport
+
+---
+
+## Execution Checklist
+
+### Phase 1: Database Foundation
+- [ ] Implement Spec 07 (remove chat_notifications code) - Small
+- [ ] Implement Spec 08 (remove resources code) - Small
+- [ ] Implement Spec 09 (v27 migration + code) - Medium, CRITICAL
+- [ ] Implement Spec 10 (v28 migration + code) - Large
+- [ ] Implement Spec 11 (v29 migration + code) - Medium, CRITICAL
+- [ ] Implement Spec 12 (v30 migration + stores) - Large, CRITICAL
+- [ ] Verify all migrations run correctly
+- [ ] Run type-check: `npm run type-check`
+
+### Phase 2: Agent Updates
+- [ ] Implement Spec 01 (event system refactor) - Large
+- [ ] Implement Spec 02 (navigation + header) - Medium
+- [ ] Verify agent still functions correctly
+- [ ] Test workflow creation and execution
+
+### Phase 3: UI Polish
+- [ ] Implement Spec 03 (notifications page) - Medium
+- [ ] Complete Spec 04 (workflow hub) - Medium
+- [ ] Implement Spec 05 (chat page update) - Medium
+- [ ] Complete Spec 06 (home page cleanup) - Small
+- [ ] End-to-end testing of all flows
+
+### Phase 4: Testing & Polish
+- [ ] Fix any broken tests
+- [ ] Add tests for new functionality
+- [ ] Code cleanup (TODOs, comments)
+- [ ] Final review and documentation

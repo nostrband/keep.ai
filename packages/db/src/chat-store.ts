@@ -324,54 +324,6 @@ export class ChatStore {
     return results?.[0]?.count || 0;
   }
 
-  // Per-device notification tracking methods
-  // These use the local chat_notifications table (not synced) to track
-  // which chats have been notified on each device.
-
-  /**
-   * Mark a chat as notified on the current device.
-   * This is used instead of the global read_at for notification purposes
-   * so that each device can receive its own notifications.
-   *
-   * @param chatId - The chat ID to mark as notified
-   * @param deviceId - The device ID (cr-sqlite site_id in hex)
-   * @param timestamp - Optional timestamp, defaults to now
-   */
-  async markChatNotifiedOnDevice(
-    chatId: string,
-    deviceId: string,
-    timestamp?: string
-  ): Promise<void> {
-    const notifiedAt = timestamp || new Date().toISOString();
-
-    await this.db.db.exec(
-      `INSERT OR REPLACE INTO chat_notifications (chat_id, device_id, notified_at)
-       VALUES (?, ?, ?)`,
-      [chatId, deviceId, notifiedAt]
-    );
-  }
-
-  /**
-   * Get the last notification timestamp for a chat on a specific device.
-   * Returns null if the chat has never been notified on this device.
-   *
-   * @param chatId - The chat ID to check
-   * @param deviceId - The device ID (cr-sqlite site_id in hex)
-   */
-  async getChatNotifiedAt(
-    chatId: string,
-    deviceId: string
-  ): Promise<string | null> {
-    const results = await this.db.db.execO<{ notified_at: string }>(
-      `SELECT notified_at FROM chat_notifications
-       WHERE chat_id = ? AND device_id = ?`,
-      [chatId, deviceId]
-    );
-
-    if (!results || results.length === 0) return null;
-    return results[0].notified_at;
-  }
-
   /**
    * Get the timestamp of the most recent chat event for a chat.
    * Used for determining "last activity" for abandoned draft detection.

@@ -60,6 +60,10 @@ export async function migrateV1(tx: DBInterface["tx"] extends (fn: (tx: infer T)
     created_at TEXT NOT NULL DEFAULT ''
   )`);
 
+  // DEPRECATED: resources table is no longer used. Kept for backwards compatibility.
+  // Will be dropped in a future migration. See Spec 08.
+  // Original purpose: Shared working memory and contextual resources.
+  // Removal reason: Feature was never implemented or used.
   await tx.exec(`CREATE TABLE IF NOT EXISTS resources (
     id TEXT NOT NULL PRIMARY KEY,
     workingMemory TEXT NOT NULL DEFAULT '',
@@ -111,6 +115,7 @@ export async function migrateV1(tx: DBInterface["tx"] extends (fn: (tx: infer T)
   await tx.exec(
     `CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at)`
   );
+  // DEPRECATED: Index for unused resources table. See Spec 08.
   await tx.exec(
     `CREATE INDEX IF NOT EXISTS idx_resources_id ON resources(id)`
   );
@@ -120,5 +125,6 @@ export async function migrateV1(tx: DBInterface["tx"] extends (fn: (tx: infer T)
   await tx.exec("SELECT crsql_as_crr('notes')");
   await tx.exec("SELECT crsql_as_crr('threads')");
   await tx.exec("SELECT crsql_as_crr('messages')");
+  // DEPRECATED: resources table CRR. See Spec 08.
   await tx.exec("SELECT crsql_as_crr('resources')");
 }

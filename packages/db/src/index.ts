@@ -7,10 +7,7 @@ export type { DBInterface, CreateDBFunction } from "./interfaces";
 
 // Memory store
 export { MemoryStore } from "./memory-store";
-export type {
-  Thread as StorageThreadType,
-  Resource as StorageResourceType,
-} from "./memory-store";
+export type { Thread as StorageThreadType } from "./memory-store";
 
 // Chat store
 export { ChatStore } from "./chat-store";

@@ -1,11 +1,19 @@
 import { DBInterface } from "../interfaces";
 
+/**
+ * DEPRECATED: This migration creates the chat_notifications table which is no longer used.
+ * The table is kept for backwards compatibility with existing databases but all
+ * application code has been removed. Will be dropped in a future migration.
+ *
+ * Original purpose: Per-device notification tracking for multi-device chat sync.
+ * Removal reason: App is workflow-focused, not chat-focused. See Spec 07.
+ */
 export async function migrateV23(tx: DBInterface["tx"] extends (fn: (tx: infer T) => any) => any ? T : never) {
 
   // VERSION: 23
   await tx.exec(`PRAGMA user_version = 23`);
 
-  // Create chat_notifications table for per-device notification tracking.
+  // DEPRECATED: Create chat_notifications table for per-device notification tracking.
   //
   // Per the FIXME in MessageNotifications.ts (line 35), the current implementation
   // uses a global `read_at` timestamp on the `chats` table to track which messages

@@ -13,14 +13,6 @@ export type Thread = {
   metadata?: Record<string, unknown>;
 };
 
-export type Resource = {
-  id: string;
-  workingMemory?: string;
-  metadata?: Record<string, unknown>;
-  created_at: Date;
-  updated_at: Date;
-};
-
 export class MemoryStore {
   private db: CRSqliteDB;
 
@@ -176,60 +168,5 @@ export class MemoryStore {
           ? 1
           : 0
       );
-  }
-
-  // Resource operations
-  async saveResource(resource: Resource): Promise<void> {
-    await this.db.db.exec(
-      `INSERT OR REPLACE INTO resources (id, workingMemory, metadata, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?)`,
-      [
-        resource.id,
-        resource.workingMemory || "",
-        JSON.stringify(resource.metadata || {}),
-        resource.created_at.toISOString(),
-        resource.updated_at.toISOString(),
-      ]
-    );
-  }
-
-  async getResource(): Promise<Resource | null> {
-    const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT * FROM resources LIMIT 1`
-    );
-
-    if (!results || results.length === 0) {
-      return null;
-    }
-
-    const row = results[0];
-    return {
-      id: row.id as string,
-      workingMemory: (row.workingMemory as string) || undefined,
-      metadata: row.metadata ? JSON.parse(row.metadata as string) : undefined,
-      created_at: new Date(row.created_at as string),
-      updated_at: new Date(row.updated_at as string),
-    };
-  }
-
-  // Set resource (full replace of working memory content)
-  async setResource(
-    workingMemory: string,
-    metadata?: Record<string, unknown>
-  ): Promise<void> {
-    const now = new Date();
-    // Use a fixed ID since we only have one resource per database now
-    const resourceId = "default";
-    await this.db.db.exec(
-      `INSERT OR REPLACE INTO resources (id, workingMemory, metadata, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?)`,
-      [
-        resourceId,
-        workingMemory,
-        JSON.stringify(metadata || {}),
-        now.toISOString(),
-        now.toISOString(),
-      ]
-    );
   }
 }

@@ -1,6 +1,5 @@
 // Query client configuration with table-based invalidation
 import { QueryClient } from "@tanstack/react-query";
-import { messageNotifications } from "./lib/MessageNotifications";
 import { workflowNotifications } from "./lib/WorkflowNotifications";
 import type { KeepDbApi } from "@app/db";
 
@@ -62,11 +61,6 @@ export function notifyTablesChanged(
   }
 
   if (!isServerless && !isLocalChange && globalThis === window) {
-    // Check for new messages and show notifications
-    messageNotifications.checkNewMessages(api).catch((error) => {
-      console.debug("Message notifications failed:", error);
-    });
-
     // Check for workflows needing attention and show notifications
     // Only check when relevant tables change
     if (set.has("script_runs") || set.has("workflows")) {
