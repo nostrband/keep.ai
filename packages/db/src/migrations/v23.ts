@@ -15,9 +15,8 @@ export async function migrateV23(tx: DBInterface["tx"] extends (fn: (tx: infer T
 
   // DEPRECATED: Create chat_notifications table for per-device notification tracking.
   //
-  // Per the FIXME in MessageNotifications.ts (line 35), the current implementation
-  // uses a global `read_at` timestamp on the `chats` table to track which messages
-  // have been notified. This causes a problem for multi-device users:
+  // Original problem: The app used a global `read_at` timestamp on the `chats` table
+  // to track which messages have been notified. This caused issues for multi-device users:
   //
   // - When a message is notified on Device A, read_at is set globally
   // - Device B never receives the notification because read_at is already set
