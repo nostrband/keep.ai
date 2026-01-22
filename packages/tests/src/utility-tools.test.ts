@@ -8,11 +8,22 @@ function createMockContext(): EvalContext {
   return {
     taskThreadId: "test-thread",
     step: 0,
-    type: "chat",
+    type: "workflow",
     taskId: "test-task",
     cost: 0,
     createEvent: vi.fn().mockResolvedValue(undefined),
     onLog: vi.fn().mockResolvedValue(undefined),
+  };
+}
+
+/**
+ * Creates mock ToolCallOptions for testing.
+ */
+function createToolCallOptions() {
+  return {
+    toolCallId: "test-call",
+    messages: [],
+    abortSignal: new AbortController().signal,
   };
 }
 
@@ -21,7 +32,7 @@ describe("Utility Tools", () => {
     it("should decode standard base64 string", async () => {
       const atobTool = makeAtobTool();
 
-      const result = await atobTool.execute("SGVsbG8gV29ybGQ=");
+      const result = await atobTool.execute!("SGVsbG8gV29ybGQ=", createToolCallOptions());
 
       expect(result).toBe("Hello World");
     });
@@ -30,7 +41,7 @@ describe("Utility Tools", () => {
       const atobTool = makeAtobTool();
 
       // base64url uses - instead of + and _ instead of /
-      const result = await atobTool.execute("SGVsbG8tV29ybGQ_");
+      const result = await atobTool.execute!("SGVsbG8tV29ybGQ_", createToolCallOptions());
 
       // The decoded result should work
       expect(typeof result).toBe("string");
@@ -40,7 +51,7 @@ describe("Utility Tools", () => {
       const atobTool = makeAtobTool();
 
       // "Hi" in base64 is "SGk=" but without padding would be "SGk"
-      const result = await atobTool.execute("SGk");
+      const result = await atobTool.execute!("SGk", createToolCallOptions());
 
       expect(result).toBe("Hi");
     });
@@ -48,7 +59,7 @@ describe("Utility Tools", () => {
     it("should handle empty string", async () => {
       const atobTool = makeAtobTool();
 
-      const result = await atobTool.execute("");
+      const result = await atobTool.execute!("", createToolCallOptions());
 
       expect(result).toBe("");
     });
@@ -56,7 +67,7 @@ describe("Utility Tools", () => {
     it("should handle whitespace in input", async () => {
       const atobTool = makeAtobTool();
 
-      const result = await atobTool.execute("SGVs bG8g V29y bGQ=");
+      const result = await atobTool.execute!("SGVs bG8g V29y bGQ=", createToolCallOptions());
 
       expect(result).toBe("Hello World");
     });
@@ -64,25 +75,25 @@ describe("Utility Tools", () => {
     it("should throw error for invalid base64", async () => {
       const atobTool = makeAtobTool();
 
-      await expect(atobTool.execute("!!!invalid!!!")).rejects.toThrow();
+      await expect(atobTool.execute!("!!!invalid!!!", createToolCallOptions())).rejects.toThrow();
     });
 
     it("should decode binary data", async () => {
       const atobTool = makeAtobTool();
 
       // Base64 for bytes [0, 255, 128]
-      const result = await atobTool.execute("AP+A");
+      const result = await atobTool.execute!("AP+A", createToolCallOptions());
 
-      expect(result.charCodeAt(0)).toBe(0);
-      expect(result.charCodeAt(1)).toBe(255);
-      expect(result.charCodeAt(2)).toBe(128);
+      expect((result as string).charCodeAt(0)).toBe(0);
+      expect((result as string).charCodeAt(1)).toBe(255);
+      expect((result as string).charCodeAt(2)).toBe(128);
     });
 
     it("should decode complex base64url", async () => {
       const atobTool = makeAtobTool();
 
       // Standard base64 with + and / replaced with - and _
-      const result = await atobTool.execute("YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXo");
+      const result = await atobTool.execute!("YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXo", createToolCallOptions());
 
       expect(result).toBe("abcdefghijklmnopqrstuvwxyz");
     });
@@ -98,10 +109,13 @@ describe("Utility Tools", () => {
     it("should log a message with log level", async () => {
       const consoleLogTool = makeConsoleLogTool(() => mockContext);
 
-      const result = await consoleLogTool.execute({
-        type: "log",
-        line: "Test message",
-      });
+      const result = await consoleLogTool.execute!(
+        {
+          type: "log",
+          line: "Test message",
+        },
+        createToolCallOptions()
+      );
 
       expect(result).toEqual({ success: true });
       expect(mockContext.onLog).toHaveBeenCalled();
@@ -114,10 +128,13 @@ describe("Utility Tools", () => {
     it("should log a message with warn level", async () => {
       const consoleLogTool = makeConsoleLogTool(() => mockContext);
 
-      await consoleLogTool.execute({
-        type: "warn",
-        line: "Warning message",
-      });
+      await consoleLogTool.execute!(
+        {
+          type: "warn",
+          line: "Warning message",
+        },
+        createToolCallOptions()
+      );
 
       const loggedLine = (mockContext.onLog as any).mock.calls[0][0];
       expect(loggedLine).toContain("WARN:");
@@ -127,10 +144,13 @@ describe("Utility Tools", () => {
     it("should log a message with error level", async () => {
       const consoleLogTool = makeConsoleLogTool(() => mockContext);
 
-      await consoleLogTool.execute({
-        type: "error",
-        line: "Error message",
-      });
+      await consoleLogTool.execute!(
+        {
+          type: "error",
+          line: "Error message",
+        },
+        createToolCallOptions()
+      );
 
       const loggedLine = (mockContext.onLog as any).mock.calls[0][0];
       expect(loggedLine).toContain("ERROR:");
@@ -140,10 +160,13 @@ describe("Utility Tools", () => {
     it("should include timestamp in log", async () => {
       const consoleLogTool = makeConsoleLogTool(() => mockContext);
 
-      await consoleLogTool.execute({
-        type: "log",
-        line: "Test",
-      });
+      await consoleLogTool.execute!(
+        {
+          type: "log",
+          line: "Test",
+        },
+        createToolCallOptions()
+      );
 
       const loggedLine = (mockContext.onLog as any).mock.calls[0][0];
       // ISO timestamp format like [2024-01-15T10:30:00.000Z]
@@ -155,10 +178,13 @@ describe("Utility Tools", () => {
 
       const longMessage = "x".repeat(2000);
 
-      await consoleLogTool.execute({
-        type: "log",
-        line: longMessage,
-      });
+      await consoleLogTool.execute!(
+        {
+          type: "log",
+          line: longMessage,
+        },
+        createToolCallOptions()
+      );
 
       const loggedLine = (mockContext.onLog as any).mock.calls[0][0];
       // Should be truncated to ~1000 chars + "..." + formatting
@@ -169,10 +195,13 @@ describe("Utility Tools", () => {
     it("should handle empty message", async () => {
       const consoleLogTool = makeConsoleLogTool(() => mockContext);
 
-      const result = await consoleLogTool.execute({
-        type: "log",
-        line: "",
-      });
+      const result = await consoleLogTool.execute!(
+        {
+          type: "log",
+          line: "",
+        },
+        createToolCallOptions()
+      );
 
       expect(result).toEqual({ success: true });
       expect(mockContext.onLog).toHaveBeenCalled();
