@@ -19,6 +19,8 @@ export function makeAddTaskTool(
         (opts.startAt ? new Date(opts.startAt).getTime() : Date.now()) / 1000
       );
       const id = generateId();
+      // Spec 10: workflow_id and asks are now on tasks table
+      // goal and notes are passed as initial inbox content instead
       await taskStore.addTask({
         id,
         timestamp,
@@ -29,13 +31,8 @@ export function makeAddTaskTool(
         type: "worker",
         title: opts.title,
         chat_id: "",
-      });
-      await taskStore.saveState({
-        id,
-        goal: opts.goal || "",
-        notes: opts.notes || "",
+        workflow_id: "",  // Worker tasks don't have workflows
         asks: "",
-        plan: "",
       });
 
       await getContext().createEvent("add_task", {

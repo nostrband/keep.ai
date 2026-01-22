@@ -6,6 +6,11 @@ export async function migrateV6(tx: DBInterface["tx"] extends (fn: (tx: infer T)
   await tx.exec(`PRAGMA user_version = 6`);
 
   // Task runs table
+  // DEPRECATED fields (kept for backwards compatibility, not used in code):
+  // - reason: only "input" value was used, now removed
+  // - input_goal, input_notes, input_plan, input_asks
+  // - output_goal, output_notes, output_plan, output_asks
+  // See Spec 10.
   await tx.exec(`CREATE TABLE IF NOT EXISTS task_runs (
     id TEXT PRIMARY KEY NOT NULL,
     task_id TEXT NOT NULL DEFAULT '',

@@ -5,7 +5,11 @@ export async function migrateV5(tx: DBInterface["tx"] extends (fn: (tx: infer T)
   // VERSION: 5
   await tx.exec(`PRAGMA user_version = 5`);
 
-  // Task states table
+  // DEPRECATED: task_states table is no longer used.
+  // The 'asks' field has been moved to the tasks table (v30 migration).
+  // Fields goal, notes, plan have been removed entirely from the application.
+  // Table kept for backwards compatibility with existing databases.
+  // See Spec 10.
   await tx.exec(`CREATE TABLE IF NOT EXISTS task_states (
     id TEXT PRIMARY KEY NOT NULL,
     goal TEXT NOT NULL DEFAULT '',

@@ -168,18 +168,12 @@ export class Agent {
         // Stop the loop
         stopped = true;
 
-        // 'done' output
+        // 'done' output (Spec 10: notes and plan removed)
         output = {
           kind: "done",
           reply: info.reply || "",
           steps: input.step + 1,
         };
-        if (info.notes || info.plan) {
-          output.patch = {
-            notes: info.notes,
-            plan: info.plan,
-          };
-        }
       },
     });
     tools.ask = makeAskTool({
@@ -189,14 +183,12 @@ export class Agent {
         // Stop the loop
         stopped = true;
 
-        // 'wait' output
+        // 'wait' output (Spec 10: notes and plan removed)
         // Use formattedAsks which includes options as JSON if provided
         output = {
           kind: "wait",
           steps: input.step + 1,
           patch: {
-            notes: info.notes,
-            plan: info.plan,
             asks: info.formattedAsks,
           },
         };

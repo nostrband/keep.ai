@@ -1,6 +1,6 @@
 import React from "react";
 import { useParams, Link } from "react-router-dom";
-import { useTask, useTaskState, useTaskRuns } from "../hooks/dbTaskReads";
+import { useTask, useTaskRuns } from "../hooks/dbTaskReads";
 import { useLatestScriptByTaskId, useWorkflowByTaskId } from "../hooks/dbScriptReads";
 import { useChat } from "../hooks/dbChatReads";
 import { useUpdateTask, usePauseTask } from "../hooks/dbWrites";
@@ -13,7 +13,6 @@ import { useAutoHidingMessage } from "../hooks/useAutoHidingMessage";
 export default function TaskDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { data: task, isLoading } = useTask(id!);
-  const { data: taskState, isLoading: isLoadingState } = useTaskState(id!);
   const { data: taskRuns = [], isLoading: isLoadingRuns } = useTaskRuns(id!);
   const { data: latestScript } = useLatestScriptByTaskId(id!);
   const { data: workflow } = useWorkflowByTaskId(id!);
@@ -165,43 +164,12 @@ export default function TaskDetailPage() {
               </div>
             </div>
 
-            {/* Task State Information */}
-            {taskState && (
+            {/* Task Asks (Spec 10: only asks is shown now) */}
+            {task.asks && (
               <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
-                <h2 className="text-lg font-semibold text-gray-900 mb-4">Task State</h2>
-                <div className="space-y-4">
-                  {taskState.goal && (
-                    <div>
-                      <h3 className="text-sm font-medium text-gray-700 mb-2">Goal</h3>
-                      <div className="prose prose-sm max-w-none">
-                        <Response>{taskState.goal}</Response>
-                      </div>
-                    </div>
-                  )}
-                  {taskState.notes && (
-                    <div>
-                      <h3 className="text-sm font-medium text-gray-700 mb-2">Notes</h3>
-                      <div className="prose prose-sm max-w-none">
-                        <Response>{taskState.notes}</Response>
-                      </div>
-                    </div>
-                  )}
-                  {taskState.plan && (
-                    <div>
-                      <h3 className="text-sm font-medium text-gray-700 mb-2">Plan</h3>
-                      <div className="prose prose-sm max-w-none">
-                        <Response>{taskState.plan}</Response>
-                      </div>
-                    </div>
-                  )}
-                  {taskState.asks && (
-                    <div>
-                      <h3 className="text-sm font-medium text-gray-700 mb-2">Asks</h3>
-                      <div className="prose prose-sm max-w-none">
-                        <Response>{taskState.asks}</Response>
-                      </div>
-                    </div>
-                  )}
+                <h2 className="text-lg font-semibold text-gray-900 mb-4">Asks</h2>
+                <div className="prose prose-sm max-w-none">
+                  <Response>{task.asks}</Response>
                 </div>
               </div>
             )}

@@ -6,17 +6,24 @@ export type TaskType = "worker" | "planner";
 export interface Task {
   id: string;
   timestamp: number;
-  // task: string;
+  // task: string;      // DEPRECATED: See Spec 10
   reply: string;
   error: string;
   state: string;
   thread_id: string;
   type: string;
   title: string;
-  // cron: string;
+  // cron: string;      // DEPRECATED: See Spec 10
   chat_id: string;
+  workflow_id: string;  // Direct link to workflow (Spec 10)
+  asks: string;         // Moved from task_states (Spec 10)
 }
 
+// DEPRECATED: TaskState interface and related methods (saveState, getState, getStates)
+// are no longer used. The 'asks' field has been moved to the Task interface.
+// Fields goal, notes, plan have been removed from the application.
+// Keeping for backwards compatibility during agent package migration.
+// See Spec 10.
 export interface TaskState {
   id: string;
   goal: string;
@@ -100,8 +107,8 @@ export class TaskStore {
     // Insert new task
     const db = tx || this.db.db;
     await db.exec(
-      `INSERT INTO tasks (id, timestamp, reply, state, thread_id, error, type, title, chat_id)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO tasks (id, timestamp, reply, state, thread_id, error, type, title, chat_id, workflow_id, asks)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         task.id,
         task.timestamp,
@@ -112,6 +119,8 @@ export class TaskStore {
         task.type,
         task.title,
         task.chat_id,
+        task.workflow_id,
+        task.asks,
       ]
     );
 
@@ -124,7 +133,7 @@ export class TaskStore {
     type?: string,
     until?: number
   ): Promise<Task[]> {
-    let sql = `SELECT id, timestamp, reply, state, thread_id, error, type, title, chat_id
+    let sql = `SELECT id, timestamp, reply, state, thread_id, error, type, title, chat_id, workflow_id, asks
                FROM tasks`;
     const args: (string | number)[] = [];
 
@@ -174,6 +183,8 @@ export class TaskStore {
       type: (row.type as string) || "",
       title: (row.title as string) || "",
       chat_id: (row.chat_id as string) || "",
+      workflow_id: (row.workflow_id as string) || "",
+      asks: (row.asks as string) || "",
     }));
   }
 
@@ -192,7 +203,7 @@ export class TaskStore {
   // Get task by id
   async getTask(id: string): Promise<Task> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, timestamp, reply, state, thread_id, error, type, title, chat_id
+      `SELECT id, timestamp, reply, state, thread_id, error, type, title, chat_id, workflow_id, asks
           FROM tasks
           WHERE id = ? AND (deleted IS NULL OR deleted = FALSE)`,
       [id]
@@ -213,6 +224,8 @@ export class TaskStore {
       type: (row.type as string) || "",
       title: (row.title as string) || "",
       chat_id: (row.chat_id as string) || "",
+      workflow_id: (row.workflow_id as string) || "",
+      asks: (row.asks as string) || "",
     };
   }
 
@@ -221,7 +234,7 @@ export class TaskStore {
   async getTaskByChatId(chatId: string, tx?: DBInterface): Promise<Task | null> {
     const db = tx || this.db.db;
     const results = await db.execO<Record<string, unknown>>(
-      `SELECT id, timestamp, reply, state, thread_id, error, type, title, chat_id
+      `SELECT id, timestamp, reply, state, thread_id, error, type, title, chat_id, workflow_id, asks
           FROM tasks
           WHERE chat_id = ? AND (deleted IS NULL OR deleted = FALSE)`,
       [chatId]
@@ -242,6 +255,37 @@ export class TaskStore {
       type: (row.type as string) || "",
       title: (row.title as string) || "",
       chat_id: (row.chat_id as string) || "",
+      workflow_id: (row.workflow_id as string) || "",
+      asks: (row.asks as string) || "",
+    };
+  }
+
+  // Get task by workflow_id (Spec 10)
+  async getTaskByWorkflowId(workflowId: string): Promise<Task | null> {
+    const results = await this.db.db.execO<Record<string, unknown>>(
+      `SELECT id, timestamp, reply, state, thread_id, error, type, title, chat_id, workflow_id, asks
+          FROM tasks
+          WHERE workflow_id = ? AND (deleted IS NULL OR deleted = FALSE)`,
+      [workflowId]
+    );
+
+    if (!results || results.length === 0) {
+      return null;
+    }
+
+    const row = results[0];
+    return {
+      id: row.id as string,
+      timestamp: row.timestamp as number,
+      reply: row.reply as string,
+      state: row.state as string,
+      thread_id: row.thread_id as string,
+      error: row.error as string,
+      type: (row.type as string) || "",
+      title: (row.title as string) || "",
+      chat_id: (row.chat_id as string) || "",
+      workflow_id: (row.workflow_id as string) || "",
+      asks: (row.asks as string) || "",
     };
   }
 
@@ -255,7 +299,7 @@ export class TaskStore {
     // Create placeholders for the IN clause (?, ?, ?, ...)
     const placeholders = ids.map(() => "?").join(", ");
 
-    const sql = `SELECT id, timestamp, reply, state, thread_id, error, type, title, chat_id
+    const sql = `SELECT id, timestamp, reply, state, thread_id, error, type, title, chat_id, workflow_id, asks
                  FROM tasks
                  WHERE id IN (${placeholders}) AND (deleted IS NULL OR deleted = FALSE)
                  ORDER BY timestamp DESC`;
@@ -274,6 +318,8 @@ export class TaskStore {
       type: (row.type as string) || "",
       title: (row.title as string) || "",
       chat_id: (row.chat_id as string) || "",
+      workflow_id: (row.workflow_id as string) || "",
+      asks: (row.asks as string) || "",
     }));
   }
 
@@ -312,7 +358,7 @@ export class TaskStore {
     const db = tx || this.db.db;
     await db.exec(
       `UPDATE tasks
-          SET timestamp = ?, reply = ?, state = ?, thread_id = ?, error = ?, type = ?, title = ?, chat_id = ?
+          SET timestamp = ?, reply = ?, state = ?, thread_id = ?, error = ?, type = ?, title = ?, chat_id = ?, workflow_id = ?, asks = ?
           WHERE id = ? AND (deleted IS NULL OR deleted = FALSE)`,
       [
         task.timestamp,
@@ -323,6 +369,8 @@ export class TaskStore {
         task.type,
         task.title,
         task.chat_id,
+        task.workflow_id,
+        task.asks,
         task.id,
       ]
     );
@@ -331,7 +379,16 @@ export class TaskStore {
     // We'll assume the operation succeeded if no error was thrown
   }
 
-  // Save task state - overwrites by id if it exists
+  // Update task asks field only (Spec 10)
+  async updateTaskAsks(taskId: string, asks: string): Promise<void> {
+    await this.db.db.exec(
+      `UPDATE tasks SET asks = ? WHERE id = ? AND (deleted IS NULL OR deleted = FALSE)`,
+      [asks, taskId]
+    );
+  }
+
+  // DEPRECATED: saveState is no longer used. Use updateTaskAsks() instead. See Spec 10.
+  // Keeping for backwards compatibility during agent package migration.
   async saveState(taskState: TaskState): Promise<void> {
     await this.db.db.exec(
       `INSERT OR REPLACE INTO task_states (id, goal, notes, plan, asks)
@@ -346,7 +403,8 @@ export class TaskStore {
     );
   }
 
-  // Get task state by id
+  // DEPRECATED: getState is no longer used. Use task.asks directly. See Spec 10.
+  // Keeping for backwards compatibility during agent package migration.
   async getState(id: string): Promise<TaskState | null> {
     const results = await this.db.db.execO<Record<string, unknown>>(
       `SELECT id, goal, notes, plan, asks
@@ -369,7 +427,8 @@ export class TaskStore {
     };
   }
 
-  // Get task states by IDs
+  // DEPRECATED: getStates is no longer used. Use tasks array with asks field directly. See Spec 10.
+  // Keeping for backwards compatibility during agent package migration.
   async getStates(ids: string[]): Promise<TaskState[]> {
     if (ids.length === 0) {
       return [];

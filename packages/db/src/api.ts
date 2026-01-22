@@ -269,7 +269,7 @@ export class KeepDbApi {
       // Save the message to the chat
       await this.chatStore.saveChatMessages(chatId, [message], tx);
 
-      // Task
+      // Task (Spec 10: workflow_id and asks set at creation)
       const task: Task = {
         id: taskId,
         timestamp,
@@ -280,6 +280,8 @@ export class KeepDbApi {
         type: "planner",
         title: input.title || "",
         chat_id: chatId,
+        workflow_id: workflowId,  // Direct link to workflow (Spec 10)
+        asks: "",                  // Initialized empty (Spec 10)
       };
 
       // Create new task with type=planner and chat_id=chatId

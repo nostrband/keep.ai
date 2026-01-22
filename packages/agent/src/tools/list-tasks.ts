@@ -11,19 +11,15 @@ export function makeListTasksTool(taskStore: TaskStore) {
           ? Math.floor(new Date(opts.until).getTime() / 1000)
           : undefined
       );
-      const states = await taskStore.getStates(tasks.map((t) => t.id));
-      return tasks.map((task) => {
-        const state = states.find((s) => s.id === task.id);
-        return {
-          id: task.id,
-          title: task.title,
-          state: task.state,
-          goal: state?.goal || "",
-          asks: state?.asks || "",
-          error: task.error,
-          runTime: new Date(task.timestamp * 1000).toISOString(),
-        };
-      });
+      // Spec 10: asks is now directly on task, no need for separate getStates call
+      return tasks.map((task) => ({
+        id: task.id,
+        title: task.title,
+        state: task.state,
+        asks: task.asks || "",
+        error: task.error,
+        runTime: new Date(task.timestamp * 1000).toISOString(),
+      }));
     },
     description: "List background tasks",
     inputSchema: z
@@ -48,7 +44,6 @@ export function makeListTasksTool(taskStore: TaskStore) {
         id: z.string(),
         title: z.string(),
         state: z.string(),
-        goal: z.string().describe("Task goal"),
         asks: z
           .string()
           .describe(

@@ -35,6 +35,10 @@ export function useTask(taskId: string) {
   });
 }
 
+/**
+ * @deprecated Use task.asks directly instead. See Spec 10.
+ * The task_states table is deprecated - asks is now on the tasks table.
+ */
 export function useTaskState(taskId: string) {
   const { api } = useDbQuery();
   return useQuery({

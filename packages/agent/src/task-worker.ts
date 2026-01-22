@@ -13,10 +13,9 @@ import {
   InboxItem,
   KeepDbApi,
   Task,
-  TaskState,
   TaskType,
 } from "@app/db";
-import { AgentTask, StepOutput, StepReason } from "./agent-types";
+import { AgentTask, StepOutput, StepReason, TaskState } from "./agent-types";
 import { AgentEnv } from "./agent-env";
 import { SandboxAPI } from "./sandbox/api";
 import { fileUtils } from "@app/node";
@@ -246,16 +245,13 @@ export class TaskWorker {
         if (!result) throw new Error("Bad result");
         if (result.kind === "code") throw new Error("Step limit exceeded");
 
-        // Save wait state
+        // Save wait state (Spec 10: only asks is used now)
         if (result.kind === "wait" && result.patch) {
-          // Goal is no longer editable
-          // if (result.patch.goal !== undefined)
-          //   state.goal = result.patch.goal;
-          if (result.patch.plan !== undefined) state.plan = result.patch.plan;
-          if (result.patch.notes !== undefined)
-            state.notes = result.patch.notes;
-          if (result.patch.asks !== undefined) state.asks = result.patch.asks;
-          await this.api.taskStore.saveState(state);
+          if (result.patch.asks !== undefined) {
+            state.asks = result.patch.asks;
+            // Spec 10: Use updateTaskAsks instead of saveState
+            await this.api.taskStore.updateTaskAsks(task.id, state.asks);
+          }
         }
 
         // Mark inbox items as finished
@@ -266,6 +262,7 @@ export class TaskWorker {
 
         // Prepare run end
         await this.finishTaskRun({
+          taskId: task.id,
           taskRunId,
           runStartTime,
           result,
@@ -490,6 +487,7 @@ export class TaskWorker {
   }) {
     const taskRunId = generateId();
     const runStartTime = new Date();
+    // Spec 10: input_goal, input_notes, input_plan are deprecated (always empty)
     await this.api.taskStore.createTaskRun({
       id: taskRunId,
       task_id: opts.agentTask.id,
@@ -500,9 +498,9 @@ export class TaskWorker {
       reason: "input",
       inbox: JSON.stringify(opts.inbox),
       input_asks: opts.agentTask.state?.asks || "",
-      input_goal: opts.agentTask.state?.goal || "",
-      input_plan: opts.agentTask.state?.plan || "",
-      input_notes: opts.agentTask.state?.notes || "",
+      input_goal: "",
+      input_plan: "",
+      input_notes: "",
     });
 
     // Log run start to execution_logs (Spec 01)
@@ -532,6 +530,7 @@ export class TaskWorker {
   }
 
   private async finishTaskRun(opts: {
+    taskId: string;  // Spec 10: taskId passed explicitly
     taskRunId: string;
     runStartTime: Date;
     result: StepOutput;
@@ -547,6 +546,7 @@ export class TaskWorker {
     // Combine agent LLM orchestration costs with tool execution costs
     const agentCostDollars = opts.agent.openRouterUsage.cost || 0;
     const totalCostDollars = agentCostDollars + opts.toolCost;
+    // Spec 10: output_goal, output_notes, output_plan are deprecated (always empty)
     await this.api.taskStore.finishTaskRun({
       id: opts.taskRunId,
       run_sec: Math.floor(
@@ -555,10 +555,10 @@ export class TaskWorker {
       end_timestamp: runEndTime.toISOString(),
       steps: opts.result.steps,
       state: opts.result.kind,
-      output_asks: opts.state.asks,
-      output_goal: opts.state.goal,
-      output_plan: opts.state.plan,
-      output_notes: opts.state.notes,
+      output_asks: opts.state.asks || "",
+      output_goal: "",
+      output_plan: "",
+      output_notes: "",
       reply: opts.taskReply,
       input_tokens: usage.inputTokens || 0,
       cached_tokens: usage.cachedInputTokens || 0,
@@ -576,7 +576,7 @@ export class TaskWorker {
       tool_name: '',
       input: '',
       output: JSON.stringify({
-        task_id: opts.state.id,
+        task_id: opts.taskId,
         usage: opts.agent.openRouterUsage,
       }),
       error: '',
@@ -670,16 +670,11 @@ export class TaskWorker {
     return sandbox;
   }
 
+  // Spec 10: TaskState now comes from task.asks directly instead of task_states table
   private async getTaskState(task: Task): Promise<TaskState> {
-    return (
-      (await this.api.taskStore.getState(task.id)) || {
-        id: task.id,
-        goal: "",
-        plan: "",
-        asks: "",
-        notes: "",
-      }
-    );
+    return {
+      asks: task.asks || "",
+    };
   }
 
   private async getInboxItems(

@@ -105,11 +105,9 @@ ${systemPrompt}
     const taskInfo: string[] = [];
     if (input.reason !== "input") {
       taskInfo.push(...["===TASK_ID===", taskId]);
-      if (state) {
-        if (state.goal) taskInfo.push(...["===TASK_GOAL===", state.goal]);
-        if (state.plan) taskInfo.push(...["===TASK_PLAN===", state.plan]);
-        if (state.asks) taskInfo.push(...["===TASK_ASKS===", state.asks]);
-        if (state.notes) taskInfo.push(...["===TASK_NOTES===", state.notes]);
+      // Spec 10: Only asks is used now (goal, notes, plan removed)
+      if (state?.asks) {
+        taskInfo.push(...["===TASK_ASKS===", state.asks]);
       }
 
       // For planner tasks, add script and workflow context

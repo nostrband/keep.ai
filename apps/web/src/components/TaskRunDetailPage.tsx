@@ -177,56 +177,14 @@ export default function TaskRunDetailPage() {
                   </div>
                 )}
 
-                {/* Input State (what the task started with) */}
-                {(taskRun.input_goal ||
-                  taskRun.input_notes ||
-                  taskRun.input_plan ||
-                  taskRun.input_asks) && (
+                {/* Input Asks (Spec 10: only asks is shown now) */}
+                {taskRun.input_asks && (
                   <div>
-                    <h3 className="text-sm font-medium text-gray-700 mb-3">
-                      Input State
+                    <h3 className="text-sm font-medium text-gray-700 mb-2">
+                      Input Asks
                     </h3>
-                    <div className="space-y-4">
-                      {taskRun.input_goal && (
-                        <div>
-                          <h4 className="text-xs font-medium text-gray-600 mb-2">
-                            Goal
-                          </h4>
-                          <div className="prose prose-sm max-w-none bg-gray-50 p-3 rounded">
-                            <Response>{taskRun.input_goal}</Response>
-                          </div>
-                        </div>
-                      )}
-                      {taskRun.input_notes && (
-                        <div>
-                          <h4 className="text-xs font-medium text-gray-600 mb-2">
-                            Notes
-                          </h4>
-                          <div className="prose prose-sm max-w-none bg-gray-50 p-3 rounded">
-                            <Response>{taskRun.input_notes}</Response>
-                          </div>
-                        </div>
-                      )}
-                      {taskRun.input_plan && (
-                        <div>
-                          <h4 className="text-xs font-medium text-gray-600 mb-2">
-                            Plan
-                          </h4>
-                          <div className="prose prose-sm max-w-none bg-gray-50 p-3 rounded">
-                            <Response>{taskRun.input_plan}</Response>
-                          </div>
-                        </div>
-                      )}
-                      {taskRun.input_asks && (
-                        <div>
-                          <h4 className="text-xs font-medium text-gray-600 mb-2">
-                            Asks
-                          </h4>
-                          <div className="prose prose-sm max-w-none bg-gray-50 p-3 rounded">
-                            <Response>{taskRun.input_asks}</Response>
-                          </div>
-                        </div>
-                      )}
+                    <div className="prose prose-sm max-w-none bg-gray-50 p-3 rounded">
+                      <Response>{taskRun.input_asks}</Response>
                     </div>
                   </div>
                 )}
@@ -243,56 +201,14 @@ export default function TaskRunDetailPage() {
                   </div>
                 )}
 
-                {/* Output State (what the task produced) */}
-                {(taskRun.output_goal ||
-                  taskRun.output_notes ||
-                  taskRun.output_plan ||
-                  taskRun.output_asks) && (
+                {/* Output Asks (Spec 10: only asks is shown now) */}
+                {taskRun.output_asks && (
                   <div>
-                    <h3 className="text-sm font-medium text-gray-700 mb-3">
-                      Output State
+                    <h3 className="text-sm font-medium text-gray-700 mb-2">
+                      Output Asks
                     </h3>
-                    <div className="space-y-4">
-                      {taskRun.output_goal && (
-                        <div>
-                          <h4 className="text-xs font-medium text-gray-600 mb-2">
-                            Goal
-                          </h4>
-                          <div className="prose prose-sm max-w-none">
-                            <Response>{taskRun.output_goal}</Response>
-                          </div>
-                        </div>
-                      )}
-                      {taskRun.output_notes && (
-                        <div>
-                          <h4 className="text-xs font-medium text-gray-600 mb-2">
-                            Notes
-                          </h4>
-                          <div className="prose prose-sm max-w-none">
-                            <Response>{taskRun.output_notes}</Response>
-                          </div>
-                        </div>
-                      )}
-                      {taskRun.output_plan && (
-                        <div>
-                          <h4 className="text-xs font-medium text-gray-600 mb-2">
-                            Plan
-                          </h4>
-                          <div className="prose prose-sm max-w-none">
-                            <Response>{taskRun.output_plan}</Response>
-                          </div>
-                        </div>
-                      )}
-                      {taskRun.output_asks && (
-                        <div>
-                          <h4 className="text-xs font-medium text-gray-600 mb-2">
-                            Asks
-                          </h4>
-                          <div className="prose prose-sm max-w-none">
-                            <Response>{taskRun.output_asks}</Response>
-                          </div>
-                        </div>
-                      )}
+                    <div className="prose prose-sm max-w-none">
+                      <Response>{taskRun.output_asks}</Response>
                     </div>
                   </div>
                 )}

@@ -1,17 +1,13 @@
 import { z } from "zod";
 import { tool } from "ai";
 
+// Spec 10: Removed notes and plan fields (no longer used)
 const AskInfoSchema = z.object({
   asks: z.string().describe("Question for user. Keep it short and specific."),
   options: z
     .array(z.string())
     .optional()
     .describe("Quick-reply options for the user. Use for yes/no or multiple-choice questions. Example: ['Yes', 'No'] or ['Archive', 'Delete', 'Skip']"),
-  notes: z
-    .string()
-    .optional()
-    .describe("Task notes, omit to keep current notes"),
-  plan: z.string().optional().describe("Task plan, omit to keep current plan"),
 });
 
 export type AskInfo = z.infer<typeof AskInfoSchema>;
@@ -55,8 +51,6 @@ Examples with options:
 - asks: "Archive or delete the processed emails?" options: ["Archive", "Delete"]
 - asks: "Send summary to you only, or also to the team?" options: ["Just me", "Include team"]
 - asks: "Should I process all invoice formats?" options: ["Yes, all formats", "Just PDFs"]
-
-The 'notes' and 'plan', if provided, will update the values stored in task context.
 `,
     inputSchema: AskInfoSchema,
   });

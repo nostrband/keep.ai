@@ -16,7 +16,12 @@ export async function migrateV1(tx: DBInterface["tx"] extends (fn: (tx: infer T)
   )`);
 
   // Tasks table with all final columns
-  // Note: 'task' field is unused (safe to remove). 'cron' on tasks is legacy (workflows use their own cron).
+  // DEPRECATED fields (kept for backwards compatibility, not used in code):
+  // - task: legacy field, never used
+  // - cron: workflows have their own cron field now
+  // Active fields added in later migrations:
+  // - workflow_id, asks added in v30 migration. See Spec 10.
+  // - chat_id added in v10 migration.
   // 'deleted' is actively used for soft-delete - do NOT remove.
   await tx.exec(`CREATE TABLE IF NOT EXISTS tasks (
     id TEXT PRIMARY KEY NOT NULL,

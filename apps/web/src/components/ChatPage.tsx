@@ -4,7 +4,7 @@ import SharedHeader from "./SharedHeader";
 import { QuickReplyButtons } from "./QuickReplyButtons";
 import { useAddMessage } from "../hooks/dbWrites";
 import { useFileUpload } from "../hooks/useFileUpload";
-import { useTaskByChatId, useTaskState } from "../hooks/dbTaskReads";
+import { useTaskByChatId } from "../hooks/dbTaskReads";
 import { parseAsks } from "@app/proto";
 import {
   PromptInput,
@@ -37,18 +37,17 @@ export default function ChatPage() {
 
   // Get task associated with this chat for quick-reply buttons
   const { data: task } = useTaskByChatId(id);
-  const { data: taskState } = useTaskState(task?.id || "");
 
-  // Parse quick-reply options from task.asks when task is waiting
+  // Spec 10: Parse quick-reply options from task.asks directly (not from taskState)
   const quickReplyOptions = useMemo(() => {
-    if (!task || !taskState) return [];
+    if (!task) return [];
     // Only show options when task is in wait or asks state
     if (task.state !== "wait" && task.state !== "asks") return [];
-    if (!taskState.asks) return [];
+    if (!task.asks) return [];
 
-    const parsed = parseAsks(taskState.asks);
+    const parsed = parseAsks(task.asks);
     return parsed.options || [];
-  }, [task, taskState]);
+  }, [task]);
 
   const handleSubmit = useCallback(async (message: PromptInputMessage) => {
     const hasText = Boolean(message.text);

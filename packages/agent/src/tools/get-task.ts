@@ -5,17 +5,14 @@ export function makeGetTaskTool(taskStore: TaskStore) {
   return {
     execute: async (id: string) => {
       const task = await taskStore.getTask(id);
-      const state = await taskStore.getState(id);
+      // Spec 10: asks is now directly on task, goal/notes/plan removed
       return {
         id: task.id,
         title: task.title,
         state: task.state,
         error: task.error,
         runTime: new Date(task.timestamp * 1000).toISOString(),
-        goal: state?.goal || "",
-        notes: state?.notes || "",
-        plan: state?.plan || "",
-        asks: state?.asks || "",
+        asks: task.asks || "",
       };
     },
     description: "Get a background task",
@@ -28,9 +25,6 @@ export function makeGetTaskTool(taskStore: TaskStore) {
       runTime: z
         .string()
         .describe("Date time when task is scheduled to run"),
-      goal: z.string(),
-      notes: z.string(),
-      plan: z.string(),
       asks: z.string(),
     }),
   };
