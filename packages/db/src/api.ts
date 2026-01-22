@@ -10,6 +10,8 @@ import { NostrPeerStore } from "./nostr-peer-store";
 import { InboxItem, InboxStore } from "./inbox-store";
 import { File, FileStore } from "./file-store";
 import { ScriptStore, Workflow } from "./script-store";
+import { NotificationStore } from "./notification-store";
+import { ExecutionLogStore } from "./execution-log-store";
 
 export class KeepDbApi {
   public readonly db: KeepDb;
@@ -21,6 +23,8 @@ export class KeepDbApi {
   public readonly inboxStore: InboxStore;
   public readonly fileStore: FileStore;
   public readonly scriptStore: ScriptStore;
+  public readonly notificationStore: NotificationStore;
+  public readonly executionLogStore: ExecutionLogStore;
 
   constructor(db: KeepDb) {
     this.db = db;
@@ -32,6 +36,8 @@ export class KeepDbApi {
     this.inboxStore = new InboxStore(db);
     this.fileStore = new FileStore(db);
     this.scriptStore = new ScriptStore(db);
+    this.notificationStore = new NotificationStore(db);
+    this.executionLogStore = new ExecutionLogStore(db);
   }
 
   async addMessage(input: {

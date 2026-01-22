@@ -5,6 +5,50 @@ import debug from "debug";
 
 const debugChatStore = debug("db:chat-store");
 
+/**
+ * ChatMessage represents a user-visible message in the conversation.
+ * Optional metadata fields link to related data for rich rendering.
+ *
+ * UI Rendering:
+ * - script_id present → Show script summary box at bottom of message
+ * - task_run_id present → Show "ℹ️" icon linking to execution detail
+ * - failed_script_run_id present → Visual indicator this was auto-fix response
+ */
+export interface ChatMessage {
+  id: string;
+  chat_id: string;
+  role: "user" | "assistant";
+  content: string;  // JSON-serialized AssistantUIMessage or plain text
+  timestamp: string;
+  task_run_id: string;        // Link to execution logs ("ℹ️" icon)
+  script_id: string;          // Script saved by this message (summary box)
+  failed_script_run_id: string;  // If maintenance: what broke
+}
+
+interface ChatMessageRow {
+  id: string;
+  chat_id: string;
+  role: string;
+  content: string;
+  timestamp: string;
+  task_run_id: string;
+  script_id: string;
+  failed_script_run_id: string;
+}
+
+function rowToChatMessage(row: ChatMessageRow): ChatMessage {
+  return {
+    id: row.id,
+    chat_id: row.chat_id,
+    role: row.role as "user" | "assistant",
+    content: row.content,
+    timestamp: row.timestamp,
+    task_run_id: row.task_run_id || "",
+    script_id: row.script_id || "",
+    failed_script_run_id: row.failed_script_run_id || "",
+  };
+}
+
 export class ChatStore {
   private db: CRSqliteDB;
 
@@ -436,5 +480,117 @@ export class ChatStore {
     } catch {
       return null;
     }
+  }
+
+  // ============================================================
+  // Chat Messages (Spec 12) - New purpose-specific table
+  // ============================================================
+
+  /**
+   * Save a single chat message to the new chat_messages table (Spec 12).
+   * This is the preferred method for saving messages going forward.
+   */
+  async saveChatMessage(message: ChatMessage, tx?: DBInterface): Promise<void> {
+    const db = tx || this.db.db;
+    await db.exec(
+      `INSERT OR REPLACE INTO chat_messages (id, chat_id, role, content, timestamp, task_run_id, script_id, failed_script_run_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        message.id,
+        message.chat_id,
+        message.role,
+        message.content,
+        message.timestamp,
+        message.task_run_id,
+        message.script_id,
+        message.failed_script_run_id,
+      ]
+    );
+  }
+
+  /**
+   * Get chat messages from the new chat_messages table (Spec 12).
+   * Returns messages in ascending order by timestamp for display.
+   */
+  async getNewChatMessages(opts: {
+    chatId: string;
+    limit?: number;
+    before?: string;
+    since?: string;
+  }): Promise<ChatMessage[]> {
+    let sql = `SELECT * FROM chat_messages WHERE chat_id = ?`;
+    const args: (string | number)[] = [opts.chatId];
+
+    if (opts.since) {
+      sql += ` AND timestamp > ?`;
+      args.push(opts.since);
+    }
+
+    if (opts.before) {
+      sql += ` AND timestamp < ?`;
+      args.push(opts.before);
+    }
+
+    // Order by timestamp DESC to get newest first for LIMIT
+    sql += ` ORDER BY timestamp DESC`;
+
+    if (opts.limit) {
+      sql += ` LIMIT ?`;
+      args.push(opts.limit);
+    }
+
+    const results = await this.db.db.execO<ChatMessageRow>(sql, args);
+
+    if (!results) return [];
+
+    // Convert and reverse to get ascending order for display
+    return results.map(rowToChatMessage).reverse();
+  }
+
+  /**
+   * Get a single chat message by ID from the new table (Spec 12).
+   */
+  async getChatMessageById(id: string): Promise<ChatMessage | null> {
+    const results = await this.db.db.execO<ChatMessageRow>(
+      "SELECT * FROM chat_messages WHERE id = ?",
+      [id]
+    );
+
+    if (!results || results.length === 0) {
+      return null;
+    }
+
+    return rowToChatMessage(results[0]);
+  }
+
+  /**
+   * Count messages in the new chat_messages table (Spec 12).
+   */
+  async countNewMessages(chatId?: string): Promise<number> {
+    let sql = `SELECT COUNT(*) as count FROM chat_messages`;
+    const args: string[] = [];
+
+    if (chatId) {
+      sql += ` WHERE chat_id = ?`;
+      args.push(chatId);
+    }
+
+    const results = await this.db.db.execO<{ count: number }>(sql, args);
+    return results?.[0]?.count || 0;
+  }
+
+  /**
+   * Get the last activity timestamp from the new chat_messages table (Spec 12).
+   */
+  async getLastMessageActivity(chatId: string): Promise<string | null> {
+    const results = await this.db.db.execO<{ max_ts: string }>(
+      `SELECT MAX(timestamp) as max_ts
+       FROM chat_messages
+       WHERE chat_id = ?`,
+      [chatId]
+    );
+
+    if (!results || results.length === 0 || !results[0].max_ts) return null;
+    return results[0].max_ts;
   }
 }

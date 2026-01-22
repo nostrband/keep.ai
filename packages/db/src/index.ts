@@ -11,6 +11,7 @@ export type { Thread as StorageThreadType } from "./memory-store";
 
 // Chat store
 export { ChatStore } from "./chat-store";
+export type { ChatMessage } from "./chat-store";
 
 // Note store
 export { NoteStore } from "./note-store";
@@ -35,6 +36,14 @@ export type { File } from "./file-store";
 // Script store
 export { ScriptStore, DRAFT_THRESHOLDS } from "./script-store";
 export type { Script, ScriptRun, Workflow, AbandonedDraft, DraftActivitySummary } from "./script-store";
+
+// Notification store (Spec 12)
+export { NotificationStore } from "./notification-store";
+export type { Notification, NotificationType } from "./notification-store";
+
+// Execution log store (Spec 12)
+export { ExecutionLogStore } from "./execution-log-store";
+export type { ExecutionLog, ExecutionLogEventType, ExecutionLogRunType } from "./execution-log-store";
 
 // Api
 export * from "./api";

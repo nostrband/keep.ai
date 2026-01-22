@@ -2,7 +2,7 @@
 
 **Goal:** Transform Keep.AI into a Simple, Lovable, Complete (SLC) v1 product focused on the core automation journey: Create -> Approve -> Run -> Handle Issues -> Tune
 
-**Last Updated:** 2026-01-22
+**Last Updated:** 2026-01-22 (Spec 12 DB layer)
 **Verified Against Codebase:** 2026-01-22
 
 ---
@@ -20,10 +20,10 @@ A comprehensive verification of all 12 specs against the codebase was completed 
 - **P2 specs (03, 04, 05, 06):** Partial progress (0-50%) - Some existing infrastructure
 
 ### Infrastructure Gaps Confirmed
-1. Latest migration is **v28** - migrations v29, v30 pending for Specs 10, 12
-2. `notification-store.ts` and `execution-log-store.ts` do not exist (Spec 12)
+1. Latest migration is **v29** - migration v30 pending for Spec 10
+2. ~~`notification-store.ts` and `execution-log-store.ts` do not exist~~ **DONE** (Spec 12 - v29)
 3. ~~No direct chat<->workflow links~~ **DONE** (Spec 09 - v28)
-4. All event writes still go to monolithic `chat_events` table (Spec 12)
+4. All event writes still go to monolithic `chat_events` table (Spec 01 will migrate writes)
 
 ### Test Coverage Notes
 - Core packages (agent, db, proto, node, browser) have no test coverage
@@ -47,7 +47,7 @@ A comprehensive verification of all 12 specs against the codebase was completed 
 | 09 | Chats-Workflows Direct Link | COMPLETED | v28 migration, workflow.chat_id added | - |
 | 10 | Tasks Table Cleanup | NOT STARTED | TaskState still active | - |
 | 11 | Workflows Status Cleanup | COMPLETED | v27 migration, explicit status values | - |
-| 12 | Split chat_events | NOT STARTED | No new tables/stores | - |
+| 12 | Split chat_events | ~30% (Database layer) | v29 migration, stores created | - |
 | 01 | Event System Refactor | NOT STARTED | Still uses saveChatEvent() | 12 |
 | 02 | Navigation & Header Refactor | NOT STARTED | No bell, flat menu | 12 (partial) |
 | 03 | Notifications Page | NOT STARTED | No page/components | 01, 12 |
@@ -405,20 +405,34 @@ Final cleanup items (deferred for post-v1)
 **Effort:** Large (8-12 hours)
 **Dependencies:** None
 **Blocks:** Specs 01, 03, 05
+**Status:** ~30% (Database layer complete)
 
-**Verified Current State:**
-- Only `chat_events` table exists (v9 migration)
-- `chat_messages` table does NOT exist
-- `notifications` table does NOT exist (only `chat_notifications` which is different)
-- `execution_logs` table does NOT exist
-- `notification-store.ts` does NOT exist
-- `execution-log-store.ts` does NOT exist
-- No `saveChatMessage()` method (only `saveChatMessages()` plural)
-- No ChatMessage type with metadata fields (task_run_id, script_id, failed_script_run_id)
-- Migration v30 does NOT exist
+**Completion Notes (Database Layer):**
+- Created migration v29 with chat_messages, notifications, execution_logs tables
+- Created notification-store.ts with Notification type and all methods (saveNotification, getNotifications, acknowledgeNotification, resolveNotification, getUnresolvedError)
+- Created execution-log-store.ts with ExecutionLog type and all methods (saveExecutionLog, getExecutionLogs)
+- Updated chat-store.ts with ChatMessage type and methods (saveChatMessage, getNewChatMessages, getChatMessageById, etc.)
+- Updated api.ts to expose new stores (notificationStore, executionLogStore)
+- Updated index.ts to export new types (ChatMessage, Notification, ExecutionLog)
+- Added deprecation comment to v9.ts for chat_events table
+
+**Remaining Work:**
+- Agent layer: Update workflow-worker.ts and task-worker.ts to use new stores (Spec 01)
+- UI layer: Update hooks to read from new tables
+- Cleanup: Migrate existing chat_events data to new tables
+
+**Verified Current State (UPDATED):**
+- ~~Only `chat_events` table exists (v9 migration)~~ **DONE** - v29 creates new tables
+- ~~`chat_messages` table does NOT exist~~ **DONE** - created in v29
+- ~~`notifications` table does NOT exist~~ **DONE** - created in v29
+- ~~`execution_logs` table does NOT exist~~ **DONE** - created in v29
+- ~~`notification-store.ts` does NOT exist~~ **DONE** - created
+- ~~`execution-log-store.ts` does NOT exist~~ **DONE** - created
+- ~~No `saveChatMessage()` method~~ **DONE** - added to chat-store.ts
+- ~~No ChatMessage type with metadata fields~~ **DONE** - added to chat-store.ts
 
 **Action Items:**
-1. Create migration v30 in `packages/db/src/migrations/v30.ts`:
+1. ~~Create migration v29 in `packages/db/src/migrations/v29.ts`~~ **DONE**:
    ```typescript
    export const v30 = async (db: DBInterface) => {
      // Create chat_messages table
@@ -484,7 +498,7 @@ Final cleanup items (deferred for post-v1)
    };
    ```
 
-2. Create `packages/db/src/notification-store.ts`:
+2. ~~Create `packages/db/src/notification-store.ts`~~ **DONE**:
    - `Notification` interface
    - `saveNotification(notification: Notification)`
    - `getNotifications(opts?: {workflowId?, unresolvedOnly?, limit?})`
@@ -492,22 +506,22 @@ Final cleanup items (deferred for post-v1)
    - `resolveNotification(id: string)`
    - `getUnresolvedError(workflowId: string)`
 
-3. Create `packages/db/src/execution-log-store.ts`:
+3. ~~Create `packages/db/src/execution-log-store.ts`~~ **DONE**:
    - `ExecutionLog` interface
    - `saveExecutionLog(log: ExecutionLog)`
    - `getExecutionLogs(runId: string, runType: 'script' | 'task')`
 
-4. Update `packages/db/src/chat-store.ts`:
+4. ~~Update `packages/db/src/chat-store.ts`~~ **DONE**:
    - Add `ChatMessage` interface with metadata fields
    - Add `saveChatMessage(message: ChatMessage)` method
    - Add `getChatMessages(chatId: string, opts?)` method
    - Add deprecation comment to `saveChatEvent()` and `getChatEvents()`
 
-5. Update `packages/db/src/api.ts`:
+5. ~~Update `packages/db/src/api.ts`~~ **DONE**:
    - Import and expose `notificationStore`
    - Import and expose `executionLogStore`
 
-6. Update `packages/db/src/index.ts`:
+6. ~~Update `packages/db/src/index.ts`~~ **DONE**:
    - Export new types: `ChatMessage`, `Notification`, `ExecutionLog`
 
 **Constraints:**
@@ -823,8 +837,8 @@ These items are not strictly required for v1 but would improve quality:
 Migrations must be created in this order to maintain version sequence:
 1. v27 - Spec 11 (workflow status values) - COMPLETED
 2. v28 - Spec 09 (chat/workflow direct links) - COMPLETED
-3. v29 - Spec 10 (tasks cleanup)
-4. v30 - Spec 12 (split chat_events)
+3. v29 - Spec 12 (split chat_events - DB layer) - COMPLETED
+4. v30 - Spec 10 (tasks cleanup)
 
 ### Breaking Changes
 - Spec 07: MessageNotifications removal changes how browser notifications work
@@ -853,8 +867,8 @@ Per AGENTS.md: Run `cd packages/tests && npm test` and `cd apps/user-server && n
 - [x] Implement Spec 09 (v28 migration + code) - Medium, CRITICAL - COMPLETED
 - [ ] Implement Spec 10 (v29 migration + code) - Large
 - [x] Implement Spec 11 (v27 migration + code) - Medium, CRITICAL - COMPLETED
-- [ ] Implement Spec 12 (v30 migration + stores) - Large, CRITICAL
-- [x] Verify migrations v27, v28 run correctly
+- [x] Implement Spec 12 (v29 migration + stores) - Large, CRITICAL (partial - DB layer done)
+- [x] Verify migrations v27, v28, v29 run correctly
 - [x] Run type-check: `npm run type-check`
 
 ### Phase 2: Agent Updates
