@@ -123,58 +123,58 @@ export class OpenRouterProxy {
         return;
       }
 
-    let buffer = '';
-    
-    proxyRes.on('data', (chunk) => {
-      buffer += chunk.toString();
-      
-      // Process complete lines from buffer
-      while (true) {
-        const lineEnd = buffer.indexOf('\n');
-        if (lineEnd === -1) break;
-        
-        const line = buffer.slice(0, lineEnd).trim();
-        buffer = buffer.slice(lineEnd + 1);
-        
-        // Skip empty lines and comments (starting with ':')
-        if (!line || line.startsWith(':')) {
-          continue;
-        }
-        
-        if (line.startsWith('data: ')) {
-          const data = line.slice(6);
-          if (data === '[DONE]') {
-            res.write('data: [DONE]\n\n');
-            // Await billing completion before ending response to prevent data loss
-            this.finalizeBilling(user.id, apiKeyId, totalCost, totalTokens, model)
-              .then(() => res.end())
-              .catch((err) => {
-                this.logger.error('Billing finalization failed', err);
-                res.end();
-              });
-            return;
+      let buffer = '';
+
+      proxyRes.on('data', (chunk) => {
+        buffer += chunk.toString();
+
+        // Process complete lines from buffer
+        while (true) {
+          const lineEnd = buffer.indexOf('\n');
+          if (lineEnd === -1) break;
+
+          const line = buffer.slice(0, lineEnd).trim();
+          buffer = buffer.slice(lineEnd + 1);
+
+          // Skip empty lines and comments (starting with ':')
+          if (!line || line.startsWith(':')) {
+            continue;
           }
 
-          try {
-            const parsed = JSON.parse(data);
-            if (parsed.usage) {
-              const cost = this.calculateCost(parsed.usage);
-              totalCost += cost;
-              totalTokens += parsed.usage.total_tokens || 0;
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+            if (data === '[DONE]') {
+              res.write('data: [DONE]\n\n');
+              // Await billing completion before ending response to prevent data loss
+              this.finalizeBilling(user.id, apiKeyId, totalCost, totalTokens, model)
+                .then(() => res.end())
+                .catch((err) => {
+                  this.logger.error('Billing finalization failed', err);
+                  res.end();
+                });
+              return;
             }
-            if (parsed.model) {
-              model = parsed.model;
+
+            try {
+              const parsed = JSON.parse(data);
+              if (parsed.usage) {
+                const cost = this.calculateCost(parsed.usage);
+                totalCost += cost;
+                totalTokens += parsed.usage.total_tokens || 0;
+              }
+              if (parsed.model) {
+                model = parsed.model;
+              }
+            } catch (e) {
+              // Log JSON parse errors but continue processing - malformed chunks shouldn't break billing
+              this.logger.debug(`JSON parse error in streaming response: ${e}`);
             }
-          } catch (e) {
-            // Log JSON parse errors but continue processing - malformed chunks shouldn't break billing
-            this.logger.debug(`JSON parse error in streaming response: ${e}`);
           }
         }
-      }
-      
-      // Write the original chunk to the response
-      res.write(chunk);
-    });
+
+        // Write the original chunk to the response
+        res.write(chunk);
+      });
 
       proxyRes.on('end', () => {
         if (!res.headersSent) {

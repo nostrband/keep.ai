@@ -983,6 +983,24 @@ The `openrouter-proxy.ts` file had several code quality issues that could lead t
 
 ---
 
+### Code Quality Fix - OpenRouter Proxy Indentation (2026-01-22)
+
+**Issue Found:**
+The streaming response handler in `openrouter-proxy.ts` had inconsistent indentation. Lines 126-177 were indented with 4 spaces instead of 6, making it appear they were at the wrong scope level. While JavaScript/TypeScript is indentation-agnostic, this created a maintenance and readability issue.
+
+**File Fixed:**
+- `/home/artur/keep.ai/apps/user-server/src/openrouter-proxy.ts`
+
+**Changes Made:**
+- Fixed indentation of streaming data handler code block (lines 126-177) to properly align within the `proxyReq.on('response')` callback
+- Standardized blank lines within the callback for consistency
+
+**Verification:**
+- Type-check passes
+- Tests pass (37 in user-server)
+
+---
+
 ## Implementation Notes
 
 ### Migration Order
