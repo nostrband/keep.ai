@@ -857,11 +857,12 @@ Final cleanup items (deferred for post-v1)
 These items are not strictly required for v1 but would improve quality:
 
 ### Test Coverage
-- ~~Add tests for database stores (chat-store, script-store, etc.)~~ **Partial** - chat-store tests added (2026-01-22)
+- ~~Add tests for database stores (chat-store, script-store, etc.)~~ **DONE** (2026-01-22)
   - Added 32 tests for ChatStore covering saveChatMessage, getNewChatMessages, getChatMessageById, countNewMessages, getLastMessageActivity
   - Added tests for createChat, getChat, getChatByWorkflowId, updateChat, deleteChat, readChat, getAllChats
+  - Added 28 tests for ScriptStore covering Script CRUD, ScriptRun operations, Workflow operations, draft activity queries
+  - Added 27 tests for TaskStore covering Task CRUD, TaskRun operations, deprecated TaskState backwards compat
   - Tests run in isolation with manual table creation (avoids CR-SQLite migration dependencies)
-  - script-store and task-store tests still pending
 - ~~Add tests for new notification-store and execution-log-store~~ **DONE** (2026-01-22)
   - Added 15 tests for NotificationStore covering save, get, filter, acknowledge, resolve, count
   - Added 15 tests for ExecutionLogStore covering save, get, list, filter, cost tracking, tool call counting
@@ -989,13 +990,18 @@ Per AGENTS.md: Run `cd packages/tests && npm test` and `cd apps/user-server && n
 - [x] Fix any broken tests (fixed CLI type error for Task missing workflow_id and asks)
   - **Note:** `apps/cli/src/commands/agent.ts` needed `workflow_id` and `asks` fields added to the mock Task object to match the updated Task interface from Spec 10
 - [x] Type-check passes (`npm run type-check` - with BUILD_GMAIL_SECRET placeholder)
-- [x] Tests pass (85 passed in packages/tests, 37 passed in user-server)
+- [x] Tests pass (172 passed in packages/tests, 37 passed in user-server)
 - [x] Create git tag (v1.0.0-alpha.2)
 - [x] Code cleanup (TODOs, comments) - Fixed orphaned comment reference in v23.ts (2026-01-22)
-- [x] Add tests for new functionality - Added 30 tests for notification-store and execution-log-store (2026-01-22)
+- [x] Add tests for new functionality - Added 85 tests for db stores (2026-01-22)
+  - notification-store: 15 tests
+  - execution-log-store: 15 tests
+  - chat-store: 32 tests (existing)
+  - script-store: 28 tests
+  - task-store: 27 tests
 - [x] Final review and documentation - COMPLETED (2026-01-22)
   - All 12 specs verified implemented
   - Type-check passes (all 18 packages)
-  - All tests pass (122 total: 85 in packages/tests, 37 in user-server)
+  - All tests pass (209 total: 172 in packages/tests, 37 in user-server)
   - No TODOs/FIXMEs in codebase
-  - v1.0.0-alpha.5 tagged
+  - v1.0.0-alpha.7 tagged
