@@ -271,7 +271,7 @@ export function useAbandonedDrafts(thresholdDays: number = DRAFT_THRESHOLDS.ABAN
         return [];
       }
     },
-    meta: { tables: ["workflows", "scripts", "chat_events", "tasks"] },
+    meta: { tables: ["workflows", "scripts", "chat_messages", "tasks"] },
     enabled: !!api,
     // Refresh every 5 minutes since this is based on time calculations
     staleTime: 5 * 60 * 1000,
@@ -308,7 +308,7 @@ export function useDraftActivitySummary() {
         };
       }
     },
-    meta: { tables: ["workflows", "scripts", "chat_events", "tasks"] },
+    meta: { tables: ["workflows", "scripts", "chat_messages", "tasks"] },
     enabled: !!api,
     // Refresh every 5 minutes since this is based on time calculations
     staleTime: 5 * 60 * 1000,

@@ -82,8 +82,17 @@ export class KeepDbApi {
         },
       };
 
-      // Save the message to chat
-      await this.chatStore.saveChatMessages(chatId, [message], tx);
+      // Save to chat_messages table (Spec 12)
+      await this.chatStore.saveChatMessage({
+        id: message.id,
+        chat_id: chatId,
+        role: role,
+        content: JSON.stringify(message),
+        timestamp: now.toISOString(),
+        task_run_id: '',
+        script_id: '',
+        failed_script_run_id: '',
+      }, tx);
 
       // Ensure Chat object exists with threadId reused as chatId
       const existingChat = await this.chatStore.getChat(chatId, tx);
@@ -266,8 +275,17 @@ export class KeepDbApi {
       // Create the chat with the first message and workflow link (Spec 09)
       await this.chatStore.createChat({ chatId, message, workflowId }, tx);
 
-      // Save the message to the chat
-      await this.chatStore.saveChatMessages(chatId, [message], tx);
+      // Save to chat_messages table (Spec 12)
+      await this.chatStore.saveChatMessage({
+        id: message.id,
+        chat_id: chatId,
+        role: 'user',
+        content: JSON.stringify(message),
+        timestamp: now.toISOString(),
+        task_run_id: '',
+        script_id: '',
+        failed_script_run_id: '',
+      }, tx);
 
       // Task (Spec 10: workflow_id and asks set at creation)
       const task: Task = {

@@ -15,12 +15,27 @@ export function useChatMessages(chatId: string) {
     queryKey: qk.chatMessages(chatId),
     queryFn: async () => {
       if (!api) return [];
-      // Use the new getChatMessages method from chatStore to read from chat_events table
-      const messages = await api.chatStore.getChatMessages({ chatId });
-      // Return AssistantUIMessage directly without conversion
-      return messages;
+      // Read from chat_messages table (Spec 12)
+      const messages = await api.chatStore.getNewChatMessages({ chatId });
+      // Parse content to AssistantUIMessage format
+      return messages.map((msg) => {
+        try {
+          return JSON.parse(msg.content);
+        } catch {
+          // Fallback for messages that aren't JSON
+          return {
+            id: msg.id,
+            role: msg.role,
+            parts: [{ type: "text", text: msg.content }],
+            metadata: {
+              threadId: msg.chat_id,
+              createdAt: msg.timestamp,
+            },
+          };
+        }
+      });
     },
-    meta: { tables: ["chat_events"] },
+    meta: { tables: ["chat_messages"] },
     enabled: !!api && !!chatId,
   });
 }
@@ -80,12 +95,37 @@ export function useChatEvents(chatId: string) {
   }): Promise<UseChatEventsResult> => {
     if (!api) return { events: [], nextCursor: undefined };
 
-    // Get chat events with pagination
-    // pageParam is the timestamp to get events before (older events)
-    const events = await api.chatStore.getChatEvents({
+    // Get chat messages with pagination from chat_messages table (Spec 12)
+    // pageParam is the timestamp to get messages before (older messages)
+    const messages = await api.chatStore.getNewChatMessages({
       chatId,
       limit: 50,
       before: pageParam,
+    });
+
+    // Convert ChatMessage to ChatEvent format
+    const events: ChatEvent[] = messages.reverse().map((msg) => {
+      let content;
+      try {
+        content = JSON.parse(msg.content);
+      } catch {
+        // Fallback for messages that aren't JSON
+        content = {
+          id: msg.id,
+          role: msg.role,
+          parts: [{ type: "text", text: msg.content }],
+          metadata: {
+            threadId: msg.chat_id,
+            createdAt: msg.timestamp,
+          },
+        };
+      }
+      return {
+        id: msg.id,
+        type: "message",
+        content,
+        timestamp: msg.timestamp,
+      };
     });
 
     // The nextCursor is the timestamp of the oldest event in this page
@@ -103,7 +143,7 @@ export function useChatEvents(chatId: string) {
     getNextPageParam: (lastPage) => lastPage.nextCursor,
     initialPageParam: undefined,
     meta: {
-      tables: ["chat_events"],
+      tables: ["chat_messages"],
       onTablesUpdate: async () => {
         const oldData = queryClient.getQueryData<InfiniteData<UseChatEventsResult>>(queryKey);
         if (oldData && oldData.pages.length && oldData.pages[0].events.length) {
@@ -117,7 +157,7 @@ export function useChatEvents(chatId: string) {
             }
           }
         }
-        
+
         // Otherwise, just invalidate the query
         queryClient.invalidateQueries({ queryKey });
       },

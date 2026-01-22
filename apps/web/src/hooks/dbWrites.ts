@@ -30,7 +30,7 @@ export function useAddMessage() {
     },
     onSuccess: () => {
       notifyTablesChanged(
-        ["messages", "threads", "chats", "chat_events"],
+        ["messages", "threads", "chats", "chat_messages"],
         true,
         api!
       );
@@ -46,15 +46,13 @@ export function useReadChat() {
       if (!api) throw new Error("Chat store not available");
 
       const chat = await api.chatStore.getChat(input.chatId);
-      const events = await api.chatStore.getChatEvents({
-        chatId: input.chatId,
-        limit: 1,
-      });
+      // Get last message timestamp from chat_messages table (Spec 12)
+      const lastActivity = await api.chatStore.getLastMessageActivity(input.chatId);
 
-      // Only update if last read timestamp was less than latest event's timestamp
-      if (events.length && events[0].timestamp > (chat?.read_at || "")) {
-        // Pass event timestamp to handle future timestamp edge case
-        await api.chatStore.readChat(input.chatId, events[0].timestamp);
+      // Only update if last read timestamp was less than latest message timestamp
+      if (lastActivity && lastActivity > (chat?.read_at || "")) {
+        // Pass message timestamp to handle future timestamp edge case
+        await api.chatStore.readChat(input.chatId, lastActivity);
         return true;
       } else {
         // No need to update

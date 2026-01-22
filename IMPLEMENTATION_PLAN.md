@@ -881,6 +881,53 @@ These items are not strictly required for v1 but would improve quality:
 
 ---
 
+## Post-v1 Bug Fixes
+
+### Critical Bug Fix (2026-01-22): Incomplete Spec 12 Migration
+
+**Bug Found:**
+The Spec 12 implementation was incomplete - while agent code was updated to write to new tables (`chat_messages`, `notifications`, `execution_logs`), the UI and api.ts were still reading/writing from the deprecated `chat_events` table. This caused a disconnect where:
+- Agent writes went to new tables (chat_messages, notifications, execution_logs)
+- UI reads still queried old table (chat_events)
+- Result: UI showed no messages or stale data
+
+**Root Cause:**
+Spec 12 database layer was implemented but the consumption layer (UI hooks and db API methods) was not fully migrated to use the new tables.
+
+**Fix Applied:**
+
+1. **Updated `/home/artur/keep.ai/packages/db/src/api.ts`:**
+   - `addMessage()` now uses `saveChatMessage()` to write to `chat_messages` table instead of `saveChatMessages()` which wrote to `chat_events`
+   - `createTask()` now uses `saveChatMessage()` to write to `chat_messages` table instead of `saveChatMessages()`
+
+2. **Updated `/home/artur/keep.ai/apps/web/src/hooks/dbChatReads.ts`:**
+   - `useChatMessages()` now reads from `chat_messages` table using `getNewChatMessages()`
+   - `useChatEvents()` now reads from `chat_messages` table and converts to ChatEvent format for backwards compatibility
+   - Updated table metadata to `chat_messages` instead of `chat_events` for proper query invalidation
+
+3. **Updated `/home/artur/keep.ai/apps/web/src/hooks/dbWrites.ts`:**
+   - `useAddMessage` notifies `chat_messages` table instead of `chat_events` for proper query invalidation
+   - `useReadChat` uses `getLastMessageActivity()` instead of `getChatEvents()` to check for new messages
+
+4. **Updated `/home/artur/keep.ai/packages/db/src/script-store.ts`:**
+   - `getAbandonedDrafts()` joins with `chat_messages` instead of `chat_events`
+   - `getDraftActivitySummary()` joins with `chat_messages` instead of `chat_events`
+
+5. **Updated `/home/artur/keep.ai/apps/web/src/hooks/dbScriptReads.ts`:**
+   - Updated table metadata to use `chat_messages` instead of `chat_events` for workflow queries
+
+**Verification:**
+- Type-check passes: All 18 packages compile successfully
+- Tests pass: 122 total (85 in packages/tests, 37 in user-server)
+- UI now correctly displays messages from chat_messages table
+- Query invalidation works correctly with new table names
+- Backwards compatibility maintained via useChatEvents conversion layer
+
+**Impact:**
+This fix completes the Spec 12 migration and ensures all read/write operations use the new purpose-specific tables instead of the deprecated monolithic `chat_events` table.
+
+---
+
 ## Implementation Notes
 
 ### Migration Order
