@@ -25,7 +25,8 @@ export default function WorkflowDetailPage() {
   const queryClient = useQueryClient();
   const { data: workflow, isLoading } = useWorkflow(id!);
   const { data: task } = useTask(workflow?.task_id || "");
-  const { data: chat } = useChat(task?.chat_id || "");
+  // Use workflow.chat_id directly (Spec 09) instead of going through task
+  const { data: chat } = useChat(workflow?.chat_id || "");
   const { data: latestScript } = useLatestScriptByWorkflowId(id!);
   const { data: scriptRuns = [], isLoading: isLoadingRuns } = useScriptRunsByWorkflowId(id!);
   const { data: scriptVersions = [], isLoading: isLoadingVersions } = useScriptVersionsByWorkflowId(id!);
@@ -100,7 +101,7 @@ export default function WorkflowDetailPage() {
 
     updateWorkflowMutation.mutate({
       workflowId: workflow.id,
-      status: "disabled",
+      status: "paused",  // Changed from 'disabled' (Spec 11)
     }, {
       onSuccess: () => {
         success.show("Automation paused");
@@ -171,8 +172,9 @@ export default function WorkflowDetailPage() {
   };
 
   const handleChat = () => {
-    if (task?.chat_id) {
-      navigate(`/chats/${task.chat_id}`);
+    // Use workflow.chat_id directly (Spec 09)
+    if (workflow?.chat_id) {
+      navigate(`/chats/${workflow.chat_id}`);
     }
   };
 
@@ -241,8 +243,8 @@ export default function WorkflowDetailPage() {
                 </div>
                 <div className="flex flex-col items-end gap-2">
                   <div className="flex gap-2">
-                    {/* Show Activate button for Draft workflows with a script */}
-                    {workflow.status === "" && activeScript && (
+                    {/* Show Activate button for Ready workflows (has script, not yet activated) */}
+                    {workflow.status === "ready" && (
                       <Button
                         onClick={handleActivate}
                         disabled={updateWorkflowMutation.isPending}
@@ -252,8 +254,8 @@ export default function WorkflowDetailPage() {
                         Activate
                       </Button>
                     )}
-                    {/* Show Run now button for Draft workflows without cron, or for testing */}
-                    {(workflow.status === "" || workflow.status === "active") && activeScript && (
+                    {/* Show Run now button for draft, ready, or active workflows with a script */}
+                    {(workflow.status === "draft" || workflow.status === "ready" || workflow.status === "active") && activeScript && (
                       <Button
                         onClick={handleRunNow}
                         disabled={updateWorkflowMutation.isPending}
@@ -288,8 +290,8 @@ export default function WorkflowDetailPage() {
                         Pause
                       </Button>
                     )}
-                    {/* Show Resume button for Paused workflows */}
-                    {workflow.status === "disabled" && (
+                    {/* Show Resume button for Paused or Error workflows */}
+                    {(workflow.status === "paused" || workflow.status === "error") && (
                       <Button
                         onClick={handleResume}
                         disabled={updateWorkflowMutation.isPending}
@@ -300,7 +302,7 @@ export default function WorkflowDetailPage() {
                         Resume
                       </Button>
                     )}
-                    {task?.chat_id && (
+                    {workflow?.chat_id && (
                       <Button
                         onClick={handleChat}
                         size="sm"
@@ -312,7 +314,7 @@ export default function WorkflowDetailPage() {
                     )}
                   </div>
                   {/* Show hint if no script exists yet */}
-                  {workflow.status === "" && !activeScript && (
+                  {workflow.status === "draft" && (
                     <div className="text-sm text-gray-500">
                       Script required to activate
                     </div>

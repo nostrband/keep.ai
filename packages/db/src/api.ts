@@ -257,8 +257,8 @@ export class KeepDbApi {
         },
       };
 
-      // Create the chat with the first message
-      await this.chatStore.createChat({ chatId, message }, tx);
+      // Create the chat with the first message and workflow link (Spec 09)
+      await this.chatStore.createChat({ chatId, message, workflowId }, tx);
 
       // Save the message to the chat
       await this.chatStore.saveChatMessages(chatId, [message], tx);
@@ -286,8 +286,9 @@ export class KeepDbApi {
         id: workflowId,
         cron: "",
         events: "",
-        status: "",
+        status: "draft",  // Explicit status (Spec 11)
         task_id: taskId,
+        chat_id: chatId,  // Direct link to chat (Spec 09)
         timestamp: now.toISOString(),
         title: task.title,
         next_run_timestamp: "",

@@ -59,9 +59,17 @@ export function makeSaveTool(opts: {
 
       // Update workflow's active_script_id to point to the new script
       // New script versions automatically become active
-      await opts.scriptStore.updateWorkflowFields(workflow.id, {
-        active_script_id: newScript.id,
-      });
+      // If workflow was draft (no script yet), transition to 'ready' (Spec 11)
+      if (workflow.status === 'draft') {
+        await opts.scriptStore.updateWorkflowFields(workflow.id, {
+          status: 'ready',
+          active_script_id: newScript.id,
+        });
+      } else {
+        await opts.scriptStore.updateWorkflowFields(workflow.id, {
+          active_script_id: newScript.id,
+        });
+      }
 
       await opts.chatStore.saveChatEvent(generateId(), opts.chatId, "add_script", {
         task_id: opts.taskId,

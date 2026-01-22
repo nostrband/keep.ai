@@ -23,7 +23,7 @@ export interface AbandonedDraft {
  * Summary of draft workflow states for UI display.
  */
 export interface DraftActivitySummary {
-  totalDrafts: number;        // All drafts (status='')
+  totalDrafts: number;        // All drafts (status='draft')
   staleDrafts: number;        // 3-7 days inactive
   abandonedDrafts: number;    // 7+ days inactive
   waitingForInput: number;    // Drafts where agent asked a question
@@ -62,6 +62,7 @@ export interface Workflow {
   id: string;
   title: string;
   task_id: string;
+  chat_id: string;                // Direct link to workflow's chat (Spec 09)
   timestamp: string;
   cron: string;
   events: string;
@@ -576,9 +577,9 @@ export class ScriptStore {
   async addWorkflow(workflow: Workflow, tx?: DBInterface): Promise<void> {
     const db = tx || this.db.db;
     await db.exec(
-      `INSERT INTO workflows (id, title, task_id, timestamp, cron, events, status, next_run_timestamp, maintenance, maintenance_fix_count, active_script_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [workflow.id, workflow.title, workflow.task_id, workflow.timestamp, workflow.cron, workflow.events, workflow.status, workflow.next_run_timestamp, workflow.maintenance ? 1 : 0, workflow.maintenance_fix_count || 0, workflow.active_script_id || '']
+      `INSERT INTO workflows (id, title, task_id, chat_id, timestamp, cron, events, status, next_run_timestamp, maintenance, maintenance_fix_count, active_script_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [workflow.id, workflow.title, workflow.task_id, workflow.chat_id || '', workflow.timestamp, workflow.cron, workflow.events, workflow.status, workflow.next_run_timestamp, workflow.maintenance ? 1 : 0, workflow.maintenance_fix_count || 0, workflow.active_script_id || '']
     );
   }
 
@@ -587,16 +588,16 @@ export class ScriptStore {
     const db = tx || this.db.db;
     await db.exec(
       `UPDATE workflows
-       SET title = ?, task_id = ?, timestamp = ?, cron = ?, events = ?, status = ?, next_run_timestamp = ?, maintenance = ?, maintenance_fix_count = ?, active_script_id = ?
+       SET title = ?, task_id = ?, chat_id = ?, timestamp = ?, cron = ?, events = ?, status = ?, next_run_timestamp = ?, maintenance = ?, maintenance_fix_count = ?, active_script_id = ?
        WHERE id = ?`,
-      [workflow.title, workflow.task_id, workflow.timestamp, workflow.cron, workflow.events, workflow.status, workflow.next_run_timestamp, workflow.maintenance ? 1 : 0, workflow.maintenance_fix_count || 0, workflow.active_script_id || '', workflow.id]
+      [workflow.title, workflow.task_id, workflow.chat_id || '', workflow.timestamp, workflow.cron, workflow.events, workflow.status, workflow.next_run_timestamp, workflow.maintenance ? 1 : 0, workflow.maintenance_fix_count || 0, workflow.active_script_id || '', workflow.id]
     );
   }
 
   // Get a workflow by ID
   async getWorkflow(id: string): Promise<Workflow | null> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, title, task_id, timestamp, cron, events, status, next_run_timestamp, maintenance, maintenance_fix_count, active_script_id
+      `SELECT id, title, task_id, chat_id, timestamp, cron, events, status, next_run_timestamp, maintenance, maintenance_fix_count, active_script_id
        FROM workflows
        WHERE id = ?`,
       [id]
@@ -611,6 +612,7 @@ export class ScriptStore {
       id: row.id as string,
       title: row.title as string,
       task_id: row.task_id as string,
+      chat_id: (row.chat_id as string) || '',
       timestamp: row.timestamp as string,
       cron: row.cron as string,
       events: row.events as string,
@@ -625,7 +627,7 @@ export class ScriptStore {
   // Get workflow by task_id
   async getWorkflowByTaskId(task_id: string): Promise<Workflow | null> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, title, task_id, timestamp, cron, events, status, next_run_timestamp, maintenance, maintenance_fix_count, active_script_id
+      `SELECT id, title, task_id, chat_id, timestamp, cron, events, status, next_run_timestamp, maintenance, maintenance_fix_count, active_script_id
        FROM workflows
        WHERE task_id = ?
        LIMIT 1`,
@@ -641,6 +643,38 @@ export class ScriptStore {
       id: row.id as string,
       title: row.title as string,
       task_id: row.task_id as string,
+      chat_id: (row.chat_id as string) || '',
+      timestamp: row.timestamp as string,
+      cron: row.cron as string,
+      events: row.events as string,
+      status: row.status as string,
+      next_run_timestamp: row.next_run_timestamp as string,
+      maintenance: Boolean(row.maintenance),
+      maintenance_fix_count: (row.maintenance_fix_count as number) || 0,
+      active_script_id: (row.active_script_id as string) || '',
+    };
+  }
+
+  // Get workflow by chat_id (Spec 09)
+  async getWorkflowByChatId(chat_id: string): Promise<Workflow | null> {
+    const results = await this.db.db.execO<Record<string, unknown>>(
+      `SELECT id, title, task_id, chat_id, timestamp, cron, events, status, next_run_timestamp, maintenance, maintenance_fix_count, active_script_id
+       FROM workflows
+       WHERE chat_id = ?
+       LIMIT 1`,
+      [chat_id]
+    );
+
+    if (!results || results.length === 0) {
+      return null;
+    }
+
+    const row = results[0];
+    return {
+      id: row.id as string,
+      title: row.title as string,
+      task_id: row.task_id as string,
+      chat_id: (row.chat_id as string) || '',
       timestamp: row.timestamp as string,
       cron: row.cron as string,
       events: row.events as string,
@@ -658,7 +692,7 @@ export class ScriptStore {
     offset: number = 0
   ): Promise<Workflow[]> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, title, task_id, timestamp, cron, events, status, next_run_timestamp, maintenance, maintenance_fix_count, active_script_id
+      `SELECT id, title, task_id, chat_id, timestamp, cron, events, status, next_run_timestamp, maintenance, maintenance_fix_count, active_script_id
        FROM workflows
        ORDER BY timestamp DESC
        LIMIT ? OFFSET ?`,
@@ -671,6 +705,7 @@ export class ScriptStore {
       id: row.id as string,
       title: row.title as string,
       task_id: row.task_id as string,
+      chat_id: (row.chat_id as string) || '',
       timestamp: row.timestamp as string,
       cron: row.cron as string,
       events: row.events as string,
@@ -783,7 +818,7 @@ export class ScriptStore {
 
     // Single atomic update
     await db.exec(
-      `UPDATE workflows SET status = 'disabled' WHERE status = 'active'`
+      `UPDATE workflows SET status = 'paused' WHERE status = 'active'`
     );
 
     return count;
@@ -793,7 +828,7 @@ export class ScriptStore {
    * Get draft workflows that have had no activity for more than the specified number of days.
    *
    * A draft is considered abandoned when:
-   * 1. Status is draft (status = '')
+   * 1. Status is draft (status = 'draft')
    * 2. No chat events, script saves, or workflow updates within the threshold period
    *
    * Last activity is calculated as the most recent of:
@@ -817,7 +852,7 @@ export class ScriptStore {
     // Uses COALESCE to find the most recent of: chat events, script saves, or workflow timestamp
     const results = await this.db.db.execO<Record<string, unknown>>(
       `SELECT
-        w.id, w.title, w.task_id, w.timestamp, w.cron, w.events, w.status,
+        w.id, w.title, w.task_id, w.chat_id, w.timestamp, w.cron, w.events, w.status,
         w.next_run_timestamp, w.maintenance, w.maintenance_fix_count, w.active_script_id,
         COALESCE(
           MAX(ce.timestamp),
@@ -827,10 +862,10 @@ export class ScriptStore {
         (SELECT COUNT(*) FROM scripts WHERE workflow_id = w.id) > 0 as has_script,
         t.state as task_state
       FROM workflows w
-      LEFT JOIN chat_events ce ON ce.chat_id = w.task_id
+      LEFT JOIN chat_events ce ON ce.chat_id = w.chat_id
       LEFT JOIN scripts s ON s.workflow_id = w.id
       LEFT JOIN tasks t ON t.id = w.task_id
-      WHERE w.status = ''
+      WHERE w.status = 'draft'
       GROUP BY w.id
       HAVING last_activity < ?
       ORDER BY last_activity ASC`,
@@ -844,6 +879,7 @@ export class ScriptStore {
         id: row.id as string,
         title: row.title as string,
         task_id: row.task_id as string,
+        chat_id: (row.chat_id as string) || '',
         timestamp: row.timestamp as string,
         cron: row.cron as string,
         events: row.events as string,
@@ -900,10 +936,10 @@ export class ScriptStore {
         ) as last_activity,
         t.state as task_state
       FROM workflows w
-      LEFT JOIN chat_events ce ON ce.chat_id = w.task_id
+      LEFT JOIN chat_events ce ON ce.chat_id = w.chat_id
       LEFT JOIN scripts s ON s.workflow_id = w.id
       LEFT JOIN tasks t ON t.id = w.task_id
-      WHERE w.status = ''
+      WHERE w.status = 'draft'
       GROUP BY w.id`
     );
 

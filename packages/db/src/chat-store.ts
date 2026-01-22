@@ -17,13 +17,16 @@ export class ChatStore {
     opts: {
       chatId: string;
       message: AssistantUIMessage;
+      workflowId?: string;  // Direct link to workflow (Spec 09)
     },
     tx?: DBInterface
   ): Promise<void> {
-    const { chatId, message: firstMessage } = opts;
+    const { chatId, message: firstMessage, workflowId } = opts;
 
     if (!firstMessage) return;
 
+    // Note: first_message_content and first_message_time are deprecated (Spec 09)
+    // but we still populate them for backwards compatibility
     const firstMessageContent = firstMessage.parts
       .filter((part) => part.type === "text")
       .map((part) => part.text)
@@ -33,9 +36,9 @@ export class ChatStore {
     const now = new Date().toISOString();
     const db = tx || this.db.db;
     await db.exec(
-      `INSERT INTO chats (id, first_message_content, first_message_time, created_at, updated_at, read_at)
-          VALUES (?, ?, ?, ?, ?, ?)`,
-      [chatId, firstMessageContent, now, now, now]
+      `INSERT INTO chats (id, first_message_content, first_message_time, created_at, updated_at, read_at, workflow_id)
+          VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [chatId, firstMessageContent, now, now, now, now, workflowId || '']
     );
   }
 
@@ -85,10 +88,11 @@ export class ChatStore {
     created_at: string;
     updated_at: string;
     read_at: string | null;
+    workflow_id: string;
   } | null> {
     const db = tx || this.db.db;
     const results = await db.execO<Record<string, unknown>>(
-      `SELECT id, first_message_content, first_message_time, created_at, updated_at, read_at
+      `SELECT id, first_message_content, first_message_time, created_at, updated_at, read_at, workflow_id
        FROM chats
        WHERE id = ?`,
       [chatId]
@@ -104,6 +108,31 @@ export class ChatStore {
       created_at: row.created_at as string,
       updated_at: row.updated_at as string,
       read_at: row.read_at as string | null,
+      workflow_id: (row.workflow_id as string) || '',
+    };
+  }
+
+  // Get chat by workflow_id (Spec 09)
+  async getChatByWorkflowId(workflowId: string): Promise<{
+    id: string;
+    created_at: string;
+    workflow_id: string;
+  } | null> {
+    const results = await this.db.db.execO<Record<string, unknown>>(
+      `SELECT id, created_at, workflow_id
+       FROM chats
+       WHERE workflow_id = ?
+       LIMIT 1`,
+      [workflowId]
+    );
+
+    if (!results || results.length === 0) return null;
+
+    const row = results[0];
+    return {
+      id: row.id as string,
+      created_at: row.created_at as string,
+      workflow_id: (row.workflow_id as string) || '',
     };
   }
 
@@ -129,6 +158,7 @@ export class ChatStore {
       first_message: string | null;
       first_message_time: string | null;
       read_at: string | null;
+      workflow_id: string;
     }>
   > {
     const results = await this.db.db.execO<Record<string, unknown>>(
@@ -137,7 +167,8 @@ export class ChatStore {
             updated_at,
             first_message_content as first_message,
             first_message_time,
-            read_at
+            read_at,
+            workflow_id
           FROM chats
           ORDER BY updated_at DESC
           LIMIT 100`
@@ -151,6 +182,7 @@ export class ChatStore {
       first_message: row.first_message as string | null,
       first_message_time: row.first_message_time as string | null,
       read_at: row.read_at as string | null,
+      workflow_id: (row.workflow_id as string) || '',
     }));
   }
 
@@ -374,5 +406,35 @@ export class ChatStore {
     }
 
     return activityMap;
+  }
+
+  /**
+   * Get the first message text for a chat (Spec 09).
+   * Used for chat preview in lists.
+   *
+   * @param chatId - The chat ID
+   * @returns The first message text, or null if no messages exist
+   */
+  async getChatFirstMessage(chatId: string): Promise<string | null> {
+    const results = await this.db.db.execO<{ content: string }>(
+      `SELECT content FROM chat_events
+       WHERE chat_id = ? AND type = 'message'
+       ORDER BY timestamp ASC LIMIT 1`,
+      [chatId]
+    );
+
+    if (!results || results.length === 0) return null;
+
+    try {
+      const parsed = JSON.parse(results[0].content) as AssistantUIMessage;
+      // Extract text from message parts
+      if (!parsed.parts) return null;
+      return parsed.parts
+        .filter((part) => part.type === "text")
+        .map((part) => part.text)
+        .join("");
+    } catch {
+      return null;
+    }
   }
 }

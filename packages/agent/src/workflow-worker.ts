@@ -236,7 +236,7 @@ export class WorkflowWorker {
           this.debug("finishScriptRun error", e);
         }
 
-        // Don't change workflow status - user already set it to disabled/paused
+        // Don't change workflow status - user already set it to paused/error
         // Just signal done (no retry needed) and don't re-throw
         this.emitSignal({
           type: "done",
@@ -657,14 +657,14 @@ After saving the fix, the workflow will automatically exit maintenance mode and 
     logs: string[],
     fixAttempts: number
   ): Promise<void> {
-    // 1. Pause the workflow and reset fix count (gives user a fresh start)
+    // 1. Set workflow to error status and reset fix count (gives user a fresh start)
     // Use updateWorkflowFields for atomic update to prevent overwriting concurrent changes
     await this.api.scriptStore.updateWorkflowFields(workflow.id, {
-      status: "disabled",
+      status: "error",  // Changed from 'disabled' to 'error' (Spec 11)
       maintenance: false, // Clear maintenance since we're not auto-fixing
       maintenance_fix_count: 0, // Reset so user gets fresh fix attempts when re-enabled
     });
-    this.debug(`Workflow ${workflow.id} paused due to repeated fix failures`);
+    this.debug(`Workflow ${workflow.id} set to error status due to repeated fix failures`);
 
     // 2. Get the task and chat to notify user
     if (!workflow.task_id) {

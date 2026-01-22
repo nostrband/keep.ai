@@ -213,7 +213,7 @@ export class WorkflowScheduler {
       const allWorkflows = await this.api.scriptStore.listWorkflows(1000, 0);
       
       // Filter active workflows - per spec 06, only workflows with status="active" run
-      // Draft ("") and Paused ("disabled") workflows do not run on schedule
+      // Draft ("draft"), Ready ("ready"), Paused ("paused"), and Error ("error") workflows do not run on schedule
       const activeWorkflows = allWorkflows.filter(
         (w) => w.status === 'active' && !w.maintenance
       );
