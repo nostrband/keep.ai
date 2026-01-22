@@ -33,7 +33,9 @@
       "Bash(node --version:*)",
       "Bash(cat:*)",
       "Bash(curl:*)",
-      "Bash(tar:*)"
+      "Bash(tar:*)",
+      "Bash(wc:*)",
+      "Bash(find:*)"
     ]
   }
 }
