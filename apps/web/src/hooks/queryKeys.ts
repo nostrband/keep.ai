@@ -61,4 +61,9 @@ export const qk = {
   // Draft activity queries (for abandoned draft detection)
   abandonedDrafts: (thresholdDays: number) => [{ scope: "abandonedDrafts", thresholdDays }] as const,
   draftActivitySummary: () => [{ scope: "draftActivitySummary" }] as const,
+
+  // Notification-related queries
+  unresolvedNotifications: () => [{ scope: "unresolvedNotifications" }] as const,
+  notifications: (workflowId?: string) => [{ scope: "notifications", workflowId }] as const,
+  notification: (id: string) => [{ scope: "notification", id }] as const,
 };

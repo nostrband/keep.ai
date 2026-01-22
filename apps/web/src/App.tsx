@@ -28,6 +28,7 @@ import FilesPage from "./components/FilesPage";
 import DevicesPage from "./components/DevicesPage";
 import ConsolePage from "./components/ConsolePage";
 import SettingsPage from "./components/SettingsPage";
+import NotificationsPage from "./components/NotificationsPage";
 import { ConnectDeviceDialog } from "./components/ConnectDeviceDialog";
 import { AuthDialog } from "./components/AuthDialog";
 import { ClerkAuthProvider } from "./components/ClerkAuthProvider";
@@ -366,8 +367,12 @@ function App() {
       <Routes>
         <Route path="/" element={<MainPage />} />
         <Route path="/chat" element={<ChatPage />} />
+        {/* Legacy route - redirect to home */}
+        <Route path="/chat/main" element={<Navigate to="/" replace />} />
         <Route path="/new" element={<NewPage />} />
         <Route path="/chats/:id" element={<ChatDetailPage />} />
+        <Route path="/notifications" element={<NotificationsPage />} />
+        <Route path="/notifications/:workflowId" element={<NotificationsPage />} />
         <Route path="/threads" element={<ThreadsPage />} />
         <Route path="/threads/:id" element={<ThreadDetailPage />} />
         <Route path="/workflows" element={<WorkflowsPage />} />

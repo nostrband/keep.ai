@@ -2,7 +2,7 @@
 
 **Goal:** Transform Keep.AI into a Simple, Lovable, Complete (SLC) v1 product focused on the core automation journey: Create -> Approve -> Run -> Handle Issues -> Tune
 
-**Last Updated:** 2026-01-22 (Spec 01 Event System Refactor)
+**Last Updated:** 2026-01-22 (Spec 02 Navigation & Header Refactor)
 **Verified Against Codebase:** 2026-01-22
 
 ---
@@ -51,7 +51,7 @@ A comprehensive verification of all 12 specs against the codebase was completed 
 | 11 | Workflows Status Cleanup | COMPLETED | v27 migration, explicit status values | - |
 | 12 | Split chat_events | ~90% (DB + Agent layer) | v29 migration, stores, agent code updated | - |
 | 01 | Event System Refactor | COMPLETED | Uses executionLogStore, notificationStore, saveChatMessage | 12 |
-| 02 | Navigation & Header Refactor | NOT STARTED | No bell, flat menu | 12 (partial) |
+| 02 | Navigation & Header Refactor | COMPLETED | Yes | 12 (partial) |
 | 03 | Notifications Page | NOT STARTED | No page/components | 01, 12 |
 | 04 | Workflow Hub Page | ~40% | Missing error alert, status dropdown | 01, 09, 11 |
 | 05 | Chat Page Update | ~5% | No WorkflowInfoBox | 04, 09, 12 |
@@ -589,16 +589,15 @@ Final cleanup items (deferred for post-v1)
 **Effort:** Medium (4-6 hours)
 **Dependencies:** Spec 12 (partial - for notification count)
 **Blocks:** Spec 03
+**Status:** COMPLETED
 
-**Verified Current State:**
-- `NotificationBell.tsx` does NOT exist
-- No notification bell in SharedHeader (lines 102-105)
-- Menu is flat list with 10 items including "Assistant" -> `/chat/main` (line 131)
-- No "Home" menu item
-- No "Notifications" menu item
-- No "Advanced" submenu
-- `/notifications` routes do NOT exist in App.tsx
-- `useUnresolvedNotifications` hook does NOT exist
+**Completion Notes:**
+- Created NotificationBell.tsx component with badge showing unresolved count
+- Created useUnresolvedNotifications.ts hook querying notifications table
+- Added notification query keys to queryKeys.ts
+- Updated SharedHeader.tsx: added notification bell before menu, removed "Assistant" menu item, added "Home" and "Notifications" menu items, created "Advanced" submenu for Tasks/Scripts/Threads/Notes/Files/Devices/Console
+- Created placeholder NotificationsPage.tsx for /notifications route
+- Updated App.tsx: added /notifications and /notifications/:workflowId routes, added /chat/main redirect to /
 
 **Action Items:**
 1. Create `apps/web/src/components/NotificationBell.tsx`:
@@ -877,7 +876,7 @@ Per AGENTS.md: Run `cd packages/tests && npm test` and `cd apps/user-server && n
 
 ### Phase 2: Agent Updates
 - [x] Implement Spec 01 (event system refactor) - Large - COMPLETED
-- [ ] Implement Spec 02 (navigation + header) - Medium
+- [x] Implement Spec 02 (navigation + header) - Medium - COMPLETED
 - [x] Verify agent still functions correctly (type-check passes)
 - [ ] Test workflow creation and execution
 

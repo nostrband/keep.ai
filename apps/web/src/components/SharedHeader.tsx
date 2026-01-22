@@ -5,6 +5,7 @@ import {
 } from "../ui";
 import { HeaderAuthNotice } from "./HeaderAuthNotice";
 import { safeLocalStorageGet } from "../lib/safe-storage";
+import { NotificationBell } from "./NotificationBell";
 
 // Access build-time constants
 declare const __SERVERLESS__: boolean;
@@ -23,6 +24,7 @@ interface SharedHeaderProps {
 
 export default function SharedHeader({ title, subtitle }: SharedHeaderProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
   // Read debug mode once on mount to avoid reading localStorage on every render
   // Uses safe localStorage access for incognito/private mode compatibility
   const [debugMode] = useState(() => safeLocalStorageGet("keep-ai-debug-mode") === "true");
@@ -103,6 +105,9 @@ export default function SharedHeader({ title, subtitle }: SharedHeaderProps) {
             {/* Auth notice - shows when authentication is required */}
             <HeaderAuthNotice />
 
+            {/* Notification bell with badge */}
+            <NotificationBell />
+
             <div className="relative" ref={dropdownRef}>
               <Button
                 variant="ghost"
@@ -127,12 +132,13 @@ export default function SharedHeader({ title, subtitle }: SharedHeaderProps) {
             {isOpen && (
               <div className="absolute right-0 top-full mt-1 w-48 bg-white border border-gray-200 rounded-md shadow-lg z-50">
                 <div className="py-1">
+                  {/* Core navigation */}
                   <Link
-                    to="/chat/main"
+                    to="/"
                     className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
                     onClick={() => setIsOpen(false)}
                   >
-                    Assistant
+                    Home
                   </Link>
                   <Link
                     to="/workflows"
@@ -142,53 +148,11 @@ export default function SharedHeader({ title, subtitle }: SharedHeaderProps) {
                     Workflows
                   </Link>
                   <Link
-                    to="/tasks"
+                    to="/notifications"
                     className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
                     onClick={() => setIsOpen(false)}
                   >
-                    Tasks
-                  </Link>
-                  <Link
-                    to="/scripts"
-                    className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-                    onClick={() => setIsOpen(false)}
-                  >
-                    Scripts
-                  </Link>
-                  <Link
-                    to="/threads"
-                    className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-                    onClick={() => setIsOpen(false)}
-                  >
-                    Threads
-                  </Link>
-                  <Link
-                    to="/notes"
-                    className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-                    onClick={() => setIsOpen(false)}
-                  >
-                    Notes
-                  </Link>
-                  <Link
-                    to="/files"
-                    className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-                    onClick={() => setIsOpen(false)}
-                  >
-                    Files
-                  </Link>
-                  <Link
-                    to="/devices"
-                    className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-                    onClick={() => setIsOpen(false)}
-                  >
-                    Devices
-                  </Link>
-                  <Link
-                    to="/console"
-                    className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
-                    onClick={() => setIsOpen(false)}
-                  >
-                    Console
+                    Notifications
                   </Link>
                   {!isServerless && (
                     <Link
@@ -199,6 +163,88 @@ export default function SharedHeader({ title, subtitle }: SharedHeaderProps) {
                       Settings
                     </Link>
                   )}
+
+                  {/* Separator */}
+                  <div className="border-t border-gray-200 my-1" />
+
+                  {/* Advanced submenu */}
+                  <div className="relative">
+                    <button
+                      className="w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center justify-between"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setIsAdvancedOpen(!isAdvancedOpen);
+                      }}
+                    >
+                      <span>Advanced</span>
+                      <svg
+                        className={`h-4 w-4 transition-transform ${isAdvancedOpen ? "rotate-90" : ""}`}
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M9 5l7 7-7 7"
+                        />
+                      </svg>
+                    </button>
+                    {isAdvancedOpen && (
+                      <div className="pl-4 bg-gray-50">
+                        <Link
+                          to="/tasks"
+                          className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                          onClick={() => setIsOpen(false)}
+                        >
+                          Tasks
+                        </Link>
+                        <Link
+                          to="/scripts"
+                          className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                          onClick={() => setIsOpen(false)}
+                        >
+                          Scripts
+                        </Link>
+                        <Link
+                          to="/threads"
+                          className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                          onClick={() => setIsOpen(false)}
+                        >
+                          Threads
+                        </Link>
+                        <Link
+                          to="/notes"
+                          className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                          onClick={() => setIsOpen(false)}
+                        >
+                          Notes
+                        </Link>
+                        <Link
+                          to="/files"
+                          className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                          onClick={() => setIsOpen(false)}
+                        >
+                          Files
+                        </Link>
+                        <Link
+                          to="/devices"
+                          className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                          onClick={() => setIsOpen(false)}
+                        >
+                          Devices
+                        </Link>
+                        <Link
+                          to="/console"
+                          className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                          onClick={() => setIsOpen(false)}
+                        >
+                          Console
+                        </Link>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
