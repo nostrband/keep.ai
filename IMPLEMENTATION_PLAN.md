@@ -14,15 +14,16 @@
 A comprehensive verification of all 12 specs against the codebase was completed on 2026-01-22. Key findings:
 
 ### Summary
-- **All P0 specs (07, 08, 09, 10, 11, 12):** NOT STARTED - All database foundation work pending
+- **P0 specs (07, 08, 09, 11):** COMPLETED - Core database foundation done
+- **P0 specs (10, 12):** NOT STARTED - Large items pending
 - **All P1 specs (01, 02):** NOT STARTED - Core UX enablers pending
 - **P2 specs (03, 04, 05, 06):** Partial progress (0-50%) - Some existing infrastructure
 
 ### Infrastructure Gaps Confirmed
-1. Latest migration is **v26** - migrations v27, v28, v29, v30 all missing
-2. `notification-store.ts` and `execution-log-store.ts` do not exist
-3. No direct chat<->workflow links (navigation goes through task)
-4. All event writes still go to monolithic `chat_events` table
+1. Latest migration is **v28** - migrations v29, v30 pending for Specs 10, 12
+2. `notification-store.ts` and `execution-log-store.ts` do not exist (Spec 12)
+3. ~~No direct chat<->workflow links~~ **DONE** (Spec 09 - v28)
+4. All event writes still go to monolithic `chat_events` table (Spec 12)
 
 ### Test Coverage Notes
 - Core packages (agent, db, proto, node, browser) have no test coverage
@@ -43,9 +44,9 @@ A comprehensive verification of all 12 specs against the codebase was completed 
 |------|-------|--------|----------|------------|
 | 07 | Remove chat_notifications | COMPLETED | All code removed | - |
 | 08 | Remove resources table | COMPLETED | All code removed | - |
-| 09 | Chats-Workflows Direct Link | NOT STARTED | No v27 migration, no chat_id field | - |
+| 09 | Chats-Workflows Direct Link | COMPLETED | v28 migration, workflow.chat_id added | - |
 | 10 | Tasks Table Cleanup | NOT STARTED | TaskState still active | - |
-| 11 | Workflows Status Cleanup | NOT STARTED | Still using "" and "disabled" | - |
+| 11 | Workflows Status Cleanup | COMPLETED | v27 migration, explicit status values | - |
 | 12 | Split chat_events | NOT STARTED | No new tables/stores | - |
 | 01 | Event System Refactor | NOT STARTED | Still uses saveChatEvent() | 12 |
 | 02 | Navigation & Header Refactor | NOT STARTED | No bell, flat menu | 12 (partial) |
@@ -137,21 +138,21 @@ Final cleanup items (deferred for post-v1)
 
 ---
 
-### 3. Spec 09: Direct Chat-Workflow Linking
+### 3. Spec 09: Direct Chat-Workflow Linking - COMPLETED
 **Priority:** P0-CRITICAL
 **Effort:** Medium (4-6 hours)
 **Dependencies:** None
 **Blocks:** Specs 04, 05, 06
+**Status:** COMPLETED
 
-**Verified Current State:**
-- Workflow interface has NO `chat_id` field (script-store.ts lines 61-73)
-- Chat type has NO `workflow_id` field (only: id, created_at, updated_at, read_at, first_message_content, first_message_time)
-- `getWorkflowByChatId()` does NOT exist
-- `getChatByWorkflowId()` does NOT exist
-- `ChatSidebar.tsx` still exists (120 lines, uses deprecated chat fields)
-- Migration v27 does NOT exist (latest is v26)
-- Navigation still goes workflow -> task -> chat (indirect pattern)
-- `getAbandonedDrafts()` uses old join: `LEFT JOIN chat_events ce ON ce.chat_id = w.task_id`
+**Completion Notes:**
+- Created migration v28 with chat_id on workflows and workflow_id on chats
+- Added `getWorkflowByChatId()` method to script-store.ts
+- Added `getChatByWorkflowId()` and `getChatFirstMessage()` methods to chat-store.ts
+- Updated createChat and createTask to set bidirectional links
+- Updated WorkflowDetailPage to use workflow.chat_id directly
+- Updated getAbandonedDrafts and getDraftActivitySummary joins
+- ChatSidebar.tsx doesn't exist (already deleted)
 
 **Action Items:**
 1. Create migration v27 in `packages/db/src/migrations/v27.ts`:
@@ -225,20 +226,23 @@ Final cleanup items (deferred for post-v1)
 
 ---
 
-### 4. Spec 11: Workflows Status Cleanup
+### 4. Spec 11: Workflows Status Cleanup - COMPLETED
 **Priority:** P0-CRITICAL
 **Effort:** Medium (3-5 hours)
 **Dependencies:** None
 **Blocks:** Specs 04, 06
+**Status:** COMPLETED
 
-**Verified Current State:**
-- Empty string `""` used for draft status (script-store.ts line 833: `WHERE w.status = ''`)
-- `"disabled"` used for paused (script-store.ts line 786: `SET status = 'disabled'`)
-- StatusBadge only handles "disabled", "active", and falls back to "Draft" (StatusBadge.tsx)
-- workflow-worker escalation sets `"disabled"` at line 663 (should be "error")
-- workflow-worker correctly sets `"error"` for auth/permission errors (lines 301, 359)
-- save.ts does NOT transition draft->ready when first script saved
-- Migration v29 does NOT exist
+**Completion Notes:**
+- Created migration v27 with status value updates:
+  - `''` -> `'draft'`
+  - `'disabled'` -> `'paused'`
+  - Workflows with active_script_id set to `'ready'`
+- Updated StatusBadge.tsx to handle all 5 statuses with appropriate colors
+- Updated WorkflowDetailPage.tsx button visibility for new statuses
+- Updated save.ts to transition draft -> ready on first script save
+- Updated workflow-worker.ts escalation to set 'error' instead of 'disabled'
+- Updated all status comparisons across codebase
 
 **Action Items:**
 1. Create migration v29 in `packages/db/src/migrations/v29.ts`:
@@ -817,9 +821,9 @@ These items are not strictly required for v1 but would improve quality:
 
 ### Migration Order
 Migrations must be created in this order to maintain version sequence:
-1. v27 - Spec 09 (chat/workflow direct links)
-2. v28 - Spec 10 (tasks cleanup)
-3. v29 - Spec 11 (workflow status values)
+1. v27 - Spec 11 (workflow status values) - COMPLETED
+2. v28 - Spec 09 (chat/workflow direct links) - COMPLETED
+3. v29 - Spec 10 (tasks cleanup)
 4. v30 - Spec 12 (split chat_events)
 
 ### Breaking Changes
@@ -844,14 +848,14 @@ Per AGENTS.md: Run `cd packages/tests && npm test` and `cd apps/user-server && n
 ## Execution Checklist
 
 ### Phase 1: Database Foundation
-- [ ] Implement Spec 07 (remove chat_notifications code) - Small
-- [ ] Implement Spec 08 (remove resources code) - Small
-- [ ] Implement Spec 09 (v27 migration + code) - Medium, CRITICAL
-- [ ] Implement Spec 10 (v28 migration + code) - Large
-- [ ] Implement Spec 11 (v29 migration + code) - Medium, CRITICAL
+- [x] Implement Spec 07 (remove chat_notifications code) - Small - COMPLETED
+- [x] Implement Spec 08 (remove resources code) - Small - COMPLETED
+- [x] Implement Spec 09 (v28 migration + code) - Medium, CRITICAL - COMPLETED
+- [ ] Implement Spec 10 (v29 migration + code) - Large
+- [x] Implement Spec 11 (v27 migration + code) - Medium, CRITICAL - COMPLETED
 - [ ] Implement Spec 12 (v30 migration + stores) - Large, CRITICAL
-- [ ] Verify all migrations run correctly
-- [ ] Run type-check: `npm run type-check`
+- [x] Verify migrations v27, v28 run correctly
+- [x] Run type-check: `npm run type-check`
 
 ### Phase 2: Agent Updates
 - [ ] Implement Spec 01 (event system refactor) - Large
