@@ -505,9 +505,18 @@ export class TaskWorker {
       input_notes: opts.agentTask.state?.notes || "",
     });
 
-    await this.api.chatStore.saveChatEvent(taskRunId, opts.chatId, "task_run", {
-      task_id: opts.agentTask.id,
-      task_run_id: taskRunId,
+    // Log run start to execution_logs (Spec 01)
+    await this.api.executionLogStore.saveExecutionLog({
+      id: generateId(),
+      run_id: taskRunId,
+      run_type: 'task',
+      event_type: 'run_start',
+      tool_name: '',
+      input: JSON.stringify({ task_id: opts.agentTask.id }),
+      output: '',
+      error: '',
+      timestamp: runStartTime.toISOString(),
+      cost: 0,
     });
 
     return {
@@ -558,17 +567,22 @@ export class TaskWorker {
       logs: opts.logs.join("\n"),
     });
 
-    // Write usage stats
-    await this.api.chatStore.saveChatEvent(
-      opts.taskRunId,
-      opts.chatId,
-      "task_run_end",
-      {
+    // Log run end to execution_logs (Spec 01)
+    await this.api.executionLogStore.saveExecutionLog({
+      id: generateId(),
+      run_id: opts.taskRunId,
+      run_type: 'task',
+      event_type: 'run_end',
+      tool_name: '',
+      input: '',
+      output: JSON.stringify({
         task_id: opts.state.id,
-        task_run_id: opts.taskRunId,
         usage: opts.agent.openRouterUsage,
-      }
-    );
+      }),
+      error: '',
+      timestamp: runEndTime.toISOString(),
+      cost: Math.ceil(totalCostDollars * 1000000),
+    });
   }
 
   private async createEnv(taskType: TaskType, task: Task, sandbox: Sandbox) {
@@ -625,20 +639,26 @@ export class TaskWorker {
       cost: 0, // Accumulated cost from tool calls (in dollars)
       createEvent: async (type: string, content: any, tx?: DBInterface) => {
         // Accumulate cost from events that have usage.cost (e.g., text_generate, images_generate)
-        if (content?.usage?.cost != null && typeof content.usage.cost === 'number') {
-          sandbox.context!.cost += content.usage.cost;
+        const eventCost = content?.usage?.cost;
+        if (eventCost != null && typeof eventCost === 'number') {
+          sandbox.context!.cost += eventCost;
         }
-        // set task fields
-        content.task_id = task.id;
-        content.task_run_id = taskRunId;
-        // Send to task's chat
-        await this.api.chatStore.saveChatEvent(
-          generateId(),
-          task.chat_id,
-          type,
-          content,
-          tx
-        );
+        // Convert cost from dollars to microdollars for storage
+        const costMicrodollars = eventCost ? Math.ceil(eventCost * 1000000) : 0;
+
+        // Save to execution_logs table (Spec 01)
+        await this.api.executionLogStore.saveExecutionLog({
+          id: generateId(),
+          run_id: taskRunId || '',
+          run_type: 'task',
+          event_type: 'tool_call',
+          tool_name: type,
+          input: JSON.stringify(content?.input || {}),
+          output: JSON.stringify(content?.output || {}),
+          error: content?.error || '',
+          timestamp: new Date().toISOString(),
+          cost: costMicrodollars,
+        }, tx);
       },
       onLog: async (line: string) => {
         if (logs) {
@@ -759,29 +779,38 @@ ${result.reply || ""}
 `;
   }
 
-  private async sendToUser(chat_id: string, reply: string) {
+  private async sendToUser(chat_id: string, reply: string, taskRunId?: string) {
     this.debug("Save user reply", reply);
 
-    const message = {
-      id: generateId(),
-      role: "assistant" as const,
+    const messageId = generateId();
+    const timestamp = new Date().toISOString();
+
+    // Build message content in AssistantUIMessage format
+    const messageContent = JSON.stringify({
+      id: messageId,
+      role: "assistant",
       metadata: {
-        createdAt: new Date().toISOString(),
+        createdAt: timestamp,
         threadId: chat_id,
       },
       parts: [
         {
-          type: "text" as const,
+          type: "text",
           text: reply,
         },
       ],
-    };
+    });
 
-    // Save to chat messages
-    await this.api.chatStore.saveChatMessages(chat_id, [message]);
-    // await this.api.db.db.tx(async (tx) => {
-    //   await this.api.memoryStore.saveMessages([message], tx);
-    //   await this.api.chatStore.saveChatMessages(tid, [message], tx);
-    // });
+    // Save to chat_messages table with metadata (Spec 01)
+    await this.api.chatStore.saveChatMessage({
+      id: messageId,
+      chat_id: chat_id,
+      role: 'assistant',
+      content: messageContent,
+      timestamp: timestamp,
+      task_run_id: taskRunId || '',
+      script_id: '',
+      failed_script_run_id: '',
+    });
   }
 }

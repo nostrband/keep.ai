@@ -14,7 +14,6 @@ import {
   makeListTasksTool,
   makeSendToTaskInboxTool,
   makeTaskUpdateTool,
-  makeListEventsTool,
   makeReadFileTool,
   makeSaveFileTool,
   makeListFilesTool,
@@ -269,13 +268,7 @@ Example: await ${ns}.${name}(<input>)
       makeDeleteNoteTool(this.api.noteStore, this.getContext)
     );
 
-    // Event history available for all agent types
-    addTool(
-      global,
-      "Memory",
-      "listEvents",
-      makeListEventsTool(this.api.chatStore, this.api.taskStore)
-    );
+    // Note: Memory.listEvents removed (Spec 01) - use execution_logs table instead
 
     // Tasks
     addTool(global, "Tasks", "get", makeGetTaskTool(this.api.taskStore));
@@ -383,8 +376,14 @@ Example: await ${ns}.${name}(<input>)
       );
     }
 
-    // User tools for planner only
-    addTool(global, "Users", "send", makeUserSendTool(this.api));
+    // User tools - with workflow context for notifications (Spec 01)
+    // When running in workflow context, messages become notifications
+    const userSendContext = this.workflowId ? {
+      workflowId: this.workflowId,
+      workflowTitle: '', // Will be fetched by the tool if needed
+      scriptRunId: this.getContext()?.scriptRunId || '',
+    } : undefined;
+    addTool(global, "Users", "send", makeUserSendTool(this.api, userSendContext));
 
     // Script tools for worker only
     addTool(

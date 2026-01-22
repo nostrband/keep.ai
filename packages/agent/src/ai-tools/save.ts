@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { generateId, tool } from "ai";
-import { ChatStore, Script, ScriptStore } from "@app/db";
+import { Script, ScriptStore } from "@app/db";
 
 const SaveInfoSchema = z.object({
   code: z.string().describe("Script code to save"),
@@ -20,15 +20,20 @@ const SaveInfoSchema = z.object({
 
 export type SaveInfo = z.infer<typeof SaveInfoSchema>;
 
+// Result type for save tool - includes script info and whether it was a maintenance fix
+export interface SaveResult {
+  script: Script;
+  wasMaintenanceFix: boolean;
+}
+
 export function makeSaveTool(opts: {
   taskId: string;
   taskRunId: string;
   chatId: string;
   scriptStore: ScriptStore;
-  chatStore: ChatStore;
 }) {
   return tool({
-    execute: async (info: SaveInfo): Promise<Script> => {
+    execute: async (info: SaveInfo): Promise<SaveResult> => {
       const script = await opts.scriptStore.getLatestScriptByTaskId(
         opts.taskId
       );
@@ -71,12 +76,8 @@ export function makeSaveTool(opts: {
         });
       }
 
-      await opts.chatStore.saveChatEvent(generateId(), opts.chatId, "add_script", {
-        task_id: opts.taskId,
-        task_run_id: opts.taskRunId,
-        script_id: newScript.id,
-        version
-      });
+      // Note: No separate add_script/maintenance_fixed events (Spec 01)
+      // The script_id is returned and included in chat message metadata by task-worker
 
       // If workflow was in maintenance mode, clear it and trigger immediate re-run
       if (wasInMaintenance) {
@@ -86,20 +87,14 @@ export function makeSaveTool(opts: {
           maintenance: false,
           next_run_timestamp: new Date().toISOString(),
         });
-
-        // Create a chat event to show the fix was applied
-        // Per spec 34: use task's chat_id, not hardcoded "main"
-        await opts.chatStore.saveChatEvent(generateId(), opts.chatId, "maintenance_fixed", {
-          task_id: opts.taskId,
-          task_run_id: opts.taskRunId,
-          script_id: newScript.id,
-          workflow_id: workflow.id,
-          fix_comment: info.comments || "Script updated",
-          version,
-        });
       }
 
-      return newScript;
+      // Return both the script and whether this was a maintenance fix
+      // The task-worker will use this to set message metadata
+      return {
+        script: newScript,
+        wasMaintenanceFix: wasInMaintenance,
+      };
     },
     description: `Save the new/updated script code, along with commit-style comments.
 `,

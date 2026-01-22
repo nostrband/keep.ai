@@ -1,7 +1,7 @@
 import { generateId } from "ai";
 import { initSandbox, Sandbox } from "./sandbox/sandbox";
 import debug from "debug";
-import { KeepDbApi, Workflow, Script } from "@app/db";
+import { KeepDbApi, Workflow, Script, DBInterface } from "@app/db";
 import { SandboxAPI } from "./sandbox/api";
 import { fileUtils } from "@app/node";
 import { ERROR_BAD_REQUEST, ERROR_PAYMENT_REQUIRED } from "./agent";
@@ -624,24 +624,8 @@ After saving the fix, the workflow will automatically exit maintenance mode and 
 
     this.debug("Maintenance request sent to planner inbox", inboxId);
 
-    // 7. Create a chat event to show in the workflow chat
-    if (task.chat_id) {
-      try {
-        await this.api.chatStore.saveChatEvent(
-          generateId(),
-          task.chat_id,
-          "maintenance_started",
-          {
-            workflow_id: workflow.id,
-            script_run_id: scriptRunId,
-            error_type: error.type,
-            error_message: error.message,
-          }
-        );
-      } catch (e) {
-        this.debug("Failed to save maintenance_started event:", e);
-      }
-    }
+    // Note: No separate maintenance_started event needed (Spec 01)
+    // Maintenance mode is internal state - UI can check workflow.maintenance flag
   }
 
   /**
@@ -680,26 +664,29 @@ After saving the fix, the workflow will automatically exit maintenance mode and 
       return;
     }
 
-    // 3. Create a chat event to show the escalation in the workflow chat
-    if (task.chat_id) {
-      try {
-        await this.api.chatStore.saveChatEvent(
-          generateId(),
-          task.chat_id,
-          "maintenance_escalated",
-          {
-            workflow_id: workflow.id,
-            script_run_id: scriptRunId,
-            error_type: error.type,
-            error_message: error.message,
-            fix_attempts: fixAttempts,
-            max_fix_attempts: MAX_FIX_ATTEMPTS,
-          }
-        );
-      } catch (e) {
-        this.debug("Failed to save maintenance_escalated event:", e);
-      }
+    // 3. Create a notification for the escalation (Spec 01)
+    try {
+      await this.api.notificationStore.saveNotification({
+        id: generateId(),
+        workflow_id: workflow.id,
+        type: 'escalated',
+        payload: JSON.stringify({
+          script_run_id: scriptRunId,
+          error_type: error.type,
+          error_message: error.message,
+          fix_attempts: fixAttempts,
+          max_fix_attempts: MAX_FIX_ATTEMPTS,
+        }),
+        timestamp: new Date().toISOString(),
+        acknowledged_at: '',
+        resolved_at: '',
+        workflow_title: workflow.title,
+      });
+    } catch (e) {
+      this.debug("Failed to save escalated notification:", e);
+    }
 
+    if (task.chat_id) {
       // 4. Send a user-facing message explaining the escalation
       const recentLogs = logs.slice(-20).join("\n");
       const escalationMessage = `**Automation Paused: Manual Intervention Required**
@@ -778,23 +765,28 @@ If you'd like me to try fixing it again, just ask and I'll give it another go wi
       type: "workflow",
       taskThreadId: "", // Workflows don't have threads
       cost: 0, // Accumulated cost from tool calls (in dollars)
-      createEvent: async (type: string, content: any, tx?: any) => {
+      createEvent: async (type: string, content: any, tx?: DBInterface) => {
         // Accumulate cost from events that have usage.cost (e.g., text_generate, images_generate)
-        if (content?.usage?.cost != null && typeof content.usage.cost === 'number') {
-          sandbox.context!.cost += content.usage.cost;
+        const eventCost = content?.usage?.cost;
+        if (eventCost != null && typeof eventCost === 'number') {
+          sandbox.context!.cost += eventCost;
         }
-        // set workflow fields
-        content.workflow_id = workflow.id;
-        content.script_run_id = scriptRunId;
-        content.script_id = scriptId;
-        // Send to main chat for now
-        await this.api.chatStore.saveChatEvent(
-          generateId(),
-          "main",
-          type,
-          content,
-          tx
-        );
+        // Convert cost from dollars to microdollars for storage
+        const costMicrodollars = eventCost ? Math.ceil(eventCost * 1000000) : 0;
+
+        // Save to execution_logs table (Spec 01)
+        await this.api.executionLogStore.saveExecutionLog({
+          id: generateId(),
+          run_id: scriptRunId,
+          run_type: 'script',
+          event_type: 'tool_call',
+          tool_name: type,
+          input: JSON.stringify(content?.input || {}),
+          output: JSON.stringify(content?.output || {}),
+          error: content?.error || '',
+          timestamp: new Date().toISOString(),
+          cost: costMicrodollars,
+        }, tx);
       },
       onLog: async (line: string) => {
         if (logs) {

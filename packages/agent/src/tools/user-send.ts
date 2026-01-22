@@ -3,42 +3,75 @@ import { tool } from "ai";
 import { KeepDbApi } from "@app/db";
 import { generateId } from "ai";
 
-export function makeUserSendTool(api: KeepDbApi) {
+export interface UserSendContext {
+  workflowId?: string;
+  workflowTitle?: string;
+  scriptRunId?: string;
+}
+
+export function makeUserSendTool(api: KeepDbApi, context?: UserSendContext) {
   return tool({
     description: `Send a message to the user.
 This is useful for scripts to send execution results to user.
-The message will be saved as an assistant message with the current timestamp.`,
+The message will create a notification that appears in the user's notification list.`,
     inputSchema: z.object({
       message: z.string().describe("The message text to send to the user"),
     }),
     outputSchema: z.object({
-      id: z.string().describe("Generated message ID"),
+      id: z.string().describe("Generated notification/message ID"),
       success: z.boolean().describe("Whether the message was sent successfully"),
     }),
     execute: async (input) => {
-      const message = {
-        id: generateId(),
-        role: "assistant" as const,
-        metadata: {
-          createdAt: new Date().toISOString(),
-          threadId: "main",
-        },
-        parts: [
-          {
-            type: "text" as const,
-            text: input.message,
-          },
-        ],
-      };
+      const notificationId = generateId();
+      const timestamp = new Date().toISOString();
 
-      // Save to both tables in one transaction
-      await api.db.db.tx(async (tx) => {
-        await api.memoryStore.saveMessages([message], tx);
-        await api.chatStore.saveChatMessages("main", [message], tx);
-      });
+      // If we have workflow context, create a notification (Spec 01)
+      if (context?.workflowId) {
+        await api.notificationStore.saveNotification({
+          id: notificationId,
+          workflow_id: context.workflowId,
+          type: 'script_message',
+          payload: JSON.stringify({
+            message: input.message,
+            script_run_id: context.scriptRunId || '',
+          }),
+          timestamp: timestamp,
+          acknowledged_at: '',
+          resolved_at: '',
+          workflow_title: context.workflowTitle || '',
+        });
+      } else {
+        // Fallback for non-workflow context: save to chat_messages
+        // This maintains backwards compatibility for planner tasks
+        const messageContent = JSON.stringify({
+          id: notificationId,
+          role: "assistant",
+          metadata: {
+            createdAt: timestamp,
+            threadId: "main",
+          },
+          parts: [
+            {
+              type: "text",
+              text: input.message,
+            },
+          ],
+        });
+
+        await api.chatStore.saveChatMessage({
+          id: notificationId,
+          chat_id: "main",
+          role: 'assistant',
+          content: messageContent,
+          timestamp: timestamp,
+          task_run_id: '',
+          script_id: '',
+          failed_script_run_id: '',
+        });
+      }
 
       return {
-        id: message.id,
+        id: notificationId,
         success: true,
       };
     },

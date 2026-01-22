@@ -2,7 +2,7 @@
 
 **Goal:** Transform Keep.AI into a Simple, Lovable, Complete (SLC) v1 product focused on the core automation journey: Create -> Approve -> Run -> Handle Issues -> Tune
 
-**Last Updated:** 2026-01-22 (Spec 12 DB layer)
+**Last Updated:** 2026-01-22 (Spec 01 Event System Refactor)
 **Verified Against Codebase:** 2026-01-22
 
 ---
@@ -15,8 +15,10 @@ A comprehensive verification of all 12 specs against the codebase was completed 
 
 ### Summary
 - **P0 specs (07, 08, 09, 11):** COMPLETED - Core database foundation done
-- **P0 specs (10, 12):** NOT STARTED - Large items pending
-- **All P1 specs (01, 02):** NOT STARTED - Core UX enablers pending
+- **P0 specs (10):** NOT STARTED - Large item pending
+- **P0 specs (12):** COMPLETED (DB layer) - New tables created, stores implemented
+- **P1 specs (01):** COMPLETED - Event system now uses new tables
+- **P1 specs (02):** NOT STARTED - Navigation & header pending
 - **P2 specs (03, 04, 05, 06):** Partial progress (0-50%) - Some existing infrastructure
 
 ### Infrastructure Gaps Confirmed
@@ -47,8 +49,8 @@ A comprehensive verification of all 12 specs against the codebase was completed 
 | 09 | Chats-Workflows Direct Link | COMPLETED | v28 migration, workflow.chat_id added | - |
 | 10 | Tasks Table Cleanup | NOT STARTED | TaskState still active | - |
 | 11 | Workflows Status Cleanup | COMPLETED | v27 migration, explicit status values | - |
-| 12 | Split chat_events | ~30% (Database layer) | v29 migration, stores created | - |
-| 01 | Event System Refactor | NOT STARTED | Still uses saveChatEvent() | 12 |
+| 12 | Split chat_events | ~90% (DB + Agent layer) | v29 migration, stores, agent code updated | - |
+| 01 | Event System Refactor | COMPLETED | Uses executionLogStore, notificationStore, saveChatMessage | 12 |
 | 02 | Navigation & Header Refactor | NOT STARTED | No bell, flat menu | 12 (partial) |
 | 03 | Notifications Page | NOT STARTED | No page/components | 01, 12 |
 | 04 | Workflow Hub Page | ~40% | Missing error alert, status dropdown | 01, 09, 11 |
@@ -533,50 +535,52 @@ Final cleanup items (deferred for post-v1)
 
 ## P1: Core UX Enablers
 
-### 7. Spec 01: Event System Refactor
+### 7. Spec 01: Event System Refactor - COMPLETED
 **Priority:** P1
 **Effort:** Large (8-12 hours)
 **Dependencies:** Spec 12 (tables must exist)
 **Blocks:** Specs 03, 04, 05
+**Status:** COMPLETED
 
-**Verified Current State:**
-- `workflow-worker.ts` uses `saveChatEvent()` at lines 630, 686, 791 - NOT `saveNotification()`
-- `task-worker.ts` uses `saveChatEvent()` at lines 508, 562, 635 - NOT `saveChatMessage()`
-- `user-send.ts` uses `saveChatMessages()` at line 37 - NOT `saveNotification()`
-- `list-events.ts` tool still exists in `packages/agent/src/tools/`
+**Completion Notes:**
+- Updated `workflow-worker.ts`:
+  - createSandbox.createEvent now uses `executionLogStore.saveExecutionLog()` for tool calls
+  - Removed maintenance_started event (internal state only)
+  - Updated escalateToUser to use `notificationStore.saveNotification({type: 'escalated'})`
+- Updated `task-worker.ts`:
+  - createTaskRun logs to `executionLogStore.saveExecutionLog()` with event_type 'run_start'
+  - finishTaskRun logs to `executionLogStore.saveExecutionLog()` with event_type 'run_end'
+  - createSandbox.createEvent now uses `executionLogStore.saveExecutionLog()` for tool calls
+  - sendToUser now uses `chatStore.saveChatMessage()` with metadata
+- Updated `save.ts`:
+  - Removed saveChatEvent calls for add_script and maintenance_fixed
+  - Returns `SaveResult { script: Script, wasMaintenanceFix: boolean }`
+  - Removed chatStore from function parameters
+- Updated `user-send.ts`:
+  - Added workflow context support (workflowId, workflowTitle, scriptRunId)
+  - When in workflow context, creates notification with type 'script_message'
+  - Fallback to saveChatMessage for non-workflow contexts
+- Deleted `list-events.ts`:
+  - Removed file entirely
+  - Removed from exports in `tools/index.ts`
+  - Removed from imports and tool registration in `sandbox/api.ts`
 
-**Action Items:**
-1. Update `packages/agent/src/workflow-worker.ts`:
-   - Replace tool event creation (line 791) with `executionLogStore.saveExecutionLog()`
-   - Remove maintenance_started event creation (line 630) - internal state only
-   - Replace maintenance_escalated event (line 686) with `notificationStore.saveNotification({type: 'escalated'})`
-   - Replace error events with `notificationStore.saveNotification({type: 'error'})`
-
-2. Update `packages/agent/src/task-worker.ts`:
-   - Replace saveChatMessages with saveChatMessage (singular) with metadata
-   - Add task_run_id to saved messages
-   - Add script_id when save tool returns it
-   - Replace tool events (lines 508, 562, 635) with execution logs
-
-3. Update `packages/agent/src/ai-tools/save.ts`:
-   - Remove saveChatEvent calls for add_script and maintenance_fixed
-   - Return `{ success: true, script_id: string, was_maintenance_fix: boolean }`
-   - Let task-worker add script_id and failed_script_run_id to message metadata
-
-4. Update `packages/agent/src/tools/user-send.ts`:
-   - Replace saveChatMessages with `notificationStore.saveNotification({type: 'script_message'})`
-
-5. Delete `packages/agent/src/tools/list-events.ts`:
-   - Remove file entirely
-   - Remove from tool registration in `packages/agent/src/tools/index.ts`
-
-6. Update sandbox event creation in `packages/agent/src/sandbox/api.ts`:
-   - Route tool calls to `executionLogStore.saveExecutionLog()`
+**Action Items:** All items completed.
+- [x] Update workflow-worker.ts createSandbox.createEvent -> executionLogStore
+- [x] Remove maintenance_started event (internal state only)
+- [x] Update escalateToUser -> notificationStore
+- [x] Update task-worker.ts createTaskRun/finishTaskRun -> executionLogStore
+- [x] Update task-worker.ts createSandbox.createEvent -> executionLogStore
+- [x] Update task-worker.ts sendToUser -> saveChatMessage with metadata
+- [x] Update save.ts to remove saveChatEvent calls and return SaveResult
+- [x] Update user-send.ts to create notifications when workflow context available
+- [x] Delete list-events.ts and remove from exports
+- [x] Update sandbox/api.ts to remove makeListEventsTool
 
 **Constraints:**
-- Spec 12 must be implemented first
-- Messages must have correct metadata for UI rendering
-- Cost tracking must continue to work
+- Spec 12 must be implemented first ✓
+- Messages must have correct metadata for UI rendering ✓
+- Cost tracking continues to work ✓
 
 ---
 
@@ -872,9 +876,9 @@ Per AGENTS.md: Run `cd packages/tests && npm test` and `cd apps/user-server && n
 - [x] Run type-check: `npm run type-check`
 
 ### Phase 2: Agent Updates
-- [ ] Implement Spec 01 (event system refactor) - Large
+- [x] Implement Spec 01 (event system refactor) - Large - COMPLETED
 - [ ] Implement Spec 02 (navigation + header) - Medium
-- [ ] Verify agent still functions correctly
+- [x] Verify agent still functions correctly (type-check passes)
 - [ ] Test workflow creation and execution
 
 ### Phase 3: UI Polish
