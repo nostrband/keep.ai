@@ -1,5 +1,5 @@
 // Hook for fetching notifications with infinite scroll
-import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { qk } from "./queryKeys";
 import { useDbQuery } from "./dbQuery";
 import { Notification } from "packages/db/dist";
@@ -102,5 +102,23 @@ export function useResolveNotification() {
       queryClient.invalidateQueries({ queryKey: qk.notifications() });
       queryClient.invalidateQueries({ queryKey: qk.unresolvedNotifications() });
     },
+  });
+}
+
+/**
+ * Hook to get the latest unresolved error for a specific workflow.
+ * Used for showing error alerts on the workflow hub page.
+ */
+export function useUnresolvedWorkflowError(workflowId: string) {
+  const { api } = useDbQuery();
+
+  return useQuery({
+    queryKey: qk.notification(workflowId),
+    queryFn: async (): Promise<Notification | null> => {
+      if (!api || !workflowId) return null;
+      return await api.notificationStore.getUnresolvedError(workflowId);
+    },
+    meta: { tables: ["notifications"] },
+    enabled: !!api && !!workflowId,
   });
 }

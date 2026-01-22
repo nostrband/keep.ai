@@ -18,6 +18,8 @@ import { workflowNotifications } from "../lib/WorkflowNotifications";
 import { WorkflowStatusBadge, ScriptRunStatusBadge } from "./StatusBadge";
 import { useAutoHidingMessage } from "../hooks/useAutoHidingMessage";
 import { API_ENDPOINT } from "../const";
+import { WorkflowErrorAlert } from "./WorkflowErrorAlert";
+import { useUnresolvedWorkflowError } from "../hooks/useNotifications";
 
 export default function WorkflowDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -30,6 +32,7 @@ export default function WorkflowDetailPage() {
   const { data: latestScript } = useLatestScriptByWorkflowId(id!);
   const { data: scriptRuns = [], isLoading: isLoadingRuns } = useScriptRunsByWorkflowId(id!);
   const { data: scriptVersions = [], isLoading: isLoadingVersions } = useScriptVersionsByWorkflowId(id!);
+  const { data: unresolvedError } = useUnresolvedWorkflowError(id!);
   const success = useAutoHidingMessage({ duration: 3000 });
   const warning = useAutoHidingMessage({ duration: 5000 });
   const [isTestRunning, setIsTestRunning] = useState(false);
@@ -232,6 +235,11 @@ export default function WorkflowDetailPage() {
           </div>
         ) : (
           <div className="bg-white rounded-lg border border-gray-200 p-6">
+            {/* Error Alert - show unresolved errors at the top */}
+            {unresolvedError && (
+              <WorkflowErrorAlert notification={unresolvedError} />
+            )}
+
             {/* Workflow Metadata */}
             <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
               <div className="flex items-start justify-between mb-6">
