@@ -2,7 +2,7 @@
 
 **Goal:** Transform Keep.AI into a Simple, Lovable, Complete (SLC) v1 product focused on the core automation journey: Create -> Approve -> Run -> Handle Issues -> Tune
 
-**Last Updated:** 2026-01-22 (v1.0.0-alpha.11 tagged)
+**Last Updated:** 2026-01-22 (v1.0.0-alpha.12 tagged)
 **Verified Against Codebase:** 2026-01-22
 
 ---
@@ -876,6 +876,12 @@ These items are not strictly required for v1 but would improve quality:
 - ~~Remove commented-out console.log statements in agent.ts, sandbox.ts~~ **DONE** (2026-01-22)
   - Removed 3 commented console.log statements from agent.ts (lines 247, 261) and sandbox.ts (line 175)
 - Address FIXME reference in migrations/v23.ts (now handled by deprecation)
+
+### P2P Sync FIXMEs (Non-blocking)
+These are in the sync package and don't affect core v1 functionality:
+- `packages/sync/src/TransportClientHttp.ts:176` - EventSource not implemented for Node.js
+- `packages/sync/src/Peer.ts:788` - Transaction delivery guarantee needs review
+- `packages/sync/src/nostr/stream/StreamWriter.ts:515` - Bandwidth/chunk size optimization needed
 
 ### Future Features (from ideas/)
 - **Dry-run Testing** - Test automation safely before enabling (partially implemented via script_runs)
