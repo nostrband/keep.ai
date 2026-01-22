@@ -2,7 +2,7 @@
 
 **Goal:** Transform Keep.AI into a Simple, Lovable, Complete (SLC) v1 product focused on the core automation journey: Create -> Approve -> Run -> Handle Issues -> Tune
 
-**Last Updated:** 2026-01-22 (Spec 02 Navigation & Header Refactor)
+**Last Updated:** 2026-01-22 (Spec 03 Notifications Page)
 **Verified Against Codebase:** 2026-01-22
 
 ---
@@ -52,7 +52,7 @@ A comprehensive verification of all 12 specs against the codebase was completed 
 | 12 | Split chat_events | ~90% (DB + Agent layer) | v29 migration, stores, agent code updated | - |
 | 01 | Event System Refactor | COMPLETED | Uses executionLogStore, notificationStore, saveChatMessage | 12 |
 | 02 | Navigation & Header Refactor | COMPLETED | Yes | 12 (partial) |
-| 03 | Notifications Page | NOT STARTED | No page/components | 01, 12 |
+| 03 | Notifications Page | COMPLETED | Yes | 01, 12 |
 | 04 | Workflow Hub Page | ~40% | Missing error alert, status dropdown | 01, 09, 11 |
 | 05 | Chat Page Update | ~5% | No WorkflowInfoBox | 04, 09, 12 |
 | 06 | Home Page Cleanup | ~50% | Creation works, /new not redirected | 05, 09 |
@@ -644,11 +644,19 @@ Final cleanup items (deferred for post-v1)
 
 ## P2: UX Implementation
 
-### 9. Spec 03: Notifications Page
+### 9. Spec 03: Notifications Page - COMPLETED
 **Priority:** P2
 **Effort:** Medium (4-6 hours)
 **Dependencies:** Specs 01, 12
 **Blocks:** None
+**Status:** COMPLETED
+
+**Completion Notes:**
+- Created useNotifications.ts hook with infinite scroll pagination
+- Created useResolveNotification mutation hook
+- Created NotificationCard.tsx component with 4 card types (error, escalated, script_message, script_ask)
+- Updated NotificationsPage.tsx with full functionality: loading state, empty state, card list, load more button
+- Supports filtering by workflowId via route parameter
 
 **Verified Current State:**
 - `NotificationsPage.tsx` does NOT exist
@@ -881,7 +889,7 @@ Per AGENTS.md: Run `cd packages/tests && npm test` and `cd apps/user-server && n
 - [ ] Test workflow creation and execution
 
 ### Phase 3: UI Polish
-- [ ] Implement Spec 03 (notifications page) - Medium
+- [x] Implement Spec 03 - COMPLETED
 - [ ] Complete Spec 04 (workflow hub) - Medium
 - [ ] Implement Spec 05 (chat page update) - Medium
 - [ ] Complete Spec 06 (home page cleanup) - Small

@@ -1,18 +1,119 @@
+import { useParams, useNavigate } from "react-router-dom";
 import SharedHeader from "./SharedHeader";
+import { NotificationCard } from "./NotificationCard";
+import { useNotifications, useResolveNotification } from "../hooks/useNotifications";
+import { Button } from "../ui";
+import { Notification } from "packages/db/dist";
 
 /**
- * Notifications page - displays all notifications for the user.
- * This is a placeholder that will be fully implemented in Spec 03.
+ * Notifications page - displays actionable items requiring user attention.
+ * Can be filtered by workflowId via route parameter.
  */
 export default function NotificationsPage() {
+  const { workflowId } = useParams<{ workflowId?: string }>();
+  const navigate = useNavigate();
+  const { data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage } = useNotifications({
+    workflowId,
+  });
+  const resolveNotification = useResolveNotification();
+
+  const notifications = data?.notifications ?? [];
+
+  const handleAction = async (notification: Notification, action: string) => {
+    switch (action) {
+      case "reconnect":
+        // Navigate to settings or open auth dialog
+        navigate("/settings");
+        break;
+      case "check_permissions":
+        // Open workflow to check permissions
+        navigate(`/workflows/${notification.workflow_id}`);
+        break;
+      case "retry":
+        // Navigate to workflow to retry
+        navigate(`/workflows/${notification.workflow_id}`);
+        break;
+      case "view_details":
+        // Navigate to workflow for details
+        navigate(`/workflows/${notification.workflow_id}`);
+        break;
+      default:
+        // For script_ask answers
+        if (action.startsWith("answer_")) {
+          // Resolve the notification after answering
+          await resolveNotification.mutateAsync(notification.id);
+        }
+    }
+  };
+
+  const handleViewWorkflow = (notification: Notification) => {
+    navigate(`/workflows/${notification.workflow_id}`);
+  };
+
+  const handleResolve = async (notification: Notification) => {
+    await resolveNotification.mutateAsync(notification.id);
+  };
+
+  // Loading state
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <SharedHeader title="Notifications" />
+        <div className="max-w-4xl mx-auto px-6 py-8">
+          <div className="text-center text-gray-500">
+            <p className="text-lg">Loading...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Empty state
+  if (notifications.length === 0) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <SharedHeader title="Notifications" />
+        <div className="max-w-4xl mx-auto px-6 py-8">
+          <div className="text-center py-12">
+            <span className="text-4xl mb-4 block">✓</span>
+            <p className="text-lg font-medium text-gray-900">All caught up!</p>
+            <p className="text-sm text-gray-500 mt-2">
+              No notifications requiring your attention.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
       <SharedHeader title="Notifications" />
-      <div className="max-w-4xl mx-auto px-6 py-8">
-        <div className="text-center text-gray-500">
-          <p className="text-lg">All caught up!</p>
-          <p className="text-sm mt-2">You have no notifications.</p>
+      <div className="max-w-4xl mx-auto px-6 py-6">
+        <div className="space-y-4">
+          {notifications.map((notification) => (
+            <NotificationCard
+              key={notification.id}
+              notification={notification}
+              onAction={handleAction}
+              onViewWorkflow={handleViewWorkflow}
+              onResolve={handleResolve}
+            />
+          ))}
         </div>
+
+        {/* Load more button */}
+        {hasNextPage && (
+          <div className="mt-6 text-center">
+            <Button
+              variant="outline"
+              onClick={() => fetchNextPage()}
+              disabled={isFetchingNextPage}
+            >
+              {isFetchingNextPage ? "Loading..." : "Load more"}
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   );
