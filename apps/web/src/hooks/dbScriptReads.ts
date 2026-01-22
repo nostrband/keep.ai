@@ -176,6 +176,28 @@ export function useWorkflowByTaskId(taskId: string) {
   });
 }
 
+/**
+ * Get workflow by chat ID (using direct link from Spec 09).
+ * Used to show workflow info on chat pages.
+ */
+export function useWorkflowByChatId(chatId: string) {
+  const { api } = useDbQuery();
+  return useQuery({
+    queryKey: qk.workflowByChatId(chatId),
+    queryFn: async () => {
+      if (!api) return null;
+      try {
+        const workflow = await api.scriptStore.getWorkflowByChatId(chatId);
+        return workflow;
+      } catch (error) {
+        return null;
+      }
+    },
+    meta: { tables: ["workflows"] },
+    enabled: !!api && !!chatId,
+  });
+}
+
 export function useLatestScriptByWorkflowId(workflowId: string) {
   const { api } = useDbQuery();
   return useQuery({

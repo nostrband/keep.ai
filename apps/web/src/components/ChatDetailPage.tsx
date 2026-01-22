@@ -1,9 +1,11 @@
 import React, { useState, useCallback, useRef, useEffect } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import ChatInterface from "./ChatInterface";
 import SharedHeader from "./SharedHeader";
 import { useAddMessage } from "../hooks/dbWrites";
 import { useFileUpload } from "../hooks/useFileUpload";
+import { useWorkflowByChatId } from "../hooks/dbScriptReads";
+import { WorkflowInfoBox } from "./WorkflowInfoBox";
 import {
   PromptInput,
   PromptInputAttachment,
@@ -26,12 +28,20 @@ type PromptInputMessage = {
 
 export default function ChatDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const chatId = id || "main"; // Fallback to "main" if no ID
   const [input, setInput] = useState("");
   const [promptHeight, setPromptHeight] = useState(0);
   const promptContainerRef = useRef<HTMLDivElement>(null);
   const addMessage = useAddMessage();
   const { uploadFiles, uploadState } = useFileUpload();
+  const { data: workflow } = useWorkflowByChatId(chatId);
+
+  const handleWorkflowClick = () => {
+    if (workflow) {
+      navigate(`/workflows/${workflow.id}`);
+    }
+  };
 
   const handleSubmit = useCallback(async (message: PromptInputMessage) => {
     const hasText = Boolean(message.text);
@@ -106,7 +116,14 @@ export default function ChatDetailPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       <SharedHeader title="Chat" />
-      
+
+      {/* Workflow info box - shows which workflow this chat belongs to */}
+      {workflow && (
+        <div className="max-w-4xl mx-auto px-6 pt-4">
+          <WorkflowInfoBox workflow={workflow} onClick={handleWorkflowClick} />
+        </div>
+      )}
+
       {/* Main chat area - flows behind header and footer with padding */}
       <div
         className="pt-6 transition-[padding-bottom] duration-200 ease-out"

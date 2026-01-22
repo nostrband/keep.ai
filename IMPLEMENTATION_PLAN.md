@@ -2,7 +2,7 @@
 
 **Goal:** Transform Keep.AI into a Simple, Lovable, Complete (SLC) v1 product focused on the core automation journey: Create -> Approve -> Run -> Handle Issues -> Tune
 
-**Last Updated:** 2026-01-22 (Spec 04 Workflow Hub Page)
+**Last Updated:** 2026-01-22 (Spec 05 Chat Page Update)
 **Verified Against Codebase:** 2026-01-22
 
 ---
@@ -54,7 +54,7 @@ A comprehensive verification of all 12 specs against the codebase was completed 
 | 02 | Navigation & Header Refactor | COMPLETED | Yes | 12 (partial) |
 | 03 | Notifications Page | COMPLETED | Yes | 01, 12 |
 | 04 | Workflow Hub Page | COMPLETED | Yes (error alert added) | 01, 09, 11 |
-| 05 | Chat Page Update | ~5% | No WorkflowInfoBox | 04, 09, 12 |
+| 05 | Chat Page Update | COMPLETED | Yes (workflow info box added) | 04, 09, 12 |
 | 06 | Home Page Cleanup | ~50% | Creation works, /new not redirected | 05, 09 |
 
 ---
@@ -746,6 +746,14 @@ Final cleanup items (deferred for post-v1)
 **Effort:** Medium (4-6 hours)
 **Dependencies:** Specs 04, 09, 12
 **Blocks:** Spec 06
+**Status:** COMPLETED
+
+**Completion Notes:**
+- Added useWorkflowByChatId hook to get workflow from chat_id
+- Added workflowByChatId query key
+- Created WorkflowInfoBox component with workflow title, status badge, and schedule
+- Updated ChatDetailPage to show WorkflowInfoBox above chat content
+- Clicking info box navigates to workflow hub page
 
 **Verified Current State (~5%):**
 - Basic chat pages exist (ChatPage.tsx, ChatDetailPage.tsx)
@@ -898,7 +906,7 @@ Per AGENTS.md: Run `cd packages/tests && npm test` and `cd apps/user-server && n
 ### Phase 3: UI Polish
 - [x] Implement Spec 03 - COMPLETED
 - [x] Complete Spec 04 - COMPLETED
-- [ ] Implement Spec 05 (chat page update) - Medium
+- [x] Implement Spec 05 - COMPLETED
 - [ ] Complete Spec 06 (home page cleanup) - Small
 - [ ] End-to-end testing of all flows
 

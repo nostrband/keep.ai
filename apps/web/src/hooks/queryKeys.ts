@@ -54,6 +54,7 @@ export const qk = {
   allWorkflows: () => [{ scope: "allWorkflows" }] as const,
   workflow: (workflowId: string) => [{ scope: "workflow", workflowId }] as const,
   workflowByTaskId: (taskId: string) => [{ scope: "workflowByTaskId", taskId }] as const,
+  workflowByChatId: (chatId: string) => [{ scope: "workflowByChatId", chatId }] as const,
   workflowScripts: (workflowId: string) => [{ scope: "workflowScripts", workflowId }] as const,
   workflowScriptRuns: (workflowId: string) => [{ scope: "workflowScriptRuns", workflowId }] as const,
   latestWorkflowScript: (workflowId: string) => [{ scope: "latestWorkflowScript", workflowId }] as const,
