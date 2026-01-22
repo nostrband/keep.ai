@@ -188,6 +188,8 @@ async function runAgentCommand(modelName: string): Promise<void> {
       error: "",
       title: "",
       chat_id: "",
+      workflow_id: "",
+      asks: "",
     };
     const env = new ReplEnv(api, "worker", task, sandboxApi.tools);
 
