@@ -8,6 +8,7 @@
  */
 
 import { KeepDbApi, Workflow, ScriptRun } from "@app/db";
+import { getWorkflowTitle } from "./workflowUtils";
 
 // Error types that should trigger user notifications (non-fixable, require user action)
 // - 'internal' errors are bugs in our code that users should be aware of
@@ -240,7 +241,7 @@ export class WorkflowNotifications {
     const MAX_NAMES_IN_BODY = 3;
     const workflowNames = workflows
       .slice(0, MAX_NAMES_IN_BODY)
-      .map(w => w.workflow.title || 'Untitled')
+      .map(w => getWorkflowTitle(w.workflow))
       .join(', ');
 
     let body: string;

@@ -476,6 +476,12 @@ The connectors framework enables multi-account OAuth connections for Gmail and o
 
 - [x] **simplify-chatpage-disabled-logic.md** - Simplified `disabled={(!input && !uploadState.isUploading) || uploadState.isUploading}` to `disabled={!input || uploadState.isUploading}` in ChatPage, ChatDetailPage, MainPage, and NewPage.
 
+- [x] **fix-pause-notification-grammar.md** - Fixed grammatically incorrect notification message in App.tsx. Now uses correct subject-verb agreement: "has been paused" for count=1 and "have been paused" for count>1.
+
+- [x] **fix-notification-workflow-name-fallback.md** - Changed WorkflowNotifications.ts to use `getWorkflowTitle()` utility instead of hardcoded "Untitled" fallback, ensuring consistent "New workflow" fallback across the application.
+
+- [x] **extract-db-run-promise-utility.md** - Created shared `dbRun()` utility in apps/user-server/src/__tests__/helpers.ts to replace duplicated Promise wrapper patterns for sqlite3's callback-based db.run(). Updated database.test.ts, integration.test.ts, and server.test.ts to use the new utility.
+
 ## Additional Fixes Completed (2026-01-23)
 
 - [x] **fix-server-test-async-pattern.md** - Fixed 3 instances of incorrectly awaiting sqlite3's callback-based `db.run()` method in server.test.ts by wrapping them in Promises with resolve/reject pattern, matching the fix already applied to database.test.ts and integration.test.ts.
@@ -556,8 +562,7 @@ Essential fixes and improvements for workflow reliability in v1.
 ### 2.4 Type Safety Cleanup (8 @ts-ignore found)
 
 **Critical (potential bugs):**
-- [ ] `packages/agent/src/task-worker.ts:694` - Array mapping returns undefined on JSON.parse error
-  - Fix: Add `.filter(Boolean)` or explicit undefined handling
+- [x] `packages/agent/src/task-worker.ts:696` - Fixed empty catch block. Now logs warning: `console.warn("Failed to parse inbox item:", i.id, e)`. Also removed @ts-ignore by adding proper type annotation to filter callback.
 
 **Library type issues (low priority):**
 - [ ] `packages/browser/src/startWorker.ts:74` - SharedWorker module type options
@@ -570,9 +575,8 @@ Essential fixes and improvements for workflow reliability in v1.
 
 ### 2.5 Empty Catch Blocks (Code Quality)
 
-Found 18+ instances of empty catch blocks. Most are intentional for cleanup operations, but one is problematic:
-- [ ] `packages/agent/src/task-worker.ts:703` - JSON parse error silently swallowed
-  - Should at least log warning: `console.warn('Failed to parse inbox item:', i.id, e)`
+Found 18+ instances of empty catch blocks. Most are intentional for cleanup operations, but one was problematic:
+- [x] `packages/agent/src/task-worker.ts:696` - Fixed. JSON parse error now logs warning: `console.warn("Failed to parse inbox item:", i.id, e)`
 
 ---
 

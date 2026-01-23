@@ -87,9 +87,10 @@ function ElectronIPCHandler() {
       // Show OS notification with the count
       if (window.electronAPI) {
         const workflowWord = count === 1 ? 'automation' : 'automations';
+        const verb = count === 1 ? 'has' : 'have';
         const shown = await window.electronAPI.showNotification({
           title: `Paused ${count} ${workflowWord}`,
-          body: `All ${workflowWord} have been paused. They will not run until you resume them.`,
+          body: `All ${workflowWord} ${verb} been paused. They will not run until you resume them.`,
         });
         if (!shown) {
           console.warn(`Failed to show notification: Paused ${count} ${workflowWord}`);

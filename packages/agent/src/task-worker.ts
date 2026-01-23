@@ -684,7 +684,6 @@ export class TaskWorker {
       })
     ).filter((i) => !i.target_id || i.target_id === taskId);
 
-    // @ts-ignore
     const inbox: string[] = inboxItems
       .map((i) => {
         try {
@@ -693,9 +692,12 @@ export class TaskWorker {
             ...message,
             id: i.id,
           });
-        } catch {}
+        } catch (e) {
+          console.warn("Failed to parse inbox item:", i.id, e);
+          return undefined;
+        }
       })
-      .filter(Boolean);
+      .filter((x): x is string => x !== undefined);
 
     return {
       inboxItems,
