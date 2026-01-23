@@ -338,7 +338,7 @@ The connectors framework enables multi-account OAuth connections for Gmail and o
 #### 1.7a Google Services (spec: connectors-06-google-services.md)
 
 **Action Items:**
-- [ ] Add service definitions to `packages/connectors/src/services/google.ts`:
+- [x] Add service definitions to `packages/connectors/src/services/google.ts`:
   ```typescript
   export const gdriveService: ServiceDefinition = {
     name: 'gdrive',
@@ -348,7 +348,7 @@ The connectors framework enables multi-account OAuth connections for Gmail and o
   };
   // Similar for gsheetsService (spreadsheets scope), gdocsService (documents scope)
   ```
-- [ ] Create `packages/agent/src/tools/google-common.ts`:
+- [x] Create `packages/agent/src/tools/google-common.ts`:
   ```typescript
   export async function getGoogleOAuthClient(connectionManager: ConnectionManager, service: string, accountId: string) {
     const creds = await connectionManager.getCredentials(service, accountId);
@@ -357,26 +357,36 @@ The connectors framework enables multi-account OAuth connections for Gmail and o
     return oauth2Client;
   }
   ```
-- [ ] Implement `packages/agent/src/tools/gdrive.ts`:
+- [x] Implement `packages/agent/src/tools/gdrive.ts`:
   - Methods: `files.list`, `files.get`, `files.create`, `files.update`, `files.export`
   - Required `account` parameter
   - Use `classifyGoogleApiError()` for error handling
-- [ ] Implement `packages/agent/src/tools/gsheets.ts`:
+- [x] Implement `packages/agent/src/tools/gsheets.ts`:
   - Methods: `spreadsheets.get`, `spreadsheets.values.get`, `spreadsheets.values.update`, `spreadsheets.values.append`, `spreadsheets.batchUpdate`
   - Required `account` parameter
-- [ ] Implement `packages/agent/src/tools/gdocs.ts`:
+- [x] Implement `packages/agent/src/tools/gdocs.ts`:
   - Methods: `documents.get`, `documents.batchUpdate`
   - Required `account` parameter
-- [ ] Register all tools in `packages/agent/src/sandbox/api.ts`:
+- [x] Register all tools in `packages/agent/src/sandbox/api.ts`:
   ```typescript
   addTool(global, "GDrive", "api", makeGDriveTool(this.getContext, this.connectionManager));
   addTool(global, "GSheets", "api", makeGSheetsTool(this.getContext, this.connectionManager));
   addTool(global, "GDocs", "api", makeGDocsTool(this.getContext, this.connectionManager));
   ```
-- [ ] Export from `packages/agent/src/tools/index.ts`
-- [ ] Register redirect URIs in Google Cloud Console (see 1.5)
+- [x] Export from `packages/agent/src/tools/index.ts`
+- [ ] Register redirect URIs in Google Cloud Console:
+  - Requires manual configuration in Google Cloud Console
+  - Register the following redirect URIs for each service (Gmail already done in 1.5):
+    - `http://127.0.0.1:4681/api/connectors/gdrive/callback`
+    - `http://localhost:4681/api/connectors/gdrive/callback`
+    - `http://127.0.0.1:4681/api/connectors/gsheets/callback`
+    - `http://localhost:4681/api/connectors/gsheets/callback`
+    - `http://127.0.0.1:4681/api/connectors/gdocs/callback`
+    - `http://localhost:4681/api/connectors/gdocs/callback`
 
 **Decision:** Using Option A (separate connections per service) for v1 - simpler. Can optimize to incremental scopes later.
+
+**Note:** The Google Cloud Console redirect URI registration is an external manual step that users must complete in their Google Cloud project settings. This cannot be automated and must be done before users can authenticate with Google Drive, Sheets, or Docs services.
 
 #### 1.7b Notion Connector (spec: connectors-07-notion.md)
 

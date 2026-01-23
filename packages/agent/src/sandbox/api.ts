@@ -24,6 +24,9 @@ import {
   makePdfExplainTool,
   makeAudioExplainTool,
   makeGmailTool,
+  makeGDriveTool,
+  makeGSheetsTool,
+  makeGDocsTool,
   makeAtobTool,
   makeTextExtractTool,
   makeTextClassifyTool,
@@ -41,13 +44,15 @@ import { z, ZodFirstPartyTypeKind as K } from "zod";
 import { EvalContext, EvalGlobal } from "./sandbox";
 import debug from "debug";
 import { ClassifiedError, isClassifiedError, LogicError, WorkflowPausedError } from "../errors";
+import type { ConnectionManager } from "@app/connectors";
 
 export interface SandboxAPIConfig {
   api: KeepDbApi;
   type: TaskType | "workflow";
   getContext: () => EvalContext;
   userPath?: string;
-  gmailOAuth2Client?: any;
+  /** Connection manager for OAuth-based tools (Gmail, etc.) */
+  connectionManager?: ConnectionManager;
   /** Workflow ID for pause checking. When set, tool calls will check if workflow is still active. */
   workflowId?: string;
 }
@@ -62,7 +67,7 @@ export class SandboxAPI {
   private type: TaskType | "workflow";
   private getContext: () => EvalContext;
   private userPath?: string;
-  private gmailOAuth2Client?: any;
+  private connectionManager?: ConnectionManager;
   private workflowId?: string;
   private debug = debug("SandboxAPI");
   private toolDocs = new Map<string, string>();
@@ -72,7 +77,7 @@ export class SandboxAPI {
     this.type = config.type;
     this.getContext = config.getContext;
     this.userPath = config.userPath;
-    this.gmailOAuth2Client = config.gmailOAuth2Client;
+    this.connectionManager = config.connectionManager;
     this.workflowId = config.workflowId;
   }
 
@@ -366,13 +371,32 @@ Example: await ${ns}.${name}(<input>)
     );
     addTool(global, "Text", "generate", makeTextGenerateTool(this.getContext));
 
-    // Gmail tools for worker only
-    if (this.gmailOAuth2Client) {
+    // Google service tools for worker only
+    // Tools are always registered - connection check happens internally when called
+    if (this.connectionManager) {
       addTool(
         global,
         "Gmail",
         "api",
-        makeGmailTool(this.getContext, this.gmailOAuth2Client)
+        makeGmailTool(this.getContext, this.connectionManager)
+      );
+      addTool(
+        global,
+        "GoogleDrive",
+        "api",
+        makeGDriveTool(this.getContext, this.connectionManager)
+      );
+      addTool(
+        global,
+        "GoogleSheets",
+        "api",
+        makeGSheetsTool(this.getContext, this.connectionManager)
+      );
+      addTool(
+        global,
+        "GoogleDocs",
+        "api",
+        makeGDocsTool(this.getContext, this.connectionManager)
       );
     }
 

@@ -754,7 +754,7 @@ export class ScriptStore {
   // This prevents concurrent update issues where stale workflow objects overwrite concurrent changes
   async updateWorkflowFields(
     workflowId: string,
-    fields: Partial<Pick<Workflow, 'timestamp' | 'next_run_timestamp' | 'status' | 'cron' | 'maintenance' | 'maintenance_fix_count' | 'active_script_id'>>,
+    fields: Partial<Pick<Workflow, 'timestamp' | 'next_run_timestamp' | 'status' | 'cron' | 'maintenance' | 'maintenance_fix_count' | 'active_script_id' | 'title'>>,
     tx?: DBInterface
   ): Promise<void> {
     const db = tx || this.db.db;
@@ -789,6 +789,10 @@ export class ScriptStore {
     if (fields.active_script_id !== undefined) {
       setClauses.push('active_script_id = ?');
       values.push(fields.active_script_id);
+    }
+    if (fields.title !== undefined) {
+      setClauses.push('title = ?');
+      values.push(fields.title);
     }
 
     if (setClauses.length === 0) return;

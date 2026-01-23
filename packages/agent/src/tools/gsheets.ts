@@ -1,0 +1,141 @@
+/**
+ * Google Sheets tool for the Keep.AI agent.
+ *
+ * Provides access to Google Sheets API for spreadsheet operations.
+ * Requires explicit account parameter (email address) for multi-account support.
+ */
+
+import { z } from "zod";
+import { tool } from "ai";
+import { EvalContext } from "../sandbox/sandbox";
+import debug from "debug";
+import { google } from "googleapis";
+import { AuthError, classifyGoogleApiError } from "../errors";
+import type { ConnectionManager } from "@app/connectors";
+import { getGoogleCredentials, createGoogleOAuthClient } from "./google-common";
+
+const debugSheets = debug("agent:gsheets");
+
+const SUPPORTED_METHODS = [
+  "spreadsheets.get",
+  "spreadsheets.create",
+  "spreadsheets.values.get",
+  "spreadsheets.values.update",
+  "spreadsheets.values.append",
+  "spreadsheets.values.clear",
+  "spreadsheets.values.batchGet",
+  "spreadsheets.values.batchUpdate",
+  "spreadsheets.batchUpdate",
+] as const;
+
+/**
+ * Create Google Sheets tool that uses ConnectionManager for credentials.
+ *
+ * The tool requires an explicit `account` parameter (email address) to specify
+ * which Google Sheets account to use. This prevents accidental account mixing in
+ * multi-account setups.
+ */
+export function makeGSheetsTool(
+  getContext: () => EvalContext,
+  connectionManager: ConnectionManager
+) {
+  return tool({
+    description: `Access Google Sheets API with various methods. Supported methods: ${SUPPORTED_METHODS.join(", ")}. Returns dynamic results based on the method used. Knowledge of param and output structure is expected from the assistant. REQUIRED: 'account' parameter must be the email address of the connected Google Sheets account.`,
+    inputSchema: z.object({
+      method: z.enum(SUPPORTED_METHODS).describe("Google Sheets API method to call"),
+      params: z
+        .any()
+        .optional()
+        .describe("Parameters to pass to the Google Sheets API method"),
+      account: z
+        .string()
+        .describe(
+          "Email address of the Google Sheets account to use (e.g., user@gmail.com)"
+        ),
+    }),
+    execute: async (input) => {
+      const { method, params = {}, account } = input;
+
+      const creds = await getGoogleCredentials(
+        connectionManager,
+        "gsheets",
+        account,
+        "GoogleSheets.api"
+      );
+
+      const connectionId = { service: "gsheets", accountId: account };
+
+      debugSheets("Calling Google Sheets API", {
+        method,
+        account,
+        params,
+      });
+
+      try {
+        const oAuth2Client = createGoogleOAuthClient(creds);
+        const sheets = google.sheets({ version: "v4", auth: oAuth2Client });
+
+        let result;
+        switch (method) {
+          case "spreadsheets.get":
+            result = await sheets.spreadsheets.get(params);
+            break;
+          case "spreadsheets.create":
+            result = await sheets.spreadsheets.create(params);
+            break;
+          case "spreadsheets.values.get":
+            result = await sheets.spreadsheets.values.get(params);
+            break;
+          case "spreadsheets.values.update":
+            result = await sheets.spreadsheets.values.update(params);
+            break;
+          case "spreadsheets.values.append":
+            result = await sheets.spreadsheets.values.append(params);
+            break;
+          case "spreadsheets.values.clear":
+            result = await sheets.spreadsheets.values.clear(params);
+            break;
+          case "spreadsheets.values.batchGet":
+            result = await sheets.spreadsheets.values.batchGet(params);
+            break;
+          case "spreadsheets.values.batchUpdate":
+            result = await sheets.spreadsheets.values.batchUpdate(params);
+            break;
+          case "spreadsheets.batchUpdate":
+            result = await sheets.spreadsheets.batchUpdate(params);
+            break;
+          default:
+            throw new Error(`Method ${method} not implemented`);
+        }
+
+        // Log events for significant operations
+        if (method.includes("create") || method.includes("update") || method.includes("append") || method.includes("clear"))
+          await getContext().createEvent("gsheets_api_call", {
+            method,
+            account,
+            params,
+          });
+
+        debugSheets("Google Sheets API call completed", { method, account, success: true });
+
+        return result.data;
+      } catch (error) {
+        debugSheets("Google Sheets API call failed", {
+          method,
+          account,
+          error: error instanceof Error ? error.message : String(error),
+        });
+
+        // Classify the error based on Google API response
+        const classified = classifyGoogleApiError(error, "GoogleSheets.api");
+
+        // If it's an auth error, mark the connection as errored
+        if (classified instanceof AuthError) {
+          await connectionManager.markError(connectionId, classified.message);
+        }
+
+        throw classified;
+      }
+    },
+  });
+}

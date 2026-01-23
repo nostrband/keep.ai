@@ -32,6 +32,9 @@ export function formatCronSchedule(cron?: string): string {
   if (minute !== "*" && hour !== "*" && dayOfMonth === "*" && month === "*" && dayOfWeek === "*") {
     const hourNum = parseInt(hour, 10);
     const minuteNum = parseInt(minute, 10);
+    if (isNaN(hourNum) || isNaN(minuteNum)) {
+      return cron; // Return raw cron for invalid format
+    }
     const period = hourNum >= 12 ? "PM" : "AM";
     const displayHour = hourNum === 0 ? 12 : hourNum > 12 ? hourNum - 12 : hourNum;
     return `Every day at ${displayHour}:${minuteNum.toString().padStart(2, "0")} ${period}`;
@@ -41,10 +44,13 @@ export function formatCronSchedule(cron?: string): string {
   if (dayOfWeek !== "*" && dayOfMonth === "*") {
     const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
     const dayNum = parseInt(dayOfWeek, 10);
-    const dayName = days[dayNum] || dayOfWeek;
+    const dayName = !isNaN(dayNum) ? (days[dayNum] || dayOfWeek) : dayOfWeek;
     if (minute !== "*" && hour !== "*") {
       const hourNum = parseInt(hour, 10);
       const minuteNum = parseInt(minute, 10);
+      if (isNaN(hourNum) || isNaN(minuteNum)) {
+        return cron; // Return raw cron for invalid format
+      }
       const period = hourNum >= 12 ? "PM" : "AM";
       const displayHour = hourNum === 0 ? 12 : hourNum > 12 ? hourNum - 12 : hourNum;
       return `Every ${dayName} at ${displayHour}:${minuteNum.toString().padStart(2, "0")} ${period}`;

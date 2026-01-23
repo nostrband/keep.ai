@@ -161,6 +161,7 @@ export default function MainPage() {
   const [latestRuns, setLatestRuns] = useState<Record<string, ScriptRun>>({});
   const [showAttentionOnly, setShowAttentionOnly] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const isSubmittingRef = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { uploadFiles, uploadState } = useFileUpload();
 
@@ -254,6 +255,11 @@ export default function MainPage() {
       return;
     }
 
+    // Synchronous check to prevent double-submit on rapid clicks
+    if (isSubmittingRef.current) {
+      return;
+    }
+    isSubmittingRef.current = true;
     setIsSubmitting(true);
 
     try {
@@ -292,6 +298,8 @@ export default function MainPage() {
       navigate(`/chats/${result.chatId}`);
     } catch (error) {
       console.error('Failed to create task:', error);
+    } finally {
+      isSubmittingRef.current = false;
       setIsSubmitting(false);
     }
   }, [api, navigate, uploadFiles]);
