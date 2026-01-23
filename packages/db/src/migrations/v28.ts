@@ -27,25 +27,6 @@ export async function migrateV28(tx: DBInterface["tx"] extends (fn: (tx: infer T
   await tx.exec(`SELECT crsql_commit_alter('chats')`);
   await tx.exec(`CREATE INDEX IF NOT EXISTS idx_chats_workflow_id ON chats(workflow_id)`);
 
-  // Populate workflow.chat_id from task.chat_id
-  await tx.exec(`
-    UPDATE workflows
-    SET chat_id = (
-      SELECT t.chat_id
-      FROM tasks t
-      WHERE t.id = workflows.task_id
-    )
-    WHERE chat_id = ''
-  `);
-
-  // Populate chats.workflow_id from workflows.chat_id
-  await tx.exec(`
-    UPDATE chats
-    SET workflow_id = (
-      SELECT w.id
-      FROM workflows w
-      WHERE w.chat_id = chats.id
-    )
-    WHERE workflow_id = ''
-  `);
+  // Data migration moved to v29 due to cr-sqlite requiring ALTER to be committed
+  // before UPDATE can see the new columns
 }
