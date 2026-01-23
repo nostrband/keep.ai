@@ -3,8 +3,6 @@ import { InfiniteData, useMutation } from "@tanstack/react-query";
 import { notifyTablesChanged, queryClient } from "../queryClient";
 import { qk } from "./queryKeys";
 import { useDbQuery } from "./dbQuery";
-import { ChatEvent } from "@app/proto";
-import { UseChatEventsResult } from "./dbChatReads";
 import { File } from "@app/db";
 
 export function useAddMessage() {

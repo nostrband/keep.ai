@@ -8,6 +8,29 @@ import { qk } from "./queryKeys";
 import { useDbQuery } from "./dbQuery";
 import { ChatEvent } from "packages/proto/dist";
 import { queryClient } from "../queryClient";
+import { ChatMessage } from "@app/db";
+
+/**
+ * Parses a ChatMessage's content into AssistantUIMessage format.
+ * If the content is already valid JSON, returns it directly.
+ * Otherwise, wraps the plain text content in the expected structure.
+ */
+function parseMessageContent(msg: ChatMessage) {
+  try {
+    return JSON.parse(msg.content);
+  } catch {
+    // Fallback for messages that aren't JSON
+    return {
+      id: msg.id,
+      role: msg.role,
+      parts: [{ type: "text", text: msg.content }],
+      metadata: {
+        threadId: msg.chat_id,
+        createdAt: msg.timestamp,
+      },
+    };
+  }
+}
 
 export function useChatMessages(chatId: string) {
   const { api } = useDbQuery();
@@ -18,22 +41,7 @@ export function useChatMessages(chatId: string) {
       // Read from chat_messages table (Spec 12)
       const messages = await api.chatStore.getNewChatMessages({ chatId });
       // Parse content to AssistantUIMessage format
-      return messages.map((msg) => {
-        try {
-          return JSON.parse(msg.content);
-        } catch {
-          // Fallback for messages that aren't JSON
-          return {
-            id: msg.id,
-            role: msg.role,
-            parts: [{ type: "text", text: msg.content }],
-            metadata: {
-              threadId: msg.chat_id,
-              createdAt: msg.timestamp,
-            },
-          };
-        }
-      });
+      return messages.map(parseMessageContent);
     },
     meta: { tables: ["chat_messages"] },
     enabled: !!api && !!chatId,
@@ -104,29 +112,12 @@ export function useChatEvents(chatId: string) {
     });
 
     // Convert ChatMessage to ChatEvent format
-    const events: ChatEvent[] = messages.reverse().map((msg) => {
-      let content;
-      try {
-        content = JSON.parse(msg.content);
-      } catch {
-        // Fallback for messages that aren't JSON
-        content = {
-          id: msg.id,
-          role: msg.role,
-          parts: [{ type: "text", text: msg.content }],
-          metadata: {
-            threadId: msg.chat_id,
-            createdAt: msg.timestamp,
-          },
-        };
-      }
-      return {
-        id: msg.id,
-        type: "message",
-        content,
-        timestamp: msg.timestamp,
-      };
-    });
+    const events: ChatEvent[] = messages.reverse().map((msg) => ({
+      id: msg.id,
+      type: "message",
+      content: parseMessageContent(msg),
+      timestamp: msg.timestamp,
+    }));
 
     // The nextCursor is the timestamp of the oldest event in this page
     // Since events come in DESC order, the oldest is the last one

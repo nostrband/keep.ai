@@ -1,7 +1,7 @@
 # Implementation Plan for Keep.AI v1.0.0 SLC Release
 
 **Last Updated**: 2026-01-23
-**Status**: 0 specs pending implementation, 24 implemented
+**Status**: 0 specs pending implementation, 29 implemented
 
 ---
 
@@ -583,6 +583,85 @@ These specs improve test coverage and ensure tests accurately reflect production
 
 ---
 
+## Priority 7: Code Quality & Migrations
+
+These specs focus on completing technical migrations, removing deprecated code, and improving code maintainability.
+
+### 25. Complete Chat Messages Migration
+**Spec**: `specs/new/complete-chat-messages-migration.md`
+**Status**: IMPLEMENTED
+**Effort**: Medium
+
+**Problem**: Remaining calls to deprecated `getChatMessages()` needed to be replaced with `getNewChatMessages()`
+
+**Action Items** (implemented):
+- File: `apps/server/src/server.ts`
+  - Line 437: Updated push notification handler to use `getNewChatMessages()`
+  - Line 1008: Updated SSE handler to use `getNewChatMessages()`
+- File: `apps/cli/src/commands/chat.ts`
+  - Updated chat command to use `getNewChatMessages()`
+
+---
+
+### 26. Extract Message Parsing Utility
+**Spec**: `specs/new/extract-message-parsing-utility.md`
+**Status**: IMPLEMENTED
+**Effort**: Low
+
+**Problem**: Duplicate JSON parsing logic existed in multiple hook functions
+
+**Action Items** (implemented):
+- File: `apps/web/src/hooks/dbChatReads.ts`
+  - Extracted `parseMessageContent` utility function
+  - Updated `useChatMessages` to use the utility
+  - Updated `useChatEvents` to use the utility
+  - Eliminated code duplication
+
+---
+
+### 27. Fix Script Store JSDoc
+**Spec**: `specs/new/fix-script-store-jsdoc.md`
+**Status**: IMPLEMENTED
+**Effort**: Low
+
+**Problem**: JSDoc comment referenced old table name and incorrect join key
+
+**Action Items** (implemented):
+- File: `packages/db/src/script-store.ts`
+  - Updated outdated JSDoc comment from `chat_events` to `chat_messages`
+  - Fixed join key reference from `chat_events.id` to `chat_messages.id`
+
+---
+
+### 28. Cleanup Unused Imports
+**Spec**: `specs/new/cleanup-unused-imports.md`
+**Status**: IMPLEMENTED
+**Effort**: Low
+
+**Problem**: Dead imports remained after chat_messages migration
+
+**Action Items** (implemented):
+- File: `apps/web/src/hooks/dbWrites.ts`
+  - Removed unused `ChatEvent` type import
+  - Removed unused `UseChatEventsResult` type import
+
+---
+
+### 29. Optimize has_script Subquery
+**Spec**: `specs/new/optimize-has-script-subquery.md`
+**Status**: IMPLEMENTED
+**Effort**: Low
+
+**Problem**: Correlated subquery caused N+1 query pattern in getWorkflows()
+
+**Action Items** (implemented):
+- File: `packages/db/src/script-store.ts`
+  - Replaced correlated subquery with `COUNT(DISTINCT s.id) > 0`
+  - Leveraged existing `LEFT JOIN scripts s` to eliminate redundant query
+  - Improved query performance by eliminating N+1 pattern
+
+---
+
 ## Summary
 
 | Priority | Category | Count | Status |
@@ -593,8 +672,9 @@ These specs improve test coverage and ensure tests accurately reflect production
 | 4 | Agent Improvements | 1 | All implemented |
 | 5 | Technical Debt | 4 | 1 implemented, 3 pending (non-blocking) |
 | 6 | Test Quality | 4 | All implemented |
+| 7 | Code Quality & Migrations | 5 | All implemented |
 
-**Total Specs**: 0 pending, 24 implemented
+**Total Specs**: 0 pending, 29 implemented
 
 **Total Technical Debt Items**: 3 (non-blocking pending)
 

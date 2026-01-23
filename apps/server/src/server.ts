@@ -319,14 +319,31 @@ async function handlePushNotifications(
       return lastMessageTime;
     }
 
-    // Get messages from threadId='main' with createdAt > lastMessageTime
-    const newMessages = await chatStore.getChatMessages({
+    // Get messages from threadId='main' with timestamp > lastMessageTime (Spec 12)
+    const rawMessages = await chatStore.getNewChatMessages({
       chatId: "main",
       since: new Date(lastMessageTime).toISOString(),
     });
 
-    // Only notify about assistant messages
-    const messages = newMessages.filter((m) => m.role === "assistant");
+    // Only notify about assistant messages and parse content to AssistantUIMessage
+    const messages = rawMessages
+      .filter((m) => m.role === "assistant")
+      .map((msg) => {
+        try {
+          return JSON.parse(msg.content);
+        } catch {
+          // Fallback for messages that aren't JSON
+          return {
+            id: msg.id,
+            role: msg.role,
+            parts: [{ type: "text", text: msg.content }],
+            metadata: {
+              threadId: msg.chat_id,
+              createdAt: msg.timestamp,
+            },
+          };
+        }
+      });
 
     if (messages.length === 0) {
       return lastMessageTime;
@@ -922,7 +939,8 @@ export async function createServer(config: ServerConfig = {}) {
 
       // First good config?
       if (!wasOk) {
-        const messages = await api.chatStore.getChatMessages({
+        // Use getNewChatMessages from chat_messages table (Spec 12)
+        const messages = await api.chatStore.getNewChatMessages({
           chatId: "main",
         });
         // First launch?

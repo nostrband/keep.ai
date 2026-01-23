@@ -829,10 +829,10 @@ export class ScriptStore {
    *
    * A draft is considered abandoned when:
    * 1. Status is draft (status = 'draft')
-   * 2. No chat events, script saves, or workflow updates within the threshold period
+   * 2. No chat messages, script saves, or workflow updates within the threshold period
    *
    * Last activity is calculated as the most recent of:
-   * - Chat event timestamp (from chat_events table where chat_id = workflow.task_id)
+   * - Chat message timestamp (from chat_messages table where chat_id = workflow.chat_id)
    * - Script save timestamp (from scripts table where workflow_id = workflow.id)
    * - Workflow timestamp (from workflows table)
    *
@@ -860,7 +860,7 @@ export class ScriptStore {
           MAX(s.timestamp),
           w.timestamp
         ) as last_activity,
-        (SELECT COUNT(*) FROM scripts WHERE workflow_id = w.id) > 0 as has_script,
+        COUNT(DISTINCT s.id) > 0 as has_script,
         t.state as task_state
       FROM workflows w
       LEFT JOIN chat_messages cm ON cm.chat_id = w.chat_id
