@@ -27,6 +27,7 @@ import {
   makeGDriveTool,
   makeGSheetsTool,
   makeGDocsTool,
+  makeNotionTool,
   makeAtobTool,
   makeTextExtractTool,
   makeTextClassifyTool,
@@ -397,6 +398,12 @@ Example: await ${ns}.${name}(<input>)
         "GoogleDocs",
         "api",
         makeGDocsTool(this.getContext, this.connectionManager)
+      );
+      addTool(
+        global,
+        "Notion",
+        "api",
+        makeNotionTool(this.getContext, this.connectionManager)
       );
     }
 

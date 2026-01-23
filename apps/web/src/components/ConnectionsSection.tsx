@@ -8,7 +8,7 @@
  */
 
 import { useState, useEffect } from "react";
-import { Mail, HardDrive, Sheet, FileText, MoreVertical, Plus, RefreshCw, Unlink, Check, AlertCircle, Pencil } from "lucide-react";
+import { Mail, HardDrive, Sheet, FileText, BookOpen, MoreVertical, Plus, RefreshCw, Unlink, Check, AlertCircle, Pencil } from "lucide-react";
 import { useConnections } from "../hooks/dbConnectionReads";
 import { useAutoHidingMessage } from "../hooks/useAutoHidingMessage";
 import { API_ENDPOINT } from "../const";
@@ -61,6 +61,12 @@ const SERVICES: ServiceInfo[] = [
     name: "Google Docs",
     icon: <FileText className="w-5 h-5" />,
     description: "Read and edit documents",
+  },
+  {
+    id: "notion",
+    name: "Notion",
+    icon: <BookOpen className="w-5 h-5" />,
+    description: "Access workspaces, databases, and pages",
   },
 ];
 

@@ -53,3 +53,5 @@ export {
   fetchGoogleProfile,
   type GoogleProfile,
 } from "./services/google";
+
+export { notionService } from "./services/notion";

@@ -351,6 +351,69 @@ export function classifyGoogleApiError(
 }
 
 /**
+ * Create a classified error from Notion API errors.
+ *
+ * Notion API error structure:
+ * - status: HTTP status code
+ * - code: Notion error code (e.g., "unauthorized", "restricted_resource", "object_not_found")
+ * - message: Human-readable error message
+ *
+ * @param err The Notion API error
+ * @param source The tool that made the API call
+ */
+export function classifyNotionError(
+  err: any,
+  source?: string
+): ClassifiedError {
+  // Notion API errors have status, code, and message
+  const status = err?.status || err?.response?.status || err?.code;
+  const notionCode = err?.code as string | undefined;
+  const message = err?.message || err?.body?.message || String(err);
+
+  // Handle numeric HTTP status codes
+  if (typeof status === 'number') {
+    return classifyHttpError(status, message, { cause: err, source });
+  }
+
+  // Handle Notion-specific error codes
+  if (notionCode) {
+    switch (notionCode) {
+      case 'unauthorized':
+      case 'invalid_token':
+        return new AuthError('Notion authentication failed. Please reconnect your workspace.', { cause: err, source });
+
+      case 'restricted_resource':
+        return new PermissionError('Notion access denied. The integration may not have access to this page or database.', { cause: err, source });
+
+      case 'object_not_found':
+        return new LogicError(`Notion resource not found: ${message}`, { cause: err, source });
+
+      case 'validation_error':
+      case 'invalid_json':
+      case 'invalid_request':
+      case 'invalid_request_url':
+        return new LogicError(`Notion request error: ${message}`, { cause: err, source });
+
+      case 'rate_limited':
+        return new NetworkError('Notion rate limit exceeded. Please try again later.', { cause: err, source, statusCode: 429 });
+
+      case 'internal_server_error':
+      case 'service_unavailable':
+        return new NetworkError(`Notion service error: ${message}`, { cause: err, source, statusCode: 500 });
+
+      case 'conflict_error':
+        return new LogicError(`Notion conflict: ${message}`, { cause: err, source });
+
+      case 'database_connection_unavailable':
+        return new NetworkError('Notion database temporarily unavailable. Please try again.', { cause: err, source });
+    }
+  }
+
+  // Fallback to generic classification
+  return classifyGenericError(err instanceof Error ? err : new Error(String(err)), source);
+}
+
+/**
  * Type-safe usage data structure for tool events.
  *
  * This interface enforces the correct nested structure for cost tracking.

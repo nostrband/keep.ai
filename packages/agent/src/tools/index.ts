@@ -29,6 +29,7 @@ export { makeGmailTool } from "./gmail";
 export { makeGDriveTool } from "./gdrive";
 export { makeGSheetsTool } from "./gsheets";
 export { makeGDocsTool } from "./gdocs";
+export { makeNotionTool } from "./notion";
 export { makeAtobTool } from "./atob";
 export { makeTextExtractTool } from "./text-extract";
 export { makeTextClassifyTool } from "./text-classify";

@@ -1,6 +1,6 @@
 # Keep.AI v1.0.0 Implementation Plan
 
-> **Note (2026-01-23):** Sections 1.1 (Build-Time Secrets), 1.2 (Core Connectors Package), 1.3 (Connection Manager + Database), 1.4 (Gmail Refactor), 1.5 (Server Endpoints), and 1.6 (Connections UI) are now fully implemented.
+> **Note (2026-01-23):** Sections 1.1 (Build-Time Secrets), 1.2 (Core Connectors Package), 1.3 (Connection Manager + Database), 1.4 (Gmail Refactor), 1.5 (Server Endpoints), 1.6 (Connections UI), and 1.7b (Notion Connector) are now fully implemented.
 
 ## Priority 1: Connectors Framework (Current Focus - BLOCKING)
 
@@ -388,10 +388,10 @@ The connectors framework enables multi-account OAuth connections for Gmail and o
 
 **Note:** The Google Cloud Console redirect URI registration is an external manual step that users must complete in their Google Cloud project settings. This cannot be automated and must be done before users can authenticate with Google Drive, Sheets, or Docs services.
 
-#### 1.7b Notion Connector (spec: connectors-07-notion.md)
+#### 1.7b Notion Connector (spec: connectors-07-notion.md) - FULLY IMPLEMENTED
 
 **Action Items:**
-- [ ] Create `packages/connectors/src/services/notion.ts`:
+- [x] Create `packages/connectors/src/services/notion.ts`:
   ```typescript
   export const notionService: ServiceDefinition = {
     name: 'notion',
@@ -407,17 +407,17 @@ The connectors framework enables multi-account OAuth connections for Gmail and o
     extractDisplayName: (tokenResponse) => tokenResponse.workspace_name,
   };
   ```
-- [ ] Update `packages/connectors/src/oauth.ts` to support Basic auth:
+- [x] Update `packages/connectors/src/oauth.ts` to support Basic auth:
   ```typescript
   if (config.useBasicAuth) {
     headers['Authorization'] = 'Basic ' + Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
   }
   ```
-- [ ] Implement `packages/agent/src/tools/notion.ts`:
+- [x] Implement `packages/agent/src/tools/notion.ts`:
   - Methods: `databases.query`, `databases.retrieve`, `pages.retrieve`, `pages.create`, `pages.update`, `blocks.children.list`, `blocks.children.append`, `search`
   - Required `account` parameter (workspace_id)
   - Use `@notionhq/client` SDK
-- [ ] Add `classifyNotionError()` to `packages/agent/src/errors.ts`:
+- [x] Add `classifyNotionError()` to `packages/agent/src/errors.ts`:
   ```typescript
   export function classifyNotionError(err: any, source?: string): ClassifiedError {
     const status = err?.status || err?.response?.status;
@@ -429,11 +429,18 @@ The connectors framework enables multi-account OAuth connections for Gmail and o
     return classifyGenericError(err, source);
   }
   ```
-- [ ] Add `@notionhq/client: ^2.2.0` to `packages/agent/package.json`
-- [ ] Register Notion tool in SandboxAPI
-- [ ] Update UI to display `workspace_name` instead of `workspace_id`:
-  - Store `workspace_name` in `connections.metadata` JSON field
+- [x] Add `@notionhq/client: ^2.2.0` to `packages/agent/package.json`
+- [x] Export Notion service from `packages/connectors/src/index.ts`
+- [x] Register Notion service in `apps/server/src/server.ts`
+- [x] Register Notion tool in `packages/agent/src/sandbox/api.ts`
+- [x] Export Notion tool from `packages/agent/src/tools/index.ts`
+- [x] Update UI ConnectionsSection to include Notion service with `workspace_name` display
+  - Stores `workspace_name` in `connections.metadata` JSON field
   - ConnectionCard shows `connection.metadata?.workspace_name || connection.accountId`
+- [ ] Register redirect URIs in Notion Developer Portal (user-facing configuration):
+  - `http://127.0.0.1:4681/api/connectors/notion/callback`
+  - `http://localhost:4681/api/connectors/notion/callback`
+  - **Note:** This is a manual step users must complete in their Notion OAuth app settings before they can authenticate.
 
 **Notion-specific:**
 - Tokens don't expire - `getCredentials()` just returns stored token

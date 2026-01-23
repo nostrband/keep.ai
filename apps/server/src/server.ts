@@ -68,6 +68,7 @@ import {
   gdriveService,
   gsheetsService,
   gdocsService,
+  notionService,
 } from "@app/connectors";
 import { registerConnectorRoutes } from "./routes/connectors";
 
@@ -144,11 +145,12 @@ async function createConnectionManager(
   // Create connection manager
   const connectionManager = new ConnectionManager(credentialStore, dbAdapter);
 
-  // Register all Google services
+  // Register all services
   connectionManager.registerService(gmailService);
   connectionManager.registerService(gdriveService);
   connectionManager.registerService(gsheetsService);
   connectionManager.registerService(gdocsService);
+  connectionManager.registerService(notionService);
 
   // Migrate old gmail.json if it exists
   await migrateOldGmailCredentials(userPath, connectionManager);
