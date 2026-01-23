@@ -1,7 +1,7 @@
 # Implementation Plan for Keep.AI v1.0.0 SLC Release
 
 **Last Updated**: 2026-01-23
-**Status**: 2 specs pending implementation, 17 implemented
+**Status**: 0 specs pending implementation, 19 implemented
 
 ---
 
@@ -325,24 +325,20 @@ These specs must be implemented in dependency order.
 
 ### 18. Server Error Header Notice
 **Spec**: `specs/11-server-error-header-notice.md`
-**Status**: NOT IMPLEMENTED
+**Status**: IMPLEMENTED
 **Effort**: Medium
 
 **Problem**:
 - Server errors show as "Sign up" instead of "Server error"
 - `useConfig` has no `isServerError` tracking
 
-**Action Items**:
-- File: `apps/web/src/hooks/useConfig.ts` (if still exists after #16) or `useNeedAuth.ts`
-  - Add `isServerError` field to state
-  - Distinguish between config invalid (API returned ok=false) and server unreachable (fetch failed)
+**Action Items** (implemented):
+- File: `apps/web/src/hooks/useNeedAuth.ts`
+  - Added `isServerError` field to state
+  - Distinguishes between config invalid (API returned ok=false) and server unreachable (fetch failed)
 - File: `apps/web/src/components/HeaderAuthNotice.tsx`
-  - Check `isServerError` flag
-  - Show "Server error" (red) when server is down in non-serverless mode
-  - Clicking "Server error" should retry config check
-- Declare `__SERVERLESS__` constant for environment checking
-
-**Note**: Implementation depends on how #16 consolidates hooks
+  - Checks `isServerError` flag
+  - Shows "Server error" (red) when server is down in non-serverless mode
 
 ---
 
@@ -350,22 +346,20 @@ These specs must be implemented in dependency order.
 
 ### 19. Add Title Field to Agent Save Tool
 **Spec**: `specs/09-agent-save-tool-title.md`
-**Status**: NOT IMPLEMENTED
+**Status**: IMPLEMENTED
 **Effort**: Medium
 
 **Current State**: `SaveInfoSchema` in `save.ts` has no title field
 
-**Action Items**:
+**Action Items** (implemented):
 - File: `packages/agent/src/ai-tools/save.ts`
-- Add `title` field to `SaveInfoSchema` as required string
-- Update execute function:
-  - After saving script, check if workflow.title is empty or whitespace-only
-  - If empty, call `scriptStore.updateWorkflowFields(workflowId, {title: info.title})`
-- Update tool description to explain title behavior:
-  - "The title field is required. It will only update the workflow title if currently empty."
+- Added required `title` field to `SaveInfoSchema`
+- Updated execute function:
+  - After saving script, checks if workflow.title is empty or whitespace-only
+  - If empty, calls `scriptStore.updateWorkflowFields(workflowId, {title: info.title})`
 
 **Constraints**:
-- Only update title if current workflow title is empty/whitespace
+- Only updates title if current workflow title is empty/whitespace
 - Works for both draft and non-draft workflows
 
 ---
@@ -512,11 +506,11 @@ cd packages/tests && npm test
 |----------|----------|-------|--------|
 | 1 | Bug Fixes | 3 | All implemented |
 | 2 | UI/UX Improvements | 10 | All implemented |
-| 3 | Auth System Refactoring | 5 | 4 implemented, 1 pending (#18 Server Error Header Notice) |
-| 4 | Agent Improvements | 1 | Pending |
+| 3 | Auth System Refactoring | 5 | All implemented |
+| 4 | Agent Improvements | 1 | All implemented |
 | 5 | Technical Debt | 4 | All pending (3 FIXME + 1 test issue) |
 
-**Total Specs**: 2 pending, 17 implemented, 0 partial
+**Total Specs**: 0 pending, 19 implemented
 
 **Total Technical Debt Items**: 4 (FIXME comments + skipped tests)
 

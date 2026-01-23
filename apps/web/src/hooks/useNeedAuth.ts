@@ -28,6 +28,7 @@ export function useNeedAuth() {
   const [state, setState] = useState<NeedAuthState>({ needed: false });
   const [isFirstLaunch, setIsFirstLaunch] = useState(false);
   const [isLoaded, setIsLoaded] = useState(false);
+  const [isServerError, setIsServerError] = useState(false);
 
   // Load state from database and check config
   const loadState = useCallback(async () => {
@@ -62,9 +63,12 @@ export function useNeedAuth() {
         timestamp: needAuthState.timestamp,
       });
       setIsFirstLaunch(firstLaunch);
+      setIsServerError(false);
       setIsLoaded(true);
     } catch (error) {
       console.warn('Could not load needAuth state:', error);
+      // Distinguish server errors from other failures
+      setIsServerError(true);
       setIsLoaded(true);
     }
   }, [api, dbStatus]);
@@ -101,6 +105,7 @@ export function useNeedAuth() {
     timestamp: state.timestamp,
     isFirstLaunch,
     isLoaded,
+    isServerError,
     clearNeedAuth,
     refresh: loadState,
   };

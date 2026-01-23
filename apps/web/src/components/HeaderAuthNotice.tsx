@@ -4,6 +4,8 @@ import { AuthPopup } from "./AuthPopup";
 import { ClerkAuthProvider } from "./ClerkAuthProvider";
 import { CLERK_PUBLISHABLE_KEY } from "../constants/auth";
 
+declare const __SERVERLESS__: boolean;
+
 interface HeaderAuthNoticeProps {
   className?: string;
 }
@@ -13,14 +15,18 @@ interface HeaderAuthNoticeProps {
  * When clicked, opens the AuthPopup modal.
  */
 export function HeaderAuthNotice({ className = "" }: HeaderAuthNoticeProps) {
-  const { needAuth, isFirstLaunch, isLoaded, refresh } = useNeedAuth();
+  const { needAuth, isFirstLaunch, isLoaded, isServerError, refresh } = useNeedAuth();
   const [showAuthPopup, setShowAuthPopup] = useState(false);
 
-  // Show notice when auth is needed and state is loaded
-  const shouldShow = isLoaded && needAuth;
+  // Show notice when auth is needed OR server error (in non-serverless mode)
+  const showServerError = isServerError && !__SERVERLESS__;
+  const shouldShow = isLoaded && (needAuth || showServerError);
 
   // Determine the button text based on state
   const getButtonText = () => {
+    if (showServerError) {
+      return 'Server error';
+    }
     return isFirstLaunch ? 'Sign up' : 'Sign in';
   };
 
@@ -29,16 +35,30 @@ export function HeaderAuthNotice({ className = "" }: HeaderAuthNoticeProps) {
     refresh();
   };
 
+  const handleClick = () => {
+    if (showServerError) {
+      // For server errors, retry the config check instead of showing auth popup
+      refresh();
+      return;
+    }
+    setShowAuthPopup(true);
+  };
+
   if (!shouldShow) {
     return null;
   }
 
+  // Use red styling for server errors, amber for auth issues
+  const buttonClass = showServerError
+    ? `flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-red-700 bg-red-100 hover:bg-red-200 rounded-md transition-colors ${className}`
+    : `flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-amber-700 bg-amber-100 hover:bg-amber-200 rounded-md transition-colors ${className}`;
+
   return (
     <>
       <button
-        onClick={() => setShowAuthPopup(true)}
-        className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-amber-700 bg-amber-100 hover:bg-amber-200 rounded-md transition-colors ${className}`}
-        aria-label="Authentication required"
+        onClick={handleClick}
+        className={buttonClass}
+        aria-label={showServerError ? "Server error" : "Authentication required"}
       >
         {/* Warning icon */}
         <svg

@@ -4,6 +4,7 @@ import { Script, ScriptStore } from "@app/db";
 
 const SaveInfoSchema = z.object({
   code: z.string().describe("Script code to save"),
+  title: z.string().describe("Title for the workflow/automation"),
   comments: z
     .string()
     .optional()
@@ -65,15 +66,26 @@ export function makeSaveTool(opts: {
       // Update workflow's active_script_id to point to the new script
       // New script versions automatically become active
       // If workflow was draft (no script yet), transition to 'ready' (Spec 11)
+      // Also update title if currently empty
+      const shouldUpdateTitle = info.title && (!workflow.title || workflow.title.trim() === '');
+
       if (workflow.status === 'draft') {
-        await opts.scriptStore.updateWorkflowFields(workflow.id, {
+        const updates: { status: string; active_script_id: string; title?: string } = {
           status: 'ready',
           active_script_id: newScript.id,
-        });
+        };
+        if (shouldUpdateTitle) {
+          updates.title = info.title;
+        }
+        await opts.scriptStore.updateWorkflowFields(workflow.id, updates);
       } else {
-        await opts.scriptStore.updateWorkflowFields(workflow.id, {
+        const updates: { active_script_id: string; title?: string } = {
           active_script_id: newScript.id,
-        });
+        };
+        if (shouldUpdateTitle) {
+          updates.title = info.title;
+        }
+        await opts.scriptStore.updateWorkflowFields(workflow.id, updates);
       }
 
       // Note: No separate add_script/maintenance_fixed events (Spec 01)
@@ -96,7 +108,8 @@ export function makeSaveTool(opts: {
         wasMaintenanceFix: wasInMaintenance,
       };
     },
-    description: `Save the new/updated script code, along with commit-style comments.
+    description: `Save the new/updated script code with a workflow title, commit-style comments, summary, and optional flow diagram.
+The title will only be applied if the workflow doesn't already have one.
 `,
     inputSchema: SaveInfoSchema,
   });
