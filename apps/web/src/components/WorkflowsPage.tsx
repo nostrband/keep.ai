@@ -47,7 +47,7 @@ export default function WorkflowsPage() {
                   <div className="flex-1">
                     <div className="flex items-center gap-2 mb-2">
                       <h3 className="font-medium text-gray-900">
-                        {workflow.title || `Workflow ${workflow.id.slice(0, 8)}`}
+                        {workflow.title || "New workflow"}
                       </h3>
                       <WorkflowStatusBadge status={workflow.status} />
                     </div>

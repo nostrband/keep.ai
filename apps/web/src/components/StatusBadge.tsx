@@ -6,7 +6,7 @@ import { Badge } from "../ui";
 export function WorkflowStatusBadge({ status }: { status: string }) {
   switch (status) {
     case "active":
-      return <Badge className="bg-green-100 text-green-800">Running</Badge>;
+      return <Badge className="bg-green-100 text-green-800">Active</Badge>;
     case "paused":
       return <Badge className="bg-yellow-100 text-yellow-800">Paused</Badge>;
     case "error":

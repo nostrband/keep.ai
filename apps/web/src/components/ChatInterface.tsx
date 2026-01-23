@@ -303,7 +303,7 @@ export default function ChatInterface({
   return (
     <div ref={containerRef} className="max-w-4xl mx-auto">
       <div className="px-6">
-        {hasNextPage && (
+        {hasNextPage && rows.length > 0 && (
           <div className="py-4 text-center text-gray-500">
             {isFetching
               ? "Loading older messages..."

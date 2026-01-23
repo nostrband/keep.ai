@@ -10,3 +10,9 @@ body {
   width: 100%;
   height: 100vh;
 }
+
+/* Override streamdown Mermaid fullscreen background to be fully opaque */
+/* The library uses bg-background/95 which is semi-transparent; we need solid */
+.fixed.inset-0.z-50 {
+  background-color: hsl(var(--background) / 1) !important;
+}
