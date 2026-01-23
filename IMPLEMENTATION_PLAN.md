@@ -328,12 +328,14 @@ The connectors framework enables multi-account OAuth connections for Gmail and o
   - Removed old Gmail-specific integration code
   - Added ConnectionsSection below main configuration form
   - Clean separation of concerns
+- [x] Implement connection label persistence via useUpdateConnectionLabel hook
 
 **Implementation Notes:**
 - Used a section-based layout instead of tabs (simpler, all on one page)
 - Combined ConnectionCard and AddServiceModal functionality into a single ServiceGroup component
 - No disconnect confirmation modal (simple delete for v1, can add later if needed)
-- Rename updates are local-only for now (labels stored in database)
+- Connection label persistence: implemented via `useUpdateConnectionLabel` hook which persists user-provided labels to the database `connections.label` field
+- Rename updates persist across sessions (labels stored in database)
 
 ### 1.7 Additional Connectors
 
