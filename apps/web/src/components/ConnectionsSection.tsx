@@ -10,6 +10,7 @@
 import { useState, useEffect } from "react";
 import { Mail, HardDrive, Sheet, FileText, BookOpen, MoreVertical, Plus, RefreshCw, Unlink, Check, AlertCircle, Pencil } from "lucide-react";
 import { useConnections } from "../hooks/dbConnectionReads";
+import { useUpdateConnectionLabel } from "../hooks/dbWrites";
 import { useAutoHidingMessage } from "../hooks/useAutoHidingMessage";
 import { API_ENDPOINT } from "../const";
 import { openUrl } from "../lib/url-utils";
@@ -319,6 +320,7 @@ function ServiceGroup({
  */
 export default function ConnectionsSection() {
   const { data: connections = [], isLoading } = useConnections();
+  const updateLabelMutation = useUpdateConnectionLabel();
   const [pendingService, setPendingService] = useState<string | null>(null);
   const [checkingConnections, setCheckingConnections] = useState<Set<string>>(new Set());
   const success = useAutoHidingMessage({ duration: 3000 });
@@ -417,10 +419,11 @@ export default function ConnectionsSection() {
   const handleRename = async (connectionId: string, newLabel: string) => {
     try {
       setError(null);
-      // Labels are stored in the local database, update via the connection store
-      // For now, we'll just show a success message - the actual update needs db write
-      // TODO: Add updateLabel mutation hook
-      success.show("Label updated (local only for now)");
+      await updateLabelMutation.mutateAsync({
+        connectionId,
+        label: newLabel,
+      });
+      success.show("Label updated");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to rename");
     }

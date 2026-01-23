@@ -243,3 +243,27 @@ export function useActivateScriptVersion() {
  * This alias is provided for backward compatibility during transition.
  */
 export const useRollbackScript = useActivateScriptVersion;
+
+/**
+ * Update the label for a connection.
+ * Labels are user-defined names like "Work Gmail" or "Personal Drive".
+ */
+export function useUpdateConnectionLabel() {
+  const { api } = useDbQuery();
+
+  return useMutation({
+    mutationFn: async (input: { connectionId: string; label: string }) => {
+      if (!api) throw new Error("Connection store not available");
+
+      await api.connectionStore.updateLabel(input.connectionId, input.label);
+      return input;
+    },
+    onSuccess: (_result, { connectionId }) => {
+      // Invalidate connection queries to get fresh data
+      queryClient.invalidateQueries({ queryKey: qk.connection(connectionId) });
+      queryClient.invalidateQueries({ queryKey: qk.allConnections() });
+
+      notifyTablesChanged(["connections"], true, api!);
+    },
+  });
+}
