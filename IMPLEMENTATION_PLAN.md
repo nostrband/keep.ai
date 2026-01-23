@@ -622,19 +622,17 @@ These features significantly improve user confidence and experience.
 - Add archive status to hide from main list
 - Add "stale drafts" banner on main page
 
-### 3.4 In-App Bug Reporting (idea: in-app-bug-report.md)
+### 3.4 In-App Bug Reporting (idea: in-app-bug-report.md) - COMPLETED
 
-**Action Items:**
-- [ ] Add "Report Issue" button to error notifications
-- [ ] Create bug report form modal with pre-filled context:
-  - Error message
-  - Workflow/task ID and name
-  - Timestamp
-  - Script version (if applicable)
-  - Anonymized logs (last N events)
-- [ ] Integration option: GitHub Issues URL with pre-filled template
-  - Format: `https://github.com/org/repo/issues/new?title=...&body=...`
-- [ ] Alternative: mailto link with pre-filled subject/body
+**Status:** Implemented with GitHub Issues integration:
+- [x] Add "Report Issue" button to ErrorCard (all error types)
+- [x] Add "Report Issue" button to EscalatedCard (for escalated failures)
+- [x] Create `bugReport.ts` utility for generating GitHub issue URLs
+- [x] Pre-filled context includes:
+  - Error type, service, message
+  - Workflow title and timestamp
+  - Issue template with sections for reproduction steps
+- [x] Opens GitHub Issues in new tab with pre-filled template
 
 ---
 
