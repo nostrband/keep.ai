@@ -13,6 +13,10 @@ export type { Thread as StorageThreadType } from "./memory-store";
 export { ChatStore } from "./chat-store";
 export type { ChatMessage } from "./chat-store";
 
+// Connection store
+export { ConnectionStore } from "./connection-store";
+export type { Connection, ConnectionStatus } from "./connection-store";
+
 // Note store
 export { NoteStore } from "./note-store";
 export type { Note, NoteListItem } from "./note-store";

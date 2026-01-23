@@ -86,10 +86,10 @@ const DEFAULT_PUSH_SERVER_PUBKEY =
   "e46b5c98fe12661a765ded00ca05866ea0b58bd175454aed703fba2589f6c666";
 
 // Gmail OAuth configuration
-const GMAIL_CLIENT_ID =
-  "642393276548-lfrhhkuf7nfuo6o3542tmibj8306a17m.apps.googleusercontent.com";
-const GMAIL_CLIENT_SECRET =
-  process.env.GMAIL_SECRET || process.env.BUILD_GMAIL_SECRET;
+// Client ID and secret are injected at build time from secrets.build.json or env vars
+// See apps/server/tsup.config.ts and specs/connectors-00-build-secrets.md
+const GMAIL_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
+const GMAIL_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
 
 // Backend server configuration for user authentication and API key management
 const BACKEND_SERVER_URL = "https://api.getkeep.ai";

@@ -1,5 +1,6 @@
 import { AssistantUIMessage, AutonomyMode } from "@app/proto";
 import { ChatStore } from "./chat-store";
+import { ConnectionStore } from "./connection-store";
 import { KeepDb } from "./database";
 import { MemoryStore, Thread } from "./memory-store";
 import { NoteStore } from "./note-store";
@@ -17,6 +18,7 @@ export class KeepDbApi {
   public readonly db: KeepDb;
   public readonly memoryStore: MemoryStore;
   public readonly chatStore: ChatStore;
+  public readonly connectionStore: ConnectionStore;
   public readonly noteStore: NoteStore;
   public readonly taskStore: TaskStore;
   public readonly nostrPeerStore: NostrPeerStore;
@@ -30,6 +32,7 @@ export class KeepDbApi {
     this.db = db;
     this.memoryStore = new MemoryStore(db);
     this.chatStore = new ChatStore(db);
+    this.connectionStore = new ConnectionStore(db);
     this.noteStore = new NoteStore(db);
     this.taskStore = new TaskStore(db);
     this.nostrPeerStore = new NostrPeerStore(db);

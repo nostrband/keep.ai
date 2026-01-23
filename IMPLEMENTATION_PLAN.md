@@ -1,5 +1,7 @@
 # Keep.AI v1.0.0 Implementation Plan
 
+> **Note (2026-01-23):** Sections 1.1 (Build-Time Secrets), 1.2 (Core Connectors Package), and 1.3 (Connection Manager + Database) are now fully implemented.
+
 ## Priority 1: Connectors Framework (Current Focus - BLOCKING)
 
 The connectors framework enables multi-account OAuth connections for Gmail and other services. This is the current development focus and blocks all new service integrations.
@@ -17,7 +19,7 @@ The connectors framework enables multi-account OAuth connections for Gmail and o
 ### 1.1 Build-Time Secrets (spec: connectors-00-build-secrets.md)
 
 **Action Items:**
-- [ ] Create `secrets.build.json` template at project root with structure:
+- [x] Create `secrets.build.json` template at project root with structure:
   ```json
   {
     "GOOGLE_CLIENT_ID": "...",
@@ -26,19 +28,19 @@ The connectors framework enables multi-account OAuth connections for Gmail and o
     "NOTION_CLIENT_SECRET": "..."
   }
   ```
-- [ ] Update `apps/server/tsup.config.ts` - current pattern (lines 4-19):
+- [x] Update `apps/server/tsup.config.ts` - current pattern (lines 4-19):
   - Add file loading: `const secrets = fs.existsSync('secrets.build.json') ? JSON.parse(fs.readFileSync('secrets.build.json', 'utf-8')) : {}`
   - Add validation for each secret with env var fallback
   - Add to `define` object: `'process.env.GOOGLE_CLIENT_ID': JSON.stringify(secrets.GOOGLE_CLIENT_ID || process.env.GOOGLE_CLIENT_ID)`
-- [ ] Add `secrets.build.example.json` (committed) with empty values and comments
-- [ ] Add `secrets.build.json` to `.gitignore` (verify not already present)
-- [ ] Create `packages/connectors/src/credentials.ts`:
+- [x] Add `secrets.build.example.json` (committed) with empty values and comments
+- [x] Add `secrets.build.json` to `.gitignore` (verify not already present)
+- [x] Create `packages/connectors/src/credentials.ts`:
   ```typescript
   export interface OAuthAppCredentials { clientId: string; clientSecret: string; }
   export function getGoogleCredentials(): OAuthAppCredentials { /* from process.env */ }
   export function getNotionCredentials(): OAuthAppCredentials { /* from process.env */ }
   ```
-- [ ] Document CI/CD setup: GitHub Actions should set env vars that override missing secrets file
+- [x] Document CI/CD setup: GitHub Actions should set env vars that override missing secrets file
 
 **Constraints:**
 - Desktop OAuth client secrets are public by design (security relies on redirect URI validation)
@@ -48,7 +50,7 @@ The connectors framework enables multi-account OAuth connections for Gmail and o
 ### 1.2 Core Connectors Package (spec: connectors-01-core-package.md) - BLOCKS 1.3-1.7
 
 **Action Items:**
-- [ ] Create `packages/connectors/` directory structure:
+- [x] Create `packages/connectors/` directory structure:
   ```
   packages/connectors/
   ├── package.json          # name: "@app/connectors", minimal deps
@@ -61,27 +63,27 @@ The connectors framework enables multi-account OAuth connections for Gmail and o
       ├── credentials.ts    # getGoogleCredentials(), getNotionCredentials()
       └── services/         # service definitions (added in later specs)
   ```
-- [ ] Implement `types.ts` interfaces (see spec for full definitions):
+- [x] Implement `types.ts` interfaces (see spec for full definitions):
   - `ConnectionId` = `${service}:${accountId}` format
   - `OAuthConfig` = URLs, scopes, extra params
   - `OAuthCredentials` = access_token, refresh_token, expiry_date, metadata
   - `Connection` = id, service, accountId, status, label, error, timestamps
   - `ServiceDefinition` = name, oauthConfig, fetchProfile, extractAccountId
-- [ ] Implement `oauth.ts` OAuthHandler class:
+- [x] Implement `oauth.ts` OAuthHandler class:
   - `getAuthUrl(config, state)` - generate authorization URL
   - `exchangeCode(config, code, redirectUri)` - exchange code for tokens
   - `refreshToken(config, refreshToken)` - refresh expired access token
   - Support both standard OAuth2 and Basic auth (for Notion)
-- [ ] Implement `store.ts` CredentialStore class:
+- [x] Implement `store.ts` CredentialStore class:
   - Path pattern: `{userPath}/connectors/{service}/{accountId}.json`
   - `save(service, accountId, credentials)` - write with mode 0o600
   - `load(service, accountId)` - read credentials
   - `delete(service, accountId)` - remove credentials file
   - `listByService(service)` - list all accountIds for service
   - `listAll()` - list all connections
-- [ ] Add `credentials.ts` (from 1.1)
-- [ ] Export all public interfaces from `index.ts`
-- [ ] Add package.json:
+- [x] Add `credentials.ts` (from 1.1)
+- [x] Export all public interfaces from `index.ts`
+- [x] Add package.json:
   ```json
   {
     "name": "@app/connectors",
@@ -89,13 +91,13 @@ The connectors framework enables multi-account OAuth connections for Gmail and o
     "dependencies": {}  // minimal - no @app/db
   }
   ```
-- [ ] Add to root package.json workspaces if not auto-detected
+- [x] Add to root package.json workspaces if not auto-detected
 
 **Testing Requirements:**
-- [ ] Unit tests for OAuthHandler (95%+ coverage target for security-critical code)
-- [ ] Unit tests for CredentialStore (98%+ coverage target - handles sensitive data)
-- [ ] Integration tests for token refresh flow
-- [ ] Mock tests for OAuth URL generation and code exchange
+- [x] Unit tests for OAuthHandler (95%+ coverage target for security-critical code)
+- [x] Unit tests for CredentialStore (98%+ coverage target - handles sensitive data)
+- [x] Integration tests for token refresh flow
+- [x] Mock tests for OAuth URL generation and code exchange
 
 **Constraints:**
 - Credentials stored in files (sensitive), metadata in database (syncs to clients)
@@ -113,7 +115,7 @@ The connectors framework enables multi-account OAuth connections for Gmail and o
 ### 1.3 Connection Manager + Database (spec: connectors-02-connection-manager.md) - BLOCKS 1.4-1.7
 
 **Action Items:**
-- [ ] Create `ConnectionManager` class in `packages/connectors/src/connection-manager.ts`:
+- [x] Create `ConnectionManager` class in `packages/connectors/src/connection-manager.ts`:
   ```typescript
   interface ConnectionDb {  // Injected, not imported from @app/db
     getConnection(id: string): Promise<Connection | null>;
@@ -138,17 +140,17 @@ The connectors framework enables multi-account OAuth connections for Gmail and o
     markError(service: string, accountId: string, error: string): Promise<void>;
   }
   ```
-- [ ] Implement CSRF protection:
+- [x] Implement CSRF protection:
   - Generate random state parameter on `startOAuthFlow()`
   - Store in Map with timestamp: `pendingStates: Map<string, { service: string; timestamp: number }>`
   - Validate and consume in `completeOAuthFlow()`
   - TTL: 10 minutes, lazy cleanup on new flow starts
-- [ ] Implement token refresh in `getCredentials()`:
+- [x] Implement token refresh in `getCredentials()`:
   - Check `expiry_date - 5 minutes < now`
   - If expired/expiring, call `oauthHandler.refreshToken()`
   - Save new credentials via `store.save()`
   - For Notion: skip refresh (tokens don't expire)
-- [ ] Create database migration **v33** in `packages/db/src/migrations/v33.ts`:
+- [x] Create database migration **v33** in `packages/db/src/migrations/v33.ts`:
   ```typescript
   export async function migrateV33(tx: DBInterface["tx"]) {
     await tx.exec("PRAGMA user_version = 33");
@@ -169,27 +171,27 @@ The connectors framework enables multi-account OAuth connections for Gmail and o
     await tx.exec(`SELECT crsql_as_crr('connections')`);
   }
   ```
-- [ ] Register v33 in `packages/db/src/database.ts` migrations Map (after line ~113)
-- [ ] Create `ConnectionStore` in `packages/db/src/connection-store.ts`:
+- [x] Register v33 in `packages/db/src/database.ts` migrations Map (after line ~113)
+- [x] Create `ConnectionStore` in `packages/db/src/connection-store.ts`:
   - Follow pattern from `packages/db/src/note-store.ts` and `packages/db/src/file-store.ts`
   - Methods: `getConnection`, `listConnections`, `upsertConnection`, `deleteConnection`, `updateLastUsed`
   - Use `this.db.db.execO<Record<string, unknown>>()` for queries
-- [ ] Add `connectionStore` to `KeepDbApi` class in `packages/db/src/api.ts`:
+- [x] Add `connectionStore` to `KeepDbApi` class in `packages/db/src/api.ts`:
   ```typescript
   public readonly connectionStore: ConnectionStore;
   // In constructor:
   this.connectionStore = new ConnectionStore(db);
   ```
-- [ ] Export from `packages/db/src/index.ts`
-- [ ] Implement startup reconciliation (in server startup):
+- [x] Export from `packages/db/src/index.ts`
+- [x] Implement startup reconciliation (in server startup):
   - List all credential files in `{userPath}/connectors/*/*`
   - For each, ensure matching db row exists
   - For db rows without files, mark status='error'
 
 **Testing Requirements:**
-- [ ] Unit tests for ConnectionManager CSRF flow
-- [ ] Unit tests for token refresh timing logic (mock Date.now)
-- [ ] Integration tests for file/db reconciliation
+- [x] Unit tests for ConnectionManager CSRF flow
+- [x] Unit tests for token refresh timing logic (mock Date.now)
+- [x] Integration tests for file/db reconciliation
 
 **Invariants:**
 - Tools MUST specify `accountId` explicitly - no default account fallback

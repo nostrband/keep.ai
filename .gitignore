@@ -111,3 +111,6 @@ test-results.xml
 # Backup files
 *.bak
 *.backup
+
+# OAuth app credentials (build-time)
+secrets.build.json

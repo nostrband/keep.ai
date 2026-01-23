@@ -19,6 +19,7 @@
     "paths": {
       "@app/proto/*": ["packages/proto/src/*"],
       "@app/agent/*": ["packages/agent/src/*"],
+      "@app/connectors/*": ["packages/connectors/src/*"],
       "@app/db/*": ["packages/db/src/*"],
       "@app/sync/*": ["packages/sync/src/*"],
       "@app/node/*": ["packages/node/src/*"],
