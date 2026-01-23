@@ -1,0 +1,207 @@
+COMMIT REVIEW: f142786
+=======================
+Title: test: Add comprehensive tests for ChatStore
+Date: 2026-01-22 17:45:20 +0100
+Author: Artur (Co-Authored-By: Claude Opus 4.5)
+
+CHANGES SUMMARY
+---------------
+Added 32 new tests for ChatStore covering the Spec 12 chat_messages table:
+- Tests for saveChatMessage, getNewChatMessages, getChatMessageById
+- Tests for countNewMessages, getLastMessageActivity
+- Tests for createChat, getChat, getChatByWorkflowId, updateChat, deleteChat
+- Tests for readChat, getAllChats
+- Edge case tests for special characters, long content, INSERT OR REPLACE
+
+Files changed (2):
+- IMPLEMENTATION_PLAN.md (+8 lines documenting test additions)
+- packages/tests/src/chat-store.test.ts (+805 lines new test file)
+
+TEST COVERAGE ANALYSIS
+----------------------
+
+METHODS TESTED (13):
++ saveChatMessage()
++ getNewChatMessages()
++ getChatMessageById()
++ countNewMessages()
++ getLastMessageActivity()
++ createChat()
++ getChat()
++ getChatByWorkflowId()
++ updateChat()
++ deleteChat()
++ readChat()
++ getAllChats()
+
+METHODS NOT TESTED (Legacy/Deprecated - Acceptable):
+- getChatMessages() (deprecated, uses chat_events)
+- getChatEvents() (deprecated, uses chat_events)
+- saveChatMessages() (deprecated)
+- saveChatEvent() (deprecated)
+- countMessages() (deprecated)
+- getLastChatActivity() (deprecated)
+- getLastChatActivities() (deprecated)
+- getChatFirstMessage() (deprecated)
+
+EDGE CASES COVERED:
++ Empty chat (no messages)
++ Special characters in content (including <script> tags)
++ Very long content (100KB)
++ INSERT OR REPLACE idempotency
++ Empty metadata fields with defaults
++ Multiple role types (user/assistant)
++ Timestamp filtering (since, before)
++ Pagination with limit
+
+ISSUES FOUND
+------------
+
+ISSUE 1: MEDIUM - Schema Mismatch in Test Table Helper
+Severity: MEDIUM
+Location: packages/tests/src/chat-store.test.ts:11-21
+
+The test table creation helper is MISSING DEFAULT clauses that exist in migration v30:
+
+Test helper:
+```sql
+chat_id TEXT NOT NULL,
+role TEXT NOT NULL,
+content TEXT NOT NULL,
+timestamp TEXT NOT NULL,
+```
+
+Migration v30:
+```sql
+chat_id TEXT NOT NULL DEFAULT '',
+role TEXT NOT NULL DEFAULT '',
+content TEXT NOT NULL DEFAULT '',
+timestamp TEXT NOT NULL DEFAULT '',
+```
+
+This matters for cr-sqlite CRR (Conflict-free Replicated Relations) tables which require
+DEFAULT values for all NOT NULL columns. Tests may pass but hide production schema issues.
+
+Proposal: Add DEFAULT '' to all NOT NULL columns in the test table helper to match
+production schema exactly.
+
+ISSUE 2: MEDIUM - Transaction Parameter Not Tested
+Severity: MEDIUM
+Location: packages/tests/src/chat-store.test.ts (entire file)
+
+Methods like saveChatMessage(), createChat(), updateChat() accept an optional `tx`
+(transaction) parameter but this is never tested. Transactional behavior is untested.
+
+Proposal: Add test cases verifying:
+- Multiple operations in a single transaction commit together
+- Transaction rollback on error
+- Transaction isolation
+
+ISSUE 3: LOW - Timing-Dependent Test
+Severity: LOW
+Location: packages/tests/src/chat-store.test.ts:595-616
+
+Test uses setTimeout with 10ms delay:
+```typescript
+await new Promise(resolve => setTimeout(resolve, 10));
+```
+
+This could be flaky on slow CI systems or under load.
+
+Proposal: Use explicit timestamps instead of relying on wall-clock timing:
+```typescript
+const futureTimestamp = new Date(Date.now() + 1000).toISOString();
+await chatStore.readChat("chat-1", futureTimestamp);
+```
+
+ISSUE 4: LOW - Missing Error Handling Tests
+Severity: LOW
+Location: packages/tests/src/chat-store.test.ts (entire file)
+
+No tests for:
+- Duplicate message IDs (PRIMARY KEY constraint)
+- NULL value validation on NOT NULL columns
+- Invalid role types (should schema enforce enum?)
+- Malformed JSON content handling
+
+Proposal: Add negative test cases:
+```typescript
+it("should handle duplicate message IDs", async () => {
+  await chatStore.saveChatMessage({ id: "msg-1", ... });
+  // Second save with same ID should replace, not throw
+  await chatStore.saveChatMessage({ id: "msg-1", content: "updated" });
+  // OR if it should throw:
+  await expect(chatStore.saveChatMessage({ id: "msg-1", ... })).rejects.toThrow();
+});
+```
+
+ISSUE 5: LOW - Missing Pagination Combination Tests
+Severity: LOW
+Location: packages/tests/src/chat-store.test.ts
+
+Individual tests for `limit`, `since`, `before` exist but combinations are not tested:
+- limit + since
+- limit + before
+- limit + since + before
+
+Proposal: Add tests for filter combinations to verify correct SQL generation.
+
+ISSUE 6: LOW - No Concurrency Tests
+Severity: LOW
+Location: packages/tests/src/chat-store.test.ts (entire file)
+
+No tests for:
+- Simultaneous message saves to same chat
+- Race conditions during concurrent reads/writes
+- Atomic operations
+
+Proposal: Add concurrency tests using Promise.all to simulate parallel operations.
+
+POSITIVE NOTES
+--------------
+- Excellent test isolation using beforeEach/afterEach with in-memory database
+- Proper cleanup of database connections
+- Comprehensive coverage of basic CRUD operations
+- Good edge case coverage for content handling
+- Fast execution (77ms for all 32 tests)
+- Tests run without CR-SQLite dependencies (simpler CI setup)
+- Tests match the new Spec 12 API correctly
+
+TEST QUALITY SCORE
+------------------
+| Category              | Score  | Notes                                      |
+|-----------------------|--------|--------------------------------------------|
+| Basic CRUD Coverage   | 9/10   | All core methods tested                    |
+| Edge Cases            | 6/10   | Good but missing advanced scenarios        |
+| Schema Alignment      | 7/10   | Missing DEFAULT clauses in test helper     |
+| Error Handling        | 5/10   | Minimal negative test coverage             |
+| Concurrency           | 0/10   | No concurrent operation tests              |
+| Flakiness             | 8/10   | One timing-dependent test                  |
+| Isolation             | 9/10   | Excellent test isolation                   |
+| Pagination            | 5/10   | Basic limit tested, combinations missing   |
+
+OVERALL GRADE: B+ (Very Good with Minor Gaps)
+
+VERDICT
+-------
+The test suite provides solid coverage of core Spec 12 functionality. All 32 tests pass
+successfully. The tests properly isolate each test case and clean up resources.
+
+The main concerns are:
+1. Schema mismatch in test helper (MEDIUM) - could hide production issues
+2. No transaction testing (MEDIUM) - critical path untested
+3. Minor gaps in edge cases and error handling
+
+RECOMMENDATION: Address the schema mismatch (ISSUE 1) as priority since it affects
+test/production parity. Transaction testing (ISSUE 2) should be added to ensure
+data integrity in production scenarios.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Schema mismatch in test helper) - covered by specs/new/align-test-schemas-with-production.md
+- Issue #2 (Transaction parameter not tested) - skipped
+- Issue #3 (Timing-dependent test) - skipped
+- Issue #4 (Missing error handling tests) - skipped
+- Issue #5 (Missing pagination combination tests) - skipped
+- Issue #6 (No concurrency tests) - skipped

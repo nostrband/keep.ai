@@ -1,0 +1,113 @@
+COMMIT: fda778e
+TITLE: fix: Improve billing reliability and code quality in openrouter-proxy
+DATE: 2026-01-22
+
+== CHANGES ==
+
+This commit addresses several code quality issues in openrouter-proxy.ts:
+
+1. **TypeScript interfaces added:**
+   - `OpenRouterMessage` interface with `role: string` and `content: string`
+   - `UserInfo` interface with `id: string`
+   - Updated method signatures to use `UserInfo` instead of `any` for user parameter
+   - Changed `filterHeaders` return type to `Record<string, string>`
+
+2. **Billing reliability fix:**
+   - Changed `finalizeBilling()` call from fire-and-forget to `.then()/.catch()` pattern
+   - Now ensures `res.end()` is only called after billing completes
+   - Logs error if billing finalization fails
+
+3. **Logging improvements:**
+   - Replaced `console.error` with `this.logger.error` in proxy response/request error handlers
+   - Added `this.logger.debug()` for JSON parse errors in streaming response
+
+4. **Documentation:**
+   - Added section to IMPLEMENTATION_PLAN.md documenting the issues found and fixes applied
+   - Updated version reference to v1.0.0-alpha.11
+
+== ISSUES ==
+
+### ISSUE 1: Incomplete UserInfo interface
+**Severity: Low**
+**Location: openrouter-proxy.ts:29-31**
+
+The `UserInfo` interface only defines `id: string`, but the actual user object from the authentication system likely has more properties. If code later tries to access other user properties, TypeScript won't catch it.
+
+**Current code:**
+```typescript
+interface UserInfo {
+  id: string;
+}
+```
+
+### ISSUE 2: Billing .then()/.catch() pattern has edge case
+**Severity: Medium**
+**Location: openrouter-proxy.ts:149-155**
+
+The fix uses `.then()/.catch()` to ensure billing completes before ending the response. However, there's a subtle issue: if the billing promise takes too long, the client might timeout waiting for `[DONE]` to be followed by connection close.
+
+Additionally, the error handling path calls `res.end()` but doesn't inform the client that billing failed - the client sees a successful response even if billing was lost.
+
+**Current code:**
+```typescript
+this.finalizeBilling(user.id, apiKeyId, totalCost, totalTokens, model)
+  .then(() => res.end())
+  .catch((err) => {
+    this.logger.error('Billing finalization failed', err);
+    res.end();
+  });
+```
+
+### ISSUE 3: Race condition in billing still exists (pre-existing)
+**Severity: High (but pre-existing, not introduced by this commit)**
+
+The core billing race condition wasn't addressed by this commit:
+- Balance is checked at line 58 (before request)
+- Deduction happens at line 316 (after stream ends)
+- Multiple concurrent requests can pass the balance check and all deduct, causing negative balance
+
+### ISSUE 4: filterHeaders type is overly strict
+**Severity: Low**
+**Location: openrouter-proxy.ts:277**
+
+The parameter type `Record<string, string | string[] | undefined>` is more specific than Express's `IncomingHttpHeaders` type. While this works, it could cause type errors if the codebase is updated to pass actual Express headers directly.
+
+== PROPOSALS ==
+
+### PROPOSAL 1: Expand UserInfo interface or import from auth module
+If there's an existing user type in auth.ts, import and use that instead. Otherwise, consider documenting that UserInfo is intentionally minimal for this use case:
+
+```typescript
+// Minimal user info needed for billing
+interface UserInfo {
+  id: string;
+}
+```
+
+### PROPOSAL 2: Add timeout to billing promise
+Consider adding a reasonable timeout to prevent clients from hanging:
+
+```typescript
+const billingPromise = this.finalizeBilling(user.id, apiKeyId, totalCost, totalTokens, model);
+const timeout = new Promise((_, reject) =>
+  setTimeout(() => reject(new Error('Billing timeout')), 5000)
+);
+
+Promise.race([billingPromise, timeout])
+  .then(() => res.end())
+  .catch((err) => {
+    this.logger.error('Billing finalization failed or timed out', err);
+    res.end();
+  });
+```
+
+### PROPOSAL 3: Address billing race condition (separate future work)
+The fundamental billing race condition needs atomic database operations:
+```sql
+UPDATE users SET balance = balance - ? WHERE id = ? AND balance >= ?
+```
+This is out of scope for this commit but should be tracked for future work.
+
+== SUMMARY ==
+
+Good code quality improvements. The TypeScript typing is better, logging is more consistent, and the billing reliability fix prevents the most obvious data loss scenario. The remaining issues are minor or pre-existing architectural concerns.

@@ -1,0 +1,133 @@
+# Review: Commit 7446fc8 - Complete StatusBadge consolidation with ScriptRunStatusBadge
+
+## Summary of Changes
+
+This commit adds a new `ScriptRunStatusBadge` component to the StatusBadge.tsx file and replaces inline badge rendering logic across multiple pages. The goal is to consolidate duplicate status badge code into reusable components.
+
+### Files Changed:
+1. `apps/web/src/components/StatusBadge.tsx` - Added ScriptRunStatusBadge component
+2. `apps/web/src/components/ScriptDetailPage.tsx` - Replaced inline badge with ScriptRunStatusBadge
+3. `apps/web/src/components/ScriptRunDetailPage.tsx` - Replaced inline badges with ScriptRunStatusBadge (two usages)
+4. `apps/web/src/components/TaskDetailPage.tsx` - Replaced inline workflow/task run badges with consolidated components
+5. `apps/web/src/components/WorkflowDetailPage.tsx` - Replaced inline script run badges with ScriptRunStatusBadge
+6. `IMPLEMENTATION_PLAN.md` - Updated status of spec item #26
+
+### ScriptRunStatusBadge Features:
+- Accepts `error` and `endTimestamp` props for status detection
+- Supports `size` prop ("default" | "small") for compact lists vs headers
+- Supports customizable `labels` prop for context-dependent text (e.g., "Error"/"Completed"/"Running" or "Failed"/"Success"/"Running")
+- Status logic: error → destructive, endTimestamp → green success, else → secondary (running)
+
+---
+
+## Potential Issues
+
+### Issue 1: Inconsistent Status Detection Approaches (Medium Severity)
+
+**Location**: StatusBadge.tsx (lines 54-74 for ScriptRunStatusBadge vs lines 39-49 for TaskRunStatusBadge)
+
+**Problem**: The new `ScriptRunStatusBadge` uses a different status detection approach compared to existing badges:
+- `TaskRunStatusBadge`: Takes a `state` string prop directly
+- `ScriptRunStatusBadge`: Derives status from `error` and `endTimestamp` fields
+
+This architectural inconsistency means:
+1. The caller must understand different data models for different badge types
+2. If script runs later add a `state` field, there will be redundant status determination
+
+**Proposal**: Consider documenting why ScriptRunStatusBadge uses field-based detection (script runs don't have a state field in the data model). Alternatively, create an adapter function or use consistent approaches across all badges.
+
+---
+
+### Issue 2: Missing Test/Retry Badge Consolidation (Low Severity)
+
+**Location**: ScriptRunDetailPage.tsx lines 50-56, WorkflowDetailPage.tsx (multiple locations)
+
+**Problem**: The commit consolidates status badges but leaves Test and Retry badges as hardcoded inline implementations:
+
+```tsx
+{run.type === 'test' && (
+  <Badge variant="outline" className="text-amber-700 border-amber-300 bg-amber-50">
+    Test
+  </Badge>
+)}
+```
+
+This same pattern exists in multiple files with identical styling, creating:
+1. Code duplication across pages
+2. Risk of styling drift if one location is updated but not others
+
+**Proposal**: Create `TestRunBadge` and `RetryBadge` helper components in StatusBadge.tsx with the consistent amber/orange styling.
+
+---
+
+### Issue 3: Green Badge Styling Override Pattern (Low Severity)
+
+**Location**: StatusBadge.tsx line 70
+
+**Problem**: The green success badge uses both `variant="default"` AND a className override:
+```tsx
+<Badge variant="default" className={`bg-green-100 text-green-800 ${sizeClass}`}>
+```
+
+This pattern:
+1. Overrides the variant's default styling with hardcoded colors
+2. Is inconsistent with destructive badges which don't use className overrides
+3. Could cause issues if the Badge component's default variant changes
+
+**Proposal**: Either create a dedicated "success" variant in the Badge component, or consistently use className overrides for all variants that need custom colors.
+
+---
+
+### Issue 4: Fallback Logic in Call Sites (Medium Severity)
+
+**Location**: TaskDetailPage.tsx line 280 (visible in diff context)
+
+**Problem**: The fallback logic for TaskRunStatusBadge still lives in the component call site:
+```tsx
+<TaskRunStatusBadge state={run.state || (run.error ? 'error' : 'pending')} />
+```
+
+This pattern wasn't addressed in this commit, creating inconsistency where:
+- ScriptRunStatusBadge handles error detection internally
+- TaskRunStatusBadge requires callers to handle error fallback logic
+
+**Proposal**: Consider updating TaskRunStatusBadge to accept error as an optional prop (like ScriptRunStatusBadge) and handle fallback internally.
+
+---
+
+### Issue 5: Missing TypeScript Type Guards (Low Severity)
+
+**Location**: StatusBadge.tsx lines 54-74
+
+**Problem**: The ScriptRunStatusBadge component accepts `error?: string | null` and `endTimestamp?: string | null` but doesn't validate these inputs:
+- If error is an empty string `""`, it's falsy and would show as "Running" instead of "Error"
+- No validation that endTimestamp is a valid date string
+
+**Proposal**: Add type guards:
+```typescript
+if (error && error.trim().length > 0) {
+  return <Badge variant="destructive" ...>
+}
+```
+
+---
+
+## Code Quality Observations
+
+### Positive Aspects:
+1. Good component API design with size and labels customization
+2. Clear JSDoc-style comment explaining the component's purpose
+3. Consistent use of the existing Badge component
+4. Props naming follows established conventions
+
+### Minor Style Notes:
+- The labels default object is created inline on every render; could be extracted as a constant for minor performance improvement
+- No explicit return type annotation on the component function
+
+---
+
+## Summary
+
+This commit successfully consolidates duplicate status badge logic for script runs. The main architectural concern is the inconsistent status detection approach (field-based vs state-based) between different badge components, which may cause confusion for developers. The Test/Retry badges remain as duplicated inline implementations that could benefit from similar consolidation.
+
+**Overall Assessment**: Good consolidation effort with minor architectural inconsistencies that don't affect functionality but could be addressed in a follow-up.

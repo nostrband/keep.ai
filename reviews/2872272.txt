@@ -1,0 +1,159 @@
+COMMIT REVIEW: 2872272
+======================
+Title: Implement Spec 05: Chat Page Update
+Author: Artur <artur@keep.ai>
+Date: Thu Jan 22 14:20:35 2026 +0100
+Co-Authored-By: Claude Opus 4.5
+
+FILES CHANGED:
+- IMPLEMENTATION_PLAN.md (+14/-5)
+- apps/web/src/components/ChatDetailPage.tsx (+21/-1)
+- apps/web/src/components/WorkflowInfoBox.tsx (NEW, +84)
+- apps/web/src/hooks/dbScriptReads.ts (+22)
+- apps/web/src/hooks/queryKeys.ts (+1)
+
+SUMMARY OF CHANGES:
+===================
+This commit implements Spec 05: Chat Page Update by adding:
+
+1. **useWorkflowByChatId hook** - Fetches workflow associated with a chat
+   - Added to dbScriptReads.ts
+   - Uses api.scriptStore.getWorkflowByChatId(chatId)
+   - Returns null on error (consistent with other hooks in file)
+
+2. **workflowByChatId query key** - Added to queryKeys.ts for caching
+
+3. **WorkflowInfoBox component** - Shows workflow context on chat pages
+   - Displays workflow title with emoji prefix
+   - Shows WorkflowStatusBadge and schedule
+   - Human-readable cron schedule formatting via formatCronSchedule()
+   - Clickable - navigates to workflow hub page
+
+4. **ChatDetailPage integration** - Shows WorkflowInfoBox above chat content
+   when the chat has an associated workflow
+
+ISSUES IDENTIFIED:
+==================
+
+### Issue 1: Incorrect Import Path (MEDIUM)
+**Location:** WorkflowInfoBox.tsx:1
+**Problem:** Uses `import { Workflow } from "packages/db/dist"` instead of `@app/db`.
+Same issue as in commits 52042af and 8f073e7.
+
+**Proposal:** Change to `import type { Workflow } from "@app/db";`
+
+### Issue 2: formatCronSchedule Incomplete Cron Parsing (LOW)
+**Location:** WorkflowInfoBox.tsx:12-57
+**Problem:** The cron parser handles only a subset of common patterns:
+- Every minute
+- Every hour at specific minute
+- Daily at specific time
+- Weekly on specific day
+
+It doesn't handle:
+- Multiple values (e.g., "0 9,18 * * *" for 9am and 6pm)
+- Step values (e.g., "*/5 * * * *" for every 5 minutes)
+- Monthly schedules (e.g., "0 9 1 * *" for 1st of month)
+- Day ranges (e.g., "0 9 * * 1-5" for weekdays)
+
+For unsupported patterns, it returns the raw cron string which is not user-friendly.
+
+**Proposal:** Either:
+1. Expand the parser to handle more patterns (complex)
+2. Use a library like `cronstrue` for human-readable cron (recommended)
+3. Add a fallback like "Custom schedule" instead of showing raw cron
+
+### Issue 3: formatCronSchedule Doesn't Validate Input (LOW)
+**Location:** WorkflowInfoBox.tsx:18
+**Problem:** The parser splits on whitespace and checks for 5 parts, but doesn't
+validate that the parts contain valid values. Invalid cron like "99 99 99 99 99"
+would be parsed but produce nonsensical output.
+
+This is low priority since cron expressions are typically validated when saved.
+
+**Proposal:** Accept this limitation or add basic validation.
+
+### Issue 4: Error Swallowing in useWorkflowByChatId (LOW)
+**Location:** dbScriptReads.ts:190-193
+**Problem:** The hook catches errors and returns null without logging:
+```typescript
+} catch (error) {
+  return null;
+}
+```
+
+While this matches the pattern used by other hooks in the file (useScript,
+useWorkflow, useWorkflowByTaskId, etc.), it silently swallows errors which
+can make debugging difficult.
+
+**Proposal:** This is consistent with the codebase pattern, so it's acceptable.
+Consider adding debug logging in a future cleanup pass:
+```typescript
+} catch (error) {
+  debug('useWorkflowByChatId error:', error);
+  return null;
+}
+```
+
+### Issue 5: Hard-coded Emoji in WorkflowInfoBox (NITPICK)
+**Location:** WorkflowInfoBox.tsx:71
+**Problem:** The component uses a hard-coded clipboard emoji "📋" for all workflows.
+This is fine for consistency but doesn't allow for workflow-specific icons.
+
+**Proposal:** Low priority - acceptable for v1. Consider allowing workflow-specific
+icons in the future via a workflow.icon field or similar.
+
+### Issue 6: WorkflowInfoBox Not Exported from Index (NITPICK)
+**Location:** WorkflowInfoBox.tsx
+**Problem:** The component is only imported directly in ChatDetailPage.tsx. If it
+needs to be reused elsewhere, there's no barrel export.
+
+**Proposal:** This is fine for now since it's only used in one place. Add to
+component index if/when needed elsewhere.
+
+### Issue 7: formatCronSchedule 12-Hour Time Conversion Bug (LOW)
+**Location:** WorkflowInfoBox.tsx:33-36, 45-48
+**Problem:** The 12-hour time conversion has a subtle issue:
+```typescript
+const displayHour = hourNum === 0 ? 12 : hourNum > 12 ? hourNum - 12 : hourNum;
+```
+
+This correctly handles midnight (0 → 12 AM) and afternoon (13 → 1 PM), but
+12:00 would show as "12:00 PM" which is correct. However, the logic could be
+clearer with explicit handling of the noon case.
+
+Actually, reviewing again: for hourNum=12, the condition `hourNum > 12` is false,
+so displayHour=12, and period=PM. This is correct. No bug here.
+
+**Proposal:** No change needed - code is correct.
+
+POSITIVE ASPECTS:
+=================
+1. Clean hook implementation following established patterns
+2. Good query key namespacing (workflowByChatId)
+3. WorkflowInfoBox is a focused, single-purpose component
+4. Proper use of WorkflowStatusBadge from shared StatusBadge module
+5. Good UX - shows "Not scheduled" for workflows without cron
+6. Button-based clickable area is accessible
+7. Uses navigate() for programmatic navigation
+8. Consistent with codebase error handling patterns in hooks
+
+ADDITIONAL OBSERVATIONS:
+========================
+1. The formatCronSchedule function is exported, which is good - it's imported
+   and used in WorkflowDetailPage.tsx and MainPage.tsx per the exploration.
+
+2. The useWorkflowByChatId hook properly uses the new chat_id → workflow direct
+   link from Spec 09, avoiding the old task_id indirection.
+
+3. The component gracefully handles missing workflow (doesn't render anything
+   if workflow is null/undefined).
+
+CONCLUSION:
+===========
+This is a clean, well-implemented feature. The main issues are:
+1. Incorrect import path (consistent with other recent commits - should be batch fixed)
+2. Cron parser is limited but functional for common cases
+
+The implementation achieves the spec goals and integrates well with existing code.
+Lower priority fixes compared to the query key issue in commit 8f073e7.

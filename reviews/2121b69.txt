@@ -1,0 +1,82 @@
+COMMIT REVIEW: 2121b69
+=======================
+Title: Update IMPLEMENTATION_PLAN.md with database test fix
+Date: 2026-01-21
+Files: IMPLEMENTATION_PLAN.md
+
+SUMMARY
+-------
+This commit documents a fix to the user-server database tests in IMPLEMENTATION_PLAN.md.
+It adds item #68 describing a database test async fix and renumbers subsequent items
+(68-71 become 69-72). The fix addresses an issue where sqlite3's callback-based db.run()
+method was incorrectly used with await, causing race conditions in tests.
+
+The actual code fix (wrapping db.run() in a Promise) was applied in the PREVIOUS commit -
+this commit only updates the documentation to track that fix.
+
+CHANGES IN DETAIL
+-----------------
+1. Added section "68. User-Server Database Test Async Fix" documenting:
+   - Problem: await on callback-based db.run() didn't wait for UPDATE to complete
+   - Solution: Wrapped db.run() in Promise with resolve/reject pattern
+   - File affected: apps/user-server/src/__tests__/database.test.ts
+
+2. Renumbered subsequent items:
+   - "68. Detect Abandoned Drafts" -> "69. Detect Abandoned Drafts"
+   - "69. Prompt Stale Drafts" -> "70. Prompt Stale Drafts"
+   - "70. Highlight Significant Events" -> "71. Highlight Significant Events"
+   - "71. Collapse Low-Signal Events" -> "72. Collapse Low-Signal Events"
+
+3. Updated dependency reference:
+   - "Prompt Stale Drafts" dependency changed from #68 to #69
+
+4. Updated summary statistics:
+   - P3 count: 20 -> 21
+   - Total: 71 -> 72
+
+POTENTIAL ISSUES
+----------------
+
+### Issue 1: Incomplete Fix - server.test.ts Still Has Broken Pattern
+**Severity**: Medium
+**Description**: The database test async fix was applied only to database.test.ts and
+integration.test.ts, but server.test.ts still has 3 instances of the same broken pattern
+at lines 96, 128, and 168:
+
+```typescript
+await (database as any).db.run(
+  'UPDATE api_keys SET key_hash = ? WHERE user_id = ?',
+  [keyHash, userId]
+);
+```
+
+These also use await incorrectly on the callback-based db.run() and should be wrapped
+in Promises like the other test files.
+
+**Proposal**: Apply the same Promise-wrapping fix to server.test.ts:
+```typescript
+await new Promise<void>((resolve, reject) => {
+  (database as any).db.run(
+    'UPDATE api_keys SET key_hash = ? WHERE user_id = ?',
+    [keyHash, userId],
+    (err: Error | null) => {
+      if (err) reject(err);
+      else resolve();
+    }
+  );
+});
+```
+
+### Issue 2: Documentation Only - No Review of Actual Code Fix
+**Severity**: Low
+**Description**: This commit only documents the fix but doesn't include the actual code
+change. The code fix was in a previous commit. This is fine for documentation purposes
+but means we should verify the actual fix commit separately.
+
+**Proposal**: None needed - this is acceptable practice to document fixes after applying them.
+
+VERDICT
+-------
+The documentation changes are correct and well-structured. The main concern is that
+server.test.ts was not fixed alongside database.test.ts and integration.test.ts, leaving
+potential race conditions in those tests.

@@ -1,0 +1,229 @@
+# Review: Commit fa24319
+
+## Summary
+
+**Commit**: fa243198eeb9d48e0e2cebc949a2b0f7e2f5785f
+**Date**: Wed Jan 21 16:59:51 2026 +0100
+**Title**: Fix UI quality issues: suggestion focus, double-click prevention, and version lookup
+
+This commit addresses four UI quality issues:
+1. MainPage - Focus textarea after clicking a suggestion
+2. ChatPage - Prevent double-clicking quick-reply buttons
+3. ScriptRunDetailPage - Fix retry link to use correct script_id
+4. WorkflowDetailPage - Use version number lookup for script diff
+
+**Files changed**: 5 files (including IMPLEMENTATION_PLAN.md)
+
+---
+
+## Changes in Detail
+
+### MainPage.tsx - Suggestion Focus
+- Added `textareaRef = useRef<HTMLTextAreaElement>(null)`
+- Updated suggestion click handler to call `textareaRef.current?.focus()` after setting input
+- Passed ref to PromptInputTextarea component
+
+### ChatPage.tsx - Double-Click Prevention
+- Added `isQuickReplySubmitting` local state
+- Set to true immediately on click, reset in `onSettled` callback
+- Updated disabled prop: `disabled={addMessage.isPending || isQuickReplySubmitting || uploadState.isUploading}`
+
+### ScriptRunDetailPage.tsx - Retry Link Fix
+- Added fetch for original run: `useScriptRun(run?.retry_of || "")`
+- Updated retry link to use `originalRun?.script_id || run.script_id`
+
+### WorkflowDetailPage.tsx - Version Lookup Fix
+- Changed from array index lookup: `scriptVersions[index + 1]`
+- To version number lookup: `scriptVersions.find(v => v.version === version.version - 1)`
+
+---
+
+## Potential Issues
+
+### ISSUE 1: PromptInputTextarea Does NOT Support Ref Forwarding [CRITICAL]
+**Severity**: Critical
+
+**Problem**: The `PromptInputTextarea` component is NOT a forwardRef component.
+
+Looking at the current implementation in `apps/web/src/ui/components/ai-elements/prompt-input.tsx`:
+
+```typescript
+export const PromptInputTextarea = ({
+  onChange,
+  className,
+  placeholder = "How can I help you today?",
+  ...props
+}: PromptInputTextareaProps) => {
+  // ... component body
+  return (
+    <Textarea ... {...props} />
+  );
+};
+```
+
+This is a regular function component that does NOT use `React.forwardRef()`. When MainPage passes `ref={textareaRef}`, the ref is NOT forwarded to the underlying Textarea element.
+
+**Impact**: The focus functionality does not work. `textareaRef.current` will be null/undefined, and `textareaRef.current?.focus()` will silently do nothing.
+
+**Evidence**: Search for `forwardRef` in prompt-input.tsx returns no matches.
+
+**Proposal**: Wrap `PromptInputTextarea` with `forwardRef`:
+```typescript
+export const PromptInputTextarea = forwardRef<HTMLTextAreaElement, PromptInputTextareaProps>(
+  ({ onChange, className, placeholder, ...props }, ref) => {
+    return <Textarea ref={ref} ... />;
+  }
+);
+```
+
+---
+
+### ISSUE 2: Quick-Reply Handler Missing Input Reset [LOW-MEDIUM]
+**Severity**: Low-Medium
+
+**Problem**: The `handleQuickReply` function doesn't reset the input field:
+
+```typescript
+const handleQuickReply = useCallback((option: string) => {
+  setIsQuickReplySubmitting(true);
+  addMessage.mutate({
+    chatId: id,
+    role: "user",
+    content: option,
+    files: [],
+  }, {
+    onSettled: () => {
+      setIsQuickReplySubmitting(false);
+    }
+  });
+}, [addMessage]);
+```
+
+**Contrast with handleSubmit** (in the same file):
+```typescript
+const handleSubmit = useCallback((message: PromptInputMessage) => {
+  addMessage.mutate(...);
+  setInput(""); // Input is cleared!
+}, [addMessage]);
+```
+
+**Impact**: If the user has typed text in the input field and clicks a quick-reply button, the typed text remains in the input after the quick-reply is sent.
+
+**Proposal**: Add `setInput("")` in `onSuccess` callback (not `onSettled` - only clear on success, not on error):
+```typescript
+addMessage.mutate({...}, {
+  onSuccess: () => {
+    setInput(""); // Clear input on successful quick-reply
+  },
+  onSettled: () => {
+    setIsQuickReplySubmitting(false);
+  }
+});
+```
+
+---
+
+### ISSUE 3: useScriptRun with Empty String [LOW]
+**Severity**: Low (No actual issue)
+
+**Problem Analysis**: The code passes an empty string when `retry_of` is undefined:
+
+```typescript
+const { data: originalRun } = useScriptRun(run?.retry_of || "");
+```
+
+**Verification**: Looking at the hook implementation, it has:
+```typescript
+enabled: !!api && !!runId,
+```
+
+Since `!!""` is `false`, the query is disabled when `retry_of` is falsy. This is correct behavior.
+
+**Status**: No issue - the hook correctly handles empty/falsy runId.
+
+---
+
+### ISSUE 4: Version Number Lookup Correctness [LOW]
+**Severity**: Low (No actual issue)
+
+**Problem Analysis**: The new code uses:
+```typescript
+const previousVersion = scriptVersions.find((v: any) => v.version === version.version - 1);
+```
+
+This correctly handles:
+- Non-contiguous version numbers (e.g., 1, 2, 5, 6 where 3, 4 are deleted)
+- Returns undefined when no previous version exists
+- `canShowDiff` becomes false when undefined
+
+**Status**: This is a correct fix for the bug where array index lookup assumed contiguous versions.
+
+---
+
+### ISSUE 5: Missing Error Handling for Quick-Reply [LOW]
+**Severity**: Low
+
+**Problem**: If the quick-reply mutation fails, the buttons are re-enabled but there's no user feedback about the failure.
+
+```typescript
+onSettled: () => {
+  setIsQuickReplySubmitting(false);
+  // No error handling here
+}
+```
+
+**Impact**: User may not know their quick-reply failed.
+
+**Proposal**: Add onError callback to show a toast/error message:
+```typescript
+onError: (error) => {
+  // Show toast or error message
+  console.error("Quick reply failed:", error);
+},
+```
+
+---
+
+### ISSUE 6: Potential State Update After Unmount [TRIVIAL]
+**Severity**: Trivial
+
+**Problem**: If the ChatPage component unmounts while a quick-reply mutation is in flight, `setIsQuickReplySubmitting(false)` will be called on an unmounted component.
+
+**Impact**: React will log a warning in development mode, but no actual bug. React 18+ handles this gracefully.
+
+**Note**: This is a minor concern and typically not worth the complexity of adding cleanup logic.
+
+---
+
+## Positive Aspects
+
+1. **Immediate UI feedback**: Using local state for button disable provides instant feedback without waiting for mutation state
+
+2. **Robust version lookup**: Using `.find()` with version number is more robust than array index
+
+3. **Fallback pattern**: `originalRun?.script_id || run.script_id` gracefully handles missing data
+
+4. **Correct enabled logic**: The useScriptRun hook correctly disables when runId is empty
+
+---
+
+## Summary Table
+
+| Issue | Severity | Type | Status |
+|-------|----------|------|--------|
+| PromptInputTextarea ref not forwarded | Critical | Bug | Focus feature broken |
+| Missing input reset on quick-reply | Low-Medium | UX | Input persists after quick-reply |
+| useScriptRun with empty string | Low | N/A | No issue - works correctly |
+| Version number lookup | Low | N/A | Correct fix |
+| Missing error handling | Low | UX | No user feedback on failure |
+| State update after unmount | Trivial | Warning | Non-issue in React 18+ |
+
+---
+
+## Recommendations
+
+1. **Critical**: Update `PromptInputTextarea` to use `forwardRef` so the ref is properly forwarded to the underlying textarea element. Without this fix, the focus feature doesn't work at all.
+
+2. **Should Fix**: Add `setInput("")` in the `onSuccess` callback of `handleQuickReply` to clear the input field after a successful quick-reply.
+
+3. **Optional**: Add error handling/toast notification for failed quick-reply mutations.

@@ -1,0 +1,154 @@
+COMMIT REVIEW: 343cd09
+=======================
+test: Add comprehensive tests for agent tools
+
+CHANGES SUMMARY:
+----------------
+This commit adds 44 new tests across two new test files:
+- packages/tests/src/note-tools.test.ts (461 lines, 30 tests)
+- packages/tests/src/utility-tools.test.ts (181 lines, 14 tests)
+
+Also exports additional types/functions from @app/agent for testing:
+- makeAtobTool
+- makeConsoleLogTool
+- EvalContext type
+
+Updates IMPLEMENTATION_PLAN.md with test progress.
+
+DETAILED CHANGES:
+-----------------
+
+1. note-tools.test.ts:
+   - Tests makeCreateNoteTool (5 tests): all fields, defaults, ID generation, size limit, max count
+   - Tests makeUpdateNoteTool (6 tests): update title/content/tags/priority, no updates, non-existent
+   - Tests makeDeleteNoteTool (3 tests): delete existing, non-existent, empty ID
+   - Tests makeGetNoteTool (3 tests): retrieve existing, non-existent, empty ID
+   - Tests makeListNotesTool (4 tests): list all, filter by priority, pagination, null input
+   - Tests makeSearchNotesTool (9 tests): keyword, string input, tag, regex, combined, no matches,
+     invalid regex, no criteria, snippets
+
+2. utility-tools.test.ts:
+   - Tests makeAtobTool (8 tests): standard base64, base64url, missing padding, empty string,
+     whitespace, invalid base64, binary data, complex base64url
+   - Tests makeConsoleLogTool (6 tests): log/warn/error levels, timestamp format, truncation, empty
+
+3. packages/agent/src/index.ts:
+   - Exports makeAtobTool
+   - Exports makeConsoleLogTool
+   - Exports EvalContext type
+
+4. IMPLEMENTATION_PLAN.md:
+   - Marks "Add tests for agent tools" as DONE
+   - Updates test counts from 209 to 253
+
+ISSUES FOUND:
+-------------
+
+ISSUE 1: Empty string ID test expectation unclear
+Severity: Low
+Location: note-tools.test.ts:143-160
+Test passes empty string as ID and expects success, but the assertion is weak:
+  expect(typeof result).toBe("string");
+The implementation uses `id || generateId()` - empty string is falsy so it generates an ID.
+The test doesn't verify the returned ID is actually generated (non-empty).
+
+ISSUE 2: Event creation failures not tested
+Severity: Low
+Location: note-tools.test.ts
+All tests mock createEvent() as always succeeding:
+  createEvent: vi.fn().mockResolvedValue(undefined)
+No tests verify behavior when createEvent() fails (rejects).
+
+ISSUE 3: onLog error handling not tested
+Severity: Low
+Location: utility-tools.test.ts
+The consoleLogTool awaits onLog() without error handling. Tests mock onLog as always
+succeeding but don't test what happens if onLog rejects/throws.
+
+ISSUE 4: Single quotes in console-log messages not tested
+Severity: Very Low
+Location: utility-tools.test.ts
+The formatted output wraps messages in single quotes: `'message'`
+No test verifies behavior when the message itself contains single quotes.
+This could break log parsing or cause display issues.
+
+ISSUE 5: Concurrent note operations not tested
+Severity: Very Low
+Location: note-tools.test.ts
+All tests are sequential. No tests for race conditions when multiple
+note operations happen simultaneously (e.g., two creates hitting 500 limit).
+
+ISSUE 6: Truncation boundary not precisely tested
+Severity: Very Low
+Location: utility-tools.test.ts:162-173
+Test creates 2000-char message and verifies output is < 2000 with "...".
+The implementation truncates at 1000 chars, but test doesn't verify:
+- Exactly 1000 char message (boundary)
+- 1001 char message (first to be truncated)
+
+ISSUE 7: atobTool size limits not tested
+Severity: Very Low
+Location: utility-tools.test.ts
+The custom atob implementation has no size limit. No test for very large
+base64 inputs that could cause memory issues.
+
+ISSUE 8: Search with empty keywords array not tested
+Severity: Very Low
+Location: note-tools.test.ts
+Test checks `null` keywords but not empty array `[]`. The implementation
+uses `!keywords?.length` which would handle it correctly, but explicit
+test would be clearer.
+
+PROPOSALS:
+----------
+
+PROPOSAL 1: Strengthen empty ID test
+Change line 158 to verify the returned ID is non-empty:
+  expect(result).toBeTruthy();
+  expect(result.length).toBeGreaterThan(0);
+
+PROPOSAL 2: Add createEvent failure test
+Add a test that mocks createEvent to reject and verify the tool handles
+or propagates the error appropriately.
+
+PROPOSAL 3: Add onLog failure test
+Add a test for consoleLogTool where onLog rejects and verify behavior.
+
+PROPOSAL 4: Add truncation boundary tests
+Add tests for exactly 1000 chars and 1001 chars to verify truncation
+kicks in at the documented threshold.
+
+PROPOSAL 5: Test message with special characters
+Add test for console-log with message containing single quotes, newlines,
+and other special characters to document expected behavior.
+
+VERDICT: GOOD
+The tests provide comprehensive coverage of note tools and utility tools.
+All 6 note tools and 2 utility tools are well tested with good happy-path
+and error-path coverage. The test structure follows good patterns:
+- Proper mocking of EvalContext
+- In-memory database for isolation
+- Tests for size limits and max counts
+- Tests for input validation
+
+The identified issues are minor edge cases that don't affect the core
+functionality. The test suite successfully validates that:
+- Note CRUD operations work correctly
+- Size/count limits are enforced
+- Search functionality works with keywords/tags/regex
+- Base64 decoding handles standard and URL-safe variants
+- Console logging formats messages correctly
+
+This is a solid test suite for agent tools.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Empty string ID test expectation) - skipped
+- Issue #2 (Event creation failures not tested) - skipped
+- Issue #3 (onLog error handling not tested) - skipped
+- Issue #4 (Single quotes in console-log) - created specs/new/test-console-log-special-chars.md
+- Issue #5 (Concurrent note operations) - skipped
+- Issue #6 (Truncation boundary testing) - skipped
+- Issue #7 (atobTool size limits) - skipped
+- Issue #8 (Empty keywords array test) - skipped

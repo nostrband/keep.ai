@@ -1,0 +1,129 @@
+COMMIT: 72fc53d
+TITLE: test: Add comprehensive tests for notification-store and execution-log-store
+DATE: 2026-01-22 15:34:58 +0100
+CO-AUTHORED-BY: Claude Opus 4.5
+
+FILES CHANGED:
+- packages/tests/src/notification-store.test.ts (new, +442 lines)
+- packages/tests/src/execution-log-store.test.ts (new, +471 lines)
+- packages/agent/src/agent.ts (-3 lines, removed commented console.log)
+- packages/agent/src/sandbox/sandbox.ts (-1 line, removed commented console.log)
+- IMPLEMENTATION_PLAN.md (+8/-4 lines)
+
+=== SUMMARY ===
+
+This commit adds 30 new tests covering NotificationStore and ExecutionLogStore, and includes minor cleanup removing 3 commented-out console.log statements from the agent package.
+
+**NotificationStore Tests (16 tests):**
+- saveNotification and getNotifications (5 tests)
+- getNotification (2 tests)
+- acknowledgeNotification (1 test)
+- resolveNotification (1 test)
+- getUnresolvedError (3 tests)
+- countUnresolved (2 tests)
+- getUnresolvedNotifications (1 test)
+
+**ExecutionLogStore Tests (14 tests):**
+- saveExecutionLog and getExecutionLogs (3 tests)
+- getExecutionLog (2 tests)
+- listExecutionLogs (5 tests)
+- getRunCost (2 tests)
+- countToolCalls (2 tests)
+
+**Console.log Cleanup:**
+- Removed 2 commented console.log statements from agent.ts (lines 247, 259)
+- Removed 1 commented console.log from sandbox.ts (line 175)
+- Codebase properly uses debug module for logging
+
+=== ISSUES FOUND ===
+
+**CRITICAL - Test Schema Mismatch (execution-log-store.test.ts):**
+
+The test's table creation (lines 10-27) differs from production schema (v30.ts):
+- Test: `run_id TEXT NOT NULL,`
+- Production: `run_id TEXT NOT NULL DEFAULT '',`
+
+Missing `DEFAULT ''` constraints for CR-SQLite CRR compatibility. Tests pass with simplified schema but don't match production constraints.
+
+**Severity:** Medium - Tests may pass but not catch CRR-related issues.
+**Location:** packages/tests/src/execution-log-store.test.ts:10-27
+
+---
+
+**HIGH - Untested `before` Parameter:**
+
+Both stores support a `before?: string` parameter for timestamp pagination:
+- NotificationStore.getNotifications() - line 98 in implementation
+- ExecutionLogStore.listExecutionLogs() - line 155 in implementation
+
+No tests cover this parameter, meaning pagination functionality is untested.
+
+**Severity:** Medium
+**Location:** Both test files
+
+---
+
+**MEDIUM - Minimal Test Coverage for Update Operations:**
+
+acknowledgeNotification and resolveNotification each have only 1 test. Missing:
+- Isolation verification (only target notification updated)
+- Error handling for non-existent IDs
+- Multiple operation calls
+- Verify other fields unchanged
+
+**Severity:** Low-Medium
+**Location:** notification-store.test.ts:226-266
+
+---
+
+**MEDIUM - Missing Default Limit Test:**
+
+getUnresolvedNotifications() has default limit=10 but test doesn't verify default behavior.
+
+**Severity:** Low
+**Location:** notification-store.test.ts:422-441
+
+---
+
+**LOW - Missing Edge Cases:**
+
+1. Empty database queries not explicitly tested
+2. Duplicate ID handling (INSERT OR REPLACE) not tested
+3. JSON with special characters not tested
+4. Transaction parameter in saveExecutionLog not tested
+
+=== PROPOSALS ===
+
+1. **Fix Schema Mismatch (Critical):**
+   Update execution-log-store.test.ts createExecutionLogsTable to add `DEFAULT ''`:
+   ```sql
+   run_id TEXT NOT NULL DEFAULT '',
+   run_type TEXT NOT NULL DEFAULT '',
+   event_type TEXT NOT NULL DEFAULT '',
+   timestamp TEXT NOT NULL DEFAULT '',
+   ```
+
+2. **Add `before` Parameter Tests:**
+   Add test for timestamp pagination:
+   ```typescript
+   it("should filter logs before a specific timestamp", async () => {
+     // Insert logs with known timestamps
+     // Call with before parameter
+     // Verify only older logs returned
+   });
+   ```
+
+3. **Improve Update Operation Coverage:**
+   Add tests for acknowledgeNotification and resolveNotification:
+   - Test isolation (other notifications unchanged)
+   - Test non-existent ID behavior
+   - Test multiple calls
+
+4. **Add Edge Case Tests (Low Priority):**
+   - Empty result sets
+   - JSON preservation with special characters
+   - Default limit behavior
+
+=== VERDICT ===
+
+GOOD with MINOR ISSUES - Tests provide solid basic coverage but have schema mismatch issue and missing coverage for some implemented features.

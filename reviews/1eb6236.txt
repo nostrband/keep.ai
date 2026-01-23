@@ -1,0 +1,148 @@
+COMMIT REVIEW: 1eb6236 "Add user feedback for pause-all operation"
+========================================================================
+
+SUMMARY OF CHANGES
+------------------
+This commit adds OS notifications when users click "Pause all automations"
+from the Electron tray menu. Three distinct feedback cases are handled:
+1. Success: "Paused N automations" with explanation
+2. No-op: "No automations to pause" when all already paused/none exist
+3. Error: "Failed to pause automations" with error message
+
+Files changed:
+- apps/web/src/App.tsx (+24 lines) - Added notification calls in handler
+- IMPLEMENTATION_PLAN.md - Updated spec status to FIXED
+
+ARCHITECTURE CONTEXT
+--------------------
+The implementation uses Electron's IPC architecture:
+1. User clicks tray menu item -> main process sends IPC message
+2. Renderer receives via window.electronAPI.onPauseAllAutomations()
+3. Handler calls pauseAllWorkflows() on database (atomic SQL UPDATE)
+4. Handler shows notification via window.electronAPI.showNotification()
+
+The showNotification method (in main.ts) creates Electron Notification
+objects with proper error handling, icon generation, and click navigation.
+
+CODE QUALITY ASSESSMENT
+-----------------------
+Strengths:
++ Follows existing patterns for IPC notification display
++ Atomic database operation prevents race conditions
++ Proper error type checking (error instanceof Error)
++ Null checks for window.electronAPI (works in non-Electron contexts)
++ Singular/plural word form ("1 automation" vs "5 automations")
++ All notification calls are properly awaited
+
+ISSUES FOUND
+------------
+
+Issue 1: Notification Return Value Not Checked
+Severity: LOW
+Location: apps/web/src/App.tsx lines 91-98, 100-106, 111-116
+
+The showNotification() method returns Promise<boolean> indicating success
+or failure, but this return value is ignored. Compare with WorkflowNotifications.ts
+which DOES check the return value:
+
+  // In WorkflowNotifications.ts (correct pattern):
+  const success = await window.electronAPI.showNotification({...});
+  if (!success) {
+    console.debug("Notification creation failed, will retry on next check");
+    continue;
+  }
+
+  // In App.tsx (current implementation - doesn't check):
+  await window.electronAPI.showNotification({...});
+  // If notification fails, user gets no feedback at all
+
+This creates silent failure: if notifications aren't supported on the system
+or notification creation fails, the user receives no indication that the
+pause operation succeeded.
+
+Proposed Fix:
+```typescript
+if (window.electronAPI) {
+  const success = await window.electronAPI.showNotification({
+    title: `Paused ${count} ${workflowWord}`,
+    body: `All ${workflowWord} have been paused. They will not run until you resume them.`,
+  });
+  if (!success) {
+    console.warn('Failed to show pause notification');
+    // Could optionally fall back to in-app toast
+  }
+}
+```
+
+---
+
+Issue 2: No Debouncing for Rapid Clicks
+Severity: LOW
+Location: apps/web/src/App.tsx handlePauseAllAutomations callback
+
+If user rapidly clicks the tray menu item multiple times, each click spawns
+a new handlePauseAllAutomations callback. While the database operation is
+atomic (no data corruption), this could flood the user with multiple
+identical notifications.
+
+Proposed Fix:
+```typescript
+const isPausingRef = useRef(false);
+
+const handlePauseAllAutomations = useCallback(async () => {
+  if (!apiRef.current || isPausingRef.current) return;
+  isPausingRef.current = true;
+
+  try {
+    // ... existing code ...
+  } finally {
+    isPausingRef.current = false;
+  }
+}, []);
+```
+
+---
+
+Issue 3: Grammar in Success Notification Body
+Severity: TRIVIAL
+Location: apps/web/src/App.tsx lines 103-104
+
+The notification body uses "${workflowWord} have been paused" which produces
+"All automation have been paused" for count=1 (should be "has been").
+
+Current:
+  body: `All ${workflowWord} have been paused. They will not run until you resume them.`
+
+Proposed Fix:
+```typescript
+const verb = count === 1 ? 'has' : 'have';
+body: `All ${workflowWord} ${verb} been paused. They will not run until you resume them.`
+```
+
+Or simpler, just use plural-only messaging since singular case is rare.
+
+TEST COVERAGE
+-------------
++ pauseAllWorkflows database operation has unit tests in script-store.test.ts
+- IPC handler integration not tested
+- Notification delivery not tested
+- Error path (pauseAllWorkflows throws) not tested
+
+CONSISTENCY CHECK
+-----------------
+Pattern compared against WorkflowNotifications.ts (the main notification system):
+- WorkflowNotifications CHECKS return value: YES
+- This code CHECKS return value: NO (inconsistent)
+- WorkflowNotifications uses singleton state tracking: YES
+- This code is stateless fire-and-forget: YES (appropriate for one-shot action)
+
+VERDICT
+-------
+The implementation is functional and solves the stated problem. The issues
+found are minor and unlikely to cause problems in practice. The most significant
+improvement would be checking the notification return value to match the
+pattern established in WorkflowNotifications.ts.
+
+Overall quality: GOOD
+Blocking issues: NONE
+Suggested improvements: 3 (1 LOW, 1 LOW, 1 TRIVIAL)

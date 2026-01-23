@@ -1,0 +1,219 @@
+# Code Review: Commit 93f3009
+
+**Commit**: 93f3009 - Add maintenance event types to UI timeline
+**Date**: 2026-01-21 15:41:35 +0100
+**Author**: Artur <artur@keep.ai>
+**Co-Authored-By**: Claude Opus 4.5 <noreply@anthropic.com>
+
+## Summary of Changes
+
+This commit registers maintenance event types (`maintenance_started`, `maintenance_escalated`, `maintenance_fixed`) in the UI event system so they display properly in the chat timeline.
+
+### Changes:
+1. Added `MAINTENANCE_STARTED`, `MAINTENANCE_ESCALATED`, `MAINTENANCE_FIXED` to `EVENT_TYPES` constant
+2. Added payload interfaces: `MaintenanceStartedEventPayload`, `MaintenanceEscalatedEventPayload`, `MaintenanceFixedEventPayload`
+3. Added `EVENT_CONFIGS` entries with emojis, title functions, and significance levels:
+   - `maintenance_started`: wrench emoji (🔧), 'state' significance
+   - `maintenance_escalated`: warning emoji (⚠️), 'error' significance
+   - `maintenance_fixed`: checkmark emoji (✅), 'success' significance
+4. Events now link to workflow page via `getEntityPath`
+
+### Files Changed:
+- `IMPLEMENTATION_PLAN.md` (~17 lines)
+- `apps/web/src/types/events.ts` (+65 lines)
+- `specs/maintenance-event-types-registration.md` → `specs/done/maintenance-event-types-registration.md` (moved)
+
+---
+
+## Issues Identified
+
+### ISSUE 1: Maintenance Events Are Registered But Never Created (CRITICAL)
+
+**Location**: `apps/web/src/types/events.ts` lines 29-31, 197-218, 525-557
+
+**Problem**: The commit adds EVENT_CONFIGS entries for three maintenance event types, but **these events are never actually created anywhere in the codebase**.
+
+**Evidence from code search**:
+- No call to `saveChatEvent(..., "maintenance_started", ...)` exists
+- No call to `saveChatEvent(..., "maintenance_escalated", ...)` exists
+- No call to `saveChatEvent(..., "maintenance_fixed", ...)` exists
+
+**What actually happens**:
+- `maintenance_escalated` → Created as a **notification**, not a chat event (workflow-worker.ts lines 667-687)
+- `maintenance_fixed` → Communicated via message with metadata, not a separate event (save.ts returns `wasMaintenanceFix` flag)
+- `maintenance_started` → No event at all, just internal state change
+
+**Migration v30 evidence**: Line 111-112 explicitly EXCLUDES these types:
+```sql
+WHERE type NOT IN (..., 'maintenance_started', 'maintenance_fixed', 'maintenance_escalated')
+```
+
+This suggests these were never intended to be chat events.
+
+**Impact**: The EVENT_CONFIGS entries are dead code that will never be triggered. EventItem will never render these events because they don't exist in the database.
+
+**Severity**: CRITICAL - Either the event creation code is missing, or this registration shouldn't exist.
+
+**Proposal**: One of:
+1. **Remove the registrations** if maintenance events should only be notifications
+2. **Add event creation code** in workflow-worker.ts and save.ts if they should be chat events
+3. **Document as "future use"** if these are placeholders for upcoming features
+
+---
+
+### ISSUE 2: Payload Interfaces Don't Match Reality (HIGH)
+
+**Location**: `apps/web/src/types/events.ts` lines 197-218
+
+**Problem**: The payload interfaces define expected fields that don't match how maintenance information is actually stored:
+
+**MaintenanceStartedEventPayload**:
+```typescript
+interface MaintenanceStartedEventPayload extends BaseEventPayload {
+  workflow_id: string;
+  script_run_id: string;
+  error_type: string;
+  error_message: string;
+}
+```
+
+But maintenance mode is actually set via:
+- `workflow.maintenance = true` (no event created)
+- Script run has `error_type` in its own record, not duplicated in an event
+
+**MaintenanceFixedEventPayload**:
+```typescript
+interface MaintenanceFixedEventPayload extends BaseEventPayload {
+  workflow_id: string;
+  script_id: string;
+  fix_comment: string;
+  version: number;
+}
+```
+
+But maintenance fixes are actually communicated via:
+- `add_script` event (which already has script_id and version)
+- Message metadata `wasMaintenanceFix: true`
+
+**Impact**: These interfaces are never validated against actual data because the events don't exist.
+
+**Proposal**: Either:
+1. Remove the interfaces if events won't be created
+2. Create events that match these interfaces
+3. Update interfaces to match existing data patterns
+
+---
+
+### ISSUE 3: Navigation Links Will Never Work (MEDIUM)
+
+**Location**: `apps/web/src/types/events.ts` lines 539, 550, 557
+
+**Problem**: All three maintenance events have:
+```typescript
+getEntityPath: (payload) => `/automations/${(payload as ...).workflow_id}`,
+```
+
+Since these events are never created, users will never be able to click through to the workflow from a maintenance event.
+
+**Impact**: Dead code in navigation handlers.
+
+**Proposal**: Remove or document as "for future use".
+
+---
+
+### ISSUE 4: Inconsistent Significance Levels (LOW)
+
+**Location**: `apps/web/src/types/events.ts` lines 536, 547, 556
+
+**Problem**: Significance levels are:
+- `maintenance_started`: 'state'
+- `maintenance_escalated`: 'error'
+- `maintenance_fixed`: 'success'
+
+But looking at the actual EVENT_CONFIGS, the significance system is used for:
+- Collapsing low-signal events
+- Visual styling (colors/icons)
+
+If these events existed, the significance levels seem reasonable. However, since they don't exist, this is moot.
+
+**Impact**: None (events don't exist).
+
+---
+
+### ISSUE 5: Spec Moved to "done" But Implementation Incomplete (MEDIUM)
+
+**Location**: `specs/maintenance-event-types-registration.md` → `specs/done/`
+
+**Problem**: The spec was moved to `done/` suggesting the feature is complete, but:
+- Events are registered in types (done)
+- Events are never created (not done)
+- Users can't see maintenance events in timeline (not done)
+
+**Impact**: Tracking/planning confusion - the spec appears complete but the user-facing feature doesn't work.
+
+**Proposal**: Either:
+1. Move spec back to in-progress if event creation is needed
+2. Update spec to clarify that registration-only was the scope
+
+---
+
+## Positive Observations
+
+1. **Type structure is correct**: The payload interfaces follow the existing pattern with `BaseEventPayload` extension.
+
+2. **Significance levels are appropriate**: If events existed, 'state', 'error', and 'success' would correctly categorize them.
+
+3. **Icons are appropriate**: Wrench for started, warning for escalated, checkmark for fixed are intuitive.
+
+4. **Entity navigation pattern**: Using `getEntityPath` to link to workflow is consistent with other events.
+
+5. **TypeScript union updated**: The `EventPayload` union type includes the new interfaces.
+
+---
+
+## Analysis: What Should Happen?
+
+Looking at the original spec and implementation patterns:
+
+### Current Maintenance Flow:
+1. Script run fails → `error_type` set on script_run record
+2. If retriable → enters maintenance mode (`workflow.maintenance = true`)
+3. Agent attempts fix → creates new script version
+4. If fix fails after N attempts → creates **notification** (not chat event)
+5. If fix succeeds → `maintenance = false`, new script is active
+
+### The Missing Piece:
+There's no visibility into maintenance lifecycle in the chat timeline because:
+- No `maintenance_started` event when entering maintenance
+- No `maintenance_escalated` event when fix attempts fail
+- No `maintenance_fixed` event when fix succeeds (just a new script version)
+
+### Recommendation:
+The event registrations suggest someone intended to add chat-based visibility into maintenance. Either:
+
+**Option A - Complete the feature**:
+Add event creation in:
+- `workflow-worker.ts` line ~700: Create `maintenance_started` when entering maintenance mode
+- `workflow-worker.ts` line ~720: Create `maintenance_escalated` when escalating
+- `save.ts` line ~90: Create `maintenance_fixed` when clearing maintenance
+
+**Option B - Document as notifications-only**:
+- Remove the chat event registrations
+- Keep maintenance visibility through the notification system only
+- Update spec to reflect this decision
+
+---
+
+## Overall Assessment
+
+This commit adds type registrations and UI configurations for maintenance events that **do not actually exist** in the system. The code is technically correct TypeScript but represents dead code paths.
+
+**Main concerns**:
+- Event registrations without event creation (CRITICAL)
+- Spec marked as complete when feature is non-functional (MEDIUM)
+
+**Recommendation**: Clarify the intent:
+1. If events should exist → add creation code in follow-up commit
+2. If notifications are sufficient → remove the dead type registrations
+
+The commit cannot be considered production-ready until the discrepancy between registration and creation is resolved.

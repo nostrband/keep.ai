@@ -1,0 +1,243 @@
+COMMIT: d296440 - Add docs, spec big refactor towards automation UX
+DATE: Thu Jan 22 11:25:19 2026 +0100
+FILES CHANGED: 21 files (+5,498 -1)
+
+================================================================================
+SUMMARY OF CHANGES
+================================================================================
+
+This commit adds comprehensive documentation and specifications for a major UX
+refactor transforming Keep.AI from a prototype into a Simple, Lovable, Complete
+(SLC) v1 product. No code changes - purely documentation and specs.
+
+DOCUMENTATION ADDED:
+
+Developer Documentation (docs/dev/):
+1. 01-workflow-lifecycle.md - Workflow states, transitions, creation flow
+2. 02-event-system.md - Event routing, types, visibility matrix
+3. 03-error-handling.md - Error classification (5 types), handling flows
+4. 04-auto-fix-mode.md - Automatic AI fix for logic errors, escalation
+
+User Documentation (docs/user/):
+1. 01-overview.md - Core concept, key features, getting started
+2. 02-four-surfaces.md - Home, Workflow, Chat, Notifications pages
+3. 03-user-flows.md - 8 user flows from creation to modification
+
+SPECIFICATIONS ADDED (specs/new/):
+
+Overview:
+- 00-v1-slc-refactor-overview.md - Vision, four surfaces, implementation order
+
+Database Specs (Phase 1):
+- 07-remove-chat-notifications.md - Deprecate chat_notifications table
+- 08-remove-resources-table.md - Deprecate resources table
+- 09-chats-workflows-direct-link.md - Add bidirectional workflow<->chat links
+- 10-tasks-table-cleanup.md - Add workflow_id, asks fields; deprecate task_states
+- 11-workflows-status-cleanup.md - Explicit status field instead of derived
+- 12-chat-events-split.md - Split into chat_messages, notifications, execution_logs
+
+UX Specs (Phases 2-3):
+- 01-event-system-refactor.md - Agent code updates for new tables
+- 02-navigation-header-refactor.md - Notification bell, simplified menu
+- 03-notifications-page.md - Actionable items only
+- 04-workflow-hub-page.md - Central workflow management
+- 05-chat-page-update.md - Clean conversation with metadata
+- 06-home-page-cleanup.md - Dashboard with single creation entry point
+
+CONFIGURATION:
+- .claude/settings.local.json - Minor permission update
+
+================================================================================
+VISION SUMMARY
+================================================================================
+
+PROBLEM: Current app is a prototype with:
+- 10 scattered menu items
+- 20+ event types cluttering chat feed
+- Duplicate creation entry points
+- Confusing workflow status representation
+
+SOLUTION: Four focused surfaces:
+1. HOME - Dashboard + quick creation
+2. WORKFLOW - Manage one automation (status, controls, runs)
+3. CHAT - Conversation history + metadata
+4. NOTIFICATIONS - Actionable items only
+
+KEY CHANGES:
+- Split chat_events into 3 tables (messages, notifications, execution_logs)
+- Explicit workflow.status instead of derived
+- Direct workflow<->chat bidirectional links
+- Auto-fix for logic errors without user interruption
+- Notification bell for actionable items
+
+================================================================================
+POTENTIAL ISSUES
+================================================================================
+
+ISSUE 1: Spec ordering may create implementation complexity
+Severity: Medium (Architecture)
+Location: specs/new/00-v1-slc-refactor-overview.md
+
+The overview specifies database changes (07-12) before UX changes (01-06), but
+the specs are numbered with UX specs (01-06) first. This could cause confusion
+during implementation about which order to follow.
+
+PROPOSAL: Either renumber the specs to match implementation order (database
+specs as 01-06, UX specs as 07-12), or add clearer phase markers in filenames
+like: db-01-remove-chat-notifications.md, ux-01-event-system-refactor.md
+
+--------------------------------------------------------------------------------
+
+ISSUE 2: Migration strategy for chat_events split lacks rollback plan
+Severity: Medium (Data Safety)
+Location: specs/new/12-chat-events-split.md
+
+The spec details forward migration from chat_events to three new tables but
+doesn't address:
+- Rollback procedure if migration fails midway
+- Handling of new events during migration window
+- Verification steps to ensure data integrity post-migration
+
+PROPOSAL: Add to the spec:
+- Rollback steps (keep original table, add deleted_at flag instead of dropping)
+- Migration mode flag to pause event creation during migration
+- Verification queries to compare counts/checksums before and after
+
+--------------------------------------------------------------------------------
+
+ISSUE 3: Workflow status enum may need "archived" state
+Severity: Low (Completeness)
+Location: specs/new/11-workflows-status-cleanup.md
+
+The proposed status values are: draft, ready, active, paused, error
+
+There's no "archived" or "deleted" state for workflows that users want to
+keep for history but not see in active lists. Currently unclear if workflows
+can be soft-deleted.
+
+PROPOSAL: Consider adding "archived" status or clarify if soft delete is
+handled differently (separate field or different mechanism).
+
+--------------------------------------------------------------------------------
+
+ISSUE 4: Notification types may expand but spec is prescriptive
+Severity: Low (Extensibility)
+Location: specs/new/03-notifications-page.md
+
+The spec lists specific notification types: error, escalated, script_message,
+script_ask. This is a closed enum which may limit future extensibility.
+
+PROPOSAL: Consider using a category-based approach (e.g., "action_required",
+"informational") with sub-types, or explicitly document how new notification
+types should be added to maintain consistency.
+
+--------------------------------------------------------------------------------
+
+ISSUE 5: User documentation references features not yet implemented
+Severity: Low (Documentation sync)
+Location: docs/user/*.md
+
+The user documentation describes the refactored UX as if it already exists.
+This could confuse developers or users who read the docs before the refactor
+is complete.
+
+PROPOSAL: Add a "Future State" or "Planned" notice at the top of user docs,
+or move them to a docs/future/ directory until implementation is complete.
+
+--------------------------------------------------------------------------------
+
+ISSUE 6: No spec for data migration tooling
+Severity: Medium (Implementation completeness)
+Location: specs/new/*
+
+The specs describe schema changes but don't specify:
+- Migration script requirements
+- Whether migrations run automatically or manually
+- How to handle production vs development migrations
+- Testing strategy for migrations
+
+PROPOSAL: Add a spec (or section in overview) covering:
+- Migration tool/framework to use
+- Migration naming convention
+- Testing procedure for migrations
+- Production deployment procedure
+
+--------------------------------------------------------------------------------
+
+ISSUE 7: Notification bell badge count logic not specified
+Severity: Low (Detail)
+Location: specs/new/02-navigation-header-refactor.md
+
+The spec mentions notification bell with badge but doesn't specify:
+- What triggers count increment
+- When count resets (on view? on dismiss?)
+- Max count display (99+?)
+- Whether different notification types have different weights
+
+PROPOSAL: Add section detailing badge count logic, or reference it as a
+follow-up micro-spec.
+
+--------------------------------------------------------------------------------
+
+ISSUE 8: Chat page workflow info box click behavior unclear
+Severity: Low (UX Detail)
+Location: specs/new/05-chat-page-update.md
+
+The spec says the workflow info box is "tappable" and navigates to workflow
+hub, but doesn't specify:
+- Visual affordance that it's tappable
+- Mobile vs desktop behavior
+- Keyboard accessibility
+
+PROPOSAL: Add UX details about interactive elements, or ensure the
+implementation addresses accessibility.
+
+================================================================================
+ARCHITECTURAL OBSERVATIONS
+================================================================================
+
+STRENGTHS:
+
+1. Clear Separation of Concerns
+   - Each table serves one purpose
+   - Each page answers one question
+   - Clean information hierarchy
+
+2. Explicit Over Implicit
+   - Moving from derived status to explicit status is a good simplification
+   - Direct workflow<->chat links avoid complex joins
+
+3. Phased Implementation
+   - Database first, then agent, then UI
+   - Allows validation at each layer
+   - Reduces risk of cascading failures
+
+4. Auto-Fix Philosophy
+   - Logic errors handled silently by AI
+   - Only user-action-required items surface to notifications
+   - Reduces cognitive load on users
+
+CONCERNS:
+
+1. Scope
+   - 13 specs representing significant changes
+   - Risk of partial implementation leaving system in inconsistent state
+   - May benefit from feature flags to enable/disable new surfaces
+
+2. Backward Compatibility
+   - Existing data needs migration
+   - Existing APIs may change
+   - External integrations (if any) could break
+
+3. Testing Coverage
+   - No testing strategy specified
+   - Complex migrations need comprehensive testing
+   - UI changes need UX testing (Playwright already added)
+
+RECOMMENDATIONS:
+
+1. Implement feature flags for each new surface
+2. Create detailed migration runbook before starting
+3. Set up staging environment that mirrors production data
+4. Plan for parallel operation period where old and new can coexist
+5. Define success metrics for each phase completion

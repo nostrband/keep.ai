@@ -1,0 +1,137 @@
+COMMIT REVIEW: edc3b3c
+=======================
+Title: Add safe localStorage/sessionStorage utilities for incognito mode
+Author: Artur (Co-Authored-By: Claude Opus 4.5)
+Date: Wed Jan 21 17:50:19 2026 +0100
+
+FILES CHANGED:
+- IMPLEMENTATION_PLAN.md (documentation update)
+- apps/web/src/lib/safe-storage.ts (NEW - 69 lines)
+- apps/web/src/main.tsx
+- apps/web/src/components/SharedHeader.tsx
+- apps/web/src/components/SettingsPage.tsx
+- apps/web/src/components/ChatInterface.tsx
+
+CHANGES SUMMARY:
+================
+This commit creates safe wrapper utilities for localStorage and sessionStorage that
+gracefully handle unavailable storage in private/incognito browsing mode. Instead
+of throwing errors, the wrappers return null/false on failure.
+
+New utilities in safe-storage.ts:
+- safeLocalStorageGet(key): returns string | null
+- safeLocalStorageSet(key, value): returns boolean
+- safeLocalStorageRemove(key): returns boolean
+- safeSessionStorageGet(key): returns string | null
+- safeSessionStorageSet(key, value): returns boolean
+
+Updated files to use safe wrappers:
+- main.tsx: debug mode initialization
+- SharedHeader.tsx: debug mode display
+- SettingsPage.tsx: debug mode toggle
+- ChatInterface.tsx: scroll position save/restore (partial)
+
+ANALYSIS:
+=========
+The safe-storage.ts implementation is correct:
+- Try-catch wraps all storage access
+- Console.debug logs failures (helpful for debugging, not noisy in production)
+- Returns appropriate fallback values (null for get, false for set/remove)
+- Functions are properly typed
+
+The pattern is correct for handling incognito/private mode where localStorage
+and sessionStorage may throw DOMException on access.
+
+ISSUES FOUND:
+=============
+1. [CRITICAL] Incomplete migration - QueryProvider files still use unsafe access
+
+   The commit notes mention "QueryProvider files (local_key) were not updated as
+   they're more complex", but these are CRITICAL paths that will break in incognito:
+
+   QueryProvider.tsx:
+   - Line 222: localStorage.setItem("local_key", data.key)
+   - Line 276: localStorage.getItem("local_key")
+
+   QueryProviderEmbedded.tsx:
+   - Line 147: localStorage.getItem("local_key")
+   - Line 301: localStorage.getItem("local_key")
+   - Line 408: localStorage.setItem("local_key", bytesToHex(result.key))
+   - Line 500: localStorage.removeItem("local_key")
+
+   These handle cryptographic connection keys and will completely break serverless
+   functionality in incognito mode without proper error handling.
+
+   PROPOSAL: Update QueryProvider files to use safe wrappers, or implement explicit
+   error handling that warns users that incognito mode is not supported for serverless.
+
+2. [HIGH] tab-lock.ts uses unsafe access at module load time
+
+   Location: apps/web/src/lib/tab-lock.ts lines 6-9
+   ```typescript
+   const TAB_ID = (() => {
+     const existing = sessionStorage.getItem(key);
+     ...
+     sessionStorage.setItem(key, id);
+     return id;
+   })();
+   ```
+
+   This executes immediately when the module is imported, before any error handling
+   can be set up. Will throw in incognito mode and potentially crash the app.
+
+   PROPOSAL: Wrap in try-catch or use safeSessionStorage functions. Consider using
+   a fallback in-memory ID if storage fails.
+
+3. [MEDIUM] ChatInterface.tsx still has direct sessionStorage calls
+
+   Despite importing safe wrappers, lines 202 and 210 still use direct calls:
+   - Line 202: sessionStorage.getItem(storageKey)
+   - Line 210: sessionStorage.removeItem(storageKey)
+
+   PROPOSAL: Update these to use safeSessionStorageGet() and add safeSessionStorageRemove()
+   to safe-storage.ts (currently missing).
+
+4. [MEDIUM] Missing safeSessionStorageRemove utility
+
+   The safe-storage.ts file has safeLocalStorageRemove() but no safeSessionStorageRemove().
+   This utility is needed for complete coverage.
+
+   PROPOSAL: Add safeSessionStorageRemove(key): boolean to safe-storage.ts
+
+5. [LOW] useFileUpload.ts and FilesPage.tsx use unsafe access
+
+   Both files have identical patterns:
+   ```typescript
+   const localKey = localStorage.getItem("local_key");
+   if (!localKey) {
+     throw new Error("No local key found");
+   }
+   ```
+
+   Will fail in incognito mode.
+
+   PROPOSAL: Use safe wrapper and handle missing key gracefully with user-facing error.
+
+SUMMARY OF UNSAFE STORAGE ACCESS:
+=================================
+| File                     | Severity | Lines    | Storage Type    |
+|--------------------------|----------|----------|-----------------|
+| QueryProviderEmbedded.tsx| CRITICAL | 147,301,408,500 | localStorage |
+| QueryProvider.tsx        | CRITICAL | 222, 276 | localStorage    |
+| tab-lock.ts              | HIGH     | 6-9      | sessionStorage  |
+| ChatInterface.tsx        | MEDIUM   | 202, 210 | sessionStorage  |
+| useFileUpload.ts         | LOW      | 133      | localStorage    |
+| FilesPage.tsx            | LOW      | 147      | localStorage    |
+
+VERDICT: APPROVED WITH CONCERNS
+===============================
+The safe-storage.ts utility is well-implemented and the updated files are correct.
+However, the migration is significantly incomplete. The CRITICAL issues in QueryProvider
+files mean the app will still break in incognito mode for serverless functionality.
+
+Recommend follow-up commits to:
+1. Add safeSessionStorageRemove() utility
+2. Update tab-lock.ts with error handling
+3. Complete ChatInterface.tsx migration
+4. Address QueryProvider files (either migrate or add explicit incognito warning)

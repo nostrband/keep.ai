@@ -1,0 +1,136 @@
+COMMIT REVIEW: 81d3743
+=======================
+test: Add comprehensive tests for ScriptStore and TaskStore
+
+CHANGES SUMMARY:
+----------------
+This commit adds 55 new tests across two new test files:
+- packages/tests/src/script-store.test.ts (768 lines, 28 tests)
+- packages/tests/src/task-store.test.ts (444 lines, 27 tests)
+
+Also updates IMPLEMENTATION_PLAN.md to reflect test coverage status and counts.
+
+DETAILED CHANGES:
+-----------------
+
+1. script-store.test.ts:
+   - Tests Script CRUD operations (add, get, list, filter by task_id/workflow_id)
+   - Tests Script versioning (get latest by task_id/workflow_id, list latest scripts)
+   - Tests ScriptRun operations (start, finish, error tracking, retries)
+   - Tests Workflow operations (add, update, get by id/task_id/chat_id, list)
+   - Tests Maintenance mode (set, increment/reset fix count, pause all)
+   - Tests Draft activity queries (abandoned drafts, activity summary)
+   - Creates in-memory tables manually to avoid CR-SQLite migration dependencies
+
+2. task-store.test.ts:
+   - Tests Task CRUD operations (add, get, update, delete, list with filters)
+   - Tests Task lookups (by chat_id, workflow_id, multiple IDs)
+   - Tests Task completion (finish with reply/error)
+   - Tests Task asks updates
+   - Tests TaskRun operations (create, finish, error, list, token/cost tracking)
+   - Tests deprecated TaskState backwards compatibility (save, get, getStates)
+
+3. IMPLEMENTATION_PLAN.md:
+   - Updated test coverage section to mark database store tests as DONE
+   - Updated test counts from 85 to 172 in packages/tests
+   - Updated total test counts from 122 to 209
+   - Updated version tag reference from alpha.5 to alpha.7
+
+ISSUES FOUND:
+-------------
+
+ISSUE 1: Missing tests for 2 ScriptStore methods
+Severity: Low
+Location: script-store.test.ts
+The following methods are not tested:
+- getScriptRunsByScriptId(script_id) - retrieves all runs for a given script
+- getScriptRunsByTaskId(task_id) - retrieves all runs for a task via join with scripts table
+These methods have different query patterns than the tested ones and could contain bugs.
+
+ISSUE 2: Test schema missing NOT NULL constraints
+Severity: Low
+Location: script-store.test.ts:9-147, task-store.test.ts:11-74
+The manually created test schemas use simpler `DEFAULT ''` patterns without the `NOT NULL`
+constraints that exist in the actual migrations (e.g., v6, v15, v31). This means tests
+could pass with NULL values that would fail in production.
+
+ISSUE 3: Transaction parameter not tested
+Severity: Low
+Location: task-store.test.ts
+Several TaskStore methods accept an optional `tx` transaction parameter:
+- addTask(task, tx?)
+- getTaskByChatId(chatId, tx?)
+- updateTask(task, tx?)
+These transaction overloads are not tested, which could miss issues with transactional operations.
+
+ISSUE 4: Boolean-to-Integer conversion edge cases not tested
+Severity: Low
+Location: script-store.test.ts:644-654
+The `maintenance` field is stored as INTEGER (0/1) but the Workflow interface uses boolean.
+Tests cover basic toggle but don't verify:
+- Round-trip conversion correctness
+- Behavior with unexpected DB values (2, -1, NULL)
+
+ISSUE 5: Abandoned drafts boundary conditions not tested
+Severity: Low
+Location: script-store.test.ts:688-814
+The getAbandonedDrafts() and getDraftActivitySummary() tests don't cover:
+- Exact threshold boundary (workflow exactly 7 days old)
+- Workflow with no chat_messages (should fallback to script timestamps)
+- Task with 'asks' state (not just 'wait')
+- COALESCE precedence when multiple timestamps exist
+
+ISSUE 6: Large dataset and pagination edge cases not tested
+Severity: Very Low
+Location: Both test files
+Tests only use 5-10 records. Edge cases not covered:
+- Large offsets (offset >= total records)
+- limit=0 behavior
+- Very large ID arrays in batch queries
+- IN clause length validation
+
+ISSUE 7: Concurrent modification scenarios not tested
+Severity: Very Low
+Location: script-store.test.ts
+The updateWorkflowFields() method is designed for atomic updates and accepts optional `tx`
+parameter for transactional calls, but concurrent update scenarios are not tested.
+
+PROPOSALS:
+----------
+
+PROPOSAL 1: Add tests for missing ScriptStore methods
+Add test cases for getScriptRunsByScriptId() and getScriptRunsByTaskId() to ensure
+their join/filter logic works correctly.
+
+PROPOSAL 2: Add NOT NULL constraints to test schemas
+Update createScriptTables() and createTaskTables() to match production schema constraints.
+This would catch bugs where code inadvertently allows NULL values.
+
+PROPOSAL 3: Add transaction parameter tests
+Add test cases that verify methods work correctly when called within transactions.
+This is especially important for operations that may be composed.
+
+PROPOSAL 4: Add boundary condition tests for draft activity
+Add tests with workflows exactly at the 7-day threshold and test all COALESCE paths
+(no chat_messages, no scripts, etc.)
+
+VERDICT: ACCEPTABLE WITH MINOR GAPS
+The tests provide good coverage (93% of methods) and follow good testing patterns:
+- In-memory database for isolation
+- Proper beforeEach/afterEach cleanup
+- Comprehensive CRUD and query testing
+- Edge cases for basic operations
+
+The identified gaps are low severity and don't affect production correctness.
+The test structure is solid and the gaps can be addressed in follow-up work.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Missing tests for 2 ScriptStore methods) - skipped
+- Issue #2 (Test schema missing NOT NULL constraints) - created specs/new/align-test-schemas-with-production.md
+- Issue #3 (Transaction parameter not tested) - skipped
+- Issue #4 (Boolean-to-Integer conversion edge cases) - created specs/new/test-boolean-integer-conversion.md
+- Issue #5 (Abandoned drafts boundary conditions) - created specs/new/test-abandoned-drafts-boundaries.md
+- Issue #6 (Large dataset and pagination) - skipped
+- Issue #7 (Concurrent modification) - skipped

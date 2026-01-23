@@ -1,0 +1,97 @@
+COMMIT REVIEW: 5105433
+=======================
+Title: Fix electron notification return type mismatch (#73)
+Date: 2026-01-21
+Files: IMPLEMENTATION_PLAN.md, apps/web/src/lib/WorkflowNotifications.ts, apps/web/src/vite-env.d.ts
+
+SUMMARY
+-------
+This commit fixes a type mismatch where the Electron showNotification IPC handler
+returns Promise<boolean> but the TypeScript type definition declared Promise<void>.
+The fix updates the type and adds handling for the return value in WorkflowNotifications
+to only mark workflows as notified when the notification was actually shown successfully.
+
+CHANGES IN DETAIL
+-----------------
+
+1. vite-env.d.ts (Line 27):
+   - Changed showNotification return type from `Promise<void>` to `Promise<boolean>`
+   - Correctly matches the actual Electron IPC handler implementation
+
+2. WorkflowNotifications.ts (Lines 149-160):
+   - Now captures the return value: `const success = await window.electronAPI.showNotification(...)`
+   - Checks if notification failed: `if (!success) { ... continue; }`
+   - Only marks workflows as notified after successful notification creation
+   - Adds debug logging for failed notifications
+   - Uses `continue` to skip marking on failure, allowing retry on next check cycle
+
+3. IMPLEMENTATION_PLAN.md:
+   - Added section "73. Electron Notification Return Type Fix"
+   - Updated summary statistics (Ideas->Specs: 4->5, Total: 72->73)
+
+POTENTIAL ISSUES
+----------------
+
+### Issue 1: Incomplete Fix - App.tsx Callers Don't Handle Return Value
+**Severity**: Low
+**Description**: The fix correctly updates WorkflowNotifications.ts to handle the boolean
+return, but App.tsx has 3 calls to showNotification (lines 73, 86, 96) in the
+handlePauseAllAutomations function that ignore the return value:
+
+```typescript
+// Line 73 - No workflows to pause
+await window.electronAPI.showNotification({
+  title: 'No automations to pause',
+  body: 'All automations are already paused...',
+});
+
+// Line 86 - Success notification
+await window.electronAPI.showNotification({
+  title: `Paused ${count} ${workflowWord}`,
+  body: `All ${workflowWord} have been paused...`,
+});
+
+// Line 96 - Error notification
+await window.electronAPI.showNotification({
+  title: 'Failed to pause automations',
+  body: error instanceof Error ? error.message : '...',
+});
+```
+
+While not breaking (the promise is awaited), these calls are inconsistent with the
+pattern established in WorkflowNotifications.ts.
+
+**Proposal**: For consistency and better UX, consider checking the return value in App.tsx,
+especially for the success case (line 86). If notification fails, could show a toast
+fallback or log a warning. However, this is low priority since:
+- These are one-off notifications (not recurring like WorkflowNotifications)
+- The user already sees the result in the UI (paused workflows)
+- Failure is unlikely and doesn't affect core functionality
+
+### Issue 2: Debug Logging Level May Be Too Quiet
+**Severity**: Low
+**Description**: When notification fails, the code uses `console.debug()` which may not
+be visible in production builds. Users won't know their notifications silently failed.
+
+```typescript
+if (!success) {
+  console.debug("Notification creation failed, will retry on next check");
+  continue;
+}
+```
+
+**Proposal**: Consider using `console.warn()` instead of `console.debug()` so failures
+are visible in production. Or, use the project's debug module with a specific namespace.
+
+POSITIVE OBSERVATIONS
+---------------------
+1. The fix correctly identifies the root cause - type mismatch between declaration and impl
+2. Retry logic is sound - failed notifications will be retried on next check cycle
+3. The continue statement correctly skips marking workflows as notified on failure
+4. Documentation in IMPLEMENTATION_PLAN.md is thorough
+
+VERDICT
+-------
+The fix is correct and well-implemented for the primary use case (WorkflowNotifications).
+Minor improvements possible for App.tsx consistency and logging visibility, but these
+don't affect the core functionality.

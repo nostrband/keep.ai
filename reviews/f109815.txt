@@ -1,0 +1,94 @@
+COMMIT REVIEW: f109815
+=======================
+Title: Verify remaining specs and update plan
+Date: 2026-01-21
+
+SUMMARY
+-------
+This commit verifies two remaining specs and moves them to the done folder:
+1. mainpage-enter-key-submit.md - Verified that MainPage form uses api.createTask()
+2. rollback-script-atomicity.md - Verified as superseded by useActivateScriptVersion
+
+The commit also updates IMPLEMENTATION_PLAN.md with verification notes.
+
+CHANGES ANALYSIS
+----------------
+1. IMPLEMENTATION_PLAN.md (+2 lines)
+   - Added verification notes for the two specs
+
+2. specs/mainpage-enter-key-submit.md -> specs/done/mainpage-enter-key-submit.md
+   - File move only, no content changes
+
+3. specs/rollback-script-atomicity.md -> specs/done/rollback-script-atomicity.md
+   - File move only, no content changes
+
+ISSUES IDENTIFIED
+-----------------
+
+### ISSUE 1: Missing isSubmitting Reset on Success (LOW)
+Location: apps/web/src/components/MainPage.tsx
+Description: The MainPage.handleSubmit function sets isSubmitting=true but only resets
+it to false in the catch block. On success, the function navigates away, but if the user
+navigates back, the input remains disabled.
+Current behavior: setIsSubmitting(true) -> api.createTask() -> navigate() -> [no reset]
+Proposed fix: Not strictly needed since navigation resets component state, but could add
+setIsSubmitting(false) before navigate() for completeness.
+Severity: LOW - Navigation causes component unmount/remount which resets state.
+
+### ISSUE 2: No User Feedback on Task Creation Failure (MEDIUM)
+Location: apps/web/src/components/MainPage.tsx
+Description: When api.createTask() fails, only console.error is called. User sees no
+toast/alert explaining what went wrong.
+Current behavior: catch { console.error(...); setIsSubmitting(false); } -> silent failure
+Proposed fix: Add error toast: toast.error("Failed to create task. Please try again.");
+Severity: MEDIUM - Users don't know why their submission failed.
+
+### ISSUE 3: Silent File Upload Failure (LOW)
+Location: apps/web/src/components/MainPage.tsx
+Description: If file upload fails, code proceeds with empty attachedFiles array.
+User's files are silently dropped without notification.
+Current behavior: await Promise.all(uploads) can fail, but only sets attachedFiles=[]
+Proposed fix: Show warning toast when file upload fails: "Some files failed to upload"
+Severity: LOW - Task still gets created, just without attachments.
+
+### ISSUE 4: TOCTOU in Rollback Atomicity (LOW)
+Location: apps/web/src/hooks/dbWrites.ts (useActivateScriptVersion)
+Description: The claim that "useActivateScriptVersion just updates pointer" is correct,
+but there's a time-of-check-to-time-of-use (TOCTOU) vulnerability between validating
+the script exists (getScript) and updating the pointer (updateWorkflowFields).
+In theory, script could be deleted between these two calls.
+Current behavior: getScript(scriptId) -> validate -> updateWorkflowFields()
+Proposed fix: Wrap in transaction: api.db.db.tx(async (tx) => { getScript + update })
+Severity: LOW - Script deletion is rare, and even if it happens, the pointer update
+to a deleted script is relatively harmless (next lookup fails gracefully).
+
+### ISSUE 5: Missing Debounce on Submit (LOW)
+Location: apps/web/src/components/MainPage.tsx
+Description: Rapid double-clicks on submit button could trigger multiple submissions
+before isSubmitting state prevents it. React state updates are asynchronous.
+Current behavior: onClick -> setIsSubmitting(true) [async] -> api.createTask()
+Proposed fix: Add useDebouncedCallback or check ref.current before submission.
+Severity: LOW - Network latency usually masks this, and double-task is just annoying.
+
+PROPOSALS
+---------
+1. For ISSUE 2 (most impactful): Add toast on api.createTask failure:
+   ```typescript
+   } catch (error) {
+     console.error("Error creating task:", error);
+     toast.error("Failed to create automation. Please try again.");
+     setIsSubmitting(false);
+   }
+   ```
+
+2. For ISSUE 4: Consider transaction wrapping in useActivateScriptVersion if atomicity
+   guarantees become important in the future.
+
+VERDICT
+-------
+The commit correctly verifies that the two specs are complete. The verification claims
+are accurate. The issues identified are minor and don't affect the correctness of the
+verification. The code quality is good for a v1 SLC release.
+
+Risk: LOW
+Blocking: NO

@@ -1,0 +1,140 @@
+COMMIT REVIEW: f9d363e
+======================
+
+Title: Implement Specs 07 and 08: Remove deprecated chat_notifications and resources code
+
+Author: Claude Agent (Artur)
+Date: Thu Jan 22 13:33:20 2026 +0100
+
+Files Changed: 22 files, +891 insertions, -311 deletions
+
+## SUMMARY
+
+This commit removes two deprecated features from the codebase:
+- Spec 07: Per-device chat notification tracking (chat_notifications table code)
+- Spec 08: Shared working memory resources (resources table code)
+
+The implementation is CLEAN AND COMPLETE. All application code was removed while
+database tables are preserved for backwards compatibility with deprecation comments.
+
+## CHANGES IN PLAIN ENGLISH
+
+### Spec 07: chat_notifications Feature Removal
+
+1. **DELETED MessageNotifications.ts** (134 lines)
+   - Singleton class that checked for new messages periodically
+   - Showed browser notifications and played sounds
+   - Tracked per-device notification timestamps via chat_notifications table
+   - REASON: App is workflow-focused, not chat-focused
+
+2. **Removed from queryClient.ts**
+   - Deleted import of messageNotifications
+   - Removed checkNewMessages() call from notifyTablesChanged()
+   - workflowNotifications remains and handles workflow error notifications
+
+3. **Removed from api.ts**
+   - Deleted getDeviceId() method (retrieved cr-sqlite site_id)
+   - Deleted getNewAssistantMessagesForDevice() method
+   - Updated deprecation comment on getNewAssistantMessages() to reference Spec 07
+
+4. **Removed from chat-store.ts**
+   - Deleted markChatNotifiedOnDevice() method
+   - Deleted getChatNotifiedAt() method
+   - Both used the chat_notifications table
+
+5. **Added deprecation comment to v23.ts migration**
+   - Documents original purpose of chat_notifications table
+   - Notes that code removed per Spec 07
+
+### Spec 08: resources Table Feature Removal
+
+1. **Removed from memory-store.ts**
+   - Deleted Resource type definition
+   - Deleted saveResource() method
+   - Deleted getResource() method
+   - Deleted setResource() method
+   - File reduced from ~230 to ~170 lines
+
+2. **Removed from index.ts**
+   - Deleted StorageResourceType export
+
+3. **Added deprecation comments to v1.ts migration**
+   - Documents resources table as deprecated
+   - Documents resources index as deprecated
+   - Documents resources CRR statement as deprecated
+
+### Other Changes
+
+4. **Moved spec files from specs/new/ to specs/**
+   - 12 spec files moved to top-level specs directory
+   - No content changes
+
+5. **Added IMPLEMENTATION_PLAN.md** (873 lines)
+   - Comprehensive implementation plan document
+   - Documents all 12 specs and their status
+
+## ISSUES FOUND
+
+### Critical Issues: NONE
+
+### Potential Issues: NONE
+
+### Minor Observations:
+
+1. **getNewAssistantMessages() still exists (intentional)**
+   - The non-device-specific version remains in api.ts
+   - Marked as deprecated with clear comment
+   - Has no callers - safe to remove later if desired
+
+2. **Database tables preserved (correct)**
+   - chat_notifications table kept in v23.ts
+   - resources table kept in v1.ts
+   - Both marked as deprecated
+   - Correct approach for backwards compatibility
+
+3. **Build artifacts contain old code (expected)**
+   - Pre-built files in apps/electron/public/assets/ still contain bundled code
+   - This is normal - they'll be regenerated on next build
+   - Source files are correct
+
+## CODE QUALITY ASSESSMENT
+
+### Strengths:
+
+1. **Complete Removal** - All methods and types fully removed, not stubbed
+2. **Comprehensive Documentation** - Clear deprecation comments explain why
+3. **Backwards Compatible** - Database tables preserved for existing data
+4. **No Orphaned References** - Verified no remaining imports or calls
+5. **Clean File Deletion** - MessageNotifications.ts properly deleted
+
+### Code Search Verification:
+
+All searches for deleted code returned CLEAN (no active references):
+- MessageNotifications imports: CLEAN
+- messageNotifications references: CLEAN
+- getDeviceId() calls: CLEAN
+- getNewAssistantMessagesForDevice() calls: CLEAN
+- markChatNotifiedOnDevice() calls: CLEAN
+- getChatNotifiedAt() calls: CLEAN
+- Resource type usage: CLEAN
+- saveResource() calls: CLEAN
+- getResource() calls: CLEAN
+- setResource() calls: CLEAN
+- StorageResourceType imports: CLEAN
+
+## PROPOSALS
+
+No issues found that require proposals.
+
+## TESTING RECOMMENDATIONS
+
+1. Rebuild the app (`npm run build`) to regenerate bundled assets
+2. Run type-check (`npm run type-check`) - should pass
+3. Verify chat functionality still works via remaining chat-store methods
+4. Verify workflow notifications still work (separate from chat notifications)
+5. Test fresh database initialization with migrations
+
+## VERDICT
+
+**APPROVED** - Implementation is correct, complete, and production-ready.
+The code removal is thorough with proper documentation and no runtime risks.

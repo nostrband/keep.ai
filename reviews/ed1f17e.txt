@@ -1,0 +1,181 @@
+COMMIT: ed1f17e
+DATE: 2026-01-21 17:37:42 +0100
+SUBJECT: Fix multiple code quality and UX issues
+
+================================================================================
+CHANGES SUMMARY
+================================================================================
+
+This commit addresses 6 documented issues (#33, #55, #57, #58, #65, #9) spanning
+error handling, UI fixes, and code quality improvements across 15 files.
+
+**1. Payment Required Error Classification (#33)**
+- File: packages/agent/src/workflow-worker.ts
+- Changed errorType for PAYMENT_REQUIRED from '' (empty string) to 'auth'
+- Rationale: Payment errors require user action similar to auth errors
+
+**2. ResizeObserver Height Reference Fix (#55)**
+- File: apps/web/src/components/ChatInterface.tsx
+- Changed initial lastHeight from container.scrollHeight to document.documentElement.scrollHeight
+- Ensures consistent height measurement across resize callbacks
+
+**3. FilesPage setTimeout Cleanup (#57)**
+- File: apps/web/src/components/FilesPage.tsx
+- Added uploadResetTimeoutRef to track setTimeout for upload reset
+- Added useEffect cleanup to clear timeout on unmount
+- Updated both uploadFileAPI() and uploadFile() to use the ref
+
+**4. AppUpdateBanner Timeout Cleanup (#58)**
+- File: apps/web/src/App.tsx
+- Added autoDismissTimeoutRef to track the 10-second auto-dismiss timeout
+- Added cleanup in useEffect return to clear timeout on unmount
+
+**5. Streamdown Tailwind Source (#65)**
+- File: apps/web/tailwind.config.js
+- Added "./node_modules/streamdown/dist/**/*.{js,ts,jsx,tsx}" to content array
+- Prevents Streamdown CSS classes from being purged in production
+
+**6. Tool Error Classification Migration (#9)**
+- Files: 9 tool files in packages/agent/src/tools/
+  - audio-explain.ts, get-weather.ts, images-explain.ts, images-generate.ts,
+    images-transform.ts, pdf-explain.ts, text-classify.ts, text-generate.ts,
+    text-summarize.ts
+- Replaced generic Error throws with ClassifiedError types:
+  - AuthError: Missing API keys
+  - PermissionError: Missing user path configuration
+  - LogicError: File not found, unsupported formats, parsing errors
+  - NetworkError: No response from model
+  - classifyHttpError(): HTTP response errors
+  - classifyGenericError(): Fallback for unclassified errors
+- Added isClassifiedError() check in catch blocks to re-throw already-classified errors
+
+================================================================================
+POTENTIAL ISSUES
+================================================================================
+
+**ISSUE 1: ResizeObserver Initial Height Mismatch (Medium)**
+Location: apps/web/src/components/ChatInterface.tsx:267
+Description: The lastHeight is now initialized with document.documentElement.scrollHeight,
+but the ResizeObserver is observing the container element. On first render, if container.scrollHeight
+differs significantly from document.documentElement.scrollHeight, the first comparison
+could be incorrect.
+
+The fix is better than the original (which used container.scrollHeight but compared against
+document.documentElement.scrollHeight in the callback), but there's still a subtle issue:
+the ResizeObserver fires immediately when observation begins, and if content is still rendering,
+this could cause unnecessary scroll triggers.
+
+**ISSUE 2: FilesPage Multiple Timeout Assignment Without Prior Cleanup (Low)**
+Location: apps/web/src/components/FilesPage.tsx:232, 277
+Description: When uploadResetTimeoutRef.current is assigned, any previous timeout is not
+explicitly cleared first. If uploadFile() succeeds and then is called again before the
+1-second timeout completes, the old timeout continues to run and will reset state unexpectedly.
+
+Pattern:
+```javascript
+// Current (line 232, 277):
+uploadResetTimeoutRef.current = setTimeout(() => {...}, 1000);
+
+// Better:
+if (uploadResetTimeoutRef.current) {
+  clearTimeout(uploadResetTimeoutRef.current);
+}
+uploadResetTimeoutRef.current = setTimeout(() => {...}, 1000);
+```
+
+**ISSUE 3: Tool Error Classification Pattern Duplicated (Low/Style)**
+Location: All 9 modified tool files in packages/agent/src/tools/
+Description: The same catch block pattern is repeated 9 times:
+```javascript
+} catch (error) {
+  if (isClassifiedError(error)) {
+    throw error;
+  }
+  throw classifyGenericError(error instanceof Error ? error : new Error(String(error)), "ToolName");
+}
+```
+This could be extracted to a utility function like:
+```javascript
+export function rethrowClassified(error: unknown, source: string): never {
+  if (isClassifiedError(error)) throw error;
+  throw classifyGenericError(error instanceof Error ? error : new Error(String(error)), source);
+}
+```
+
+**ISSUE 4: Weather Tool Double Error Wrapping (Low)**
+Location: packages/agent/src/tools/get-weather.ts:97-106, 124-133
+Description: The catch blocks for geocoding and weather API calls wrap errors, but if fetch()
+throws a network error (not an HTTP error), the classifyGenericError() is called which may
+not classify network errors as NetworkError if the message doesn't contain specific keywords.
+
+The existing keyword matching in classifyGenericError includes "network", "timeout", "connection",
+etc., so this is likely fine in practice.
+
+**ISSUE 5: Empty Content Classified as LogicError (Medium/Architecture)**
+Location: Multiple tools (text-classify.ts:106, text-generate.ts:97, text-summarize.ts:94, etc.)
+Description: When the API returns empty content (result.choices[0].message?.content is empty),
+this is classified as LogicError. However, empty content could indicate:
+- Rate limiting (should be NetworkError)
+- Model refusal (could be PermissionError)
+- Transient API issues (should be NetworkError)
+
+The current classification as LogicError means the agent will attempt to auto-fix the script,
+which won't help in these cases. However, this is a pre-existing architectural decision.
+
+================================================================================
+PROPOSALS
+================================================================================
+
+**PROPOSAL 1: Add Defensive Timeout Cleanup in FilesPage**
+Severity: Low
+Effort: Minimal (5 minutes)
+```javascript
+// Before assigning new timeout, clear any existing one
+if (uploadResetTimeoutRef.current) {
+  clearTimeout(uploadResetTimeoutRef.current);
+}
+uploadResetTimeoutRef.current = setTimeout(() => {
+  setIsUploading(false);
+  setUploadProgress(0);
+  uploadResetTimeoutRef.current = null;
+}, 1000);
+```
+
+**PROPOSAL 2: Extract Error Re-throw Utility**
+Severity: Low (Style)
+Effort: Low (30 minutes)
+In packages/agent/src/errors.ts, add:
+```javascript
+export function rethrowClassified(error: unknown, source: string): never {
+  if (isClassifiedError(error)) throw error;
+  throw classifyGenericError(
+    error instanceof Error ? error : new Error(String(error)),
+    source
+  );
+}
+```
+Then in each tool:
+```javascript
+} catch (error) {
+  rethrowClassified(error, "Audio.explain");
+}
+```
+
+**PROPOSAL 3: No Action Required for ResizeObserver**
+The current fix is an improvement. The potential edge cases are unlikely to cause
+noticeable issues in practice. The scroll behavior is already guarded by wasAtBottomRef.
+
+================================================================================
+VERDICT
+================================================================================
+
+Overall: GOOD COMMIT
+
+The commit correctly addresses all 6 documented issues. The error classification
+migration is thorough and follows consistent patterns. The timeout cleanup fixes
+prevent memory leaks. The only substantive issue is the missing defensive cleanup
+before reassigning timeouts in FilesPage, which is a minor edge case.
+
+Code quality: Good
+Test coverage: Not visible in diff, but likely covered by existing tests
+Documentation: IMPLEMENTATION_PLAN.md updated appropriately

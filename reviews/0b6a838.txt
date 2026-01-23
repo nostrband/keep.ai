@@ -1,0 +1,46 @@
+COMMIT: 0b6a838
+TITLE: fix: Correct indentation in openrouter-proxy streaming handler
+DATE: 2026-01-22
+
+== CHANGES ==
+
+This commit fixes a code formatting/indentation issue in openrouter-proxy.ts:
+
+1. **Indentation fix:**
+   - Lines 126-177 were indented with 4 spaces instead of 6 spaces
+   - This made the streaming data handler code block appear to be at the wrong scope level
+   - The code was inside `proxyReq.on('response')` callback but visually looked misaligned
+   - Fixed to use proper 6-space indentation matching the surrounding code
+
+2. **Whitespace standardization:**
+   - Standardized blank lines within the callback for consistency
+   - Some blank lines were inconsistent between code blocks
+
+3. **Documentation:**
+   - Added section to IMPLEMENTATION_PLAN.md documenting the fix
+
+== ISSUES ==
+
+### ISSUE 1: Purely cosmetic change with no functional impact
+**Severity: None (informational)**
+
+This is a formatting-only commit. JavaScript/TypeScript is indentation-agnostic, so the code behavior is unchanged. The diff appears large because an entire code block was re-indented.
+
+The commit is appropriate for maintaining code quality and readability. The inconsistent indentation likely occurred due to copy-paste or editor misconfiguration in a previous commit.
+
+== PROPOSALS ==
+
+### PROPOSAL 1: Consider automated formatting
+If indentation issues occur frequently, consider:
+- Adding a `.editorconfig` file to enforce consistent indentation
+- Running Prettier on save or as a pre-commit hook
+- Adding ESLint with indentation rules
+
+This would prevent similar formatting inconsistencies in the future.
+
+### PROPOSAL 2: None needed for this specific fix
+The commit is clean and does exactly what it claims. No changes required.
+
+== SUMMARY ==
+
+Clean formatting fix. The indentation issue was genuinely confusing when reading the code - it looked like the streaming data handler was outside the response callback when it wasn't. Good catch and appropriate fix.

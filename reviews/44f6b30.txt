@@ -1,0 +1,158 @@
+# Review: Commit 44f6b30 - Extract useAutoHidingMessage hook to reduce duplication
+
+## Summary of Changes
+
+This commit creates a new `useAutoHidingMessage` custom React hook to centralize auto-hiding notification message logic that was previously duplicated across 4 components. The hook handles state management, timeout tracking, and cleanup on unmount.
+
+### Files Changed:
+1. `apps/web/src/hooks/useAutoHidingMessage.ts` - New hook implementation (78 lines)
+2. `apps/web/src/components/WorkflowDetailPage.tsx` - Refactored to use hook (-46 lines)
+3. `apps/web/src/components/TaskDetailPage.tsx` - Refactored to use hook (-46 lines)
+4. `apps/web/src/components/ScriptDetailPage.tsx` - Refactored to use hook (-43 lines)
+5. `apps/web/src/components/WorkflowEventGroup.tsx` - Refactored to use hook (-28 lines)
+6. `IMPLEMENTATION_PLAN.md` - Updated spec item #24
+
+### Hook Features:
+- Configurable duration via options (default: 3000ms)
+- Returns `{ message, show, clear }` interface
+- Proper timeout cleanup on unmount (useEffect cleanup)
+- Timeout tracking with useRef to prevent stale closures
+- Resets timeout when new message shown (prevents multiple timers)
+
+---
+
+## Potential Issues
+
+### Issue 1: Duplicated showWarning Helper Pattern (Low Severity)
+
+**Location**: WorkflowDetailPage.tsx (lines 68-71), TaskDetailPage.tsx (lines 27-30), ScriptDetailPage.tsx (lines 26-29)
+
+**Problem**: Three components now have an identical helper function:
+```typescript
+const showWarning = (message: string) => {
+  success.clear();
+  warning.show(message);
+};
+```
+
+This pattern coordinates two hook instances (clearing success before showing warning) and is duplicated verbatim.
+
+**Proposal**: Consider one of these approaches:
+1. Create a `useMessagePair()` hook that returns `{ success, warning, showWarning }` for cases where both are always used together
+2. Add optional `clearOther?: () => void` callback to the show method
+3. Accept the duplication as minimal (3 lines, 3 files) and low risk
+
+---
+
+### Issue 2: Missing useCallback Dependency Warning (Non-Issue, Verified)
+
+**Location**: useAutoHidingMessage.ts lines 57-75
+
+**Observation**: The `show` and `clear` callbacks use `useCallback` correctly:
+- `clear` has empty dependency array `[]` since it only uses refs and setters (stable references)
+- `show` has `[duration]` dependency since it uses the duration value
+
+**Status**: Correctly implemented. The hook properly memoizes callbacks to prevent unnecessary re-renders in consuming components.
+
+---
+
+### Issue 3: Potential State Update After Unmount Edge Case (Very Low Severity)
+
+**Location**: useAutoHidingMessage.ts lines 68-73
+
+**Problem**: Theoretical race condition:
+```typescript
+timeoutRef.current = setTimeout(() => {
+  setMessage("");  // This could run after unmount
+  timeoutRef.current = null;
+}, duration);
+```
+
+If a component unmounts immediately after calling `show()` but before the cleanup effect runs, there's a brief window where `setMessage("")` could be called on an unmounted component.
+
+**Why it's acceptable**:
+1. React's cleanup function runs synchronously on unmount
+2. The cleanup clears the timeout before the callback can fire
+3. Even if there was a race, React handles stale state updates gracefully (no crash, just a warning in strict mode)
+
+**Proposal**: No action needed. The current implementation follows React best practices and this edge case is handled by React's architecture.
+
+---
+
+### Issue 4: WorkflowDetailPage Uses Different Warning Duration (By Design, Not a Bug)
+
+**Location**: WorkflowDetailPage.tsx lines 35-36
+
+**Observation**:
+```typescript
+const success = useAutoHidingMessage({ duration: 3000 });
+const warning = useAutoHidingMessage({ duration: 5000 });
+```
+
+WorkflowDetailPage uses 5000ms for warnings while other pages use 3000ms. This appears intentional (warnings stay visible longer to ensure users notice them).
+
+**Status**: This is a feature, not a bug. The hook's configurable duration allows for this flexibility.
+
+---
+
+### Issue 5: Warning Message Styling Inconsistency (Low Severity)
+
+**Location**: WorkflowDetailPage.tsx lines 326-328 vs TaskDetailPage.tsx lines 124-126
+
+**Problem**: Warning message styling differs between components:
+- WorkflowDetailPage: `text-amber-700 bg-amber-50 border-amber-200`
+- TaskDetailPage: `text-red-600 bg-red-50 border-red-200`
+
+The hook doesn't enforce consistent styling - it only manages state. This leaves styling decisions to each component, which has led to inconsistency.
+
+**Proposal**: Consider creating a companion `<AutoHidingMessage variant="success|warning" message={...} />` component that enforces consistent styling, or document the expected color conventions.
+
+---
+
+### Issue 6: JSX Conditional Rendering Verbosity (Very Low Severity)
+
+**Location**: All consuming components
+
+**Problem**: Each component repeats the conditional rendering pattern:
+```tsx
+{success.message && (
+  <div className="text-sm text-green-600 bg-green-50 px-2 py-1 rounded border border-green-200">
+    {success.message}
+  </div>
+)}
+{warning.message && (
+  <div className="text-sm text-red-600 bg-red-50 px-2 py-1 rounded border border-red-200">
+    {warning.message}
+  </div>
+)}
+```
+
+**Proposal**: The hook could optionally export a render helper or the codebase could introduce a `<ToastMessage type="success|warning" message={...} />` component. However, this is a minor concern and the current approach provides maximum flexibility.
+
+---
+
+## Code Quality Observations
+
+### Positive Aspects:
+1. Excellent JSDoc documentation with clear examples
+2. Proper TypeScript interfaces for options and return value
+3. Follows React hook best practices (useCallback, useRef, useEffect cleanup)
+4. Clean API design: `{ message, show, clear }`
+5. Successfully removes ~100 lines of duplicated code
+6. Timeout ID tracking with useRef avoids stale closure issues
+
+### Technical Correctness:
+- Memory leak prevention: ✓ Cleanup effect clears timeouts
+- Race condition handling: ✓ Clears previous timeout before setting new one
+- State consistency: ✓ Uses functional updates where appropriate
+- Dependency tracking: ✓ Correct useCallback dependencies
+
+---
+
+## Summary
+
+This commit is a well-executed refactoring that properly extracts duplicated timeout/message logic into a reusable hook. The implementation follows React best practices and handles edge cases correctly.
+
+The main improvement opportunity is the duplicated `showWarning` helper that coordinates success/warning clearing - this could be extracted into a compound hook for components that always use both message types together.
+
+**Overall Assessment**: High-quality refactoring with proper cleanup handling and good documentation. Minor code duplication in the `showWarning` helper pattern doesn't significantly impact maintainability.

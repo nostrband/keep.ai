@@ -1,0 +1,65 @@
+# Review: 2439d17 - Consolidate AutonomyMode type to use @app/proto
+
+## Summary
+
+This commit replaces inline `'ai_decides' | 'coordinate'` type annotations with the `AutonomyMode` type imported from `@app/proto`. This ensures type consistency across the codebase.
+
+### Changes in Plain English
+
+1. **Updated api.ts** (`packages/db/src/api.ts`):
+   - Added import: `import { AssistantUIMessage, AutonomyMode } from "@app/proto";`
+   - Changed `setAutonomyMode(mode: 'ai_decides' | 'coordinate')` to `setAutonomyMode(mode: AutonomyMode)`
+   - Changed return type from `Promise<'ai_decides' | 'coordinate'>` to `Promise<AutonomyMode>`
+   - Updated JSDoc comment to reference the type
+
+2. **Updated task-worker.ts** (`packages/agent/src/task-worker.ts`):
+   - Added `AutonomyMode` to existing import from `@app/proto`
+   - Changed variable declaration from `let autonomyMode: 'ai_decides' | 'coordinate'` to `let autonomyMode: AutonomyMode`
+
+3. **Updated IMPLEMENTATION_PLAN.md**:
+   - Marked spec as completed
+   - Documented the changes
+
+4. **Moved spec to done folder**
+
+---
+
+## Issues Identified
+
+### Issue 1: Missing ChatPage Autonomy Toggle (Pre-existing, Out of Scope)
+
+**Context discovered during exploration**:
+- A spec exists at `specs/01-chat-page-autonomy-toggle.md` to add the autonomy toggle to ChatPage
+- This spec is NOT implemented yet
+- MainPage.tsx has the toggle (lines 354-379) but ChatPage.tsx does not
+
+**Impact**: Not related to this commit. This commit correctly consolidated the type; the missing UI feature is a separate task.
+
+**Proposal**: None for this commit. The spec already exists to track this work.
+
+---
+
+## Code Quality Assessment
+
+### Positive Aspects
+
+1. **Single source of truth**: Type is now defined once in `@app/proto/src/schemas.ts:4`
+2. **Type safety**: Changing the type values in one place will cause compile errors if usages don't match
+3. **Clean changes**: No functional changes, pure type consolidation
+4. **Complete consolidation**: Exploration verified no remaining inline type definitions in source code
+
+### Architecture Notes
+
+The `AutonomyMode` type is used in a complete vertical slice:
+- **Definition**: `@app/proto` (shared package)
+- **Storage**: `packages/db/src/api.ts` - stores in `agent_state` table
+- **Backend usage**: `packages/agent/src/task-worker.ts` and `agent-env.ts` - affects system prompts
+- **Frontend usage**: `apps/web/src/hooks/useAutonomyPreference.ts` and `MainPage.tsx` - user toggle
+
+All layers now import from the same source, which is the correct architecture.
+
+---
+
+## Verdict
+
+**APPROVED** - Clean type consolidation with no issues. All inline type definitions have been replaced with the canonical type from @app/proto.

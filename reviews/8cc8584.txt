@@ -1,0 +1,205 @@
+# Review: Commit 8cc8584
+
+## Summary
+Implements Spec 01: Event System Refactor - migrating agent event writes from the monolithic `chat_events` table to purpose-specific tables:
+- `execution_logs`: Tool calls and run start/end events
+- `notifications`: Escalations and script messages
+- `chat_messages`: User/AI conversation with metadata
+
+This is a major refactoring affecting workflow-worker.ts, task-worker.ts, save.ts, user-send.ts, and sandbox/api.ts. Also deletes the now-obsolete list-events.ts tool.
+
+## Changes Made
+
+### 1. workflow-worker.ts
+- `createEvent`: Now routes tool calls to `executionLogStore.saveExecutionLog()` instead of `chatStore.saveChatEvent()`
+- `escalateToUser`: Creates a notification with type 'escalated' via `notificationStore.saveNotification()`
+- Removed `maintenance_started` event (internal state tracked via workflow.maintenance flag)
+- Cost converted from dollars to microdollars for storage
+
+### 2. task-worker.ts
+- `createTaskRun`: Logs run_start event to `executionLogStore`
+- `finishTaskRun`: Logs run_end event to `executionLogStore` with cost tracking
+- `createEvent` in createSandbox: Routes tool calls to `executionLogStore`
+- `sendToUser`: Changed to use `chatStore.saveChatMessage()` with metadata fields
+
+### 3. save.ts
+- Removed `chatStore` from function parameters
+- Removed `saveChatEvent` calls for `add_script` and `maintenance_fixed`
+- Returns `SaveResult { script: Script, wasMaintenanceFix: boolean }` for caller to use
+
+### 4. user-send.ts
+- Added `UserSendContext` interface for workflow context
+- When workflow context is present, creates notification with type 'script_message'
+- Falls back to `saveChatMessage` for non-workflow contexts (backwards compatibility)
+
+### 5. sandbox/api.ts
+- Removed `makeListEventsTool` import and tool registration
+- Added workflow context to user-send tool creation
+
+### 6. tools/index.ts
+- Removed `makeListEventsTool` export
+
+### 7. Deleted tools/list-events.ts
+- Entire file removed as it relied on deprecated chat_events table
+
+---
+
+## Potential Issues
+
+### ISSUE 1: Missing taskRunId in sendToUser Calls [HIGH]
+**Location:** packages/agent/src/task-worker.ts
+
+The `sendToUser` method signature was updated to accept `taskRunId?` parameter, but the callers don't pass it:
+
+```typescript
+// Line 471 - after result.reply
+await this.sendToUser(task.chat_id, result.reply);  // Missing taskRunId!
+
+// Line 477 - after result.kind === "wait"
+await this.sendToUser(task.chat_id, state.asks);    // Missing taskRunId!
+```
+
+The `taskRunId` is available in scope but not passed. This means all assistant messages saved via this path will have empty `task_run_id` metadata, breaking the audit trail linking messages to task executions.
+
+**Proposal:** Pass `taskRunId` to both sendToUser calls:
+```typescript
+await this.sendToUser(task.chat_id, result.reply, taskRunId);
+await this.sendToUser(task.chat_id, state.asks, taskRunId);
+```
+
+---
+
+### ISSUE 2: SaveResult script_id Not Captured [HIGH]
+**Location:** packages/agent/src/task-worker.ts, packages/agent/src/ai-tools/save.ts
+
+The save tool now returns `SaveResult { script: Script, wasMaintenanceFix: boolean }` with explicit comment:
+```typescript
+// The script_id is returned and included in chat message metadata by task-worker
+```
+
+However, the task-worker has no mechanism to capture this result. The `sendToUser` method always sets `script_id: ''`:
+```typescript
+await this.api.chatStore.saveChatMessage({
+  // ...
+  script_id: '',  // Always empty!
+  // ...
+});
+```
+
+There's no callback or result extraction to get the script_id from the agent's tool execution and include it in the chat message.
+
+**Risk:** All script save operations have empty script_id in chat messages, making it impossible to correlate saved scripts with the messages that triggered them.
+
+**Proposal:** The agent/sandbox needs a mechanism to surface tool results (especially from save) back to the task-worker. Possible approaches:
+1. Have agent.loop() return tool results along with regular results
+2. Use a callback pattern to capture save results
+3. Store save results in a scoped context that task-worker can access
+
+---
+
+### ISSUE 3: workflowTitle Not Populated in UserSendContext [MODERATE]
+**Location:** packages/agent/src/sandbox/api.ts (line 383), packages/agent/src/tools/user-send.ts
+
+In sandbox/api.ts:
+```typescript
+const userSendContext = this.workflowId ? {
+  workflowId: this.workflowId,
+  workflowTitle: '', // Will be fetched by the tool if needed
+  scriptRunId: this.getContext()?.scriptRunId || '',
+} : undefined;
+```
+
+The comment says workflowTitle "will be fetched by the tool if needed" but the tool never fetches it - it just uses the empty string. All script_message notifications will have empty `workflow_title`, reducing their usefulness in the UI.
+
+**Proposal:** Either:
+1. Fetch the workflow title in sandbox/api.ts when creating the context
+2. Have the tool fetch it from the database when saving the notification
+3. Accept that this is low priority and document for future improvement
+
+---
+
+### ISSUE 4: Input/Output Data Loss in Execution Logs [MODERATE]
+**Location:** packages/agent/src/workflow-worker.ts (lines 775-789), packages/agent/src/task-worker.ts (similar)
+
+The new createEvent implementation extracts `content?.input` and `content?.output`:
+```typescript
+input: JSON.stringify(content?.input || {}),
+output: JSON.stringify(content?.output || {}),
+```
+
+However, most tools don't structure their event content with explicit `input` and `output` fields. For example, `text_generate` passes:
+```typescript
+{ promptLength, generatedLength, temperature, maxChars, usage: { cost } }
+```
+
+This means the execution logs end up with empty `input: "{}"` and `output: "{}"` while the actual tool call details are lost.
+
+**Risk:** Execution logs lose detailed information about what tools did, reducing their debugging value.
+
+**Proposal:** Either:
+1. Standardize how tools call createEvent to include `input` and `output` fields
+2. Store the entire `content` object in a separate field (e.g., `metadata`) when input/output are empty
+3. Accept current behavior as sufficient for cost tracking (primary use case)
+
+---
+
+### ISSUE 5: No Error Handling in user-send.ts [MINOR]
+**Location:** packages/agent/src/tools/user-send.ts (lines 30-42, 61-70)
+
+Both notification and chat message saves use `await` without try-catch. If the database operation fails, the error propagates up and could crash the script.
+
+**Risk:** Script execution fails entirely if notification/message creation fails, rather than gracefully degrading.
+
+**Proposal:** Add try-catch with appropriate error handling:
+```typescript
+try {
+  await api.notificationStore.saveNotification({...});
+  return { id: notificationId, success: true };
+} catch (error) {
+  console.error('Failed to save notification:', error);
+  return { id: '', success: false };
+}
+```
+
+---
+
+### ISSUE 6: Hardcoded "main" Chat ID in Fallback [MINOR]
+**Location:** packages/agent/src/tools/user-send.ts (line 63)
+
+The non-workflow fallback path hardcodes `chat_id: "main"`. This works for the current architecture but is fragile if the chat system evolves.
+
+**Risk:** Low - the fallback is rarely used since user-send is primarily for workflow contexts.
+
+**Proposal:** No immediate action needed. Document as potential tech debt.
+
+---
+
+## Code Quality Observations
+
+### Positive
+- Clean separation of concerns: each event type routes to its appropriate store
+- Consistent cost conversion to microdollars (Math.ceil to avoid fractional microdollars)
+- Good removal of dead code (list-events.ts, maintenance_started events)
+- Proper TypeScript typing with DBInterface for transaction support
+- SaveResult return type clearly documents the expected output
+
+### Concerns
+- The split between what task-worker handles and what agent/sandbox handles creates a gap where save results can't flow back to set message metadata
+- Some fallback paths (user-send non-workflow) may be dead code that could be simplified
+
+---
+
+## Testing Considerations
+
+Should verify:
+1. Task run messages have correct task_run_id linkage (currently broken)
+2. Script save messages have correct script_id linkage (currently broken)
+3. Notifications appear correctly for workflow escalations
+4. Execution logs capture sufficient detail for debugging
+5. Cost tracking works correctly with microdollar conversion
+
+---
+
+## Conclusion
+
+This commit successfully migrates the event system to the new purpose-specific tables per Spec 01. The architecture is clean and the separation of concerns is good. However, there are two high-priority issues (missing taskRunId, missing script_id capture) that break the metadata linkage promises made by the new ChatMessage schema. These should be addressed before the feature is considered complete.

@@ -1,0 +1,157 @@
+COMMIT: 0acfcd8
+DATE: 2026-01-21 17:42:27 +0100
+SUBJECT: Add notification grouping for batch workflow errors
+
+================================================================================
+CHANGES SUMMARY
+================================================================================
+
+This commit reduces notification spam by grouping multiple workflow errors of the
+same type into a single OS notification. This is particularly useful when cascading
+failures occur (e.g., OAuth token expiry affects multiple workflows).
+
+**Files Modified:**
+- apps/web/src/lib/WorkflowNotifications.ts (main implementation)
+- apps/electron/src/main.ts (click navigation)
+- IMPLEMENTATION_PLAN.md (documentation)
+
+**Key Changes:**
+
+1. **Error Type Grouping**
+   - Workflows are now grouped by error_type (auth, permission, network, internal)
+   - Each group produces a single notification instead of one per workflow
+
+2. **Grouped Notification Content (buildGroupedNotificationContent method)**
+   - Single workflow: Shows specific workflow title and error message
+   - Multiple workflows: Shows count (e.g., "3 workflows need authentication")
+   - Body includes up to 3 workflow names with "and X more" suffix for longer lists
+
+3. **Click Navigation**
+   - Single workflow in group: Navigates to workflow detail page
+   - Multiple workflows: Navigates to /workflows list page
+
+4. **Electron Main Process Update**
+   - Now handles notifications without workflowId by navigating to /workflows
+
+5. **Visibility Check Moved**
+   - document.visibilityState check moved earlier in the function (before grouping loop)
+   - Prevents unnecessary grouping work when tab is visible
+
+================================================================================
+POTENTIAL ISSUES
+================================================================================
+
+**ISSUE 1: Empty Error Type Groups All Non-Typed Errors Together (Medium)**
+Location: apps/web/src/lib/WorkflowNotifications.ts:132
+Description: The grouping key is `latestRun.error_type || ''`, meaning all workflows
+without an error_type are grouped together regardless of the actual error. Different
+errors would be grouped and shown as "X workflows need attention" with a generic message.
+
+Example: A workflow with a parsing error (no error_type) and another with a database
+error (no error_type) would be grouped together, potentially confusing users.
+
+**ISSUE 2: Workflow Names May Be Empty (Low)**
+Location: apps/web/src/lib/WorkflowNotifications.ts:238
+Description: When building workflow names for the body, the code uses:
+`w.workflow.title || 'Untitled'`
+If multiple workflows lack titles, the body could read:
+"Untitled, Untitled, Untitled. Please reconnect."
+
+This is technically correct but could be confusing. Consider using workflow IDs
+or creation dates as fallback identifiers.
+
+**ISSUE 3: No Debounce Between Check Cycles (Low)**
+Location: apps/web/src/lib/WorkflowNotifications.ts (overall design)
+Description: If checkWorkflowsNeedingAttention() is called multiple times in rapid
+succession (unlikely but possible), multiple grouped notifications could be sent.
+The notifiedWorkflows Set prevents duplicates for the same workflow/error combo,
+but if new workflows fail between calls, each call could send a notification.
+
+This is likely fine given the check interval design, but could be improved with
+a debounce mechanism.
+
+**ISSUE 4: MAX_NAMES_IN_BODY Hardcoded (Low/Style)**
+Location: apps/web/src/lib/WorkflowNotifications.ts:234
+Description: The constant MAX_NAMES_IN_BODY = 3 is defined inline in the method.
+Consider extracting to class-level constant for configurability and clarity.
+
+**ISSUE 5: Error Type Switch Statement Missing 'logic' Type (Low)**
+Location: apps/web/src/lib/WorkflowNotifications.ts:203-226
+Description: The switch statement handles 'auth', 'permission', 'network', 'internal',
+and a default case. The 'logic' error type (which exists in the error classification
+system) falls through to the default case, which produces a generic message.
+
+Logic errors are typically script bugs that the agent should auto-fix, so they may
+not need special handling in notifications. However, if they surface to the user,
+the message "X workflows need attention" is vague.
+
+**ISSUE 6: Race Condition with notifiedWorkflows Cleanup (Very Low)**
+Location: apps/web/src/lib/WorkflowNotifications.ts:153-159
+Description: The cleanup logic:
+```javascript
+if (this.notifiedWorkflows.size > 100) {
+  const toRemove = [...this.notifiedWorkflows].slice(0, 50);
+  toRemove.forEach(key => this.notifiedWorkflows.delete(key));
+}
+```
+This removes the oldest 50 entries when size exceeds 100. However, "oldest" here is
+based on Set iteration order, which reflects insertion order. This is correct behavior,
+but the comment doesn't clarify that oldest = first-inserted.
+
+================================================================================
+PROPOSALS
+================================================================================
+
+**PROPOSAL 1: Add 'unknown' Category for Empty Error Types**
+Severity: Medium
+Effort: Low (15 minutes)
+```javascript
+// Instead of grouping all non-typed errors together:
+const errorType = latestRun.error_type || 'unknown';
+
+// Add handling in buildGroupedNotificationContent:
+case 'unknown':
+  title = `${count} workflows encountered errors`;
+  actionHint = 'Please check the workflow logs.';
+  break;
+```
+
+**PROPOSAL 2: Improve Workflow Name Fallback**
+Severity: Low
+Effort: Minimal (5 minutes)
+```javascript
+const workflowNames = workflows
+  .slice(0, MAX_NAMES_IN_BODY)
+  .map((w, i) => w.workflow.title || `Workflow ${i + 1}`)
+  .join(', ');
+```
+
+**PROPOSAL 3: Extract MAX_NAMES_IN_BODY to Class Constant**
+Severity: Low (Style)
+Effort: Minimal (5 minutes)
+```javascript
+private static readonly MAX_NAMES_IN_BODY = 3;
+```
+
+**PROPOSAL 4: No Action Required for 'logic' Error Type**
+Logic errors should typically be auto-fixed by the agent and not surface to users
+as notifications. If they do surface, the generic message is acceptable.
+
+================================================================================
+VERDICT
+================================================================================
+
+Overall: GOOD COMMIT
+
+The implementation correctly addresses the notification spam issue. The grouping
+logic is sound, and the user experience is improved with contextual messages and
+appropriate click navigation. The code is well-structured with the helper method
+extracted for clarity.
+
+The main substantive issue is that empty error types are all grouped together,
+which could confuse users when different error causes are combined. This is an
+edge case but worth addressing.
+
+Code quality: Good
+Test coverage: Not visible in diff
+Documentation: IMPLEMENTATION_PLAN.md updated appropriately

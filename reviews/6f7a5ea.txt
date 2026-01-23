@@ -1,0 +1,65 @@
+COMMIT REVIEW: 6f7a5ea
+=======================
+Title: Remove dead handleBeforeUnload function from ChatInterface
+Author: Artur (Co-Authored-By: Claude Opus 4.5)
+Date: Wed Jan 21 17:46:34 2026 +0100
+
+FILES CHANGED:
+- IMPLEMENTATION_PLAN.md (documentation update)
+- apps/web/src/components/ChatInterface.tsx (code cleanup)
+
+CHANGES SUMMARY:
+================
+This commit removes dead code from ChatInterface.tsx. The `handleBeforeUnload` function
+was defined inside a useEffect but never attached to any event listener. The function
+was intended to save scroll position before page unload, but since it was never wired
+up, it was completely inert.
+
+The fix:
+1. Removed the unused `handleBeforeUnload` function definition
+2. Simplified the useEffect to only contain the cleanup function
+3. Updated IMPLEMENTATION_PLAN.md to reflect the partial fix status
+
+The commit correctly notes that full ScrollRestoration would require migrating from
+BrowserRouter to createBrowserRouter (data router API), which is a significant refactor.
+The current sessionStorage-based approach works for in-app navigation.
+
+ANALYSIS:
+=========
+The removal was CORRECT. The useEffect cleanup function runs on route changes because
+of the `[chatId, location.pathname]` dependencies, which is the correct pattern for
+React Router navigation. The `beforeunload` event only fires when closing the browser
+tab/window, not on in-app navigation, so it was the wrong approach anyway.
+
+The scroll position save/restore mechanism now works correctly:
+- Cleanup function saves scroll position on route change
+- Detection on mount checks for saved position
+- Restoration happens on first data load
+
+ISSUES FOUND:
+=============
+1. [LOW] Incomplete safe storage migration in same file
+   Location: ChatInterface.tsx lines 202 and 210
+
+   The commit message says scroll position uses safeSessionStorageGet/Set, but there
+   are still direct sessionStorage calls in the scroll restoration logic:
+   ```
+   const savedPosition = sessionStorage.getItem(storageKey);  // Line 202
+   sessionStorage.removeItem(storageKey);                      // Line 210
+   ```
+
+   These were NOT updated to use safe wrappers and could fail in incognito mode.
+
+   PROPOSAL: Update lines 202 and 210 to use safeSessionStorageGet() and add a new
+   safeSessionStorageRemove() function to safe-storage.ts for line 210.
+
+2. [INFO] Tab closure/refresh doesn't persist scroll position
+
+   The commit correctly notes this in IMPLEMENTATION_PLAN.md. Since sessionStorage
+   clears on tab close, and beforeunload was removed, scroll position is lost on
+   refresh. This is acceptable behavior for this use case.
+
+VERDICT: APPROVED
+=================
+The dead code removal is correct. The minor inconsistency with safe storage wrappers
+should be addressed in a follow-up commit but doesn't block this change.

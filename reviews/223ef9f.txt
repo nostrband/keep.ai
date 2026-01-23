@@ -1,0 +1,204 @@
+COMMIT: 223ef9f
+DATE: 2026-01-21 17:43:58 +0100
+SUBJECT: Prevent concurrent test runs for same workflow
+
+================================================================================
+CHANGES SUMMARY
+================================================================================
+
+This commit prevents duplicate test runs by tracking in-progress executions per
+workflow and returning HTTP 409 (Conflict) with the existing run ID when a second
+request comes in for the same workflow.
+
+**Files Modified:**
+- apps/server/src/server.ts (main implementation)
+- IMPLEMENTATION_PLAN.md (documentation)
+
+**Key Changes:**
+
+1. **In-Progress Tracking Map (Module Level)**
+   - Added `inProgressTestRuns = new Map<string, string>()` at module level
+   - Key: workflow_id, Value: scriptRunId
+
+2. **Concurrent Request Check**
+   - Before starting execution, checks if workflow already has in-progress run
+   - Returns HTTP 409 with error message and existing scriptRunId
+
+3. **Cleanup in finally() Handler**
+   - After execution completes (success or failure), removes workflow from map
+   - Ensures tracking state is always cleaned up
+
+**Endpoint Design Notes:**
+- Endpoint returns HTTP 202 (Accepted) immediately with scriptRunId
+- Actual execution happens asynchronously in background
+- Client can poll /api/script-run/{id} to check status
+
+================================================================================
+POTENTIAL ISSUES
+================================================================================
+
+**ISSUE 1: Memory Leak if WorkflowWorker Construction Fails (HIGH)**
+Location: apps/server/src/server.ts:1651-1678
+Description: The inProgressTestRuns entry is set BEFORE WorkflowWorker is constructed:
+
+```javascript
+// Line 1651: Entry added to map
+inProgressTestRuns.set(workflow.id, scriptRunId);
+
+// Lines 1654-1660: WorkflowWorker construction (could throw)
+const testWorker = new WorkflowWorker({...});
+
+// Lines 1667-1678: Only the promise chain has .finally() cleanup
+testWorker.executeWorkflow(...).then(...).catch(...).finally(() => {
+  inProgressTestRuns.delete(workflow.id);  // Cleanup here
+});
+```
+
+If WorkflowWorker construction throws (e.g., invalid config), the Map entry persists
+forever and the workflow becomes permanently locked for test runs.
+
+**ISSUE 2: No Timeout-Based Cleanup (MEDIUM)**
+Location: apps/server/src/server.ts:68
+Description: If a test run hangs indefinitely or the server crashes/restarts mid-execution,
+stale entries could persist in the Map. While server restart would clear the Map (since
+it's in-memory), a hanging execution would block that workflow's test runs forever.
+
+Recommend adding a timeout-based cleanup mechanism:
+```javascript
+setTimeout(() => {
+  if (inProgressTestRuns.get(workflowId) === scriptRunId) {
+    inProgressTestRuns.delete(workflowId);
+    debugServer(`Timeout cleanup for stuck test run ${scriptRunId}`);
+  }
+}, 10 * 60 * 1000); // 10 minute max
+```
+
+**ISSUE 3: Dynamic Import on Every Request (LOW)**
+Location: apps/server/src/server.ts:1647
+Description: The code does a dynamic import of 'ai' on every test-run request:
+```javascript
+const { generateId } = await import("ai");
+```
+
+This should be a module-level import for better performance. The 'ai' package is
+already used elsewhere in the codebase.
+
+**ISSUE 4: Map Not Persisted Across Server Restarts (LOW/Design)**
+Location: apps/server/src/server.ts:68
+Description: The inProgressTestRuns Map is in-memory. On server restart:
+- All tracking is lost
+- Any runs that were genuinely in-progress are now unknown
+- No duplicate prevention for those runs
+
+For a local personal automation product, this is acceptable. The test_runs table
+in the database is the source of truth for execution history. However, there's a
+brief window after restart where duplicate test runs could be started.
+
+**ISSUE 5: Race Condition Between Check and Set (Very Low)**
+Location: apps/server/src/server.ts:1623-1651
+Description: There's a theoretical race condition:
+```javascript
+// Request 1 checks - no existing run
+const existingRunId = inProgressTestRuns.get(body.workflow_id);
+// ... Request 2 could check here too ...
+// Request 1 sets
+inProgressTestRuns.set(workflow.id, scriptRunId);
+// Request 2 also sets (overwrites Request 1)
+```
+
+However, Node.js is single-threaded for JS execution, so this is not actually
+a race condition in practice. The request handlers execute atomically between
+await points.
+
+================================================================================
+PROPOSALS
+================================================================================
+
+**PROPOSAL 1: Move Map.set() After WorkflowWorker Construction (HIGH PRIORITY)**
+Severity: High (Memory leak risk)
+Effort: Minimal (5 minutes)
+```javascript
+// Create WorkflowWorker BEFORE marking as in-progress
+const testWorker = new WorkflowWorker({
+  api: new KeepDbApi(keepDB),
+  userPath,
+  gmailOAuth2Client,
+});
+
+// Only mark as in-progress if construction succeeded
+inProgressTestRuns.set(workflow.id, scriptRunId);
+
+testWorker.executeWorkflow(...).finally(() => {
+  inProgressTestRuns.delete(workflow.id);
+});
+```
+
+Or wrap in try-catch:
+```javascript
+inProgressTestRuns.set(workflow.id, scriptRunId);
+try {
+  const testWorker = new WorkflowWorker({...});
+  testWorker.executeWorkflow(...).finally(() => {
+    inProgressTestRuns.delete(workflow.id);
+  });
+} catch (error) {
+  inProgressTestRuns.delete(workflow.id); // Cleanup on construction failure
+  throw error;
+}
+```
+
+**PROPOSAL 2: Add Timeout-Based Cleanup (MEDIUM PRIORITY)**
+Severity: Medium
+Effort: Low (15 minutes)
+```javascript
+const STALE_RUN_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+
+inProgressTestRuns.set(workflow.id, scriptRunId);
+
+const timeoutId = setTimeout(() => {
+  if (inProgressTestRuns.get(workflow.id) === scriptRunId) {
+    inProgressTestRuns.delete(workflow.id);
+    debugServer(`Timeout cleanup for stuck test run ${scriptRunId}`);
+  }
+}, STALE_RUN_TIMEOUT_MS);
+
+testWorker.executeWorkflow(...).finally(() => {
+  clearTimeout(timeoutId);
+  inProgressTestRuns.delete(workflow.id);
+});
+```
+
+**PROPOSAL 3: Move generateId Import to Module Level (LOW PRIORITY)**
+Severity: Low (Performance)
+Effort: Minimal (2 minutes)
+```javascript
+// At top of server.ts
+import { generateId } from "ai";
+
+// In handler:
+const scriptRunId = generateId();
+```
+
+================================================================================
+VERDICT
+================================================================================
+
+Overall: GOOD COMMIT with ONE HIGH-PRIORITY ISSUE
+
+The commit correctly addresses the concurrent test run problem. The design is sound:
+using a Map for tracking, returning 409 with the existing run ID, and cleaning up
+in finally().
+
+However, there's a significant memory leak risk: if WorkflowWorker construction
+fails, the Map entry is never cleaned up, permanently blocking that workflow from
+test runs. This should be fixed by either moving the Map.set() after construction
+or adding a try-catch cleanup.
+
+Code quality: Good
+Test coverage: Not visible in diff
+Documentation: IMPLEMENTATION_PLAN.md updated appropriately
+
+Recommended actions before merge:
+1. Fix the memory leak risk (HIGH)
+2. Consider adding timeout-based cleanup (MEDIUM)
+3. Move dynamic import to module level (LOW)

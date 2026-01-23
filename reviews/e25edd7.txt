@@ -1,0 +1,208 @@
+# Code Review: Commit e25edd7
+
+**Commit**: e25edd7 - Fix P0 test-run blocking and P1 improvements
+**Date**: 2026-01-21 15:13:22 +0100
+**Author**: Artur <artur@keep.ai>
+**Co-Authored-By**: Claude Opus 4.5 <noreply@anthropic.com>
+
+## Summary of Changes
+
+This commit addresses several critical issues:
+
+1. **P0 #6 - Test-run endpoint blocking fix**: Changed `/api/workflow/test-run` from blocking HTTP request (up to 5 minutes) to returning HTTP 202 immediately with the script run ID
+2. **P0 #7 - Script run ID generation upfront**: Added optional `scriptRunId` parameter to `executeWorkflow()` to avoid race conditions when querying for "latest" run
+3. **P1 #10 - Max retry logging**: Enhanced logging with error context when max retries exceeded
+4. **P1 #14 - Database indexes**: Added migration v25 with indexes on `script_runs.workflow_id` and `script_runs.retry_of`
+5. **P1 #17 - Legacy error handling**: Added empty string to `NOTIFY_ERROR_TYPES` for legacy errors
+6. **P2 #32 - Internal errors**: Added 'internal' to `NOTIFY_ERROR_TYPES`
+7. **CLI fix**: Added missing `chat_id` property to AgentTask in CLI
+
+### Files Changed:
+- `.claude/settings.local.json` (unrelated permission changes)
+- `IMPLEMENTATION_PLAN.md` (new file, tracking document)
+- `apps/cli/src/commands/agent.ts` (+1 line)
+- `apps/server/src/server.ts` (~56 lines changed)
+- `apps/web/src/components/MainPage.tsx` (~78 lines changed)
+- `apps/web/src/lib/WorkflowNotifications.ts` (~15 lines changed)
+- `loop.sh` (unrelated)
+- `package-lock.json`, `package.json` (dependency changes)
+- `packages/agent/src/agent-types.ts` (+1 line)
+- `packages/agent/src/agent.ts` (+1 line)
+- `packages/agent/src/ai-tools/save.ts` (~10 lines)
+- `packages/agent/src/task-worker.ts` (+1 line)
+- `packages/agent/src/workflow-scheduler.ts` (~17 lines)
+- `packages/agent/src/workflow-worker.ts` (~13 lines)
+- `packages/db/src/database.ts` (+2 lines)
+- `packages/db/src/migrations/v25.ts` (new file)
+
+---
+
+## Issues Identified
+
+### ISSUE 1: Memory Leak Risk in inProgressTestRuns Map (HIGH)
+
+**Location**: `apps/server/src/server.ts` line 68, line 1678
+
+**Problem**: The `inProgressTestRuns` Map tracks concurrent test runs, with cleanup happening in a `.finally()` block. If test execution crashes with an uncaught exception OUTSIDE the try/catch (e.g., during WorkflowWorker initialization or sandbox disposal errors), the Map entry persists forever.
+
+**Impact**: Subsequent test runs for the affected workflow will be permanently blocked with "Test run already in progress" error.
+
+**Severity**: HIGH - Can happen if worker initialization fails or sandbox has disposal errors.
+
+**Proposal**: Add a timeout-based cleanup mechanism that automatically removes stale entries after a maximum execution time (e.g., 10 minutes).
+
+```typescript
+// After adding to Map, schedule timeout cleanup
+const timeoutId = setTimeout(() => {
+  if (inProgressTestRuns.get(workflowId) === scriptRunId) {
+    inProgressTestRuns.delete(workflowId);
+    debugServer(`Timeout cleanup for stuck test run ${scriptRunId}`);
+  }
+}, 10 * 60 * 1000); // 10 minute max
+
+testWorker.executeWorkflow(...).finally(() => {
+  clearTimeout(timeoutId);
+  inProgressTestRuns.delete(workflowId);
+});
+```
+
+---
+
+### ISSUE 2: Dynamic Import in Request Handler (LOW)
+
+**Location**: `apps/server/src/server.ts` line 1647
+
+**Problem**: `const { generateId } = await import("ai")` is a dynamic import inside a request handler. This import is performed on every test-run request, causing unnecessary overhead.
+
+**Impact**: Performance degradation under high test-run load.
+
+**Comparison**: `workflow-worker.ts` imports `generateId` at module level (line 1).
+
+**Proposal**: Move the import to module level:
+
+```typescript
+// At top of file
+import { generateId } from "ai";
+
+// In handler
+const scriptRunId = generateId();
+```
+
+---
+
+### ISSUE 3: Test Runs May Appear in Attention List (MEDIUM)
+
+**Location**: `apps/web/src/components/MainPage.tsx` lines 71-72, `packages/agent/src/workflow-worker.ts` line 131
+
+**Problem**: Test runs (runType='test') are tracked in the script_runs table. `MainPage.tsx` queries `getLatestRunsByWorkflowIds()` which may return test runs. If a test run fails with an attention-requiring error type, it could appear in the workflow attention indicators.
+
+**Impact**: Users may see attention indicators for test run failures that don't affect the actual workflow.
+
+**Proposal**: Ensure `getLatestRunsByWorkflowIds()` filters out test runs with `WHERE type != 'test'` or modify the attention logic to exclude test runs.
+
+---
+
+### ISSUE 4: Inconsistent Logging Levels (MEDIUM)
+
+**Location**: `packages/agent/src/workflow-scheduler.ts` line 78-79
+
+**Problem**: The enhanced retry exhaustion logging uses `this.debug()` which requires DEBUG env var to be visible. In production, these critical escalation events may be invisible.
+
+**Impact**: Admins may not see when workflows exhaust their retries without enabling debug mode.
+
+**Proposal**: Use console.warn() or a dedicated logging system for P1+ severity events that should always be visible in production logs.
+
+---
+
+### ISSUE 5: Index Strategy May Not Be Optimal (LOW)
+
+**Location**: `packages/db/src/migrations/v25.ts` lines 17-21
+
+**Problem**: Two single-column indexes are created. Queries like `SELECT * FROM script_runs WHERE workflow_id = ? AND retry_of = ?` won't efficiently use both indexes.
+
+**Impact**: Suboptimal query performance for compound queries.
+
+**Proposal**: Consider adding a composite index if query patterns warrant it:
+```sql
+CREATE INDEX idx_script_runs_workflow_retry ON script_runs(workflow_id, retry_of)
+```
+
+---
+
+### ISSUE 6: Empty String Error Type Ambiguity (LOW)
+
+**Location**: `apps/web/src/lib/WorkflowNotifications.ts` line 15
+
+**Problem**: Empty string '' was added to `NOTIFY_ERROR_TYPES` for "legacy error handling". The comment explains this is for consistency with MainPage attention indicators, but the semantic meaning is unclear.
+
+**Questions**:
+- What creates empty error_type values?
+- Should these be migrated to a specific error type?
+- Is there a plan to eliminate legacy '' error types?
+
+**Impact**: Code clarity and maintainability.
+
+**Proposal**: Add a migration to convert NULL/'' error_type values to a specific type like 'unknown' or 'unclassified', and document the expected error_type values.
+
+---
+
+### ISSUE 7: CLI chat_id Inconsistency (LOW)
+
+**Location**: `apps/cli/src/commands/agent.ts` lines 190, 212
+
+**Problem**: Task mock has `chat_id: ""` (line 190) while agentTask has `chat_id: "cli"` (line 212). While the correct value (line 212) is used, the inconsistency is confusing.
+
+**Impact**: Code clarity only; functionally works correctly.
+
+**Proposal**: Initialize task mock with a placeholder comment or use a partial object to avoid confusion.
+
+---
+
+### ISSUE 8: File Upload Error Not Surfaced to User (MEDIUM)
+
+**Location**: `apps/web/src/components/MainPage.tsx` lines 270-272
+
+**Problem**: If file upload fails, the error is caught and logged, but task creation proceeds without the files. User is not informed that their attachments weren't included.
+
+**Impact**: User confusion when files don't appear in the created task.
+
+**Proposal**: Either show an error toast when file upload fails, or abort task creation entirely and ask user to retry.
+
+---
+
+### ISSUE 9: Orphaned Files from Failed Task Creation (LOW)
+
+**Location**: `apps/web/src/components/MainPage.tsx` lines 268-280
+
+**Problem**: Files are uploaded before task creation. If task creation fails after files are uploaded, the files remain orphaned in storage.
+
+**Impact**: Database bloat over time from orphaned file entries.
+
+**Proposal**: Implement a file cleanup mechanism or wrap upload+create in a transaction-like pattern that cleans up on failure.
+
+---
+
+## Positive Observations
+
+1. **HTTP 202 pattern**: Returning 202 immediately with run ID is the correct REST semantics for async operations.
+
+2. **ID upfront pattern**: Generating script run ID before execution eliminates race conditions cleanly.
+
+3. **Idempotent indexes**: Using `CREATE INDEX IF NOT EXISTS` is good practice.
+
+4. **Set iteration fix**: The WorkflowNotifications.ts fix for Set iteration during deletion is correct - collecting keys first avoids undefined behavior.
+
+5. **updateWorkflowFields usage**: Switching from full object update to partial field update (`updateWorkflowFields`) is architecturally sound and prevents accidental field overwrites.
+
+---
+
+## Overall Assessment
+
+The commit successfully addresses the stated P0/P1/P2 issues. The test-run endpoint is now properly async, the script run ID race condition is fixed, and the database indexes should improve query performance.
+
+**Main concerns**:
+- Memory leak potential in inProgressTestRuns Map needs timeout-based cleanup
+- Test run failures may incorrectly appear in attention indicators
+- File upload error handling should inform the user
+
+**Recommendation**: The commit is production-ready with the inProgressTestRuns timeout cleanup as a follow-up fix.
