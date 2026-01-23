@@ -1,7 +1,7 @@
 # Implementation Plan for Keep.AI v1.0.0 SLC Release
 
 **Last Updated**: 2026-01-23
-**Status**: 0 specs pending implementation, 19 implemented
+**Status**: 0 specs pending implementation, 20 implemented
 
 ---
 
@@ -368,6 +368,7 @@ These specs must be implemented in dependency order.
 
 ### 20. Fix EventSource for Node.js (FIXME)
 **Location**: `packages/sync/src/TransportClientHttp.ts:176`
+**Status**: IMPLEMENTED
 **Effort**: Medium
 
 **Problem**: SSE not implemented for Node.js environment
@@ -375,6 +376,8 @@ These specs must be implemented in dependency order.
 **Action Items**:
 - Install `eventsource` npm package for Node.js SSE support
 - Implement EventSource polyfill in Node.js code path
+
+**Note**: Added eventsource npm package to packages/sync and updated TransportClientHttp.ts to use it for Node.js environments.
 
 ---
 
@@ -387,6 +390,8 @@ These specs must be implemented in dependency order.
 **Action Items**:
 - Research optimal threshold based on bandwidth analysis
 - Consider making configurable or adaptive
+
+**Note**: Non-blocking technical debt item.
 
 ---
 
@@ -401,6 +406,8 @@ These specs must be implemented in dependency order.
 - Add tests to verify correct behavior
 - Fix any identified issues
 
+**Note**: Non-blocking technical debt item.
+
 ---
 
 ### 23. Fix Skipped Test Suites
@@ -413,6 +420,8 @@ These specs must be implemented in dependency order.
 - Identify and list all skipped test suites
 - Investigate why each was skipped
 - Fix underlying issues or document why tests should remain skipped
+
+**Note**: Non-blocking technical debt item.
 
 ---
 
@@ -508,11 +517,11 @@ cd packages/tests && npm test
 | 2 | UI/UX Improvements | 10 | All implemented |
 | 3 | Auth System Refactoring | 5 | All implemented |
 | 4 | Agent Improvements | 1 | All implemented |
-| 5 | Technical Debt | 4 | All pending (3 FIXME + 1 test issue) |
+| 5 | Technical Debt | 4 | 1 implemented, 3 pending (non-blocking) |
 
-**Total Specs**: 0 pending, 19 implemented
+**Total Specs**: 0 pending, 20 implemented
 
-**Total Technical Debt Items**: 4 (FIXME comments + skipped tests)
+**Total Technical Debt Items**: 4 (1 implemented, 3 non-blocking pending)
 
 **Ideas Ready for Promotion**: 5 prioritized candidates
 

@@ -7,8 +7,20 @@ import {
   deserializeCursor,
 } from "./messages";
 import debug from "debug";
+// Import eventsource for Node.js environments
+import { EventSource as EventSourcePolyfill } from "eventsource";
 
 const debugTransport = debug("worker:TransportClientHttp");
+
+// Get EventSource implementation (browser native or Node.js polyfill)
+function getEventSource(): typeof EventSource {
+  // Check if browser EventSource is available
+  if (typeof EventSource !== "undefined") {
+    return EventSource;
+  }
+  // Use polyfill for Node.js
+  return EventSourcePolyfill as unknown as typeof EventSource;
+}
 
 // Type for fetch function to support both browser and Node.js
 type FetchFunction = (
@@ -171,15 +183,12 @@ export class TransportClientHttp implements Transport {
     }
 
     try {
-      // Check if EventSource is available
-      if (typeof EventSource === "undefined") {
-        // FIXME implement for nodejs
-        throw new Error("EventSource not available");
-      }
+      // Get appropriate EventSource (browser native or Node.js polyfill)
+      const EventSourceImpl = getEventSource();
 
       debugTransport("Connecting to SSE stream...");
       // Now use GET with peerId as query parameter
-      this.eventSource = new EventSource(
+      this.eventSource = new EventSourceImpl(
         `${this.endpoint}/stream?peerId=${encodeURIComponent(this.localPeerId)}`
       );
 
