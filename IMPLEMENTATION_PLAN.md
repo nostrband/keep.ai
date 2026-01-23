@@ -450,6 +450,18 @@ The connectors framework enables multi-account OAuth connections for Gmail and o
 
 ---
 
+## Bug Fixes Completed (2026-01-23)
+
+- [x] **add-task-creation-error-toast.md** - Added error toast notification to MainPage when task creation fails. Previously errors were only logged to console.
+
+- [x] **add-file-upload-failure-warning.md** - Added warning notification when file uploads fail during task creation. User now sees a warning that files failed to upload.
+
+- [x] **add-http-status-check-useNeedAuth.md** - Added HTTP status validation in useNeedAuth.ts before parsing JSON from /check_config endpoint. Improves error handling.
+
+- [x] **wrap-activate-script-in-transaction.md** - Wrapped useActivateScriptVersion mutation in database transaction to prevent TOCTOU vulnerability. Added tx parameter to ScriptStore.getScript() method.
+
+---
+
 ## Priority 2: Core Automation Reliability
 
 Essential fixes and improvements for workflow reliability in v1.

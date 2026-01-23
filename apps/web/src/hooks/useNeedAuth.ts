@@ -40,6 +40,9 @@ export function useNeedAuth() {
 
       // Also check config to detect missing API key proactively
       const configResponse = await fetch(`${API_ENDPOINT}/check_config`);
+      if (!configResponse.ok) {
+        throw new Error(`Failed to check config: HTTP ${configResponse.status}`);
+      }
       const configData = await configResponse.json();
 
       // Determine if auth is needed:

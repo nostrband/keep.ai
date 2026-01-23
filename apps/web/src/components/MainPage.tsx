@@ -161,6 +161,8 @@ export default function MainPage() {
   const [latestRuns, setLatestRuns] = useState<Record<string, ScriptRun>>({});
   const [showAttentionOnly, setShowAttentionOnly] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [uploadWarning, setUploadWarning] = useState<string | null>(null);
   const isSubmittingRef = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { uploadFiles, uploadState } = useFileUpload();
@@ -261,6 +263,8 @@ export default function MainPage() {
     }
     isSubmittingRef.current = true;
     setIsSubmitting(true);
+    setSubmitError(null);
+    setUploadWarning(null);
 
     try {
       const messageContent = message.text || "";
@@ -284,7 +288,8 @@ export default function MainPage() {
           attachedFiles = uploadResults;
         } catch (error) {
           console.error('File upload failed:', error);
-          // Still proceed with task creation without file attachments
+          // Show warning but still proceed with task creation without file attachments
+          setUploadWarning('Some files failed to upload and were not attached.');
         }
       }
 
@@ -298,6 +303,7 @@ export default function MainPage() {
       navigate(`/chats/${result.chatId}`);
     } catch (error) {
       console.error('Failed to create task:', error);
+      setSubmitError('Failed to create automation. Please try again.');
     } finally {
       isSubmittingRef.current = false;
       setIsSubmitting(false);
@@ -337,6 +343,20 @@ export default function MainPage() {
       {uploadState.error && (
         <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-lg">
           <p className="text-sm text-red-600">{uploadState.error}</p>
+        </div>
+      )}
+
+      {/* Task creation error indicator */}
+      {submitError && (
+        <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-lg">
+          <p className="text-sm text-red-600">{submitError}</p>
+        </div>
+      )}
+
+      {/* File upload warning (partial failure) */}
+      {uploadWarning && (
+        <div className="mb-3 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+          <p className="text-sm text-yellow-700">{uploadWarning}</p>
         </div>
       )}
 

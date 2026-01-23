@@ -207,19 +207,23 @@ export function useActivateScriptVersion() {
     }) => {
       if (!api) throw new Error("Script store not available");
 
-      // Validate the script exists and belongs to this workflow
-      const script = await api.scriptStore.getScript(input.scriptId);
-      if (!script) throw new Error("Script not found");
-      if (script.workflow_id !== input.workflowId) {
-        throw new Error("Script does not belong to this workflow");
-      }
+      // Use transaction to ensure atomic validation and update
+      // Prevents TOCTOU vulnerability where script could be deleted between check and update
+      return await api.db.db.tx(async (tx) => {
+        // Validate the script exists and belongs to this workflow
+        const script = await api.scriptStore.getScript(input.scriptId, tx);
+        if (!script) throw new Error("Script not found");
+        if (script.workflow_id !== input.workflowId) {
+          throw new Error("Script does not belong to this workflow");
+        }
 
-      // Just update the pointer - no new script creation needed
-      await api.scriptStore.updateWorkflowFields(input.workflowId, {
-        active_script_id: input.scriptId,
+        // Update the pointer within the same transaction
+        await api.scriptStore.updateWorkflowFields(input.workflowId, {
+          active_script_id: input.scriptId,
+        }, tx);
+
+        return { scriptId: input.scriptId, version: script.version };
       });
-
-      return { scriptId: input.scriptId, version: script.version };
     },
     onSuccess: (_result, { workflowId }) => {
       // Invalidate workflow queries since active_script_id changed

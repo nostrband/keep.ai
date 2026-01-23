@@ -91,8 +91,9 @@ export class ScriptStore {
   }
 
   // Get a script by ID
-  async getScript(id: string): Promise<Script | null> {
-    const results = await this.db.db.execO<Record<string, unknown>>(
+  async getScript(id: string, tx?: DBInterface): Promise<Script | null> {
+    const db = tx || this.db.db;
+    const results = await db.execO<Record<string, unknown>>(
       `SELECT id, task_id, version, timestamp, code, change_comment, workflow_id, type, summary, diagram
        FROM scripts
        WHERE id = ?`,
