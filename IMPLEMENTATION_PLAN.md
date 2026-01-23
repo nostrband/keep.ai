@@ -1,7 +1,7 @@
 # Implementation Plan for Keep.AI v1.0.0 SLC Release
 
 **Last Updated**: 2026-01-23
-**Status**: 0 specs pending implementation, 20 implemented
+**Status**: 0 specs pending implementation, 24 implemented
 
 ---
 
@@ -502,6 +502,87 @@ cd packages/tests && npm test
 
 ---
 
+## Priority 6: Test Quality Improvements
+
+These specs improve test coverage and ensure tests accurately reflect production behavior.
+
+### 21. Align Test Schemas with Production Constraints
+**Spec**: `specs/new/align-test-schemas-with-production.md`
+**Status**: IMPLEMENTED
+**Effort**: Low
+
+**Problem**: Test helper `createScriptTables` and `createTaskTables` don't match production schema constraints
+
+**Action Items** (implemented):
+- Updated `packages/tests/src/task-store.test.ts` - `createTaskTables` function
+  - Added `DEFAULT ''` to all `NOT NULL` columns without defaults
+  - Changed `deleted INTEGER DEFAULT 0` to `deleted INTEGER NOT NULL DEFAULT 0`
+- Updated `packages/tests/src/script-store.test.ts` - `createScriptTables` function
+  - Added `DEFAULT` values to match production migrations
+  - Updated `chat_messages` table to include `task_run_id`, `script_id`, `failed_script_run_id` columns
+
+---
+
+### 22. Test Abandoned Drafts Boundary Conditions
+**Spec**: `specs/new/test-abandoned-drafts-boundaries.md`
+**Status**: IMPLEMENTED
+**Effort**: Low
+
+**Problem**: Existing tests don't cover edge cases like exact threshold boundaries
+
+**Action Items** (implemented):
+- Added test: "should handle exact 7-day threshold boundary (just over - included)"
+- Added test: "should handle exact 7-day threshold boundary (just under - excluded)"
+- Added test: "should fallback to script timestamps when no chat_messages exist"
+- Added test: "should detect task in 'asks' state as waiting for input"
+- Added test: "should use most recent timestamp via COALESCE when multiple exist"
+- Added test: "should document COALESCE behavior: chat_messages take precedence over scripts"
+- Added test: "should fallback to workflow timestamp when no scripts or messages exist"
+
+**Note**: One test documents a limitation in the current COALESCE query where chat_messages take precedence even if older than scripts.
+
+---
+
+### 23. Test Boolean-to-Integer Conversion Edge Cases
+**Spec**: `specs/new/test-boolean-integer-conversion.md`
+**Status**: IMPLEMENTED
+**Effort**: Low
+
+**Problem**: Boolean values stored as integers (0/1) in SQLite need thorough testing
+
+**Action Items** (implemented):
+- Added tests for round-trip conversion (true → 1 → true, false → 0 → false)
+- Added test for database integer 1 → true
+- Added test for database integer 0 → false
+- Added test for non-standard integer 2 → truthy
+- Added test for negative integer -1 → truthy
+- Added test for default value when maintenance not specified
+- Added test for updateWorkflow with maintenance=true
+- Added test for updateWorkflowFields with maintenance=false
+
+---
+
+### 24. Test Console-Log with Special Characters
+**Spec**: `specs/new/test-console-log-special-chars.md`
+**Status**: IMPLEMENTED
+**Effort**: Low
+
+**Problem**: consoleLogTool needs tests for special characters in log messages
+
+**Action Items** (implemented):
+- Added test: "should handle message containing single quotes"
+- Added test: "should handle message containing newlines"
+- Added test: "should handle message containing tabs"
+- Added test: "should handle message containing carriage returns"
+- Added test: "should handle message containing unicode characters"
+- Added test: "should handle message containing emojis"
+- Added test: "should handle message containing backslashes"
+- Added test: "should handle message containing double quotes"
+- Added test: "should handle message containing null character"
+- Added test: "should handle message with only special characters"
+
+---
+
 ## Summary
 
 | Priority | Category | Count | Status |
@@ -511,10 +592,11 @@ cd packages/tests && npm test
 | 3 | Auth System Refactoring | 5 | All implemented |
 | 4 | Agent Improvements | 1 | All implemented |
 | 5 | Technical Debt | 4 | 1 implemented, 3 pending (non-blocking) |
+| 6 | Test Quality | 4 | All implemented |
 
-**Total Specs**: 0 pending, 20 implemented
+**Total Specs**: 0 pending, 24 implemented
 
-**Total Technical Debt Items**: 4 (1 implemented, 3 non-blocking pending)
+**Total Technical Debt Items**: 3 (non-blocking pending)
 
 **Ideas Ready for Promotion**: 1 remaining (Agent Status from Active Runs)
 - 4 ideas already implemented: Collapse Events, Highlight Events, Dry-Run Testing, Abandoned Drafts Detection

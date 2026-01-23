@@ -7,14 +7,14 @@ import { createDBNode } from "@app/node";
  * This allows testing the store in isolation without CR-SQLite dependencies.
  */
 async function createScriptTables(db: DBInterface): Promise<void> {
-  // Create scripts table
+  // Create scripts table (matches production v11 + v16 + later migrations)
   await db.exec(`
     CREATE TABLE IF NOT EXISTS scripts (
       id TEXT PRIMARY KEY NOT NULL,
-      task_id TEXT NOT NULL,
-      version INTEGER NOT NULL,
-      timestamp TEXT NOT NULL,
-      code TEXT NOT NULL,
+      task_id TEXT NOT NULL DEFAULT '',
+      version INTEGER NOT NULL DEFAULT 0,
+      timestamp TEXT NOT NULL DEFAULT '',
+      code TEXT NOT NULL DEFAULT '',
       change_comment TEXT NOT NULL DEFAULT '',
       workflow_id TEXT NOT NULL DEFAULT '',
       type TEXT NOT NULL DEFAULT '',
@@ -25,12 +25,12 @@ async function createScriptTables(db: DBInterface): Promise<void> {
   await db.exec(`CREATE INDEX IF NOT EXISTS idx_scripts_task_id ON scripts(task_id)`);
   await db.exec(`CREATE INDEX IF NOT EXISTS idx_scripts_workflow_id ON scripts(workflow_id)`);
 
-  // Create script_runs table
+  // Create script_runs table (matches production v11 + v12 + v16 + later migrations)
   await db.exec(`
     CREATE TABLE IF NOT EXISTS script_runs (
       id TEXT PRIMARY KEY NOT NULL,
-      script_id TEXT NOT NULL,
-      start_timestamp TEXT NOT NULL,
+      script_id TEXT NOT NULL DEFAULT '',
+      start_timestamp TEXT NOT NULL DEFAULT '',
       end_timestamp TEXT NOT NULL DEFAULT '',
       error TEXT NOT NULL DEFAULT '',
       error_type TEXT NOT NULL DEFAULT '',
@@ -46,17 +46,17 @@ async function createScriptTables(db: DBInterface): Promise<void> {
   await db.exec(`CREATE INDEX IF NOT EXISTS idx_script_runs_script_id ON script_runs(script_id)`);
   await db.exec(`CREATE INDEX IF NOT EXISTS idx_script_runs_workflow_id ON script_runs(workflow_id)`);
 
-  // Create workflows table
+  // Create workflows table (matches production v16 + later migrations)
   await db.exec(`
     CREATE TABLE IF NOT EXISTS workflows (
       id TEXT PRIMARY KEY NOT NULL,
-      title TEXT NOT NULL,
-      task_id TEXT NOT NULL,
+      title TEXT NOT NULL DEFAULT '',
+      task_id TEXT NOT NULL DEFAULT '',
       chat_id TEXT NOT NULL DEFAULT '',
-      timestamp TEXT NOT NULL,
+      timestamp TEXT NOT NULL DEFAULT '',
       cron TEXT NOT NULL DEFAULT '',
       events TEXT NOT NULL DEFAULT '',
-      status TEXT NOT NULL DEFAULT 'draft',
+      status TEXT NOT NULL DEFAULT '',
       next_run_timestamp TEXT NOT NULL DEFAULT '',
       maintenance INTEGER NOT NULL DEFAULT 0,
       maintenance_fix_count INTEGER NOT NULL DEFAULT 0,
@@ -67,11 +67,11 @@ async function createScriptTables(db: DBInterface): Promise<void> {
   await db.exec(`CREATE INDEX IF NOT EXISTS idx_workflows_chat_id ON workflows(chat_id)`);
   await db.exec(`CREATE INDEX IF NOT EXISTS idx_workflows_status ON workflows(status)`);
 
-  // Create tasks table (needed for abandoned drafts queries)
+  // Create tasks table (matches production v1 + v15 + v31 migrations, needed for abandoned drafts queries)
   await db.exec(`
     CREATE TABLE IF NOT EXISTS tasks (
       id TEXT PRIMARY KEY NOT NULL,
-      timestamp INTEGER NOT NULL,
+      timestamp INTEGER NOT NULL DEFAULT 0,
       reply TEXT NOT NULL DEFAULT '',
       state TEXT NOT NULL DEFAULT '',
       thread_id TEXT NOT NULL DEFAULT '',
@@ -81,18 +81,21 @@ async function createScriptTables(db: DBInterface): Promise<void> {
       chat_id TEXT NOT NULL DEFAULT '',
       workflow_id TEXT NOT NULL DEFAULT '',
       asks TEXT NOT NULL DEFAULT '',
-      deleted INTEGER DEFAULT 0
+      deleted INTEGER NOT NULL DEFAULT 0
     )
   `);
 
-  // Create chat_messages table (needed for abandoned drafts queries)
+  // Create chat_messages table (matches production v30 migration, needed for abandoned drafts queries)
   await db.exec(`
     CREATE TABLE IF NOT EXISTS chat_messages (
       id TEXT PRIMARY KEY NOT NULL,
-      chat_id TEXT NOT NULL,
-      role TEXT NOT NULL,
-      content TEXT NOT NULL,
-      timestamp TEXT NOT NULL
+      chat_id TEXT NOT NULL DEFAULT '',
+      role TEXT NOT NULL DEFAULT '',
+      content TEXT NOT NULL DEFAULT '',
+      timestamp TEXT NOT NULL DEFAULT '',
+      task_run_id TEXT NOT NULL DEFAULT '',
+      script_id TEXT NOT NULL DEFAULT '',
+      failed_script_run_id TEXT NOT NULL DEFAULT ''
     )
   `);
   await db.exec(`CREATE INDEX IF NOT EXISTS idx_chat_messages_chat_id ON chat_messages(chat_id)`);
@@ -635,6 +638,121 @@ describe("ScriptStore", () => {
       expect(w2?.status).toBe("paused");
       expect(w3?.status).toBe("draft"); // Unchanged
     });
+
+    // Boolean-to-integer conversion tests per spec: test-boolean-integer-conversion.md
+
+    describe("Boolean-to-integer conversion (maintenance field)", () => {
+      it("should correctly round-trip boolean true through database", async () => {
+        // Create workflow with maintenance=true
+        await scriptStore.addWorkflow(createWorkflow({ maintenance: true }));
+
+        // Read back and verify
+        const retrieved = await scriptStore.getWorkflow("workflow-1");
+        expect(retrieved?.maintenance).toBe(true);
+        expect(typeof retrieved?.maintenance).toBe("boolean");
+
+        // Update with false and verify
+        await scriptStore.setWorkflowMaintenance("workflow-1", false);
+        const updated = await scriptStore.getWorkflow("workflow-1");
+        expect(updated?.maintenance).toBe(false);
+        expect(typeof updated?.maintenance).toBe("boolean");
+      });
+
+      it("should correctly round-trip boolean false through database", async () => {
+        // Create workflow with maintenance=false (default)
+        await scriptStore.addWorkflow(createWorkflow({ maintenance: false }));
+
+        // Read back and verify
+        const retrieved = await scriptStore.getWorkflow("workflow-1");
+        expect(retrieved?.maintenance).toBe(false);
+        expect(typeof retrieved?.maintenance).toBe("boolean");
+      });
+
+      it("should interpret integer 1 as true from database", async () => {
+        // Insert directly with integer 1
+        await db.exec(
+          `INSERT INTO workflows (id, title, task_id, timestamp, maintenance) VALUES (?, ?, ?, ?, ?)`,
+          ["workflow-direct-1", "Direct 1", "task-1", new Date().toISOString(), 1]
+        );
+
+        const workflow = await scriptStore.getWorkflow("workflow-direct-1");
+        expect(workflow?.maintenance).toBe(true);
+      });
+
+      it("should interpret integer 0 as false from database", async () => {
+        // Insert directly with integer 0
+        await db.exec(
+          `INSERT INTO workflows (id, title, task_id, timestamp, maintenance) VALUES (?, ?, ?, ?, ?)`,
+          ["workflow-direct-0", "Direct 0", "task-1", new Date().toISOString(), 0]
+        );
+
+        const workflow = await scriptStore.getWorkflow("workflow-direct-0");
+        expect(workflow?.maintenance).toBe(false);
+      });
+
+      it("should interpret non-standard integer 2 as truthy", async () => {
+        // Insert directly with integer 2 (non-standard boolean value)
+        // SQLite will allow this, and JavaScript Boolean(2) is true
+        await db.exec(
+          `INSERT INTO workflows (id, title, task_id, timestamp, maintenance) VALUES (?, ?, ?, ?, ?)`,
+          ["workflow-direct-2", "Direct 2", "task-1", new Date().toISOString(), 2]
+        );
+
+        const workflow = await scriptStore.getWorkflow("workflow-direct-2");
+        // Boolean(2) === true
+        expect(workflow?.maintenance).toBe(true);
+      });
+
+      it("should interpret negative integer -1 as truthy", async () => {
+        // Insert directly with integer -1 (non-standard boolean value)
+        // SQLite will allow this, and JavaScript Boolean(-1) is true
+        await db.exec(
+          `INSERT INTO workflows (id, title, task_id, timestamp, maintenance) VALUES (?, ?, ?, ?, ?)`,
+          ["workflow-direct-neg1", "Direct -1", "task-1", new Date().toISOString(), -1]
+        );
+
+        const workflow = await scriptStore.getWorkflow("workflow-direct-neg1");
+        // Boolean(-1) === true
+        expect(workflow?.maintenance).toBe(true);
+      });
+
+      it("should handle default value when maintenance not specified in insert", async () => {
+        // Insert without specifying maintenance (should use DEFAULT 0)
+        await db.exec(
+          `INSERT INTO workflows (id, title, task_id, timestamp) VALUES (?, ?, ?, ?)`,
+          ["workflow-default", "Default", "task-1", new Date().toISOString()]
+        );
+
+        const workflow = await scriptStore.getWorkflow("workflow-default");
+        expect(workflow?.maintenance).toBe(false);
+      });
+
+      it("should persist maintenance=true through updateWorkflow", async () => {
+        // Create workflow
+        const workflow = createWorkflow({ maintenance: false });
+        await scriptStore.addWorkflow(workflow);
+
+        // Update with true via updateWorkflow
+        workflow.maintenance = true;
+        await scriptStore.updateWorkflow(workflow);
+
+        // Verify persisted correctly
+        const retrieved = await scriptStore.getWorkflow("workflow-1");
+        expect(retrieved?.maintenance).toBe(true);
+      });
+
+      it("should persist maintenance=false through updateWorkflowFields", async () => {
+        // Create workflow with maintenance=true
+        await scriptStore.addWorkflow(createWorkflow({ maintenance: true }));
+
+        // Update to false via updateWorkflowFields
+        await scriptStore.updateWorkflowFields("workflow-1", { maintenance: false });
+
+        // Verify persisted correctly
+        const retrieved = await scriptStore.getWorkflow("workflow-1");
+        expect(retrieved?.maintenance).toBe(false);
+      });
+    });
   });
 
   describe("Draft activity queries", () => {
@@ -763,6 +881,309 @@ describe("ScriptStore", () => {
       expect(summary.staleDrafts).toBe(1);      // 5 days is stale (3-7)
       expect(summary.abandonedDrafts).toBe(1);   // 10 days is abandoned (7+)
       expect(summary.waitingForInput).toBe(1);   // task-1 is in 'wait' state
+    });
+
+    // Boundary condition tests per spec: test-abandoned-drafts-boundaries.md
+
+    it("should handle exact 7-day threshold boundary (just over - included)", async () => {
+      const now = new Date();
+
+      // Create task
+      await db.exec(
+        `INSERT INTO tasks (id, timestamp, state, chat_id) VALUES (?, ?, ?, ?)`,
+        ["task-boundary", Date.now(), "done", "chat-boundary"]
+      );
+
+      // Workflow exactly 7 days + 1 second ago (should be included as abandoned)
+      const justOverThreshold = new Date(now.getTime() - (7 * 24 * 60 * 60 * 1000 + 1000));
+      await scriptStore.addWorkflow({
+        id: "workflow-boundary-over",
+        title: "Just Over Threshold",
+        task_id: "task-boundary",
+        chat_id: "chat-boundary",
+        timestamp: justOverThreshold.toISOString(),
+        cron: "",
+        events: "",
+        status: "draft",
+        next_run_timestamp: "",
+        maintenance: false,
+        maintenance_fix_count: 0,
+        active_script_id: "",
+      });
+
+      const abandoned = await scriptStore.getAbandonedDrafts(7);
+      expect(abandoned).toHaveLength(1);
+      expect(abandoned[0].workflow.id).toBe("workflow-boundary-over");
+    });
+
+    it("should handle exact 7-day threshold boundary (just under - excluded)", async () => {
+      const now = new Date();
+
+      // Create task
+      await db.exec(
+        `INSERT INTO tasks (id, timestamp, state, chat_id) VALUES (?, ?, ?, ?)`,
+        ["task-boundary", Date.now(), "done", "chat-boundary"]
+      );
+
+      // Workflow exactly 7 days - 1 hour ago (should NOT be included as abandoned)
+      const justUnderThreshold = new Date(now.getTime() - (7 * 24 * 60 * 60 * 1000 - 60 * 60 * 1000));
+      await scriptStore.addWorkflow({
+        id: "workflow-boundary-under",
+        title: "Just Under Threshold",
+        task_id: "task-boundary",
+        chat_id: "chat-boundary",
+        timestamp: justUnderThreshold.toISOString(),
+        cron: "",
+        events: "",
+        status: "draft",
+        next_run_timestamp: "",
+        maintenance: false,
+        maintenance_fix_count: 0,
+        active_script_id: "",
+      });
+
+      const abandoned = await scriptStore.getAbandonedDrafts(7);
+      expect(abandoned).toHaveLength(0);
+    });
+
+    it("should fallback to script timestamps when no chat_messages exist", async () => {
+      const now = new Date();
+
+      // Create task
+      await db.exec(
+        `INSERT INTO tasks (id, timestamp, state, chat_id) VALUES (?, ?, ?, ?)`,
+        ["task-no-chat", Date.now(), "done", "chat-no-chat"]
+      );
+
+      // Old workflow timestamp (10 days ago)
+      const oldWorkflowDate = new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000);
+      await scriptStore.addWorkflow({
+        id: "workflow-no-chat",
+        title: "No Chat Messages",
+        task_id: "task-no-chat",
+        chat_id: "chat-no-chat",
+        timestamp: oldWorkflowDate.toISOString(),
+        cron: "",
+        events: "",
+        status: "draft",
+        next_run_timestamp: "",
+        maintenance: false,
+        maintenance_fix_count: 0,
+        active_script_id: "",
+      });
+
+      // Add a recent script (2 days ago) - should update last_activity via COALESCE
+      const recentScriptDate = new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000);
+      await scriptStore.addScript({
+        id: "script-recent",
+        task_id: "task-no-chat",
+        version: 1,
+        timestamp: recentScriptDate.toISOString(),
+        code: "console.log('test');",
+        change_comment: "Initial",
+        workflow_id: "workflow-no-chat",
+        type: "cron",
+        summary: "",
+        diagram: "",
+      });
+
+      // Should NOT be abandoned because script is recent (2 days < 7 days threshold)
+      const abandoned = await scriptStore.getAbandonedDrafts(7);
+      expect(abandoned).toHaveLength(0);
+
+      // Verify hasScript flag works
+      const summary = await scriptStore.getDraftActivitySummary();
+      expect(summary.totalDrafts).toBe(1);
+      expect(summary.abandonedDrafts).toBe(0);
+    });
+
+    it("should detect task in 'asks' state as waiting for input", async () => {
+      const now = new Date();
+
+      // Create task with 'asks' state (not 'wait')
+      await db.exec(
+        `INSERT INTO tasks (id, timestamp, state, chat_id) VALUES (?, ?, ?, ?)`,
+        ["task-asks", Date.now(), "asks", "chat-asks"]
+      );
+
+      // Old draft (8 days)
+      const oldDate = new Date(now.getTime() - 8 * 24 * 60 * 60 * 1000);
+      await scriptStore.addWorkflow({
+        id: "workflow-asks",
+        title: "Asks State Draft",
+        task_id: "task-asks",
+        chat_id: "chat-asks",
+        timestamp: oldDate.toISOString(),
+        cron: "",
+        events: "",
+        status: "draft",
+        next_run_timestamp: "",
+        maintenance: false,
+        maintenance_fix_count: 0,
+        active_script_id: "",
+      });
+
+      const abandoned = await scriptStore.getAbandonedDrafts(7);
+      expect(abandoned).toHaveLength(1);
+      expect(abandoned[0].isWaitingForInput).toBe(true);
+
+      const summary = await scriptStore.getDraftActivitySummary();
+      expect(summary.waitingForInput).toBe(1);
+    });
+
+    it("should use most recent timestamp via COALESCE when multiple exist", async () => {
+      const now = new Date();
+
+      // Create task
+      await db.exec(
+        `INSERT INTO tasks (id, timestamp, state, chat_id) VALUES (?, ?, ?, ?)`,
+        ["task-coalesce", Date.now(), "done", "chat-coalesce"]
+      );
+
+      // Old workflow timestamp (20 days ago)
+      const oldWorkflowDate = new Date(now.getTime() - 20 * 24 * 60 * 60 * 1000);
+      await scriptStore.addWorkflow({
+        id: "workflow-coalesce",
+        title: "COALESCE Test",
+        task_id: "task-coalesce",
+        chat_id: "chat-coalesce",
+        timestamp: oldWorkflowDate.toISOString(),
+        cron: "",
+        events: "",
+        status: "draft",
+        next_run_timestamp: "",
+        maintenance: false,
+        maintenance_fix_count: 0,
+        active_script_id: "",
+      });
+
+      // Medium-old script (10 days ago)
+      const mediumOldDate = new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000);
+      await scriptStore.addScript({
+        id: "script-medium",
+        task_id: "task-coalesce",
+        version: 1,
+        timestamp: mediumOldDate.toISOString(),
+        code: "console.log('medium');",
+        change_comment: "",
+        workflow_id: "workflow-coalesce",
+        type: "",
+        summary: "",
+        diagram: "",
+      });
+
+      // Recent chat message (1 day ago) - this should be the most recent
+      const recentChatDate = new Date(now.getTime() - 1 * 24 * 60 * 60 * 1000);
+      await db.exec(
+        `INSERT INTO chat_messages (id, chat_id, role, content, timestamp) VALUES (?, ?, ?, ?, ?)`,
+        ["msg-recent", "chat-coalesce", "user", "Hello", recentChatDate.toISOString()]
+      );
+
+      // Should NOT be abandoned because chat message is recent (1 day < 7 days)
+      const abandoned = await scriptStore.getAbandonedDrafts(7);
+      expect(abandoned).toHaveLength(0);
+
+      // Verify in summary too
+      const summary = await scriptStore.getDraftActivitySummary();
+      expect(summary.totalDrafts).toBe(1);
+      expect(summary.abandonedDrafts).toBe(0);
+      expect(summary.staleDrafts).toBe(0);
+    });
+
+    it("should document COALESCE behavior: chat_messages take precedence over scripts", async () => {
+      // NOTE: This test documents the current COALESCE behavior where chat_messages
+      // timestamp is checked BEFORE scripts timestamp. This means if there's ANY
+      // chat message (even old), it will use that timestamp instead of a newer script.
+      // This is a known limitation of the current query structure:
+      //   COALESCE(MAX(cm.timestamp), MAX(s.timestamp), w.timestamp)
+      // Future improvement could use: MAX(cm.timestamp, s.timestamp, w.timestamp)
+      const now = new Date();
+
+      // Create task
+      await db.exec(
+        `INSERT INTO tasks (id, timestamp, state, chat_id) VALUES (?, ?, ?, ?)`,
+        ["task-coalesce-order", Date.now(), "done", "chat-coalesce-order"]
+      );
+
+      // Old workflow timestamp (20 days ago)
+      const oldWorkflowDate = new Date(now.getTime() - 20 * 24 * 60 * 60 * 1000);
+      await scriptStore.addWorkflow({
+        id: "workflow-coalesce-order",
+        title: "COALESCE Order Test",
+        task_id: "task-coalesce-order",
+        chat_id: "chat-coalesce-order",
+        timestamp: oldWorkflowDate.toISOString(),
+        cron: "",
+        events: "",
+        status: "draft",
+        next_run_timestamp: "",
+        maintenance: false,
+        maintenance_fix_count: 0,
+        active_script_id: "",
+      });
+
+      // Old chat message (15 days ago)
+      const oldChatDate = new Date(now.getTime() - 15 * 24 * 60 * 60 * 1000);
+      await db.exec(
+        `INSERT INTO chat_messages (id, chat_id, role, content, timestamp) VALUES (?, ?, ?, ?, ?)`,
+        ["msg-old-order", "chat-coalesce-order", "user", "Old message", oldChatDate.toISOString()]
+      );
+
+      // More recent script (2 days ago)
+      const recentScriptDate = new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000);
+      await scriptStore.addScript({
+        id: "script-newer-order",
+        task_id: "task-coalesce-order",
+        version: 1,
+        timestamp: recentScriptDate.toISOString(),
+        code: "console.log('newer');",
+        change_comment: "",
+        workflow_id: "workflow-coalesce-order",
+        type: "",
+        summary: "",
+        diagram: "",
+      });
+
+      // Due to COALESCE order, it uses chat_messages timestamp (15 days ago)
+      // even though script is more recent (2 days ago)
+      // This means the workflow IS considered abandoned (15 days > 7 days threshold)
+      const abandoned = await scriptStore.getAbandonedDrafts(7);
+      expect(abandoned).toHaveLength(1);
+      expect(abandoned[0].workflow.id).toBe("workflow-coalesce-order");
+      expect(abandoned[0].daysSinceActivity).toBeGreaterThanOrEqual(14); // Based on chat message, not script
+    });
+
+    it("should fallback to workflow timestamp when no scripts or messages exist", async () => {
+      const now = new Date();
+
+      // Create task
+      await db.exec(
+        `INSERT INTO tasks (id, timestamp, state, chat_id) VALUES (?, ?, ?, ?)`,
+        ["task-fallback", Date.now(), "done", "chat-fallback"]
+      );
+
+      // Old workflow timestamp (8 days ago) - no scripts, no chat messages
+      const oldWorkflowDate = new Date(now.getTime() - 8 * 24 * 60 * 60 * 1000);
+      await scriptStore.addWorkflow({
+        id: "workflow-fallback",
+        title: "Fallback Test",
+        task_id: "task-fallback",
+        chat_id: "chat-fallback",
+        timestamp: oldWorkflowDate.toISOString(),
+        cron: "",
+        events: "",
+        status: "draft",
+        next_run_timestamp: "",
+        maintenance: false,
+        maintenance_fix_count: 0,
+        active_script_id: "",
+      });
+
+      // Should be abandoned based on workflow timestamp
+      const abandoned = await scriptStore.getAbandonedDrafts(7);
+      expect(abandoned).toHaveLength(1);
+      expect(abandoned[0].workflow.id).toBe("workflow-fallback");
+      expect(abandoned[0].hasScript).toBe(false);
     });
   });
 });
