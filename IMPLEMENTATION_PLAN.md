@@ -641,9 +641,18 @@ These features significantly improve user confidence and experience.
 Lower priority but would enhance the release.
 
 ### 4.1 Agent Status (idea: agent-status-from-active-runs.md)
-- [ ] Derive agent status from active task_runs/script_runs queries
-- [ ] Handle orphaned runs on startup (mark as "interrupted")
-- [ ] Display combined status in UI header
+
+**Completed (2026-01-23)**
+
+The implementation includes:
+
+1. [x] Added `getActiveTaskRuns()`, `countActiveTaskRuns()`, and `markOrphanedTaskRuns()` methods to TaskStore (`packages/db/src/task-store.ts`)
+2. [x] Added `getActiveScriptRuns()`, `countActiveScriptRuns()`, and `markOrphanedScriptRuns()` methods to ScriptStore (`packages/db/src/script-store.ts`)
+3. [x] Added orphaned run handling on server startup in `apps/server/src/server.ts` - marks all active runs as interrupted when server restarts
+4. [x] Added `/api/agent/status` endpoint returning `{ activeTaskRuns, activeScriptRuns, isRunning }`
+5. [x] Created `useAgentStatus` hook in `apps/web/src/hooks/useAgentStatus.ts` with adaptive polling (5s when active, 30s when idle)
+6. [x] Created `AgentStatusBadge` component in `apps/web/src/components/AgentStatusBadge.tsx` showing status with animated pulse when running
+7. [x] Added AgentStatusBadge to SharedHeader.tsx
 
 ### 4.2 Archive Old Drafts
 - [ ] Add "Archive" action for drafts

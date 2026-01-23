@@ -553,4 +553,101 @@ export class TaskStore {
       logs: row.logs as string,
     };
   }
+
+  /**
+   * Get all active (currently running) task runs.
+   * A run is active if it has no end_timestamp (empty string).
+   * Returns runs ordered by start_timestamp descending.
+   */
+  async getActiveTaskRuns(): Promise<TaskRun[]> {
+    const results = await this.db.db.execO<Record<string, unknown>>(
+      `SELECT
+        id, task_id, type, start_timestamp, thread_id, reason, inbox, model,
+        input_goal, input_notes, input_plan, input_asks,
+        output_goal, output_notes, output_plan, output_asks,
+        end_timestamp, state, reply, error, steps, run_sec,
+        input_tokens, output_tokens, cached_tokens, cost, logs
+      FROM task_runs
+      WHERE end_timestamp = ''
+      ORDER BY start_timestamp DESC`
+    );
+
+    if (!results) return [];
+
+    return results.map((row) => ({
+      id: row.id as string,
+      task_id: row.task_id as string,
+      type: row.type as string,
+      start_timestamp: row.start_timestamp as string,
+      thread_id: row.thread_id as string,
+      reason: row.reason as string,
+      inbox: row.inbox as string,
+      model: row.model as string,
+      input_goal: row.input_goal as string,
+      input_notes: row.input_notes as string,
+      input_plan: row.input_plan as string,
+      input_asks: row.input_asks as string,
+      output_goal: row.output_goal as string,
+      output_notes: row.output_notes as string,
+      output_plan: row.output_plan as string,
+      output_asks: row.output_asks as string,
+      end_timestamp: row.end_timestamp as string,
+      state: row.state as string,
+      reply: row.reply as string,
+      error: row.error as string,
+      steps: row.steps as number,
+      run_sec: row.run_sec as number,
+      input_tokens: row.input_tokens as number,
+      output_tokens: row.output_tokens as number,
+      cached_tokens: row.cached_tokens as number,
+      cost: row.cost as number,
+      logs: row.logs as string,
+    }));
+  }
+
+  /**
+   * Count active (currently running) task runs.
+   * Returns the number of runs with no end_timestamp.
+   */
+  async countActiveTaskRuns(): Promise<number> {
+    const results = await this.db.db.execO<Record<string, unknown>>(
+      `SELECT COUNT(*) as count FROM task_runs WHERE end_timestamp = ''`
+    );
+    if (!results || results.length === 0) return 0;
+    return results[0].count as number;
+  }
+
+  /**
+   * Mark orphaned task runs as interrupted.
+   * Orphaned runs are those with no end_timestamp that started before a threshold.
+   * This should be called on server startup to clean up runs from previous crashes.
+   * @param thresholdMs - Only mark runs older than this as orphaned (default: 0, marks all)
+   * @returns Number of runs marked as interrupted
+   */
+  async markOrphanedTaskRuns(thresholdMs: number = 0): Promise<number> {
+    const now = new Date().toISOString();
+    const thresholdTimestamp = thresholdMs > 0
+      ? new Date(Date.now() - thresholdMs).toISOString()
+      : '';
+
+    let sql = `UPDATE task_runs SET
+      end_timestamp = ?,
+      state = 'error',
+      error = 'Run interrupted (server restart)'
+      WHERE end_timestamp = ''`;
+
+    const args: string[] = [now];
+
+    // Only filter by threshold if provided (greater than 0)
+    if (thresholdMs > 0) {
+      sql += ` AND start_timestamp < ?`;
+      args.push(thresholdTimestamp);
+    }
+
+    await this.db.db.exec(sql, args);
+
+    // Return count of affected rows - unfortunately cr-sqlite doesn't return this
+    // We'll just return 0 and log separately if needed
+    return 0;
+  }
 }

@@ -577,12 +577,34 @@ export async function createServer(config: ServerConfig = {}) {
   const keepDB = new KeepDb(dbInstance);
   await keepDB.start();
 
+  // Handle orphaned runs from previous server instances
+  // These are runs that were "in progress" when the server was stopped/crashed
+  const api = new KeepDbApi(keepDB);
+  try {
+    const activeTaskRuns = await api.taskStore.getActiveTaskRuns();
+    const activeScriptRuns = await api.scriptStore.getActiveScriptRuns();
+
+    if (activeTaskRuns.length > 0 || activeScriptRuns.length > 0) {
+      debugServer(
+        `Marking orphaned runs: ${activeTaskRuns.length} task runs, ${activeScriptRuns.length} script runs`
+      );
+
+      // Mark all orphaned runs as interrupted
+      await api.taskStore.markOrphanedTaskRuns(0);
+      await api.scriptStore.markOrphanedScriptRuns(0);
+
+      debugServer("Orphaned runs marked as interrupted");
+    }
+  } catch (err) {
+    debugServer("Failed to handle orphaned runs:", err);
+    // Non-fatal, continue startup
+  }
+
   // For sync over nostr & web push
   const pool = new SimplePool({
     enablePing: true,
     enableReconnect: true,
   });
-  const api = new KeepDbApi(keepDB);
   const peerStore = api.nostrPeerStore;
   const chatStore = api.chatStore;
   const fileStore = new FileStore(keepDB);
@@ -1724,6 +1746,27 @@ export async function createServer(config: ServerConfig = {}) {
       debugServer("Error in /api/id:", error);
       return reply.status(500).send({
         error: "Failed to get site_id",
+        message: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
+  // GET /api/agent/status - Get current agent activity status
+  // Returns counts of active task runs and script runs
+  app.get("/api/agent/status", async (request, reply) => {
+    try {
+      const activeTaskRuns = await api.taskStore.countActiveTaskRuns();
+      const activeScriptRuns = await api.scriptStore.countActiveScriptRuns();
+
+      return reply.send({
+        activeTaskRuns,
+        activeScriptRuns,
+        isRunning: activeTaskRuns > 0 || activeScriptRuns > 0,
+      });
+    } catch (error) {
+      debugServer("Error in /api/agent/status:", error);
+      return reply.status(500).send({
+        error: "Failed to get agent status",
         message: error instanceof Error ? error.message : "Unknown error",
       });
     }

@@ -6,6 +6,7 @@ import {
 import { HeaderAuthNotice } from "./HeaderAuthNotice";
 import { safeLocalStorageGet } from "../lib/safe-storage";
 import { NotificationBell } from "./NotificationBell";
+import { AgentStatusBadge } from "./AgentStatusBadge";
 
 // Access build-time constants
 declare const __SERVERLESS__: boolean;
@@ -102,6 +103,9 @@ export default function SharedHeader({ title, subtitle }: SharedHeaderProps) {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {/* Agent status indicator */}
+            <AgentStatusBadge />
+
             {/* Auth notice - shows when authentication is required */}
             <HeaderAuthNotice />
 

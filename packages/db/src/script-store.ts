@@ -990,4 +990,82 @@ export class ScriptStore {
       waitingForInput,
     };
   }
+
+  /**
+   * Get all active (currently running) script runs.
+   * A run is active if it has no end_timestamp (empty string).
+   * Returns runs ordered by start_timestamp descending.
+   */
+  async getActiveScriptRuns(): Promise<ScriptRun[]> {
+    const results = await this.db.db.execO<Record<string, unknown>>(
+      `SELECT id, script_id, start_timestamp, end_timestamp, error, error_type, result, logs, workflow_id, type, retry_of, retry_count, cost
+       FROM script_runs
+       WHERE end_timestamp = ''
+       ORDER BY start_timestamp DESC`
+    );
+
+    if (!results) return [];
+
+    return results.map((row) => ({
+      id: row.id as string,
+      script_id: row.script_id as string,
+      start_timestamp: row.start_timestamp as string,
+      end_timestamp: row.end_timestamp as string,
+      error: row.error as string,
+      error_type: row.error_type as string,
+      result: row.result as string,
+      logs: row.logs as string,
+      workflow_id: row.workflow_id as string,
+      type: row.type as string,
+      retry_of: row.retry_of as string,
+      retry_count: row.retry_count as number,
+      cost: row.cost as number,
+    }));
+  }
+
+  /**
+   * Count active (currently running) script runs.
+   * Returns the number of runs with no end_timestamp.
+   */
+  async countActiveScriptRuns(): Promise<number> {
+    const results = await this.db.db.execO<Record<string, unknown>>(
+      `SELECT COUNT(*) as count FROM script_runs WHERE end_timestamp = ''`
+    );
+    if (!results || results.length === 0) return 0;
+    return results[0].count as number;
+  }
+
+  /**
+   * Mark orphaned script runs as interrupted.
+   * Orphaned runs are those with no end_timestamp that started before a threshold.
+   * This should be called on server startup to clean up runs from previous crashes.
+   * @param thresholdMs - Only mark runs older than this as orphaned (default: 0, marks all)
+   * @returns Number of runs marked as interrupted
+   */
+  async markOrphanedScriptRuns(thresholdMs: number = 0): Promise<number> {
+    const now = new Date().toISOString();
+    const thresholdTimestamp = thresholdMs > 0
+      ? new Date(Date.now() - thresholdMs).toISOString()
+      : '';
+
+    let sql = `UPDATE script_runs SET
+      end_timestamp = ?,
+      error = 'Run interrupted (server restart)',
+      error_type = 'logic'
+      WHERE end_timestamp = ''`;
+
+    const args: string[] = [now];
+
+    // Only filter by threshold if provided (greater than 0)
+    if (thresholdMs > 0) {
+      sql += ` AND start_timestamp < ?`;
+      args.push(thresholdTimestamp);
+    }
+
+    await this.db.db.exec(sql, args);
+
+    // Return count of affected rows - unfortunately cr-sqlite doesn't return this
+    // We'll just return 0 and log separately if needed
+    return 0;
+  }
 }

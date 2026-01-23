@@ -71,4 +71,7 @@ export const qk = {
   allConnections: () => [{ scope: "allConnections" }] as const,
   connection: (connectionId: string) => [{ scope: "connection", connectionId }] as const,
   connectionsByService: (service: string) => [{ scope: "connectionsByService", service }] as const,
+
+  // Agent status queries
+  agentStatus: () => [{ scope: "agentStatus" }] as const,
 };
