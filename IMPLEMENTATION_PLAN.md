@@ -474,6 +474,16 @@ The connectors framework enables multi-account OAuth connections for Gmail and o
 
 - [x] **simplify-chatpage-disabled-logic.md** - Simplified `disabled={(!input && !uploadState.isUploading) || uploadState.isUploading}` to `disabled={!input || uploadState.isUploading}` in ChatPage, ChatDetailPage, MainPage, and NewPage.
 
+## Additional Fixes Completed (2026-01-23)
+
+- [x] **fix-server-test-async-pattern.md** - Fixed 3 instances of incorrectly awaiting sqlite3's callback-based `db.run()` method in server.test.ts by wrapping them in Promises with resolve/reject pattern, matching the fix already applied to database.test.ts and integration.test.ts.
+
+- [x] **handle-notification-return-in-app.md** - Added return value checking for `window.electronAPI.showNotification` calls in App.tsx handlePauseAllAutomations. Now logs warnings when notifications fail to show, improving debuggability.
+
+- [x] **fix-agent-system-prompts.md** - Updated worker/planner system prompts in agent-env.ts to remove references to removed goal/notes/plan fields. Now correctly references only the "asks" field that is available after Spec 10 changes.
+
+- [x] **complete-chat-messages-migration.md** - Already completed. Server.ts and CLI already use `getNewChatMessages()` instead of deprecated `getChatMessages()`.
+
 ---
 
 ## Priority 2: Core Automation Reliability

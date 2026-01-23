@@ -93,10 +93,13 @@ describe('Server', () => {
       const keyHash = crypto.createHash('sha256').update(apiKey).digest('hex');
       
       // Update the database with our known key hash
-      await (database as any).db.run(
-        'UPDATE api_keys SET key_hash = ? WHERE user_id = ?',
-        [keyHash, userId]
-      );
+      await new Promise<void>((resolve, reject) => {
+        (database as any).db.run(
+          'UPDATE api_keys SET key_hash = ? WHERE user_id = ?',
+          [keyHash, userId],
+          (err: Error | null) => err ? reject(err) : resolve()
+        );
+      });
       
       await request(app)
         .post('/api/v1/chat/completions')
@@ -125,11 +128,14 @@ describe('Server', () => {
       const apiKey = 'test-api-key';
       const keyHash = crypto.createHash('sha256').update(apiKey).digest('hex');
       
-      await (database as any).db.run(
-        'UPDATE api_keys SET key_hash = ? WHERE user_id = ?',
-        [keyHash, userId]
-      );
-      
+      await new Promise<void>((resolve, reject) => {
+        (database as any).db.run(
+          'UPDATE api_keys SET key_hash = ? WHERE user_id = ?',
+          [keyHash, userId],
+          (err: Error | null) => err ? reject(err) : resolve()
+        );
+      });
+
       const response = await request(app)
         .get('/api/v1/user')
         .set('Authorization', `Bearer ${apiKey}`)
@@ -165,11 +171,14 @@ describe('Server', () => {
       const keyString = 'test-key';
       const keyHash = crypto.createHash('sha256').update(keyString).digest('hex');
       
-      await (database as any).db.run(
-        'UPDATE api_keys SET key_hash = ? WHERE id = ?',
-        [keyHash, apiKey.id]
-      );
-      
+      await new Promise<void>((resolve, reject) => {
+        (database as any).db.run(
+          'UPDATE api_keys SET key_hash = ? WHERE id = ?',
+          [keyHash, apiKey.id],
+          (err: Error | null) => err ? reject(err) : resolve()
+        );
+      });
+
       // Mock a streaming response
       mockProxy.handleRequest.mockImplementation(async (req, res) => {
         res.writeHead(200, {
