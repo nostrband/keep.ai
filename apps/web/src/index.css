@@ -1,5 +1,9 @@
 @import "./ui/globals.css";
 
+:root {
+  --header-height: 49px;
+}
+
 body {
   margin: 0;
   min-width: 320px;

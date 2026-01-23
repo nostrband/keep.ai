@@ -16,11 +16,12 @@ import { Badge, Button } from "../ui";
 import { Archive, RotateCcw } from "lucide-react";
 import { workflowNotifications } from "../lib/WorkflowNotifications";
 import { WorkflowStatusBadge, ScriptRunStatusBadge } from "./StatusBadge";
-import { formatCronSchedule } from "./WorkflowInfoBox";
+import { formatCronSchedule } from "../lib/formatCronSchedule";
 import { useAutoHidingMessage } from "../hooks/useAutoHidingMessage";
 import { API_ENDPOINT } from "../const";
 import { WorkflowErrorAlert } from "./WorkflowErrorAlert";
 import { useUnresolvedWorkflowError } from "../hooks/useNotifications";
+import { getWorkflowTitle } from "../lib/workflowUtils";
 
 export default function WorkflowDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -247,7 +248,7 @@ export default function WorkflowDetailPage() {
     <div className="min-h-screen bg-gray-50">
       <SharedHeader
         title="Workflows"
-        subtitle={workflow ? (workflow.title || "New workflow") : undefined}
+        subtitle={workflow ? (getWorkflowTitle(workflow)) : undefined}
       />
 
       {/* Main content */}
@@ -291,7 +292,7 @@ export default function WorkflowDetailPage() {
               <div className="flex items-start justify-between mb-6">
                 <div>
                   <h2 className="text-xl font-semibold text-gray-900 mb-2">
-                    {workflow.title || "New workflow"}
+                    {getWorkflowTitle(workflow)}
                   </h2>
                   <WorkflowStatusBadge status={workflow.status} />
                 </div>

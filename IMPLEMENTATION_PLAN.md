@@ -460,6 +460,20 @@ The connectors framework enables multi-account OAuth connections for Gmail and o
 
 - [x] **wrap-activate-script-in-transaction.md** - Wrapped useActivateScriptVersion mutation in database transaction to prevent TOCTOU vulnerability. Added tx parameter to ScriptStore.getScript() method.
 
+## Code Quality Refactors Completed (2026-01-23)
+
+- [x] **move-format-cron-to-lib.md** - Moved `formatCronSchedule` from WorkflowInfoBox.tsx to `lib/formatCronSchedule.ts`. Added try-catch error handling to prevent UI crashes on malformed cron expressions.
+
+- [x] **add-error-handling-cron-display.md** - Combined with above. Function now returns raw cron string as fallback on any error.
+
+- [x] **centralize-header-height-variable.md** - Added `--header-height` CSS variable in index.css. Updated ChatDetailPage sticky element to use the variable.
+
+- [x] **centralize-workflow-title-fallback.md** - Created `lib/workflowUtils.ts` with `getWorkflowTitle()` function. Updated 7 locations across MainPage, WorkflowDetailPage, TaskDetailPage, ArchivedPage, WorkflowsPage, and WorkflowInfoBox.
+
+- [x] **extract-is-running-hook.md** - Added `isScriptRunRunning()` utility to workflowUtils.ts. Updated MainPage to use the shared utility.
+
+- [x] **simplify-chatpage-disabled-logic.md** - Simplified `disabled={(!input && !uploadState.isUploading) || uploadState.isUploading}` to `disabled={!input || uploadState.isUploading}` in ChatPage, ChatDetailPage, MainPage, and NewPage.
+
 ---
 
 ## Priority 2: Core Automation Reliability

@@ -7,7 +7,8 @@ import { useDbQuery } from "../hooks/dbQuery";
 import { useAutonomyPreference } from "../hooks/useAutonomyPreference";
 import SharedHeader from "./SharedHeader";
 import { WorkflowStatusBadge } from "./StatusBadge";
-import { formatCronSchedule } from "./WorkflowInfoBox";
+import { formatCronSchedule } from "../lib/formatCronSchedule";
+import { getWorkflowTitle, isScriptRunRunning } from "../lib/workflowUtils";
 import { StaleDraftsBanner } from "./StaleDraftsBanner";
 import {
   Badge,
@@ -220,7 +221,7 @@ export default function MainPage() {
       const task = taskMap[workflow.task_id];
       const { text, isAttention } = getSecondaryLine(workflow, latestRun, task);
       // A workflow is "running" if it has a script run with no end_timestamp
-      const isRunning = latestRun && !latestRun.end_timestamp;
+      const isRunning = isScriptRunRunning(latestRun);
       return {
         ...workflow,
         secondaryText: text,
@@ -417,7 +418,7 @@ export default function MainPage() {
             )}
           </PromptInputTools>
           <PromptInputSubmit
-            disabled={(!input && !uploadState.isUploading) || uploadState.isUploading || isSubmitting}
+            disabled={!input || uploadState.isUploading || isSubmitting}
             status={uploadState.isUploading || isSubmitting ? "submitted" : undefined}
           />
         </PromptInputToolbar>
@@ -540,7 +541,7 @@ export default function MainPage() {
                       <div className="flex-1">
                         <div className="flex items-center gap-2 mb-1">
                           <h3 className="font-medium text-gray-900">
-                            {workflow.title || "New workflow"}
+                            {getWorkflowTitle(workflow)}
                           </h3>
                           <WorkflowStatusBadge status={workflow.status} />
                           {workflow.isRunning && (

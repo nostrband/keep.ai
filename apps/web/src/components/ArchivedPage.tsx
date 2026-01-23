@@ -6,6 +6,7 @@ import SharedHeader from "./SharedHeader";
 import { WorkflowStatusBadge } from "./StatusBadge";
 import { Button } from "../ui";
 import { Archive, RotateCcw, Trash2, ArrowLeft } from "lucide-react";
+import { getWorkflowTitle } from "../lib/workflowUtils";
 
 export default function ArchivedPage() {
   const navigate = useNavigate();
@@ -79,7 +80,7 @@ export default function ArchivedPage() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
                       <h3 className="font-medium text-gray-700 truncate">
-                        {workflow.title || "New workflow"}
+                        {getWorkflowTitle(workflow)}
                       </h3>
                       <WorkflowStatusBadge status={workflow.status} />
                     </div>

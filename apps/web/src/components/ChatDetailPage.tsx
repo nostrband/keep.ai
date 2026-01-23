@@ -119,7 +119,7 @@ export default function ChatDetailPage() {
 
       {/* Workflow info box - shows which workflow this chat belongs to */}
       {workflow && (
-        <div className="sticky top-[49px] z-10 bg-gray-50 border-b border-gray-200">
+        <div className="sticky top-[var(--header-height)] z-10 bg-gray-50 border-b border-gray-200">
           <div className="max-w-4xl mx-auto px-6 py-4">
             <WorkflowInfoBox workflow={workflow} onClick={handleWorkflowClick} />
           </div>
@@ -187,7 +187,7 @@ export default function ChatDetailPage() {
                 </PromptInputButton>
               </PromptInputTools>
               <PromptInputSubmit
-                disabled={(!input && !uploadState.isUploading) || uploadState.isUploading}
+                disabled={!input || uploadState.isUploading}
                 status={uploadState.isUploading ? "submitted" : undefined}
               />
             </PromptInputToolbar>

@@ -143,7 +143,7 @@ export default function NewPage() {
                 </PromptInputButton>
               </PromptInputTools>
               <PromptInputSubmit
-                disabled={(!input && !uploadState.isUploading) || uploadState.isUploading || isSubmitting}
+                disabled={!input || uploadState.isUploading || isSubmitting}
                 status={uploadState.isUploading || isSubmitting ? "submitted" : undefined}
               />
             </PromptInputToolbar>

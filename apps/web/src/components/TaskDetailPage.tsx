@@ -9,6 +9,7 @@ import { Badge, Button } from "../ui";
 import { Response } from "../ui/components/ai-elements/response";
 import { TaskStatusBadge, WorkflowStatusBadge, TaskRunStatusBadge } from "./StatusBadge";
 import { useAutoHidingMessage } from "../hooks/useAutoHidingMessage";
+import { getWorkflowTitle } from "../lib/workflowUtils";
 
 export default function TaskDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -185,7 +186,7 @@ export default function TaskDetailPage() {
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-2">
-                        <span className="font-medium text-gray-900">{workflow.title || "New workflow"}</span>
+                        <span className="font-medium text-gray-900">{getWorkflowTitle(workflow)}</span>
                         <WorkflowStatusBadge status={workflow.status} />
                       </div>
                       <div className="flex items-center gap-4 text-xs text-gray-500">

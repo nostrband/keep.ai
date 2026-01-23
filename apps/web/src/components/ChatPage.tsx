@@ -246,7 +246,7 @@ export default function ChatPage() {
                 )}
               </PromptInputTools>
               <PromptInputSubmit
-                disabled={(!input && !uploadState.isUploading) || uploadState.isUploading}
+                disabled={!input || uploadState.isUploading}
                 status={uploadState.isUploading ? "submitted" : undefined}
               />
             </PromptInputToolbar>
