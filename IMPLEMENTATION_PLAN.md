@@ -429,43 +429,36 @@ These specs must be implemented in dependency order.
 
 These ideas from `ideas/` have been prioritized by potential impact and are candidates for promotion to full specs:
 
-### 1. Collapse Low-Signal Events (HIGH PRIORITY)
-**Impact**: Huge UX win
-**Complexity**: Medium
+### 1. ~~Collapse Low-Signal Events~~ ✅ IMPLEMENTED
+**Status**: Already implemented in codebase
+**Files**: `EventListWithCollapse.tsx`, `CollapsedEventSummary.tsx`, `eventSignal.ts`
 
-Auto-collapse routine events (Gmail reads, web fetches, authentication flows) in chat timeline. Would dramatically improve readability of event history.
-
-**Why Prioritize**: Currently, users must scroll through many routine events to find meaningful interactions. This is the single highest-impact UX improvement identified.
+Auto-collapse routine events (Gmail reads, web fetches, etc.) in chat timeline.
 
 ---
 
-### 2. Detect/Archive/Prompt Abandoned Drafts (HIGH PRIORITY)
-**Impact**: High - keeps UI clean
-**Complexity**: Low-Medium
+### 2. ~~Detect/Archive/Prompt Abandoned Drafts~~ ✅ IMPLEMENTED
+**Status**: Fully implemented in codebase
+**Detection**: `script-store.ts` (getAbandonedDrafts, getDraftActivitySummary), `dbScriptReads.ts` (useAbandonedDrafts, useDraftActivitySummary hooks), `StaleDraftsBanner.tsx`
+**Archive Feature**: `ArchivedPage.tsx`, `StatusBadge.tsx` (archived status), `WorkflowDetailPage.tsx` (archive/restore buttons), `MainPage.tsx` (filters out archived, shows link to archived)
 
-Identify drafts with no activity for X days, surface with banner ("3+ days inactive"), and provide non-destructive archive option.
-
-**Why Prioritize**: Abandoned drafts clutter the interface and confuse users about what's actively being worked on.
+Identify drafts with no activity for X days, surface with banner, and allow archiving/restoring.
 
 ---
 
-### 3. Highlight Significant Events (MEDIUM-HIGH PRIORITY)
-**Impact**: Medium-High - improved event scannability
-**Complexity**: Low
+### 3. ~~Highlight Significant Events~~ ✅ IMPLEMENTED
+**Status**: Already implemented in codebase
+**Files**: `EventItem.tsx` with `significanceStyles`, `events.ts` with `EventSignificance` type
 
 Color-code events by type: errors (red), fixes (green), user interactions (blue), routine operations (gray).
 
-**Why Prioritize**: Low implementation cost with immediate visual improvement to event timeline.
-
 ---
 
-### 4. Dry-Run Testing (MEDIUM PRIORITY)
-**Impact**: Medium - safer testing
-**Complexity**: Low (partially exists)
+### 4. ~~Dry-Run Testing~~ ✅ IMPLEMENTED
+**Status**: Already implemented in codebase
+**Files**: `WorkflowDetailPage.tsx` with `handleTestRun`, server endpoint `/workflow/test-run`
 
-"Test run" button functionality - partially implemented, needs UI completion.
-
-**Why Prioritize**: Button already exists, just needs proper wiring and UX polish.
+"Test run" button functionality is fully implemented.
 
 ---
 
@@ -523,7 +516,8 @@ cd packages/tests && npm test
 
 **Total Technical Debt Items**: 4 (1 implemented, 3 non-blocking pending)
 
-**Ideas Ready for Promotion**: 5 prioritized candidates
+**Ideas Ready for Promotion**: 1 remaining (Agent Status from Active Runs)
+- 4 ideas already implemented: Collapse Events, Highlight Events, Dry-Run Testing, Abandoned Drafts Detection
 
 ---
 

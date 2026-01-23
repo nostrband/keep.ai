@@ -13,6 +13,7 @@ import SharedHeader from "./SharedHeader";
 import { Response } from "../ui";
 import ScriptDiff from "./ScriptDiff";
 import { Badge, Button } from "../ui";
+import { Archive, RotateCcw } from "lucide-react";
 import { workflowNotifications } from "../lib/WorkflowNotifications";
 import { WorkflowStatusBadge, ScriptRunStatusBadge } from "./StatusBadge";
 import { formatCronSchedule } from "./WorkflowInfoBox";
@@ -180,6 +181,33 @@ export default function WorkflowDetailPage() {
     }
   };
 
+  const handleArchive = async () => {
+    if (!workflow) return;
+
+    updateWorkflowMutation.mutate({
+      workflowId: workflow.id,
+      status: "archived",
+    }, {
+      onSuccess: () => {
+        success.show("Workflow archived");
+        navigate("/archived");
+      },
+    });
+  };
+
+  const handleRestore = async () => {
+    if (!workflow) return;
+
+    updateWorkflowMutation.mutate({
+      workflowId: workflow.id,
+      status: "draft",
+    }, {
+      onSuccess: () => {
+        success.show("Workflow restored");
+      },
+    });
+  };
+
   const handleActivateVersion = (scriptId: string, version: number) => {
     if (!workflow) return;
 
@@ -237,6 +265,25 @@ export default function WorkflowDetailPage() {
             {/* Error Alert - show unresolved errors at the top */}
             {unresolvedError && (
               <WorkflowErrorAlert notification={unresolvedError} />
+            )}
+
+            {/* Archived workflow restore banner */}
+            {workflow.status === "archived" && (
+              <div className="mb-6 flex items-center justify-between bg-gray-50 border border-gray-200 rounded-lg p-4">
+                <div className="flex items-center gap-2 text-gray-600">
+                  <Archive className="w-5 h-5" />
+                  <span>This workflow is archived and hidden from the main list.</span>
+                </div>
+                <Button
+                  onClick={handleRestore}
+                  disabled={updateWorkflowMutation.isPending}
+                  size="sm"
+                  className="flex items-center gap-1"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                  Restore
+                </Button>
+              </div>
             )}
 
             {/* Workflow Metadata */}
@@ -316,9 +363,22 @@ export default function WorkflowDetailPage() {
                         Edit
                       </Button>
                     )}
+                    {/* Archive button for drafts */}
+                    {workflow.status === "draft" && (
+                      <Button
+                        onClick={handleArchive}
+                        disabled={updateWorkflowMutation.isPending}
+                        size="sm"
+                        variant="ghost"
+                        className="cursor-pointer text-gray-400 hover:text-gray-600"
+                        title="Archive this draft"
+                      >
+                        <Archive className="w-4 h-4" />
+                      </Button>
+                    )}
                   </div>
                   {/* Show hint if no script exists yet */}
-                  {workflow.status === "draft" && (
+                  {workflow.status === "draft" && !activeScript && (
                     <div className="text-sm text-gray-500">
                       Script required to activate
                     </div>
