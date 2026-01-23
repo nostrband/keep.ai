@@ -19,7 +19,7 @@ export default function WorkflowsPage() {
         {/* Create Workflow Button */}
         <div className="mb-6">
           <Button
-            onClick={() => navigate("/new")}
+            onClick={() => navigate("/")}
             size="sm"
             variant="outline"
             className="cursor-pointer"

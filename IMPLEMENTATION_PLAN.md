@@ -524,7 +524,7 @@ Essential fixes and improvements for workflow reliability in v1.
 ### 2.2 Technical Debt (From FIXME/TODO Comments)
 
 **BLOCKING for v1:**
-- [ ] `packages/sync/src/TransportClientHttp.ts:176` - Node.js EventSource not implemented
+- [x] `packages/sync/src/TransportClientHttp.ts:176` - Node.js EventSource not implemented
   - Currently throws "EventSource not available" for Node.js SSE transport
   - Blocks server-side SSE sync; browser works fine
   - **Recommended: Option A** - use `eventsource` npm package (minimal, focused dependency)

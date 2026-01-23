@@ -56,7 +56,7 @@ export default function ChatSidebar() {
       {/* Header */}
       <div className="p-4 border-b border-gray-200">
         <h2 className="text-lg font-semibold text-gray-800">Chats</h2>
-        <Link to="/chat/new">
+        <Link to="/">
           <Button className="mt-2 block w-full text-center p-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors">
             + New Chat
           </Button>
