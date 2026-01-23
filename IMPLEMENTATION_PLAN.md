@@ -654,9 +654,15 @@ The implementation includes:
 6. [x] Created `AgentStatusBadge` component in `apps/web/src/components/AgentStatusBadge.tsx` showing status with animated pulse when running
 7. [x] Added AgentStatusBadge to SharedHeader.tsx
 
-### 4.2 Archive Old Drafts
-- [ ] Add "Archive" action for drafts
-- [ ] Archived drafts hidden from main list, viewable in separate section
+### 4.2 Archive Old Drafts - COMPLETED
+
+**Status:** Fully implemented. Archive functionality already exists in the codebase:
+- [x] Archive button in WorkflowDetailPage (for draft status workflows) - `apps/web/src/components/WorkflowDetailPage.tsx:367-379`
+- [x] Archived status badge - `apps/web/src/components/StatusBadge.tsx:16`
+- [x] ArchivedPage for viewing archived workflows - `apps/web/src/components/ArchivedPage.tsx`
+- [x] Route `/archived` defined in `apps/web/src/App.tsx:353`
+- [x] MainPage filters out archived workflows and shows link to view them - `apps/web/src/components/MainPage.tsx:215-217,564-570`
+- [x] Restore functionality returns workflow to draft status
 
 ---
 
