@@ -35,28 +35,6 @@ export function useTask(taskId: string) {
   });
 }
 
-/**
- * @deprecated Use task.asks directly instead. See Spec 10.
- * The task_states table is deprecated - asks is now on the tasks table.
- */
-export function useTaskState(taskId: string) {
-  const { api } = useDbQuery();
-  return useQuery({
-    queryKey: qk.taskState(taskId),
-    queryFn: async () => {
-      if (!api) return null;
-      try {
-        const taskState = await api.taskStore.getState(taskId);
-        return taskState;
-      } catch (error) {
-        return null;
-      }
-    },
-    meta: { tables: ["task_states"] },
-    enabled: !!api && !!taskId,
-  });
-}
-
 export function useTaskRuns(taskId: string) {
   const { api } = useDbQuery();
   return useQuery({

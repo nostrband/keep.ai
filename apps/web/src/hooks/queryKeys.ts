@@ -17,7 +17,6 @@ export const qk = {
   // Task-related queries
   allTasks: (includeFinished: boolean) => [{ scope: "allTasks", includeFinished }] as const,
   task: (taskId: string) => [{ scope: "task", taskId }] as const,
-  taskState: (taskId: string) => [{ scope: "taskState", taskId }] as const,
   taskRuns: (taskId: string) => [{ scope: "taskRuns", taskId }] as const,
   taskRun: (runId: string) => [{ scope: "taskRun", runId }] as const,
   taskByChatId: (chatId: string) => [{ scope: "taskByChatId", chatId }] as const,

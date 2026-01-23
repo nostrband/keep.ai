@@ -1,6 +1,8 @@
 # Keep.AI v1.0.0 Implementation Plan
 
 > **Note (2026-01-23):** Sections 1.1 (Build-Time Secrets), 1.2 (Core Connectors Package), 1.3 (Connection Manager + Database), 1.4 (Gmail Refactor), 1.5 (Server Endpoints), 1.6 (Connections UI), and 1.7b (Notion Connector) are now fully implemented.
+>
+> **Note (2026-01-23):** Code cleanup completed: TaskState struct removed (Spec 10 completion), Tasks.* tools deprecated and moved to `packages/agent/src/tools/deprecated/`.
 
 ## Priority 1: Connectors Framework (Current Focus - BLOCKING)
 
@@ -483,6 +485,24 @@ The connectors framework enables multi-account OAuth connections for Gmail and o
 - [x] **fix-agent-system-prompts.md** - Updated worker/planner system prompts in agent-env.ts to remove references to removed goal/notes/plan fields. Now correctly references only the "asks" field that is available after Spec 10 changes.
 
 - [x] **complete-chat-messages-migration.md** - Already completed. Server.ts and CLI already use `getNewChatMessages()` instead of deprecated `getChatMessages()`.
+
+## Spec 10 Completion (TaskState Cleanup) - Completed 2026-01-23
+
+- [x] **remove-taskstate-struct.md** - Removed obsolete TaskState type/interface entirely:
+  - Deleted `TaskState` type from `packages/agent/src/agent-types.ts`
+  - Deleted `TaskState` interface and deprecated methods (`saveState`, `getState`, `getStates`) from `packages/db/src/task-store.ts`
+  - Updated all references to use `task.asks` directly
+  - Removed `useTaskState` hook from `apps/web/src/hooks/dbTaskReads.ts`
+  - Introduced `TaskPatch` type for step output patches (just `asks` field)
+  - Removed deprecated tests for task_states table operations
+
+- [x] **deprecate-tasks-api-tools.md** - Removed Tasks.* tools from sandbox API:
+  - Removed `Tasks.get`, `Tasks.list`, `Tasks.sendToTaskInbox`, `Tasks.update` from sandbox API registration
+  - Moved 6 task tool files to `packages/agent/src/tools/deprecated/` folder:
+    - `add-task.ts`, `add-task-recurring.ts`, `get-task.ts`, `list-tasks.ts`, `send-to-task-inbox.ts`, `task-update.ts`
+  - Added `@deprecated` JSDoc comments to all deprecated tool files
+  - Updated system prompts in `agent-env.ts` to remove task management references
+  - Removed "Other tasks" section from worker prompt and "Workflow Title" section from planner prompt
 
 ---
 

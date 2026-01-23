@@ -1,5 +1,5 @@
 import { EvalResult, Sandbox } from "./sandbox/sandbox";
-import { StepInput, StepOutput, AgentTask, TaskState } from "./agent-types";
+import { StepInput, StepOutput, AgentTask } from "./agent-types";
 import {
   convertToModelMessages,
   generateId,
@@ -40,7 +40,7 @@ export class Agent {
   private sandbox: Sandbox;
   private readonly task: AgentTask;
   private readonly taskRunId: string;
-  private state?: TaskState;
+  private asks?: string;
   private debug = debug("agent:Agent");
 
   constructor(
@@ -55,7 +55,7 @@ export class Agent {
     this.env = env;
     this.task = task;
     this.taskRunId = taskRunId;
-    if (task.state) this.state = { ...task.state };
+    if (task.asks) this.asks = task.asks;
   }
 
   async loop(
@@ -101,7 +101,7 @@ export class Agent {
     }
 
     // Custom user message (worker)
-    const user = await this.env.buildUser(this.task.id, input, this.state);
+    const user = await this.env.buildUser(this.task.id, input, this.asks);
     if (user) {
       // Append to history
       const userMessage: AssistantUIMessage = {

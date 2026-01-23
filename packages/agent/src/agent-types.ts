@@ -4,13 +4,6 @@ import { EvalResult } from "./sandbox/sandbox";
 export type StepReason = "code" | "input"; // "start" | "timer";
 export type StepOutputKind = "done" | "code" | "wait";
 
-export type TaskState = {
-  goal?: string;
-  notes?: string;
-  plan?: string;
-  asks?: string;
-};
-
 export type StepAttachment = {
   type: "image_url",
   image_url: {
@@ -38,15 +31,21 @@ export type StepInput = {
   result?: EvalResult;
 };
 
+/** Patch for updating task state. Only `asks` is used now (Spec 10). */
+export type TaskPatch = {
+  asks?: string;
+};
+
 export type StepOutput = { steps: number; reasoning?: string } & (
-  | { kind: "done"; reply: string; patch?: TaskState }
-  | { kind: "code"; code: string; patch?: TaskState }
-  | { kind: "wait"; reply?: string; patch?: TaskState }
+  | { kind: "done"; reply: string; patch?: TaskPatch }
+  | { kind: "code"; code: string; patch?: TaskPatch }
+  | { kind: "wait"; reply?: string; patch?: TaskPatch }
 );
 
 export type AgentTask = {
   id: string;
   type: TaskType;
-  state?: TaskState;
+  /** Task state containing only the asks field (Spec 10) */
+  asks?: string;
   chat_id: string;
 };

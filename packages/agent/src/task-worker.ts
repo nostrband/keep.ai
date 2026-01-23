@@ -15,7 +15,7 @@ import {
   Task,
   TaskType,
 } from "@app/db";
-import { AgentTask, StepOutput, StepReason, TaskState } from "./agent-types";
+import { AgentTask, StepOutput, StepReason } from "./agent-types";
 import { AgentEnv } from "./agent-env";
 import { SandboxAPI } from "./sandbox/api";
 import { fileUtils } from "@app/node";
@@ -159,17 +159,15 @@ export class TaskWorker {
       // Generate title from first inbox message if task doesn't have one
       await this.ensureThread(task, taskType, inbox);
 
-      // Get task state
-      const state = await this.getTaskState(task);
+      // Track asks locally (Spec 10: asks moved from task_states to tasks table)
+      let currentAsks = task.asks || "";
 
-      // Agent task
+      // Agent task (Spec 10: asks moved directly to AgentTask)
       const agentTask: AgentTask = {
         id: task.id,
         type: taskType,
         chat_id: task.chat_id,
-        state: {
-          ...state,
-        },
+        asks: currentAsks,
       };
 
       // Model for agent
@@ -250,9 +248,9 @@ export class TaskWorker {
         // Save wait state (Spec 10: only asks is used now)
         if (result.kind === "wait" && result.patch) {
           if (result.patch.asks !== undefined) {
-            state.asks = result.patch.asks;
+            currentAsks = result.patch.asks;
             // Spec 10: Use updateTaskAsks instead of saveState
-            await this.api.taskStore.updateTaskAsks(task.id, state.asks);
+            await this.api.taskStore.updateTaskAsks(task.id, currentAsks);
           }
         }
 
@@ -268,7 +266,7 @@ export class TaskWorker {
           taskRunId,
           runStartTime,
           result,
-          state,
+          currentAsks,
           taskReply,
           agent,
           chatId: task.chat_id,
@@ -295,7 +293,7 @@ export class TaskWorker {
           this.debug(`Task updated`, {
             id: task.id,
             threadId: task.thread_id,
-            asks: state?.asks,
+            asks: currentAsks,
           });
         } else {
           // Single-shot task finished
@@ -308,7 +306,7 @@ export class TaskWorker {
         }
 
         // Send reply/asks to recipient (replier inbox or user)
-        await this.handleReply(taskType, task, state, result);
+        await this.handleReply(taskType, task, currentAsks, result);
 
         // Signal success to scheduler
         this.emitSignal({
@@ -463,7 +461,7 @@ export class TaskWorker {
   private async handleReply(
     taskType: TaskType,
     task: Task,
-    state: TaskState,
+    currentAsks: string,
     result: StepOutput
   ) {
     if (result.kind === "code") throw new Error("Can't handle 'code' reply");
@@ -473,10 +471,10 @@ export class TaskWorker {
       await this.sendToUser(task.chat_id, result.reply);
     }
 
-    // We ran an iteraction and still have asks in state?
+    // We ran an iteration and still have asks?
     // Send to replier
-    if (result.kind === "wait" && state.asks) {
-      await this.sendToUser(task.chat_id, state.asks);
+    if (result.kind === "wait" && currentAsks) {
+      await this.sendToUser(task.chat_id, currentAsks);
     }
   }
 
@@ -499,7 +497,7 @@ export class TaskWorker {
       model: opts.modelName,
       reason: "input",
       inbox: JSON.stringify(opts.inbox),
-      input_asks: opts.agentTask.state?.asks || "",
+      input_asks: opts.agentTask.asks || "",
       input_goal: "",
       input_plan: "",
       input_notes: "",
@@ -536,7 +534,7 @@ export class TaskWorker {
     taskRunId: string;
     runStartTime: Date;
     result: StepOutput;
-    state: TaskState;
+    currentAsks: string;  // Spec 10: asks passed directly instead of TaskState
     taskReply: string;
     agent: ReplAgent;
     chatId: string;
@@ -557,7 +555,7 @@ export class TaskWorker {
       end_timestamp: runEndTime.toISOString(),
       steps: opts.result.steps,
       state: opts.result.kind,
-      output_asks: opts.state.asks || "",
+      output_asks: opts.currentAsks || "",
       output_goal: "",
       output_plan: "",
       output_notes: "",
@@ -670,13 +668,6 @@ export class TaskWorker {
     };
 
     return sandbox;
-  }
-
-  // Spec 10: TaskState now comes from task.asks directly instead of task_states table
-  private async getTaskState(task: Task): Promise<TaskState> {
-    return {
-      asks: task.asks || "",
-    };
   }
 
   private async getInboxItems(

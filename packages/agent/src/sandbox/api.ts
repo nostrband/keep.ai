@@ -10,10 +10,6 @@ import {
   makeWebFetchTool,
   makeWebDownloadTool,
   makeWebSearchTool,
-  makeGetTaskTool,
-  makeListTasksTool,
-  makeSendToTaskInboxTool,
-  makeTaskUpdateTool,
   makeReadFileTool,
   makeSaveFileTool,
   makeListFilesTool,
@@ -275,26 +271,7 @@ Example: await ${ns}.${name}(<input>)
     );
 
     // Note: Memory.listEvents removed (Spec 01) - use execution_logs table instead
-
-    // Tasks
-    addTool(global, "Tasks", "get", makeGetTaskTool(this.api.taskStore));
-    addTool(global, "Tasks", "list", makeListTasksTool(this.api.taskStore));
-    addTool(
-      global,
-      "Tasks",
-      "sendToTaskInbox",
-      makeSendToTaskInboxTool(
-        this.api.taskStore,
-        this.api.inboxStore,
-        this.getContext
-      )
-    );
-    addTool(
-      global,
-      "Tasks",
-      "update",
-      makeTaskUpdateTool(this.api, this.getContext)
-    );
+    // Note: Tasks.* tools removed (deprecated, no longer part of agent workflow)
 
     // File tools for router and worker
     addTool(

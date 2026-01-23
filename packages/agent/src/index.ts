@@ -26,7 +26,7 @@ export {
   type AgentTask as Task,
   type StepInput,
   type StepOutput,
-  type TaskState,
+  type TaskPatch,
 } from "./agent-types";
 
 export {

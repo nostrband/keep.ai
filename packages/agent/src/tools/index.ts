@@ -10,12 +10,7 @@ export { makeWebSearchTool } from "./web-search";
 export { makeWebFetchTool } from "./web-fetch";
 export { makeWebDownloadTool } from "./web-download";
 // Note: makeListEventsTool removed (Spec 01) - use execution_logs instead
-export { makeAddTaskTool } from "./add-task";
-export { makeAddTaskRecurringTool } from "./add-task-recurring";
-export { makeGetTaskTool } from "./get-task";
-export { makeListTasksTool } from "./list-tasks";
-export { makeSendToTaskInboxTool } from "./send-to-task-inbox";
-export { makeTaskUpdateTool } from "./task-update";
+// Note: Task tools (makeAddTaskTool, makeGetTaskTool, etc.) moved to deprecated/ - no longer part of agent workflow
 export { makeReadFileTool } from "./read-file";
 export { makeSaveFileTool } from "./save-file";
 export { makeListFilesTool } from "./list-files";

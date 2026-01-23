@@ -19,19 +19,6 @@ export interface Task {
   asks: string;         // Moved from task_states (Spec 10)
 }
 
-// DEPRECATED: TaskState interface and related methods (saveState, getState, getStates)
-// are no longer used. The 'asks' field has been moved to the Task interface.
-// Fields goal, notes, plan have been removed from the application.
-// Keeping for backwards compatibility during agent package migration.
-// See Spec 10.
-export interface TaskState {
-  id: string;
-  goal: string;
-  notes: string;
-  plan: string;
-  asks: string;
-}
-
 export interface TaskRun {
   id: string;
   task_id: string;
@@ -385,74 +372,6 @@ export class TaskStore {
       `UPDATE tasks SET asks = ? WHERE id = ? AND (deleted IS NULL OR deleted = FALSE)`,
       [asks, taskId]
     );
-  }
-
-  // DEPRECATED: saveState is no longer used. Use updateTaskAsks() instead. See Spec 10.
-  // Keeping for backwards compatibility during agent package migration.
-  async saveState(taskState: TaskState): Promise<void> {
-    await this.db.db.exec(
-      `INSERT OR REPLACE INTO task_states (id, goal, notes, plan, asks)
-          VALUES (?, ?, ?, ?, ?)`,
-      [
-        taskState.id,
-        taskState.goal,
-        taskState.notes,
-        taskState.plan,
-        taskState.asks,
-      ]
-    );
-  }
-
-  // DEPRECATED: getState is no longer used. Use task.asks directly. See Spec 10.
-  // Keeping for backwards compatibility during agent package migration.
-  async getState(id: string): Promise<TaskState | null> {
-    const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, goal, notes, plan, asks
-          FROM task_states
-          WHERE id = ?`,
-      [id]
-    );
-
-    if (!results || results.length === 0) {
-      return null;
-    }
-
-    const row = results[0];
-    return {
-      id: row.id as string,
-      goal: row.goal as string,
-      notes: row.notes as string,
-      plan: row.plan as string,
-      asks: row.asks as string,
-    };
-  }
-
-  // DEPRECATED: getStates is no longer used. Use tasks array with asks field directly. See Spec 10.
-  // Keeping for backwards compatibility during agent package migration.
-  async getStates(ids: string[]): Promise<TaskState[]> {
-    if (ids.length === 0) {
-      return [];
-    }
-    validateInClauseLength(ids, 'getStates');
-
-    // Create placeholders for the IN clause (?, ?, ?, ...)
-    const placeholders = ids.map(() => "?").join(", ");
-
-    const sql = `SELECT id, goal, notes, plan, asks
-                 FROM task_states
-                 WHERE id IN (${placeholders})`;
-
-    const results = await this.db.db.execO<Record<string, unknown>>(sql, ids);
-
-    if (!results) return [];
-
-    return results.map((row) => ({
-      id: row.id as string,
-      goal: row.goal as string,
-      notes: row.notes as string,
-      plan: row.plan as string,
-      asks: row.asks as string,
-    }));
   }
 
   // Create a new task run

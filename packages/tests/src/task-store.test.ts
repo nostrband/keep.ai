@@ -3,7 +3,7 @@ import { DBInterface, KeepDb, TaskStore, Task, TaskRun, TaskRunStart, TaskRunEnd
 import { createDBNode } from "@app/node";
 
 /**
- * Helper to create tasks, task_runs, and task_states tables without full migration system.
+ * Helper to create tasks and task_runs tables without full migration system.
  * This allows testing the store in isolation without CR-SQLite dependencies.
  */
 async function createTaskTables(db: DBInterface): Promise<void> {
@@ -60,17 +60,6 @@ async function createTaskTables(db: DBInterface): Promise<void> {
     )
   `);
   await db.exec(`CREATE INDEX IF NOT EXISTS idx_task_runs_task_id ON task_runs(task_id)`);
-
-  // Create task_states table (deprecated but still needed for backwards compat)
-  await db.exec(`
-    CREATE TABLE IF NOT EXISTS task_states (
-      id TEXT PRIMARY KEY NOT NULL,
-      goal TEXT NOT NULL DEFAULT '',
-      notes TEXT NOT NULL DEFAULT '',
-      plan TEXT NOT NULL DEFAULT '',
-      asks TEXT NOT NULL DEFAULT ''
-    )
-  `);
 }
 
 describe("TaskStore", () => {
@@ -392,53 +381,6 @@ describe("TaskStore", () => {
       expect(run.output_goal).toBe("Updated goal");
       expect(run.input_asks).toBe(JSON.stringify([{ q: "Question 1" }]));
       expect(run.output_asks).toBe(JSON.stringify([{ q: "Question 2" }]));
-    });
-  });
-
-  describe("Deprecated TaskState operations (backwards compat)", () => {
-    it("should save and get state", async () => {
-      await taskStore.saveState({
-        id: "task-1",
-        goal: "Test goal",
-        notes: "Test notes",
-        plan: "Test plan",
-        asks: JSON.stringify([{ q: "Test question" }]),
-      });
-
-      const state = await taskStore.getState("task-1");
-      expect(state?.goal).toBe("Test goal");
-      expect(state?.notes).toBe("Test notes");
-      expect(state?.plan).toBe("Test plan");
-      expect(state?.asks).toBe(JSON.stringify([{ q: "Test question" }]));
-    });
-
-    it("should return null for non-existent state", async () => {
-      const state = await taskStore.getState("non-existent");
-      expect(state).toBeNull();
-    });
-
-    it("should get multiple states", async () => {
-      await taskStore.saveState({ id: "task-1", goal: "Goal 1", notes: "", plan: "", asks: "" });
-      await taskStore.saveState({ id: "task-2", goal: "Goal 2", notes: "", plan: "", asks: "" });
-      await taskStore.saveState({ id: "task-3", goal: "Goal 3", notes: "", plan: "", asks: "" });
-
-      const states = await taskStore.getStates(["task-1", "task-3"]);
-      expect(states).toHaveLength(2);
-      expect(states.find(s => s.id === "task-1")?.goal).toBe("Goal 1");
-      expect(states.find(s => s.id === "task-3")?.goal).toBe("Goal 3");
-    });
-
-    it("should return empty array for empty IDs", async () => {
-      const states = await taskStore.getStates([]);
-      expect(states).toHaveLength(0);
-    });
-
-    it("should upsert state", async () => {
-      await taskStore.saveState({ id: "task-1", goal: "Initial", notes: "", plan: "", asks: "" });
-      await taskStore.saveState({ id: "task-1", goal: "Updated", notes: "", plan: "", asks: "" });
-
-      const state = await taskStore.getState("task-1");
-      expect(state?.goal).toBe("Updated");
     });
   });
 });
