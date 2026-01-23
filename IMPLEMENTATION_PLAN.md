@@ -516,10 +516,15 @@ The connectors framework enables multi-account OAuth connections for Gmail and o
 
 Essential fixes and improvements for workflow reliability in v1.
 
-### 2.1 Error Handling Improvements
-- [x] Add `classifyNotionError()` function (part of Notion connector - see 1.7b) - Already implemented in packages/agent/src/errors.ts
-- [ ] Review existing error classification completeness for Google APIs
-- [ ] Ensure all tools use appropriate error classification
+### 2.1 Error Handling Improvements - COMPLETED
+- [x] Add `classifyNotionError()` function - Implemented in packages/agent/src/errors.ts
+- [x] Review existing error classification completeness for Google APIs - **Verified 2026-01-23**
+  - All 4 Google tools (gmail, gdrive, gsheets, gdocs) use `classifyGoogleApiError`
+- [x] Ensure all tools use appropriate error classification - **Verified 2026-01-23**
+  - All 18 external API tools are properly classified:
+    - Google APIs → `classifyGoogleApiError`
+    - Notion API → `classifyNotionError`
+    - OpenRouter/Web APIs → `classifyHttpError` + `classifyGenericError`
 
 ### 2.2 Technical Debt (From FIXME/TODO Comments)
 
@@ -606,11 +611,11 @@ These features significantly improve user confidence and experience.
 - [x] WorkflowEventGroup and TaskEventGroup using EventListWithCollapse
 - [x] Auto-expand when hasError=true for debugging
 
-### 3.3 Draft Management (idea: handle-abandoned-drafts.md)
+### 3.3 Draft Management (idea: handle-abandoned-drafts.md) - v1 COMPLETE
 
-**For v1 (simplest approach):**
-- [ ] Leave drafts in Draft status forever (no auto-archive)
-- [ ] Optionally add gentle reminder notification after 3+ days inactive
+**v1 approach (current behavior - no changes needed):**
+- [x] Drafts remain in Draft status indefinitely (this is the current behavior)
+- [ ] *(Optional post-v1)* Add gentle reminder notification after 3+ days inactive
 
 **Future (post-v1):**
 - Define abandoned draft detection (no activity for X days)

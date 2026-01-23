@@ -1,5 +1,6 @@
 import { Notification } from "packages/db/dist";
 import { Button } from "../ui";
+import { openBugReport } from "../lib/bugReport";
 
 interface ErrorPayload {
   error_type?: "auth" | "permission" | "network" | "internal";
@@ -148,6 +149,17 @@ function ErrorCard({
 
   const actionButton = actionButtons[errorType];
 
+  const handleReportIssue = () => {
+    openBugReport({
+      errorType,
+      service,
+      message,
+      workflowId: notification.workflow_id,
+      workflowTitle: notification.workflow_title,
+      timestamp: notification.timestamp,
+    });
+  };
+
   return (
     <div>
       <div className="flex items-start gap-3">
@@ -159,13 +171,23 @@ function ErrorCard({
           <p className="text-sm text-gray-600 mt-1">{message}</p>
         </div>
       </div>
-      {onAction && actionButton && !notification.resolved_at && (
-        <div className="mt-3">
+      {!notification.resolved_at && (
+        <div className="mt-3 flex gap-2">
+          {onAction && actionButton && (
+            <Button
+              size="sm"
+              onClick={() => onAction(notification, actionButton.action)}
+            >
+              {actionButton.label}
+            </Button>
+          )}
           <Button
             size="sm"
-            onClick={() => onAction(notification, actionButton.action)}
+            variant="outline"
+            onClick={handleReportIssue}
+            className="text-gray-600"
           >
-            {actionButton.label}
+            Report Issue
           </Button>
         </div>
       )}
@@ -178,18 +200,42 @@ function EscalatedCard({ notification }: { notification: Notification }) {
   const fixAttempts = payload?.fix_attempts || 3;
   const reason = payload?.reason;
 
+  const handleReportIssue = () => {
+    openBugReport({
+      errorType: "escalated",
+      message: `AI tried ${fixAttempts}x but couldn't fix it${reason ? `: ${reason}` : ""}`,
+      workflowId: notification.workflow_id,
+      workflowTitle: notification.workflow_title,
+      timestamp: notification.timestamp,
+    });
+  };
+
   return (
-    <div className="flex items-start gap-3">
-      <span className="text-xl">⛔</span>
-      <div className="flex-1">
-        <h3 className="font-medium text-gray-900">
-          Automation paused - needs your help
-        </h3>
-        <p className="text-sm text-gray-600 mt-1">
-          AI tried {fixAttempts}x but couldn't fix it
-          {reason && `: ${reason}`}
-        </p>
+    <div>
+      <div className="flex items-start gap-3">
+        <span className="text-xl">⛔</span>
+        <div className="flex-1">
+          <h3 className="font-medium text-gray-900">
+            Automation paused - needs your help
+          </h3>
+          <p className="text-sm text-gray-600 mt-1">
+            AI tried {fixAttempts}x but couldn't fix it
+            {reason && `: ${reason}`}
+          </p>
+        </div>
       </div>
+      {!notification.resolved_at && (
+        <div className="mt-3">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleReportIssue}
+            className="text-gray-600"
+          >
+            Report Issue
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
