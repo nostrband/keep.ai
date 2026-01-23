@@ -41,3 +41,15 @@ export {
   type DbConnection,
   type DbConnectionStore,
 } from "./db-adapter";
+
+// Service definitions
+export {
+  gmailService,
+  gdriveService,
+  gsheetsService,
+  gdocsService,
+  googleServices,
+  googleOAuthBase,
+  fetchGoogleProfile,
+  type GoogleProfile,
+} from "./services/google";
