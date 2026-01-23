@@ -1,6 +1,6 @@
 # Keep.AI v1.0.0 Implementation Plan
 
-> **Note (2026-01-23):** Sections 1.1 (Build-Time Secrets), 1.2 (Core Connectors Package), 1.3 (Connection Manager + Database), 1.4 (Gmail Refactor), and 1.5 (Server Endpoints) are now fully implemented.
+> **Note (2026-01-23):** Sections 1.1 (Build-Time Secrets), 1.2 (Core Connectors Package), 1.3 (Connection Manager + Database), 1.4 (Gmail Refactor), 1.5 (Server Endpoints), and 1.6 (Connections UI) are now fully implemented.
 
 ## Priority 1: Connectors Framework (Current Focus - BLOCKING)
 
@@ -306,70 +306,32 @@ The connectors framework enables multi-account OAuth connections for Gmail and o
 
 **Note:** Callback returns HTML page that auto-closes. No postMessage needed - connection appears via db sync.
 
-### 1.6 Connections UI (spec: connectors-05-ui-connections-page.md)
+### 1.6 Connections UI (spec: connectors-05-ui-connections-page.md) - FULLY IMPLEMENTED
 
 **Action Items:**
-- [ ] Add query keys to `apps/web/src/hooks/queryKeys.ts`:
-  ```typescript
-  allConnections: () => [{ scope: "allConnections" }] as const,
-  connection: (connectionId: string) => [{ scope: "connection", connectionId }] as const,
-  connectionsByService: (service: string) => [{ scope: "connectionsByService", service }] as const,
-  ```
-- [ ] Create `apps/web/src/hooks/dbConnectionReads.ts`:
-  ```typescript
-  import { useQuery } from "@tanstack/react-query";
-  import { qk } from "./queryKeys";
-  import { useDbQuery } from "./dbQuery";
+- [x] Add query keys to `apps/web/src/hooks/queryKeys.ts`:
+  - `allConnections`, `connection`, `connectionsByService`
+- [x] Create `apps/web/src/hooks/dbConnectionReads.ts`:
+  - `useConnections()`, `useConnection()`, `useConnectionsByService()` hooks
+  - Uses TanStack Query with `meta: { tables: ["connections"] }` for auto-invalidation
+- [x] Create `apps/web/src/components/ConnectionsSection.tsx`:
+  - Full-featured component with:
+    - Service groups (Gmail, Google Drive, Sheets, Docs)
+    - Connection cards with status badges (green/yellow/red)
+    - Dropdown menu (Rename, Check, Reconnect, Disconnect)
+    - Inline rename UI with input field
+    - Error message display for failed connections
+    - OAuth popup flow with pending state
+- [x] Update `apps/web/src/components/SettingsPage.tsx`:
+  - Removed old Gmail-specific integration code
+  - Added ConnectionsSection below main configuration form
+  - Clean separation of concerns
 
-  export function useConnections() {
-    const { api } = useDbQuery();
-    return useQuery({
-      queryKey: qk.allConnections(),
-      queryFn: async () => {
-        if (!api) return [];
-        return await api.connectionStore.listConnections();
-      },
-      meta: { tables: ["connections"] },  // CRITICAL: enables auto-invalidation
-      enabled: !!api,
-    });
-  }
-  ```
-- [ ] Add Radix Tabs component (if not present) - check `@radix-ui/react-tabs` in package.json
-- [ ] Update `apps/web/src/components/SettingsPage.tsx`:
-  - Import Tabs components
-  - Wrap current content in `<TabsContent value="general">`
-  - Add `<TabsContent value="connections">` for new section
-  - Add `<TabsList>` with "General" and "Connections" triggers
-- [ ] Create `apps/web/src/components/ConnectionCard.tsx`:
-  - Props: `connection: Connection, onRename, onDisconnect, onReconnect`
-  - Status badge: green (connected), yellow (expired), red (error)
-  - Dropdown menu: Rename, Check, Disconnect
-  - Show error message when status='error'
-- [ ] Create `apps/web/src/components/AddServiceModal.tsx`:
-  - Grid of available services (Gmail, Drive, Sheets, Docs, Notion)
-  - Click triggers OAuth flow
-- [ ] Implement OAuth popup flow:
-  ```typescript
-  const handleConnect = async (service: string) => {
-    const res = await fetch(`/api/connectors/${service}/connect`, { method: 'POST' });
-    const { authUrl } = await res.json();
-    window.open(authUrl, '_blank', 'width=600,height=700');
-    // Connection appears via db sync - useConnections() auto-updates
-  };
-  ```
-- [ ] Create rename modal (simple input with save/cancel)
-- [ ] Create disconnect confirmation modal (warn about automation impact)
-- [ ] Handle reconnect: same as connect, reuses existing accountId
-
-**UI States:**
-- connected: green badge, normal card
-- expired: yellow badge, "Reconnect" button prominent
-- error: red badge with error message, "Reconnect" button, "Check" to retry
-
-**Important Correction:**
-- The codebase uses **TanStack Query (React Query)**, NOT Dexie's useLiveQuery
-- Reactivity is via `meta: { tables: [...] }` which triggers auto-invalidation when table changes
-- See `apps/web/src/queryClient.ts` for the invalidation mechanism
+**Implementation Notes:**
+- Used a section-based layout instead of tabs (simpler, all on one page)
+- Combined ConnectionCard and AddServiceModal functionality into a single ServiceGroup component
+- No disconnect confirmation modal (simple delete for v1, can add later if needed)
+- Rename updates are local-only for now (labels stored in database)
 
 ### 1.7 Additional Connectors
 

@@ -3,8 +3,8 @@ import { API_ENDPOINT } from "../const";
 import SharedHeader from "./SharedHeader";
 import { Button } from "../ui";
 import { SUPPORTED_LANGUAGES, getBrowserLanguage, getLanguageDisplayName } from "../lib/language-utils";
-import { openUrl } from "../lib/url-utils";
 import { safeLocalStorageGet, safeLocalStorageSet, safeLocalStorageRemove } from "../lib/safe-storage";
+import ConnectionsSection from "./ConnectionsSection";
 // import { DEFAULT_AGENT_MODEL } from "@app/agent";
 
 interface OpenRouterModel {
@@ -67,11 +67,6 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
-  const [gmailConnected, setGmailConnected] = useState(false);
-  const [gmailConnecting, setGmailConnecting] = useState(false);
-  const [checkingGmail, setCheckingGmail] = useState(false);
-  const [gmailChecking, setGmailChecking] = useState(false);
-  const [gmailCheckResult, setGmailCheckResult] = useState<string>("");
   const [debugMode, setDebugMode] = useState(() =>
     safeLocalStorageGet("keep-ai-debug-mode") === "true"
   );
@@ -161,108 +156,6 @@ export default function SettingsPage() {
 
     loadModels();
   }, [config]);
-
-  // Check Gmail connection status
-  useEffect(() => {
-    const checkGmailStatus = async () => {
-      try {
-        setCheckingGmail(true);
-        const response = await fetch(`${API_ENDPOINT}/gmail/status`);
-        if (response.ok) {
-          const data = await response.json();
-          setGmailConnected(data.connected);
-        }
-      } catch (err) {
-        console.error("Failed to check Gmail status:", err);
-      } finally {
-        setCheckingGmail(false);
-      }
-    };
-
-    checkGmailStatus();
-  }, []);
-
-  // Poll Gmail status during connection process
-  useEffect(() => {
-    if (!gmailConnecting) return;
-
-    const pollStatus = async () => {
-      try {
-        const response = await fetch(`${API_ENDPOINT}/gmail/status`);
-        if (response.ok) {
-          const data = await response.json();
-          if (data.connected) {
-            setGmailConnected(true);
-            setGmailConnecting(false);
-          }
-        }
-      } catch (err) {
-        console.error("Failed to poll Gmail status:", err);
-      }
-    };
-
-    const interval = setInterval(pollStatus, 2000); // Poll every 2 seconds
-    const timeout = setTimeout(() => {
-      setGmailConnecting(false);
-      clearInterval(interval);
-    }, 60000); // Stop after 1 minute
-
-    return () => {
-      clearInterval(interval);
-      clearTimeout(timeout);
-    };
-  }, [gmailConnecting]);
-
-  const handleGmailConnect = async () => {
-    try {
-      setGmailConnecting(true);
-      const response = await fetch(`${API_ENDPOINT}/gmail/connect`, {
-        method: "POST",
-      });
-
-      if (!response.ok) {
-        throw new Error("Failed to get Gmail authorization URL");
-      }
-
-      const data = await response.json();
-      // Open auth URL in new window/tab
-      openUrl(data.authUrl);
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to connect Gmail"
-      );
-      setGmailConnecting(false);
-    }
-  };
-
-  const handleGmailCheck = async () => {
-    try {
-      setGmailChecking(true);
-      setGmailCheckResult("");
-      
-      const response = await fetch(`${API_ENDPOINT}/gmail/check`, {
-        method: "POST",
-      });
-
-      const data = await response.json();
-
-      if (data.success) {
-        setGmailCheckResult(`✅ Connected to ${data.email} (${data.messagesTotal} messages, ${data.threadsTotal} threads)`);
-      } else {
-        setGmailCheckResult(`❌ ${data.error}`);
-        // Set gmailConnected to false so UI shows "Connect" button instead of "Check"
-        setGmailConnected(false);
-      }
-    } catch (err) {
-      setGmailCheckResult(
-        `❌ ${err instanceof Error ? err.message : "Failed to check Gmail connection"}`
-      );
-      // Set gmailConnected to false so UI shows "Connect" button instead of "Check"
-      setGmailConnected(false);
-    } finally {
-      setGmailChecking(false);
-    }
-  };
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -561,59 +454,6 @@ export default function SettingsPage() {
               </p>
             </div>
 
-            <div>
-              <div className="flex items-center justify-between">
-                <div>
-                  <label className="text-sm font-medium text-gray-700">
-                    Gmail Integration
-                  </label>
-                  <p className="text-sm text-gray-500 mt-1">
-                    Connect your Gmail account to enable email management features.
-                  </p>
-                </div>
-                <div className="flex items-center space-x-2">
-                  {checkingGmail ? (
-                    <span className="text-sm text-gray-500">Checking...</span>
-                  ) : gmailConnected ? (
-                    <div className="flex items-center space-x-2">
-                      <span className="text-sm text-green-600 font-medium">Connected</span>
-                      <Button
-                        type="button"
-                        onClick={handleGmailCheck}
-                        disabled={saving || gmailChecking}
-                        variant="outline"
-                        size="sm"
-                        className="cursor-pointer"
-                      >
-                        {gmailChecking ? "Checking..." : "Check"}
-                      </Button>
-                    </div>
-                  ) : gmailConnecting ? (
-                    <div className="flex items-center space-x-2">
-                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
-                      <span className="text-sm text-blue-600">Connecting...</span>
-                    </div>
-                  ) : (
-                    <Button
-                      type="button"
-                      onClick={handleGmailConnect}
-                      disabled={saving || gmailConnecting}
-                      variant="outline"
-                      size="sm"
-                      className="cursor-pointer"
-                    >
-                      Connect
-                    </Button>
-                  )}
-                </div>
-              </div>
-              {gmailCheckResult && (
-                <div className="mt-2 p-2 bg-gray-50 rounded text-sm">
-                  {gmailCheckResult}
-                </div>
-              )}
-            </div>
-
             <div className="border-t border-gray-200 pt-6 mt-6">
               <h3 className="text-sm font-medium text-gray-700 mb-4">Advanced</h3>
               <div>
@@ -676,6 +516,11 @@ export default function SettingsPage() {
               </Button>
             </div>
           </form>
+        </div>
+
+        {/* Service Connections Section */}
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mt-6">
+          <ConnectionsSection />
         </div>
       </div>
     </div>

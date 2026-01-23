@@ -67,4 +67,9 @@ export const qk = {
   unresolvedNotifications: () => [{ scope: "unresolvedNotifications" }] as const,
   notifications: (workflowId?: string) => [{ scope: "notifications", workflowId }] as const,
   notification: (id: string) => [{ scope: "notification", id }] as const,
+
+  // Connection-related queries
+  allConnections: () => [{ scope: "allConnections" }] as const,
+  connection: (connectionId: string) => [{ scope: "connection", connectionId }] as const,
+  connectionsByService: (service: string) => [{ scope: "connectionsByService", service }] as const,
 };
