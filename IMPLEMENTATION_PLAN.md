@@ -524,20 +524,10 @@ Essential fixes and improvements for workflow reliability in v1.
 ### 2.2 Technical Debt (From FIXME/TODO Comments)
 
 **BLOCKING for v1:**
-- [x] `packages/sync/src/TransportClientHttp.ts:176` - Node.js EventSource not implemented
-  - Currently throws "EventSource not available" for Node.js SSE transport
-  - Blocks server-side SSE sync; browser works fine
-  - **Recommended: Option A** - use `eventsource` npm package (minimal, focused dependency)
-  - Implementation:
-    ```typescript
-    let EventSourceImpl: typeof EventSource;
-    if (typeof EventSource !== "undefined") {
-      EventSourceImpl = EventSource;
-    } else {
-      EventSourceImpl = require('eventsource');
-    }
-    // Use EventSourceImpl in connectSSE()
-    ```
+- [x] `packages/sync/src/TransportClientHttp.ts:176` - Node.js EventSource - **COMPLETED**
+  - Implemented using `eventsource` npm package (v4.1.0)
+  - Added `getEventSource()` function that returns browser native or Node.js polyfill
+  - Works in both browser and Node.js environments
 
 **Nice-to-have (non-blocking):**
 - [ ] `packages/sync/src/nostr/stream/StreamWriter.ts:515` - Find optimal chunk size for high bandwidth
@@ -584,62 +574,37 @@ Found 18+ instances of empty catch blocks. Most are intentional for cleanup oper
 
 These features significantly improve user confidence and experience.
 
-### 3.1 Workflow Dry-Run Testing (idea: dry-run-testing.md)
+### 3.1 Workflow Dry-Run Testing (idea: dry-run-testing.md) - COMPLETED
 
-**Action Items:**
-- [ ] Add "Test run" button to workflow detail page (`apps/web/src/components/WorkflowDetailPage.tsx`)
-- [ ] Create server endpoint `POST /api/workflow/:id/test-run`
-- [ ] Modify `script_runs` insertion to support `type="dry_run"` marker
-- [ ] Execute script normally in sandbox (reads are real, QuickJS provides isolation)
-- [ ] Show results in chat with clear "Test Run Completed" or "Test Run Failed" message
-- [ ] Add styling to distinguish test run events (gray/muted vs normal)
+**Status:** Fully implemented with all features working:
+- [x] "Test run" button in WorkflowDetailPage with amber styling
+- [x] Server endpoint `POST /api/workflow/test-run` (returns HTTP 202, async execution)
+- [x] `script_runs.type = 'test'` marker for test runs
+- [x] Full sandbox execution with 300s timeout, 16MB memory
+- [x] Test badge display in ScriptRunDetailPage
+- [x] Concurrent test run prevention (409 if already running)
+- [x] Cost tracking for test runs
 
-**Already Exists:**
-- `script_runs` table with `type` column
-- `WorkflowWorker` executes scripts in QuickJS sandbox (16MB memory, 300s timeout)
+### 3.2 Event Timeline Improvements - COMPLETED
 
-### 3.2 Event Timeline Improvements
+#### 3.2a Highlight Significant Events - COMPLETED
 
-#### 3.2a Highlight Significant Events (idea: highlight-significant-events.md)
+**Status:** Fully implemented with:
+- [x] `EventSignificance` type with 6 levels (normal, write, error, success, user, state)
+- [x] All 32 event types configured with significance in EVENT_CONFIGS
+- [x] `significanceStyles` in EventItem.tsx with Tailwind classes for each level
+- [x] Dynamic significance for Gmail API calls (read vs write methods)
+- [x] `getEventSignificance()` helper function for dynamic classification
 
-**Action Items:**
-- [ ] Add `significance: EventSignificance` to `EventConfig` in `apps/web/src/types/events.ts`:
-  ```typescript
-  export type EventSignificance = 'normal' | 'error' | 'success' | 'user' | 'state' | 'write';
-  ```
-- [ ] Update `EVENT_CONFIGS` with significance for each event type:
-  - `create_note`, `update_note`, `file_save`, `add_script` → `write`
-  - `gmail_api_call`, `web_fetch`, `web_search` → `normal`
-  - Future error events → `error`
-- [ ] Update `apps/web/src/components/EventItem.tsx` with significance-based styling:
-  - Error: `border-red-200 bg-red-50 text-red-700`
-  - Success: `border-green-200 bg-green-50 text-green-700`
-  - User: `border-blue-200 bg-blue-50 text-blue-700`
-  - State: `border-yellow-200 bg-yellow-50 text-yellow-700`
-  - Write: `border-gray-200 bg-white text-gray-700`
-- [ ] Update `WorkflowEventGroup.tsx` and `TaskEventGroup.tsx` to show status in headers:
-  - Red left border if any error event
-  - Green indicator if fix after failure
+#### 3.2b Collapse Low-Signal Events - COMPLETED
 
-#### 3.2b Collapse Low-Signal Events (idea: collapse-low-signal-events.md)
-
-**Action Items:**
-- [ ] Create `apps/web/src/lib/eventSignal.ts`:
-  ```typescript
-  export type SignalLevel = 'high' | 'low';
-  const LOW_SIGNAL_EVENTS = ['web_fetch', 'web_search', 'get_weather', 'text_extract', ...];
-  export function getEventSignalLevel(type, payload): SignalLevel { ... }
-  ```
-- [ ] Create `apps/web/src/components/CollapsedEventSummary.tsx`:
-  - Shows "X routine events (type1, type2, ...)" with expand/collapse toggle
-- [ ] Update `WorkflowEventGroup.tsx`:
-  - Add `isCollapsed` state (default: true)
-  - Partition events into high/low signal
-  - Render high-signal events normally, collapse low-signal
-  - Auto-expand if any errors present
-- [ ] Apply same changes to `TaskEventGroup.tsx`
-
-**Effort:** Small (2-4 hours), purely UI change, no backend needed
+**Status:** Fully implemented with:
+- [x] `eventSignal.ts` with SignalLevel type and `getEventSignalLevel()` function
+- [x] LOW_SIGNAL_EVENTS list (web_fetch, web_search, get_weather, text_extract, etc.)
+- [x] `CollapsedEventSummary.tsx` component showing count, types, and aggregate cost
+- [x] `EventListWithCollapse.tsx` component with collapse/expand state
+- [x] WorkflowEventGroup and TaskEventGroup using EventListWithCollapse
+- [x] Auto-expand when hasError=true for debugging
 
 ### 3.3 Draft Management (idea: handle-abandoned-drafts.md)
 
