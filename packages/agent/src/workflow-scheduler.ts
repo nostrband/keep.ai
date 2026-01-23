@@ -4,18 +4,20 @@ import { WorkflowWorker } from "./workflow-worker";
 import { WorkflowExecutionSignal, WorkflowRetryState } from "./workflow-worker-signal";
 import { isValidEnv } from "./env";
 import { Cron } from "croner";
+import type { ConnectionManager } from "@app/connectors";
 
 export interface WorkflowSchedulerConfig {
   api: KeepDbApi;
   userPath?: string; // path to user files directory
-  gmailOAuth2Client?: any; // Gmail OAuth2 client
+  /** Connection manager for OAuth-based tools */
+  connectionManager?: ConnectionManager;
 }
 
 export class WorkflowScheduler {
   private api: KeepDbApi;
   private worker: WorkflowWorker;
   private userPath?: string;
-  public readonly gmailOAuth2Client?: any;
+  public readonly connectionManager?: ConnectionManager;
 
   private isRunning: boolean = false;
   private isShuttingDown: boolean = false;
@@ -36,12 +38,12 @@ export class WorkflowScheduler {
   constructor(config: WorkflowSchedulerConfig) {
     this.api = config.api;
     this.userPath = config.userPath;
-    this.gmailOAuth2Client = config.gmailOAuth2Client;
+    this.connectionManager = config.connectionManager;
 
     // Create worker with signal handler
     this.worker = new WorkflowWorker({
       ...config,
-      onSignal: (signal) => this.handleWorkerSignal(signal)
+      onSignal: (signal) => this.handleWorkerSignal(signal),
     });
 
     this.debug("Constructed");

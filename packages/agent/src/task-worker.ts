@@ -21,6 +21,7 @@ import { SandboxAPI } from "./sandbox/api";
 import { fileUtils } from "@app/node";
 import { ERROR_BAD_REQUEST, ERROR_PAYMENT_REQUIRED } from "./agent";
 import { TaskSignalHandler } from "./task-worker-signal";
+import type { ConnectionManager } from "@app/connectors";
 
 /**
  * Generate a concise title from the first user message.
@@ -72,7 +73,8 @@ export interface TaskWorkerConfig {
   api: KeepDbApi;
   stepLimit?: number; // default 50
   userPath?: string; // path to user files directory
-  gmailOAuth2Client?: any; // Gmail OAuth2 client
+  /** Connection manager for OAuth-based tools */
+  connectionManager?: ConnectionManager;
   onSignal?: TaskSignalHandler; // Callback for scheduling signals
 }
 
@@ -84,7 +86,7 @@ export class TaskWorker {
   private api: KeepDbApi;
   private stepLimit: number;
   private userPath?: string;
-  public readonly gmailOAuth2Client?: any;
+  public readonly connectionManager?: ConnectionManager;
   private onSignal?: TaskSignalHandler;
 
   private debug = debug("agent:TaskWorker");
@@ -93,7 +95,7 @@ export class TaskWorker {
     this.api = config.api;
     this.stepLimit = config.stepLimit || 50;
     this.userPath = config.userPath;
-    this.gmailOAuth2Client = config.gmailOAuth2Client;
+    this.connectionManager = config.connectionManager;
     this.onSignal = config.onSignal;
     this.debug("Constructed");
   }
@@ -592,7 +594,7 @@ export class TaskWorker {
       type: taskType,
       getContext: () => sandbox.context!,
       userPath: this.userPath,
-      gmailOAuth2Client: this.gmailOAuth2Client,
+      connectionManager: this.connectionManager,
     });
 
     sandbox.setGlobal(await sandboxAPI.createGlobal());

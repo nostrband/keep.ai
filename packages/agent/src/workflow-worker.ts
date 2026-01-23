@@ -18,6 +18,7 @@ import {
   WorkflowPausedError,
   isWorkflowPausedError,
 } from "./errors";
+import type { ConnectionManager } from "@app/connectors";
 
 // Maximum number of consecutive fix attempts before escalating to user (spec 09b)
 // After this many failed auto-fix attempts, the workflow is paused and user is notified.
@@ -26,7 +27,8 @@ const MAX_FIX_ATTEMPTS = 3;
 export interface WorkflowWorkerConfig {
   api: KeepDbApi;
   userPath?: string; // path to user files directory
-  gmailOAuth2Client?: any; // Gmail OAuth2 client
+  /** Connection manager for OAuth-based tools */
+  connectionManager?: ConnectionManager;
   onSignal?: WorkflowSignalHandler; // Callback for scheduling signals
 }
 
@@ -37,7 +39,7 @@ export interface WorkflowWorkerConfig {
 export class WorkflowWorker {
   private api: KeepDbApi;
   private userPath?: string;
-  public readonly gmailOAuth2Client?: any;
+  public readonly connectionManager?: ConnectionManager;
   private onSignal?: WorkflowSignalHandler;
 
   private debug = debug("agent:WorkflowWorker");
@@ -45,7 +47,7 @@ export class WorkflowWorker {
   constructor(config: WorkflowWorkerConfig) {
     this.api = config.api;
     this.userPath = config.userPath;
-    this.gmailOAuth2Client = config.gmailOAuth2Client;
+    this.connectionManager = config.connectionManager;
     this.onSignal = config.onSignal;
     this.debug("Constructed");
   }
@@ -738,7 +740,7 @@ If you'd like me to try fixing it again, just ask and I'll give it another go wi
       type: "workflow",
       getContext: () => sandbox.context!,
       userPath: this.userPath,
-      gmailOAuth2Client: this.gmailOAuth2Client,
+      connectionManager: this.connectionManager,
       workflowId: workflow.id, // Enable pause checking during tool calls
     });
 

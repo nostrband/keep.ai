@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "@app/agent": "file:../../packages/agent",
+    "@app/connectors": "file:../../packages/connectors",
     "@app/db": "file:../../packages/db",
     "@app/node": "file:../../packages/node",
     "@app/sync": "file:../../packages/sync",

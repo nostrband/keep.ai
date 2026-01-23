@@ -3,7 +3,12 @@ import { tool } from "ai";
 import { EvalContext } from "../sandbox/sandbox";
 import debug from "debug";
 import { google } from "googleapis";
-import { AuthError, PermissionError, classifyGoogleApiError } from "../errors";
+import {
+  AuthError,
+  LogicError,
+  classifyGoogleApiError,
+} from "../errors";
+import type { ConnectionManager, Connection } from "@app/connectors";
 
 const debugGmail = debug("agent:gmail");
 
@@ -14,35 +19,82 @@ const SUPPORTED_METHODS = [
   "users.history.list",
   "users.threads.get",
   "users.threads.list",
-  "users.getProfile"
+  "users.getProfile",
 ] as const;
 
-export function makeGmailTool(getContext: () => EvalContext, gmailOAuth2Client?: any) {
+/**
+ * Create Gmail tool that uses ConnectionManager for credentials.
+ *
+ * The tool requires an explicit `account` parameter (email address) to specify
+ * which Gmail account to use. This prevents accidental account mixing in
+ * multi-account setups.
+ */
+export function makeGmailTool(
+  getContext: () => EvalContext,
+  connectionManager: ConnectionManager
+) {
   return tool({
-    description: `Access Gmail API with various methods. Supported methods: ${SUPPORTED_METHODS.join(', ')}. For all methods that require userId param, it will be automatically set to 'me'. Returns dynamic results based on the method used. Knowledge of param and output structure is expected from the assistant.`,
+    description: `Access Gmail API with various methods. Supported methods: ${SUPPORTED_METHODS.join(", ")}. For all methods that require userId param, it will be automatically set to 'me'. Returns dynamic results based on the method used. Knowledge of param and output structure is expected from the assistant. REQUIRED: 'account' parameter must be the email address of the connected Gmail account.`,
     inputSchema: z.object({
       method: z.enum(SUPPORTED_METHODS).describe("Gmail API method to call"),
-      params: z.any().optional().describe("Parameters to pass to the Gmail API method")
+      params: z
+        .any()
+        .optional()
+        .describe("Parameters to pass to the Gmail API method"),
+      account: z
+        .string()
+        .describe(
+          "Email address of the Gmail account to use (e.g., user@gmail.com)"
+        ),
     }),
     // Skip output schema since it's dynamic based on method
     execute: async (input) => {
-      const { method, params = {} } = input;
+      const { method, params = {}, account } = input;
+
+      // Validate account is specified
+      if (!account) {
+        const connections =
+          await connectionManager.listConnectionsByService("gmail");
+        if (connections.length === 0) {
+          throw new AuthError(
+            "Gmail not connected. Please connect Gmail in Settings.",
+            { source: "Gmail.api" }
+          );
+        }
+        throw new LogicError(
+          `Gmail account required. Available accounts: ${connections.map((c: Connection) => c.accountId).join(", ")}`,
+          { source: "Gmail.api" }
+        );
+      }
+
+      const connectionId = { service: "gmail", accountId: account };
 
       // Ensure userId is always 'me' for methods that require it
       const processedParams = { ...params };
-      if (method !== 'users.getProfile') {
-        processedParams.userId = 'me';
+      if (method !== "users.getProfile") {
+        processedParams.userId = "me";
       }
 
-      debugGmail("Calling Gmail API", { method, params: processedParams });
+      debugGmail("Calling Gmail API", {
+        method,
+        account,
+        params: processedParams,
+      });
 
       try {
-        if (!gmailOAuth2Client) {
-          throw new AuthError("Gmail OAuth client not available. Please connect your Gmail account.", { source: "Gmail.api" });
-        }
+        // Get fresh credentials (auto-refreshes if needed)
+        const creds = await connectionManager.getCredentials(connectionId);
+
+        // Create OAuth2 client with credentials
+        const oAuth2Client = new google.auth.OAuth2();
+        oAuth2Client.setCredentials({
+          access_token: creds.accessToken,
+          refresh_token: creds.refreshToken,
+          expiry_date: creds.expiresAt,
+        });
 
         // Create Gmail API client
-        const gmail = google.gmail({ version: "v1", auth: gmailOAuth2Client });
+        const gmail = google.gmail({ version: "v1", auth: oAuth2Client });
 
         // Call the appropriate method
         let result;
@@ -71,18 +123,34 @@ export function makeGmailTool(getContext: () => EvalContext, gmailOAuth2Client?:
           default:
             throw new Error(`Method ${method} not implemented`);
         }
-        
+
         // Don't spam events with 'get' methods which usually happen in batches
         if (method.includes("list"))
-          await getContext().createEvent("gmail_api_call", { method, params: processedParams });
-        
-        debugGmail("Gmail API call completed", { method, success: true });
-        
+          await getContext().createEvent("gmail_api_call", {
+            method,
+            account,
+            params: processedParams,
+          });
+
+        debugGmail("Gmail API call completed", { method, account, success: true });
+
         return result.data;
       } catch (error) {
-        debugGmail("Gmail API call failed", { method, error: error instanceof Error ? error.message : String(error) });
+        debugGmail("Gmail API call failed", {
+          method,
+          account,
+          error: error instanceof Error ? error.message : String(error),
+        });
+
         // Classify the error based on Gmail API response
-        throw classifyGoogleApiError(error, "Gmail.api");
+        const classified = classifyGoogleApiError(error, "Gmail.api");
+
+        // If it's an auth error, mark the connection as errored
+        if (classified instanceof AuthError) {
+          await connectionManager.markError(connectionId, classified.message);
+        }
+
+        throw classified;
       }
     },
   });

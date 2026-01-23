@@ -3,19 +3,21 @@ import { KeepDbApi, InboxItem } from "@app/db";
 import { TaskWorker } from "./task-worker";
 import { TaskExecutionSignal, TaskRetryState } from "./task-worker-signal";
 import { isValidEnv } from "./env";
+import type { ConnectionManager } from "@app/connectors";
 
 export interface TaskSchedulerConfig {
   api: KeepDbApi;
   stepLimit?: number; // default 50
   userPath?: string; // path to user files directory
-  gmailOAuth2Client?: any; // Gmail OAuth2 client
+  /** Connection manager for OAuth-based tools */
+  connectionManager?: ConnectionManager;
 }
 
 export class TaskScheduler {
   private api: KeepDbApi;
   private worker: TaskWorker;
   private userPath?: string;
-  public readonly gmailOAuth2Client?: any;
+  public readonly connectionManager?: ConnectionManager;
 
   private isRunning: boolean = false;
   private isShuttingDown: boolean = false;
@@ -32,12 +34,12 @@ export class TaskScheduler {
   constructor(config: TaskSchedulerConfig) {
     this.api = config.api;
     this.userPath = config.userPath;
-    this.gmailOAuth2Client = config.gmailOAuth2Client;
+    this.connectionManager = config.connectionManager;
 
     // Create worker with signal handler
     this.worker = new TaskWorker({
       ...config,
-      onSignal: (signal) => this.handleWorkerSignal(signal)
+      onSignal: (signal) => this.handleWorkerSignal(signal),
     });
 
     this.debug("Constructed");
