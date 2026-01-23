@@ -794,8 +794,13 @@ export async function createServer(config: ServerConfig = {}) {
 
   app.get("/api/check_config", async (request, reply) => {
     const currentEnv = getEnv();
-    const ok = !!currentEnv.OPENROUTER_API_KEY?.trim();
-    return reply.send({ ok });
+    const hasApiKey = !!currentEnv.OPENROUTER_API_KEY?.trim();
+    const hasBaseUrl = !!currentEnv.OPENROUTER_BASE_URL?.trim();
+    return reply.send({
+      ok: hasApiKey,
+      hasApiKey,
+      hasBaseUrl
+    });
   });
 
   app.get("/api/get_config", async (request, reply) => {

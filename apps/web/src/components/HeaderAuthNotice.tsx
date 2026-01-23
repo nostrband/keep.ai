@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { useNeedAuth } from "../hooks/useNeedAuth";
-import { useConfig } from "../hooks/useConfig";
 import { AuthPopup } from "./AuthPopup";
 import { ClerkAuthProvider } from "./ClerkAuthProvider";
 import { CLERK_PUBLISHABLE_KEY } from "../constants/auth";
@@ -14,27 +13,20 @@ interface HeaderAuthNoticeProps {
  * When clicked, opens the AuthPopup modal.
  */
 export function HeaderAuthNotice({ className = "" }: HeaderAuthNoticeProps) {
-  const { needAuth, reason, isLoaded: needAuthLoaded, refresh: refreshNeedAuth } = useNeedAuth();
-  const { isConfigValid, isLoading: configLoading, recheckConfig } = useConfig();
+  const { needAuth, isFirstLaunch, isLoaded, refresh } = useNeedAuth();
   const [showAuthPopup, setShowAuthPopup] = useState(false);
 
-  // Determine if we need to show the notice
-  const shouldShow = needAuthLoaded && !configLoading && (needAuth || isConfigValid === false);
+  // Show notice when auth is needed and state is loaded
+  const shouldShow = isLoaded && needAuth;
 
   // Determine the button text based on state
   const getButtonText = () => {
-    if (reason === 'api_key_missing' || isConfigValid === false) {
-      // First launch or no API key configured
-      return 'Sign up';
-    }
-    // Returning user needs to re-authenticate
-    return 'Sign in';
+    return isFirstLaunch ? 'Sign up' : 'Sign in';
   };
 
   const handleAuthenticated = () => {
     setShowAuthPopup(false);
-    recheckConfig();
-    refreshNeedAuth();
+    refresh();
   };
 
   if (!shouldShow) {
@@ -71,7 +63,7 @@ export function HeaderAuthNotice({ className = "" }: HeaderAuthNoticeProps) {
             onClose={() => setShowAuthPopup(false)}
             onAuthenticated={handleAuthenticated}
             clerkPublishableKey={CLERK_PUBLISHABLE_KEY}
-            mode={getButtonText() === 'Sign up' ? 'signup' : 'signin'}
+            mode={isFirstLaunch ? 'signup' : 'signin'}
             canDismiss={true}
           />
         </ClerkAuthProvider>

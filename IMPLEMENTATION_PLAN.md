@@ -1,7 +1,7 @@
 # Implementation Plan for Keep.AI v1.0.0 SLC Release
 
 **Last Updated**: 2026-01-23
-**Status**: 6 specs pending implementation, 13 implemented
+**Status**: 2 specs pending implementation, 17 implemented
 
 ---
 
@@ -248,7 +248,7 @@ These specs must be implemented in dependency order.
 
 ### 14. Fix Proactive needAuth Detection
 **Spec**: `specs/fix-proactive-needauth-detection.md`
-**Status**: NOT IMPLEMENTED
+**Status**: IMPLEMENTED
 **Effort**: Medium
 **Dependency**: Required before #15, #16, and #17
 
@@ -257,7 +257,7 @@ These specs must be implemented in dependency order.
 - Server `/check_config` endpoint (`server.ts:795-799`) returns only `{ok}`, needs `{ok, hasApiKey, hasBaseUrl}`
 - No `isFirstLaunch` export exists
 
-**Action Items**:
+**Action Items** (implemented):
 - File: `apps/server/src/server.ts` (lines 795-799)
   - Update `/api/check_config` endpoint to return `{ok, hasApiKey, hasBaseUrl}` instead of just `{ok}`
 - File: `apps/web/src/hooks/useNeedAuth.ts`
@@ -270,13 +270,13 @@ These specs must be implemented in dependency order.
 
 ### 15. Remove Blocking Auth from App
 **Spec**: `specs/remove-blocking-auth-from-app.md`
-**Status**: NOT IMPLEMENTED
+**Status**: IMPLEMENTED
 **Effort**: Low
 **Dependency**: Requires #14 first
 
 **Problem**: App.tsx blocks entire UI (lines 270-298) when config invalid, preventing browsing
 
-**Action Items**:
+**Action Items** (implemented):
 - File: `apps/web/src/App.tsx` (lines 270-298)
 - Delete blocking auth check section
 - Remove `useConfig` import and usage if possible
@@ -286,13 +286,13 @@ These specs must be implemented in dependency order.
 
 ### 16. Consolidate Auth/Config Hooks
 **Spec**: `specs/consolidate-auth-config-hooks.md`
-**Status**: NOT IMPLEMENTED
+**Status**: IMPLEMENTED
 **Effort**: Medium
 **Dependency**: Requires #14 and #15 first
 
 **Current State**: HeaderAuthNotice and AuthEventItem use both useConfig and useNeedAuth hooks
 
-**Action Items**:
+**Action Items** (implemented):
 - Delete `apps/web/src/hooks/useConfig.ts` entirely
 - Update `apps/web/src/components/HeaderAuthNotice.tsx`
   - Remove useConfig import and usage
@@ -306,13 +306,13 @@ These specs must be implemented in dependency order.
 
 ### 17. Deprecate AuthDialog Component
 **Spec**: `specs/deprecate-auth-dialog.md`
-**Status**: NOT IMPLEMENTED
+**Status**: IMPLEMENTED
 **Effort**: Low
 **Dependency**: Should be done after #15
 
 **Problem**: AuthDialog.tsx (367 lines) is a full implementation, duplicates AuthPopup functionality, only used in App.tsx
 
-**Action Items**:
+**Action Items** (implemented):
 - File: `apps/web/src/components/AuthDialog.tsx`
 - Option A: Replace entire file with simple re-export:
   ```typescript
@@ -512,11 +512,11 @@ cd packages/tests && npm test
 |----------|----------|-------|--------|
 | 1 | Bug Fixes | 3 | All implemented |
 | 2 | UI/UX Improvements | 10 | All implemented |
-| 3 | Auth System Refactoring | 5 | All pending (ordered dependencies) |
+| 3 | Auth System Refactoring | 5 | 4 implemented, 1 pending (#18 Server Error Header Notice) |
 | 4 | Agent Improvements | 1 | Pending |
 | 5 | Technical Debt | 4 | All pending (3 FIXME + 1 test issue) |
 
-**Total Specs**: 6 pending, 13 implemented, 0 partial
+**Total Specs**: 2 pending, 17 implemented, 0 partial
 
 **Total Technical Debt Items**: 4 (FIXME comments + skipped tests)
 

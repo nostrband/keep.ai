@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
 import { useNeedAuth } from "../hooks/useNeedAuth";
-import { useConfig } from "../hooks/useConfig";
 import { AuthPopup } from "./AuthPopup";
 import { ClerkAuthProvider } from "./ClerkAuthProvider";
 import { CLERK_PUBLISHABLE_KEY } from "../constants/auth";
@@ -14,16 +13,12 @@ interface AuthEventItemProps {
  * Appears as a yellow card at the bottom of the chat interface.
  */
 export function AuthEventItem({ autoShowPopup = true }: AuthEventItemProps) {
-  const { needAuth, reason, isLoaded: needAuthLoaded, refresh: refreshNeedAuth } = useNeedAuth();
-  const { isConfigValid, isLoading: configLoading, recheckConfig } = useConfig();
+  const { needAuth, isFirstLaunch, isLoaded, refresh } = useNeedAuth();
   const [showAuthPopup, setShowAuthPopup] = useState(false);
   const [hasAutoDismissed, setHasAutoDismissed] = useState(false);
 
-  // Determine if we need to show the item
-  const shouldShow = needAuthLoaded && !configLoading && (needAuth || isConfigValid === false);
-
-  // Determine if this is first launch (signup) or returning user (signin)
-  const isFirstLaunch = reason === 'api_key_missing' || isConfigValid === false;
+  // Show item when auth is needed and state is loaded
+  const shouldShow = isLoaded && needAuth;
 
   // Auto-show popup on first occurrence (only once)
   useEffect(() => {
@@ -35,8 +30,7 @@ export function AuthEventItem({ autoShowPopup = true }: AuthEventItemProps) {
   const handleAuthenticated = () => {
     setShowAuthPopup(false);
     setHasAutoDismissed(true);
-    recheckConfig();
-    refreshNeedAuth();
+    refresh();
   };
 
   const handleClose = () => {
