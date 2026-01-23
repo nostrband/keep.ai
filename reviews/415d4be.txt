@@ -1,0 +1,206 @@
+# Review: Commit 415d4be
+
+## Summary
+Implements Spec 02: Navigation & Header Refactor - adding a notification bell to the header and restructuring the navigation menu with an "Advanced" submenu for power-user features. Also creates placeholder routes for the notifications page.
+
+## Changes Made
+
+### 1. NotificationBell.tsx (new file)
+- New component showing bell icon with red badge for unresolved notification count
+- Clicking navigates to /notifications page
+- Uses Heroicons-style SVG bell icon
+- Badge shows count or "9+" for larger counts
+- Proper aria-label for accessibility
+
+### 2. useUnresolvedNotifications.ts (new hook)
+- React Query hook that queries `notificationStore.getUnresolvedNotifications()`
+- Sets `meta: { tables: ["notifications"] }` for automatic invalidation on database changes
+- Returns count and list of unresolved notifications
+
+### 3. SharedHeader.tsx updates
+- Added NotificationBell component next to menu button
+- Restructured menu: "Home", "Workflows", "Notifications" are primary
+- Added "Advanced" expandable submenu containing: Tasks, Scripts, Threads, Notes, Files, Devices, Console
+- Added separator between primary items and Advanced section
+- Removed "Assistant" link (replaced with "Home" pointing to /)
+
+### 4. NotificationsPage.tsx (new placeholder)
+- Simple placeholder page with "All caught up!" message
+- Will be fully implemented in Spec 03
+
+### 5. App.tsx route updates
+- Added /chat/main redirect to / (legacy route handling)
+- Added /notifications route
+- Added /notifications/:workflowId route for workflow-specific notifications
+
+### 6. queryKeys.ts updates
+- Added notification-related query keys: `unresolvedNotifications`, `notifications`, `notification`
+
+---
+
+## Potential Issues
+
+### ISSUE 1: Advanced Submenu State Not Reset When Menu Closes [HIGH]
+**Location:** apps/web/src/components/SharedHeader.tsx
+
+The `isAdvancedOpen` state is not reset when the main dropdown (`isOpen`) closes:
+
+```typescript
+const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
+
+// Click-outside handler only resets isOpen, not isAdvancedOpen
+function handleClickOutside(event: MouseEvent) {
+  if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+    setIsOpen(false);
+    // MISSING: setIsAdvancedOpen(false);
+  }
+}
+```
+
+**Problem Scenario:**
+1. User opens menu, clicks "Advanced" to expand it
+2. User clicks a submenu item (e.g., Tasks) - menu closes
+3. User opens menu again
+4. Advanced submenu is still expanded from previous interaction
+
+**Proposal:** Add a useEffect to reset `isAdvancedOpen` when `isOpen` becomes false:
+```typescript
+useEffect(() => {
+  if (!isOpen) {
+    setIsAdvancedOpen(false);
+  }
+}, [isOpen]);
+```
+
+Or reset in the click-outside handler:
+```typescript
+setIsOpen(false);
+setIsAdvancedOpen(false);
+```
+
+---
+
+### ISSUE 2: Missing Accessibility Attributes on Advanced Submenu [MODERATE]
+**Location:** apps/web/src/components/SharedHeader.tsx (lines 172-193)
+
+The Advanced submenu button lacks proper ARIA attributes:
+
+```typescript
+<button
+  className="w-full px-4 py-2 text-sm..."
+  onClick={(e) => {...}}
+>
+  <span>Advanced</span>
+  <svg>...</svg>
+</button>
+```
+
+Missing:
+- `aria-expanded={isAdvancedOpen}` to indicate submenu state
+- `aria-haspopup="menu"` to indicate it controls a submenu
+- Arrow icon has no text alternative for screen readers
+
+**Proposal:** Add accessibility attributes:
+```typescript
+<button
+  className="w-full px-4 py-2 text-sm..."
+  onClick={(e) => {...}}
+  aria-expanded={isAdvancedOpen}
+  aria-haspopup="menu"
+>
+  <span>Advanced</span>
+  <svg aria-hidden="true">...</svg>
+  <span className="sr-only">{isAdvancedOpen ? "Collapse" : "Expand"}</span>
+</button>
+```
+
+---
+
+### ISSUE 3: No Keyboard Navigation Support [MODERATE]
+**Location:** apps/web/src/components/SharedHeader.tsx
+
+The dropdown and Advanced submenu don't support keyboard navigation:
+- No Escape key to close menu
+- No arrow key navigation between items
+- No Enter/Space handling for menu items
+
+**Risk:** Users relying on keyboard navigation cannot easily use the menu.
+
+**Proposal:** Add keyboard event handlers:
+```typescript
+useEffect(() => {
+  if (!isOpen) return;
+  const handleKeyDown = (e: KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      setIsOpen(false);
+      setIsAdvancedOpen(false);
+    }
+  };
+  document.addEventListener('keydown', handleKeyDown);
+  return () => document.removeEventListener('keydown', handleKeyDown);
+}, [isOpen]);
+```
+
+---
+
+### ISSUE 4: NotificationsPage Is Static Placeholder [MINOR]
+**Location:** apps/web/src/components/NotificationsPage.tsx
+
+The page always shows "All caught up! You have no notifications." regardless of actual notifications. It doesn't query for notifications or use the workflowId route param.
+
+**Risk:** Low - this is explicitly marked as a placeholder for Spec 03.
+
+**Proposal:** No immediate action needed. Ensure Spec 03 implementation replaces this properly.
+
+---
+
+### ISSUE 5: Import Path Uses "packages/db/dist" [MINOR]
+**Location:** apps/web/src/hooks/useUnresolvedNotifications.ts (line 5)
+
+```typescript
+import { Notification } from "packages/db/dist";
+```
+
+This imports from the dist folder directly, which is unusual. Other files import types from `@app/db`.
+
+**Risk:** Low - works but inconsistent with codebase patterns.
+
+**Proposal:** Use the standard import:
+```typescript
+import type { Notification } from "@app/db";
+```
+
+---
+
+## Code Quality Observations
+
+### Positive
+- NotificationBell has good accessibility with aria-label that updates with count
+- Query uses proper table metadata for automatic invalidation on database changes
+- Badge display handles edge cases well (nullish coalescing, "9+" cap)
+- Menu restructuring makes sense - core features visible, power-user features in Advanced
+- Legacy route redirect (/chat/main -> /) preserves existing links
+
+### Concerns
+- Advanced submenu state persistence is a noticeable UX bug
+- No tests added for new components
+- The Advanced submenu implementation is basic - consider using a proper dropdown menu component library
+
+---
+
+## Testing Considerations
+
+Should verify:
+1. Menu opens and closes correctly
+2. Advanced submenu collapses when main menu closes (currently broken)
+3. Notification bell shows correct count from database
+4. Badge updates when notifications are added/resolved
+5. All navigation links work correctly
+6. /chat/main redirect works
+7. Keyboard navigation (if added)
+
+---
+
+## Conclusion
+
+This commit successfully implements the visual changes for Spec 02 - the notification bell and menu restructuring work functionally. The main issue is the Advanced submenu state not resetting when the menu closes, which is a noticeable UX bug that should be fixed. The accessibility improvements are nice-to-have but would make the app more inclusive. The NotificationsPage placeholder is fine since Spec 03 will implement it fully.

@@ -7,15 +7,16 @@ import {
   useScriptRunsByWorkflowId,
   useScriptVersionsByWorkflowId
 } from "../hooks/dbScriptReads";
-import { useTask } from "../hooks/dbTaskReads";
 import { useChat } from "../hooks/dbChatReads";
 import { useUpdateWorkflow, useActivateScriptVersion } from "../hooks/dbWrites";
 import SharedHeader from "./SharedHeader";
 import { Response } from "../ui";
 import ScriptDiff from "./ScriptDiff";
 import { Badge, Button } from "../ui";
+import { Archive, RotateCcw } from "lucide-react";
 import { workflowNotifications } from "../lib/WorkflowNotifications";
 import { WorkflowStatusBadge, ScriptRunStatusBadge } from "./StatusBadge";
+import { formatCronSchedule } from "./WorkflowInfoBox";
 import { useAutoHidingMessage } from "../hooks/useAutoHidingMessage";
 import { API_ENDPOINT } from "../const";
 import { WorkflowErrorAlert } from "./WorkflowErrorAlert";
@@ -26,7 +27,6 @@ export default function WorkflowDetailPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { data: workflow, isLoading } = useWorkflow(id!);
-  const { data: task } = useTask(workflow?.task_id || "");
   // Use workflow.chat_id directly (Spec 09) instead of going through task
   const { data: chat } = useChat(workflow?.chat_id || "");
   const { data: latestScript } = useLatestScriptByWorkflowId(id!);
@@ -181,6 +181,33 @@ export default function WorkflowDetailPage() {
     }
   };
 
+  const handleArchive = async () => {
+    if (!workflow) return;
+
+    updateWorkflowMutation.mutate({
+      workflowId: workflow.id,
+      status: "archived",
+    }, {
+      onSuccess: () => {
+        success.show("Workflow archived");
+        navigate("/archived");
+      },
+    });
+  };
+
+  const handleRestore = async () => {
+    if (!workflow) return;
+
+    updateWorkflowMutation.mutate({
+      workflowId: workflow.id,
+      status: "draft",
+    }, {
+      onSuccess: () => {
+        success.show("Workflow restored");
+      },
+    });
+  };
+
   const handleActivateVersion = (scriptId: string, version: number) => {
     if (!workflow) return;
 
@@ -220,7 +247,7 @@ export default function WorkflowDetailPage() {
     <div className="min-h-screen bg-gray-50">
       <SharedHeader
         title="Workflows"
-        subtitle={workflow ? (workflow.title || `Workflow ${workflow.id.slice(0, 8)}`) : undefined}
+        subtitle={workflow ? (workflow.title || "New workflow") : undefined}
       />
 
       {/* Main content */}
@@ -240,18 +267,37 @@ export default function WorkflowDetailPage() {
               <WorkflowErrorAlert notification={unresolvedError} />
             )}
 
+            {/* Archived workflow restore banner */}
+            {workflow.status === "archived" && (
+              <div className="mb-6 flex items-center justify-between bg-gray-50 border border-gray-200 rounded-lg p-4">
+                <div className="flex items-center gap-2 text-gray-600">
+                  <Archive className="w-5 h-5" />
+                  <span>This workflow is archived and hidden from the main list.</span>
+                </div>
+                <Button
+                  onClick={handleRestore}
+                  disabled={updateWorkflowMutation.isPending}
+                  size="sm"
+                  className="flex items-center gap-1"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                  Restore
+                </Button>
+              </div>
+            )}
+
             {/* Workflow Metadata */}
             <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
               <div className="flex items-start justify-between mb-6">
                 <div>
                   <h2 className="text-xl font-semibold text-gray-900 mb-2">
-                    {workflow.title || `Workflow ${workflow.id.slice(0, 8)}`}
+                    {workflow.title || "New workflow"}
                   </h2>
                   <WorkflowStatusBadge status={workflow.status} />
                 </div>
                 <div className="flex flex-col items-end gap-2">
                   <div className="flex gap-2">
-                    {/* Show Activate button for Ready workflows (has script, not yet activated) */}
+                    {/* Primary action button: Activate, Pause, or Resume - always first */}
                     {workflow.status === "ready" && (
                       <Button
                         onClick={handleActivate}
@@ -262,31 +308,6 @@ export default function WorkflowDetailPage() {
                         Activate
                       </Button>
                     )}
-                    {/* Show Run now button for draft, ready, or active workflows with a script */}
-                    {(workflow.status === "draft" || workflow.status === "ready" || workflow.status === "active") && activeScript && (
-                      <Button
-                        onClick={handleRunNow}
-                        disabled={updateWorkflowMutation.isPending}
-                        size="sm"
-                        variant="outline"
-                        className="cursor-pointer"
-                      >
-                        Run now
-                      </Button>
-                    )}
-                    {/* Show Test Run button for any workflow with a script - runs immediately without affecting workflow state */}
-                    {activeScript && (
-                      <Button
-                        onClick={handleTestRun}
-                        disabled={isTestRunning || updateWorkflowMutation.isPending}
-                        size="sm"
-                        variant="outline"
-                        className="cursor-pointer bg-amber-50 border-amber-300 text-amber-900 hover:bg-amber-100"
-                      >
-                        {isTestRunning ? "Testing..." : "Test run"}
-                      </Button>
-                    )}
-                    {/* Show Pause button for Active workflows */}
                     {workflow.status === "active" && (
                       <Button
                         onClick={handlePause}
@@ -298,16 +319,38 @@ export default function WorkflowDetailPage() {
                         Pause
                       </Button>
                     )}
-                    {/* Show Resume button for Paused or Error workflows */}
                     {(workflow.status === "paused" || workflow.status === "error") && (
                       <Button
                         onClick={handleResume}
                         disabled={updateWorkflowMutation.isPending}
                         size="sm"
+                        className="cursor-pointer bg-green-600 hover:bg-green-700 text-white"
+                      >
+                        Resume
+                      </Button>
+                    )}
+
+                    {/* Secondary actions: Run now, Test run, Edit */}
+                    {(workflow.status === "draft" || workflow.status === "ready" || workflow.status === "active") && activeScript && (
+                      <Button
+                        onClick={handleRunNow}
+                        disabled={updateWorkflowMutation.isPending}
+                        size="sm"
                         variant="outline"
                         className="cursor-pointer"
                       >
-                        Resume
+                        Run now
+                      </Button>
+                    )}
+                    {activeScript && (
+                      <Button
+                        onClick={handleTestRun}
+                        disabled={isTestRunning || updateWorkflowMutation.isPending}
+                        size="sm"
+                        variant="outline"
+                        className="cursor-pointer bg-amber-50 border-amber-300 text-amber-900 hover:bg-amber-100"
+                      >
+                        {isTestRunning ? "Testing..." : "Test run"}
                       </Button>
                     )}
                     {workflow?.chat_id && (
@@ -317,12 +360,25 @@ export default function WorkflowDetailPage() {
                         variant="outline"
                         className="cursor-pointer"
                       >
-                        Chat
+                        Edit
+                      </Button>
+                    )}
+                    {/* Archive button for drafts */}
+                    {workflow.status === "draft" && (
+                      <Button
+                        onClick={handleArchive}
+                        disabled={updateWorkflowMutation.isPending}
+                        size="sm"
+                        variant="ghost"
+                        className="cursor-pointer text-gray-400 hover:text-gray-600"
+                        title="Archive this draft"
+                      >
+                        <Archive className="w-4 h-4" />
                       </Button>
                     )}
                   </div>
                   {/* Show hint if no script exists yet */}
-                  {workflow.status === "draft" && (
+                  {workflow.status === "draft" && !activeScript && (
                     <div className="text-sm text-gray-500">
                       Script required to activate
                     </div>
@@ -357,7 +413,7 @@ export default function WorkflowDetailPage() {
                   {workflow.cron && (
                     <div>
                       <h3 className="text-sm font-medium text-gray-700 mb-2">Schedule</h3>
-                      <p className="text-gray-900">{workflow.cron}</p>
+                      <p className="text-gray-900">{formatCronSchedule(workflow.cron)}</p>
                       {nextRunTime && (
                         <p className="text-sm text-gray-600 mt-1">
                           Next run at: {nextRunTime.toLocaleString()}
@@ -375,6 +431,25 @@ export default function WorkflowDetailPage() {
                 </div>
               </div>
             </div>
+
+            {/* What This Automation Does - Summary and Diagram */}
+            {activeScript && (activeScript.summary || activeScript.diagram) && (
+              <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
+                <h2 className="text-lg font-semibold text-gray-900 mb-4">What This Automation Does</h2>
+
+                {/* Summary */}
+                {activeScript.summary && (
+                  <p className="text-gray-700 mb-4">{activeScript.summary}</p>
+                )}
+
+                {/* Mermaid Diagram - rendered via markdown code fence */}
+                {diagramMarkdown && (
+                  <div className="mt-4 p-4 bg-gray-50 rounded-lg">
+                    <Response>{diagramMarkdown}</Response>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Chat Section */}
             {chat && (
@@ -403,29 +478,6 @@ export default function WorkflowDetailPage() {
               </div>
             )}
 
-            {/* Task Section */}
-            {task && (
-              <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
-                <h2 className="text-lg font-semibold text-gray-900 mb-4">Task</h2>
-                <Link
-                  to={`/tasks/${task.id}`}
-                  className="block p-4 border border-gray-200 rounded-lg hover:border-gray-300 hover:shadow-sm transition-all"
-                >
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-2">
-                        <span className="font-medium text-gray-900">
-                          {task.title || `Task ${task.id.slice(0, 8)}`}
-                        </span>
-                      </div>
-                      <div className="text-xs text-gray-500">
-                        Task ID: {task.id}
-                      </div>
-                    </div>
-                  </div>
-                </Link>
-              </div>
-            )}
 
             {/* Script Section */}
             {activeScript && (
@@ -556,25 +608,6 @@ export default function WorkflowDetailPage() {
                         })}
                       </div>
                     )}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* What This Automation Does - Summary and Diagram */}
-            {activeScript && (activeScript.summary || activeScript.diagram) && (
-              <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
-                <h2 className="text-lg font-semibold text-gray-900 mb-4">What This Automation Does</h2>
-
-                {/* Summary */}
-                {activeScript.summary && (
-                  <p className="text-gray-700 mb-4">{activeScript.summary}</p>
-                )}
-
-                {/* Mermaid Diagram - rendered via markdown code fence */}
-                {diagramMarkdown && (
-                  <div className="mt-4 p-4 bg-gray-50 rounded-lg">
-                    <Response>{diagramMarkdown}</Response>
                   </div>
                 )}
               </div>

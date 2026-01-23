@@ -1,0 +1,82 @@
+COMMIT REVIEW: 5ca1203
+=======================
+Title: Extract TaskHeaderContent to module scope in TaskEventGroup
+Author: Artur (Co-Authored-By: Claude Opus 4.5)
+Date: Wed Jan 21 17:47:56 2026 +0100
+
+FILES CHANGED:
+- IMPLEMENTATION_PLAN.md (documentation update)
+- apps/web/src/components/TaskEventGroup.tsx (+99/-63 lines)
+
+CHANGES SUMMARY:
+================
+This commit extracts the `HeaderContent` inline component to module scope as
+`TaskHeaderContent`. The inline component was defined inside the `TaskEventGroup`
+function, causing it to be recreated on every render - a React anti-pattern that
+prevents component identity stability and memoization.
+
+The extraction:
+1. Created `TaskHeaderContentProps` interface with explicit props
+2. Moved `TaskHeaderContent` function to module scope (before the main component)
+3. Updated both usages (Link and div versions) to pass props explicitly
+4. Added comment explaining the pattern for future maintainers
+
+Props interface includes: taskType, taskTitle, duration, steps, totalCost, onViewTask
+
+ANALYSIS:
+=========
+The extraction follows React best practices correctly:
+- Component defined at module scope (lines 26-100) avoids recreation
+- Explicit props interface ensures type safety
+- Named function (not arrow) aids debugging and React DevTools
+- Explanatory comment clarifies intent
+- Both invocations (lines 191-198 and 202-209) use consistent props
+
+This pattern prevents the exponential component recreation issue in list scenarios,
+where the parent might render multiple times and each render creates new component
+instances that React cannot reconcile properly.
+
+ISSUES FOUND:
+=============
+1. [LOW] Memoization not applied but may not be needed
+
+   The commit mentions "enabling memoization if needed" but doesn't apply React.memo.
+   This is actually correct - the props (duration, totalCost, steps) likely change
+   frequently as they update with timers. Memoization would add overhead without
+   benefit if props change every render.
+
+   PROPOSAL: No action needed. Memoization should only be added after measuring
+   actual performance impact.
+
+2. [INFO] Similar inline patterns exist elsewhere (code duplication opportunity)
+
+   The `AssistantIcon` component is defined inline identically in 3 files:
+   - SharedHeader.tsx (lines 14-18)
+   - AuthPopup.tsx (lines 17-21)
+   - ConfigDialog.tsx (lines 7-11)
+
+   While this isn't a performance issue (simple stateless component, rendered once),
+   it is code duplication.
+
+   PROPOSAL: Extract `AssistantIcon` to a shared component file for DRY purposes.
+   This is low priority as it doesn't affect performance.
+
+3. [INFO] Other potential extraction candidates
+
+   The following components could benefit from similar extraction patterns if they
+   experience performance issues:
+   - EventListWithCollapse
+   - EventItem
+   - CollapsedEventSummary
+
+   These are good candidates for React.memo since they're rendered in lists with
+   stable props.
+
+   PROPOSAL: Monitor performance and apply similar extraction + memoization if
+   needed. No immediate action required.
+
+VERDICT: APPROVED
+=================
+Excellent refactor following React best practices. The extraction is correct and
+the decision not to apply memoization is sound. The explanatory comments make
+the code maintainable for future developers.

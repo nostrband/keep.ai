@@ -1,0 +1,207 @@
+COMMIT REVIEW: 5cdf75d "Add truncation and tooltip for long quick-reply options"
+===================================================================================
+
+SUMMARY OF CHANGES
+------------------
+This commit adds text truncation and tooltip functionality to QuickReplyButtons
+to handle long option text that could break UI layout:
+
+1. Adds MAX_OPTION_LENGTH constant (60 characters)
+2. Adds truncateOption() helper function
+3. Wraps truncated options in Tooltip for full text on hover
+4. Uses existing Tooltip components from UI library
+
+Files changed:
+- apps/web/src/components/QuickReplyButtons.tsx (+50 lines)
+- IMPLEMENTATION_PLAN.md - Updated spec status to FIXED
+
+IMPLEMENTATION DETAILS
+----------------------
+The QuickReplyButtons component is used in ChatPage.tsx to display quick-reply
+options when an agent asks yes/no or multiple-choice questions. The Suggestion
+component has a dual-source rendering mechanism:
+- `suggestion` prop: Full text, used for onClick handler
+- `children`: Display text (truncated if needed)
+
+This allows showing truncated text while sending the full option on click.
+
+CODE QUALITY ASSESSMENT
+-----------------------
+Strengths:
++ Truncation logic is mathematically correct (no off-by-one errors)
++ Boundary at 60 chars is reasonable (50-120 range used elsewhere)
++ Tooltip shows full text for truncated options
++ Uses existing UI components (Tooltip, TooltipProvider, etc.)
++ Consistent with Radix UI patterns
+
+ISSUES FOUND
+------------
+
+Issue 1: Unnecessary span Wrapper in TooltipTrigger
+Severity: TRIVIAL
+Location: apps/web/src/components/QuickReplyButtons.tsx lines 49-60
+
+The current implementation wraps Suggestion in a span when using TooltipTrigger
+with asChild. This creates an extra DOM node and may affect focus handling:
+
+Current:
+```jsx
+<TooltipTrigger asChild>
+  <span>
+    <Suggestion
+      suggestion={option}
+      onClick={() => onSelect(option)}
+      disabled={disabled}
+    >
+      {displayText}
+    </Suggestion>
+  </span>
+</TooltipTrigger>
+```
+
+The span is unnecessary because Suggestion is already a button element that
+can receive the trigger props directly:
+
+Proposed Fix:
+```jsx
+<TooltipTrigger asChild>
+  <Suggestion
+    suggestion={option}
+    onClick={() => onSelect(option)}
+    disabled={disabled}
+  >
+    {displayText}
+  </Suggestion>
+</TooltipTrigger>
+```
+
+---
+
+Issue 2: Missing Accessibility Attributes for Screen Readers
+Severity: LOW
+Location: apps/web/src/components/QuickReplyButtons.tsx
+
+When text is truncated, screen reader users only hear the truncated text.
+They don't know the full text exists or that they can hover to see it.
+
+Current behavior:
+- Screen reader announces: "This is a very long question about whet..."
+- User doesn't know the option is truncated or what the full text is
+
+Proposed Fix:
+```jsx
+<Suggestion
+  suggestion={option}
+  onClick={() => onSelect(option)}
+  disabled={disabled}
+  aria-label={isTruncated ? option : undefined}  // Full text for SR
+  title={isTruncated ? option : undefined}       // Fallback tooltip
+>
+  {displayText}
+</Suggestion>
+```
+
+---
+
+Issue 3: Tooltip max-width May Cause Very Tall Tooltips
+Severity: TRIVIAL
+Location: apps/web/src/components/QuickReplyButtons.tsx line 56
+
+The tooltip uses `className="max-w-xs"` (320px max width). For extremely
+long options (200+ characters), this creates very tall wrapped tooltips
+that may be visually jarring.
+
+Current:
+```jsx
+<TooltipContent className="max-w-xs">
+  {option}
+</TooltipContent>
+```
+
+Proposed Fix (if needed):
+```jsx
+<TooltipContent className="max-w-md max-h-48 overflow-y-auto">
+  {option}
+</TooltipContent>
+```
+
+This is a minor issue since extremely long options are rare in practice.
+
+---
+
+Issue 4: Inconsistent Rendering Path
+Severity: TRIVIAL
+Location: apps/web/src/components/QuickReplyButtons.tsx lines 46-72
+
+The component has two rendering paths: one for truncated options (with Tooltip)
+and one for non-truncated options (without Tooltip). This creates slightly
+different DOM structures that could cause subtle styling differences.
+
+The non-truncated path renders:
+  <Suggestion>text</Suggestion>
+
+The truncated path renders:
+  <Tooltip><TooltipTrigger><span><Suggestion>text</Suggestion></span></TooltipTrigger></Tooltip>
+
+This is unlikely to cause visible issues but could be simplified by always
+wrapping in Tooltip (with disabled state for non-truncated options).
+
+TRUNCATION LOGIC VERIFICATION
+-----------------------------
+Testing truncateOption(text, 60):
+
+| Input Length | Output | Correct? |
+|--------------|--------|----------|
+| 3 chars      | 3      | YES - no truncation |
+| 59 chars     | 59     | YES - no truncation |
+| 60 chars     | 60     | YES - exactly at limit, no truncation |
+| 61 chars     | 60     | YES - "57 chars..." = 60 |
+| 100 chars    | 60     | YES - "57 chars..." = 60 |
+
+The logic correctly handles all boundary conditions.
+
+TEST COVERAGE
+-------------
+- No unit tests for truncateOption() function
+- No component tests for QuickReplyButtons
+- No accessibility tests
+- No tooltip interaction tests
+
+TEST RECOMMENDATIONS:
+```typescript
+describe('truncateOption', () => {
+  it('returns text unchanged if <= maxLength', () => {
+    expect(truncateOption('Yes', 60)).toBe('Yes');
+    expect(truncateOption('A'.repeat(60), 60)).toBe('A'.repeat(60));
+  });
+
+  it('truncates text > maxLength with ellipsis', () => {
+    const result = truncateOption('A'.repeat(61), 60);
+    expect(result).toBe('A'.repeat(57) + '...');
+    expect(result.length).toBe(60);
+  });
+});
+```
+
+COMPARISON WITH SIMILAR PATTERNS
+--------------------------------
+| Location | Max Length | Has Tooltip? |
+|----------|------------|--------------|
+| QuickReplyButtons | 60 | YES |
+| ChatSidebar | 50 | NO |
+| Service Worker notifications | 120 | N/A |
+| NotificationCard | 50 | NO |
+
+QuickReplyButtons is the only implementation that adds tooltip for full text,
+which is the correct UX pattern for interactive elements.
+
+VERDICT
+-------
+The implementation correctly solves the stated problem of long options breaking
+UI layout. The truncation logic is mathematically sound, and the tooltip
+provides good UX for accessing full text. The issues found are all minor
+cosmetic or accessibility improvements.
+
+Overall quality: GOOD
+Blocking issues: NONE
+Suggested improvements: 4 (1 LOW, 3 TRIVIAL)

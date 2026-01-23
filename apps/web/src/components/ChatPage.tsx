@@ -16,8 +16,13 @@ import {
   PromptInputTextarea,
   PromptInputToolbar,
   PromptInputTools,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
 } from "../ui";
-import { PlusIcon } from "lucide-react";
+import { PlusIcon, Info } from "lucide-react";
+import { useAutonomyPreference } from "../hooks/useAutonomyPreference";
 import type { FileUIPart } from "ai";
 import { type File as DbFile } from "@app/db";
 
@@ -34,6 +39,7 @@ export default function ChatPage() {
   const promptContainerRef = useRef<HTMLDivElement>(null);
   const addMessage = useAddMessage();
   const { uploadFiles, uploadState } = useFileUpload();
+  const { mode: autonomyMode, toggleMode: toggleAutonomyMode, isLoaded: isAutonomyLoaded } = useAutonomyPreference();
 
   // Get task associated with this chat for quick-reply buttons
   const { data: task } = useTaskByChatId(id);
@@ -211,6 +217,33 @@ export default function ChatPage() {
                 >
                   <PlusIcon className="size-4" />
                 </PromptInputButton>
+                {isAutonomyLoaded && (
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          onClick={toggleAutonomyMode}
+                          className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700 transition-colors py-1 px-2 rounded hover:bg-gray-100"
+                        >
+                          <span>{autonomyMode === 'ai_decides' ? 'AI decides' : 'Coordinate'}</span>
+                          <Info className="size-3" />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="top" className="max-w-xs">
+                        <p className="font-medium mb-1">
+                          {autonomyMode === 'ai_decides' ? 'AI Decides Details' : 'Coordinate With Me'}
+                        </p>
+                        <p className="text-xs text-gray-600">
+                          {autonomyMode === 'ai_decides'
+                            ? 'The AI will minimize questions and use safe defaults to complete tasks quickly.'
+                            : 'The AI will ask clarifying questions before proceeding with key decisions.'}
+                        </p>
+                        <p className="text-xs text-gray-500 mt-1">Click to switch</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                )}
               </PromptInputTools>
               <PromptInputSubmit
                 disabled={(!input && !uploadState.isUploading) || uploadState.isUploading}

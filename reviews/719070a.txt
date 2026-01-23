@@ -1,0 +1,68 @@
+COMMIT REVIEW: 719070a
+=======================
+Title: docs: Update IMPLEMENTATION_PLAN.md - Spec 10 complete
+Date: 2026-01-22 14:37:37 +0100
+Co-Authored-By: Claude Opus 4.5
+
+SUMMARY OF CHANGES
+------------------
+This commit updates IMPLEMENTATION_PLAN.md to mark Spec 10 (Tasks Table Cleanup) as
+COMPLETED. The changes include:
+
+1. Updated "Last Updated" timestamp to reflect Spec 10 completion
+2. Summary section: Moved Spec 10 from "NOT STARTED" to "COMPLETED" in P0 specs group
+3. Infrastructure Gaps: Marked "v30 pending for Spec 10" as DONE
+4. Status table: Changed Spec 10 status from "NOT STARTED" to "COMPLETED" with details
+   "v30 migration, task.asks, useTaskState deprecated"
+5. Spec 10 section: Added comprehensive completion notes documenting all changes made:
+   - Created migration v30 with workflow_id and asks columns
+   - Added getTaskByWorkflowId() and updateTaskAsks() methods
+   - Marked TaskState interface as deprecated
+   - Updated agent-env.ts, ask.ts, finish.ts tools
+   - Updated task-worker.ts, ChatPage.tsx, TaskDetailPage.tsx, TaskRunDetailPage.tsx
+   - Marked useTaskState hook as deprecated
+   - Updated add-task.ts, add-task-recurring.ts, get-task.ts, list-tasks.ts tools
+6. Updated checklist: Changed Spec 10 from unchecked to checked with new migration version
+
+ANALYSIS
+--------
+This is a documentation-only commit that accurately records the completion of a major
+spec. The completion notes are thorough and provide a good audit trail of all the
+changes that were made as part of Spec 10.
+
+POTENTIAL ISSUES
+----------------
+
+1. MINOR: Migration version inconsistency in action items
+   - The "Action Items" section still references "migration v28" (line ~339 in original)
+   - But completion notes and status correctly say "v30"
+   - This is a copy-paste artifact from the original spec that wasn't updated
+   - Impact: Could confuse future readers
+   - Resolution: Update the action items template to say v30, or add a note that
+     the action items show the original plan while completion notes show actual
+     implementation
+
+2. MINOR: Redundant "Original Verified Current State" section
+   - After marking as COMPLETED, the document keeps the original verified state
+     which describes "Task interface missing workflow_id and asks fields"
+   - This is now historical/stale information
+   - Impact: Low - it's labeled as "Original" but could be cleaner
+   - Resolution: Consider moving to a collapsed/archived section or adding strikethrough
+
+3. OBSERVATION: Good documentation practice
+   - The completion notes provide a clear record of what was actually implemented
+   - This is helpful for code archaeology and understanding the evolution
+
+PROPOSALS
+---------
+None required - this is a low-risk documentation update. The minor inconsistencies
+noted above are cosmetic and don't affect functionality.
+
+VERDICT: ACCEPTABLE
+The documentation accurately reflects the completion of Spec 10 with comprehensive
+notes. Minor cleanup could improve clarity but is not required.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+No actionable issues - minor documentation observations only.

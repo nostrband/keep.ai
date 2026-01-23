@@ -1,0 +1,157 @@
+COMMIT REVIEW: c322297
+=======================
+Title: fix: Complete Spec 12 migration from chat_events to chat_messages
+Date: 2026-01-22 15:54:19 +0100
+Author: Artur (Co-Authored-By: Claude Opus 4.5)
+
+CHANGES SUMMARY
+---------------
+Critical bug fix completing the Spec 12 migration. The agent code was writing to new
+tables (chat_messages, notifications, execution_logs) but the UI and api.ts were still
+reading/writing from the deprecated chat_events table.
+
+Files changed (6):
+- IMPLEMENTATION_PLAN.md (+47 lines documenting the bug fix)
+- apps/web/src/hooks/dbChatReads.ts (useChatMessages/useChatEvents now read from chat_messages)
+- apps/web/src/hooks/dbScriptReads.ts (table metadata updated)
+- apps/web/src/hooks/dbWrites.ts (useAddMessage/useReadChat use new tables)
+- packages/db/src/api.ts (addMessage/createTask use saveChatMessage)
+- packages/db/src/script-store.ts (getAbandonedDrafts/getDraftActivitySummary join chat_messages)
+
+DETAILED ANALYSIS
+-----------------
+
+1. api.ts CHANGES - CORRECT
+   - addMessage() and createTask() now use saveChatMessage() with correct parameters
+   - All 8 required ChatMessage fields are properly populated
+   - JSON.stringify(message) preserves full AssistantUIMessage structure
+   - Empty string defaults for task_run_id, script_id, failed_script_run_id are correct
+   - Transaction parameter properly passed
+
+2. dbChatReads.ts CHANGES - CORRECT WITH MINOR ISSUES
+   - useChatMessages() correctly uses getNewChatMessages() with JSON parsing
+   - useChatEvents() properly converts ChatMessage to ChatEvent format
+   - Table metadata correctly set to "chat_messages"
+   - The reverse() call is necessary: DB returns DESC, reverse converts to ASC for display
+
+3. dbWrites.ts CHANGES - CORRECT
+   - useAddMessage() notifies "chat_messages" table
+   - useReadChat() uses getLastMessageActivity() - more efficient than getChatEvents({limit:1})
+   - String comparison for ISO 8601 timestamps is safe (lexicographic = chronological)
+
+4. script-store.ts CHANGES - CORRECT WITH MINOR ISSUES
+   - SQL JOINs correctly use cm.chat_id = w.chat_id
+   - COALESCE logic with MAX(timestamp) is correct
+   - All column names verified to exist
+
+ISSUES FOUND
+------------
+
+ISSUE 1: CRITICAL - Active Code Still Using Deprecated Methods
+Severity: HIGH
+Location: apps/server/src/server.ts:323, apps/server/src/server.ts:925, apps/cli/src/commands/chat.ts:52
+
+The server and CLI still call getChatMessages() which reads from the deprecated chat_events
+table. This means:
+- Push notifications logic reads from wrong table
+- /api/set_config endpoint reads from wrong table
+- CLI chat command reads from wrong table
+
+Proposal: Replace these calls with getNewChatMessages() from the new Spec 12 API.
+
+ISSUE 2: MEDIUM - Duplicated JSON Parsing Logic
+Severity: LOW
+Location: apps/web/src/hooks/dbChatReads.ts (useChatMessages and useChatEvents)
+
+Both functions have identical try/catch JSON.parse fallback logic. This violates DRY.
+
+Proposal: Extract JSON parsing to a shared utility function:
+```typescript
+function parseMessageContent(msg: ChatMessage): AssistantUIMessage {
+  try {
+    return JSON.parse(msg.content);
+  } catch {
+    return {
+      id: msg.id,
+      role: msg.role,
+      parts: [{ type: "text", text: msg.content }],
+      metadata: { threadId: msg.chat_id, createdAt: msg.timestamp },
+    };
+  }
+}
+```
+
+ISSUE 3: LOW - Misleading Comment
+Severity: LOW
+Location: apps/web/src/hooks/dbChatReads.ts:132-134
+
+Comment says "Since events come in DESC order" but at that point events are in ASC
+after the .reverse() call. The oldest is actually FIRST, not last.
+
+Proposal: Fix comment to: "Since events were reversed to ASC order, oldest is first"
+
+ISSUE 4: LOW - Outdated JSDoc
+Severity: LOW
+Location: packages/db/src/script-store.ts:835
+
+JSDoc references old table name and incorrect join key:
+  "Chat event timestamp (from chat_events table where chat_id = workflow.task_id)"
+
+Proposal: Update to:
+  "Chat message timestamp (from chat_messages table where chat_id = workflow.chat_id)"
+
+ISSUE 5: LOW - Unused Imports
+Severity: LOW
+Location: apps/web/src/hooks/dbWrites.ts
+
+ChatEvent and UseChatEventsResult imports are no longer used after the migration.
+
+Proposal: Remove unused imports in a cleanup commit.
+
+ISSUE 6: MEDIUM - Subquery Performance in script-store.ts
+Severity: MEDIUM
+Location: packages/db/src/script-store.ts:863
+
+The subquery `(SELECT COUNT(*) FROM scripts WHERE workflow_id = w.id) > 0 as has_script`
+executes once per returned row (N+1 pattern).
+
+Proposal: Use COUNT with the existing LEFT JOIN:
+```sql
+CASE WHEN COUNT(DISTINCT s.id) > 0 THEN 1 ELSE 0 END as has_script
+```
+
+ISSUE 7: LOW - Silent JSON Parse Failures
+Severity: LOW
+Location: apps/web/src/hooks/dbChatReads.ts
+
+JSON parse failures are caught but not logged. This could hide data corruption issues.
+
+Proposal: Add debug logging for parse failures to aid troubleshooting.
+
+POSITIVE NOTES
+--------------
+- Transaction safety is maintained throughout
+- Type safety is fully preserved
+- The migration is backwards compatible (old table kept for now)
+- Performance improvement in useReadChat() using MAX() aggregation instead of full fetch
+- Comprehensive documentation added to IMPLEMENTATION_PLAN.md
+
+VERDICT
+-------
+The migration is FUNCTIONALLY CORRECT for the scope it addresses. However, ISSUE 1 is
+critical - the server and CLI still use deprecated methods. The other issues are
+quality/maintenance improvements that should be addressed in follow-up commits.
+
+RECOMMENDATION: Create follow-up tasks to address the remaining chat_events references
+in server.ts and chat.ts before removing the deprecated methods.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Active code using deprecated methods) - created specs/new/complete-chat-messages-migration.md
+- Issue #2 (Duplicated JSON parsing logic) - created specs/new/extract-message-parsing-utility.md
+- Issue #3 (Misleading comment) - skipped
+- Issue #4 (Outdated JSDoc) - created specs/new/fix-script-store-jsdoc.md
+- Issue #5 (Unused imports) - created specs/new/cleanup-unused-imports.md
+- Issue #6 (Subquery performance) - created specs/new/optimize-has-script-subquery.md
+- Issue #7 (Silent JSON parse failures) - skipped

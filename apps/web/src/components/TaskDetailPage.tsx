@@ -185,7 +185,7 @@ export default function TaskDetailPage() {
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-2">
-                        <span className="font-medium text-gray-900">{workflow.title || `Workflow ${workflow.id.slice(0, 8)}`}</span>
+                        <span className="font-medium text-gray-900">{workflow.title || "New workflow"}</span>
                         <WorkflowStatusBadge status={workflow.status} />
                       </div>
                       <div className="flex items-center gap-4 text-xs text-gray-500">

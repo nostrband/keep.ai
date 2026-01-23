@@ -9,7 +9,7 @@ interface WorkflowInfoBoxProps {
 /**
  * Parse cron expression to human-readable schedule string.
  */
-function formatCronSchedule(cron?: string): string {
+export function formatCronSchedule(cron?: string): string {
   if (!cron) return "Not scheduled";
 
   // Basic cron parsing for common patterns
@@ -66,12 +66,12 @@ export function WorkflowInfoBox({ workflow, onClick }: WorkflowInfoBoxProps) {
   return (
     <button
       onClick={onClick}
-      className="w-full p-3 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors text-left border border-gray-200"
+      className="w-full p-3 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors text-left border border-gray-200 cursor-pointer"
     >
       <div className="flex items-center gap-2">
         <span>📋</span>
         <span className="font-medium text-gray-900 truncate">
-          {workflow.title || `Workflow ${workflow.id.slice(0, 8)}`}
+          {workflow.title || "New workflow"}
         </span>
       </div>
       <div className="flex items-center gap-2 text-sm text-gray-600 mt-1">

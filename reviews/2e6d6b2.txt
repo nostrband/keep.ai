@@ -1,0 +1,183 @@
+COMMIT REVIEW: 2e6d6b2
+Title: Add draft detection and stale drafts banner (#68, #69)
+Date: 2026-01-21
+
+================================================================================
+SUMMARY
+================================================================================
+
+This commit implements abandoned draft detection and user prompting:
+- Added getAbandonedDrafts() and getDraftActivitySummary() to ScriptStore
+- Added DRAFT_THRESHOLDS constants (STALE_DAYS: 3, ABANDONED_DAYS: 7, ARCHIVE_DAYS: 30)
+- Added getLastChatActivity() methods to ChatStore
+- Created StaleDraftsBanner component showing amber banner for stale/waiting drafts
+- Added React Query hooks for draft activity data
+- Banner links to /workflows?filter=drafts
+
+================================================================================
+CHANGES DESCRIPTION
+================================================================================
+
+1. packages/db/src/script-store.ts
+   - Added DRAFT_THRESHOLDS export with STALE_DAYS (3), ABANDONED_DAYS (7), ARCHIVE_DAYS (30)
+   - Added AbandonedDraft interface with workflow, lastActivity, daysSinceActivity, etc.
+   - Added DraftActivitySummary interface with counts
+   - Added getAbandonedDrafts(thresholdDays): queries draft workflows with COALESCE
+     for last activity from chat_messages, scripts, or workflow timestamp
+   - Added getDraftActivitySummary(): returns summary with totalDrafts, staleDrafts,
+     abandonedDrafts, waitingForInput counts
+
+2. packages/db/src/chat-store.ts
+   - Added getLastChatActivity(chatId): returns MAX(timestamp) from chat_events
+   - Added getLastChatActivities(chatIds): batch version for multiple chats
+
+3. packages/db/src/index.ts
+   - Exported DRAFT_THRESHOLDS, AbandonedDraft, DraftActivitySummary
+
+4. apps/web/src/components/StaleDraftsBanner.tsx (NEW)
+   - Uses useDraftActivitySummary() hook
+   - Shows banner when drafts are waiting for input or abandoned (7+ days)
+   - Amber styling for urgent (waiting), gray for stale
+   - Links to /workflows?filter=drafts
+
+5. apps/web/src/components/MainPage.tsx
+   - Imported and rendered StaleDraftsBanner above workflow list
+
+6. apps/web/src/hooks/dbScriptReads.ts
+   - Added useAbandonedDrafts(thresholdDays) hook with 5-min staleTime/refetch
+   - Added useDraftActivitySummary() hook with same caching strategy
+   - Both hooks have try-catch returning empty/zero on error
+
+7. apps/web/src/hooks/queryKeys.ts
+   - Added 'abandonedDrafts' and 'draftActivitySummary' query keys
+
+================================================================================
+POTENTIAL ISSUES
+================================================================================
+
+1. [HIGH] SQL COALESCE Logic Bug in getAbandonedDrafts() and getDraftActivitySummary()
+
+   Location: packages/db/src/script-store.ts lines 858-862, 934-938
+
+   The current SQL:
+   ```sql
+   COALESCE(
+     MAX(cm.timestamp),
+     MAX(s.timestamp),
+     w.timestamp
+   ) as last_activity
+   ```
+
+   Problem: COALESCE returns the FIRST non-NULL value, not the MAXIMUM across all.
+
+   Example scenario:
+   - Workflow has chat messages from 10 days ago: MAX(cm.timestamp) = "10 days ago"
+   - Workflow has scripts from 2 days ago: MAX(s.timestamp) = "2 days ago"
+   - COALESCE picks "10 days ago" (first non-null), NOT "2 days ago" (most recent)
+
+   Impact: Drafts will be INCORRECTLY marked as abandoned if they have old chat
+   messages but recent script saves. A draft that was edited yesterday but has
+   chat messages from last week will show as "7+ days inactive".
+
+   Proposal: Use MAX across all values:
+   ```sql
+   MAX(
+     COALESCE(cm.timestamp, '1970-01-01'),
+     COALESCE(s.timestamp, '1970-01-01'),
+     w.timestamp
+   ) as last_activity
+   ```
+   Or for SQLite 3.44+: use GREATEST function (but may need fallback for older SQLite).
+
+2. [MEDIUM] Table Inconsistency: chat_events vs chat_messages
+
+   Location: packages/db/src/chat-store.ts lines 410-420
+
+   The ChatStore.getLastChatActivity() queries from `chat_events` table:
+   ```sql
+   SELECT MAX(timestamp) as max_ts FROM chat_events WHERE chat_id = ?
+   ```
+
+   But script-store.ts directly JOINs `chat_messages` table (per Spec 12).
+
+   This inconsistency could cause:
+   - Confusion about which table is authoritative
+   - Cache invalidation misses if hooks depend on wrong table
+
+   Current code comment says "Uses chat_messages table per Spec 12" but ChatStore
+   uses chat_events. The getLastChatActivity() methods are not currently used by
+   the draft detection queries (they do direct JOINs), but the inconsistency exists.
+
+   Proposal: Either update ChatStore to query chat_messages, or document clearly
+   which table should be used where.
+
+3. [MEDIUM] ARCHIVE_DAYS Constant Unused
+
+   Location: packages/db/src/script-store.ts line 9
+
+   DRAFT_THRESHOLDS.ARCHIVE_DAYS = 30 is defined but never used anywhere.
+   The spec mentions "Offer to archive" at 30 days but this isn't implemented.
+
+   Impact: Incomplete feature - users don't get prompted to archive very old drafts.
+
+   Proposal: Either implement the archive prompting feature or remove the constant
+   to avoid confusion.
+
+4. [LOW] Missing Index on workflows.status
+
+   The query filters with `WHERE w.status = 'draft'` but there's no index on
+   the status column. With many workflows, this could be slow.
+
+   Proposal: Add migration to create index on workflows(status).
+
+5. [LOW] Subquery Inefficiency
+
+   Location: packages/db/src/script-store.ts line 863
+   ```sql
+   (SELECT COUNT(*) FROM scripts WHERE workflow_id = w.id) > 0 as has_script
+   ```
+
+   This correlated subquery runs once per workflow row. For many drafts, this
+   could be slow.
+
+   Proposal: Use EXISTS instead of COUNT for better performance:
+   ```sql
+   EXISTS(SELECT 1 FROM scripts WHERE workflow_id = w.id) as has_script
+   ```
+
+6. [INFO] Component correctly handles edge cases
+
+   StaleDraftsBanner.tsx properly:
+   - Returns null during loading
+   - Returns null when summary is undefined
+   - Returns null when no drafts need attention
+   - Uses correct pluralization ("draft is" vs "drafts are")
+
+================================================================================
+CODE QUALITY ASSESSMENT
+================================================================================
+
+Strengths:
+- Good separation of database logic from UI
+- React Query hooks with appropriate staleTime/refetchInterval
+- Try-catch in hooks for graceful error handling
+- Clean banner component with proper conditional rendering
+- JSDoc comments on new methods
+
+Areas for improvement:
+- SQL COALESCE bug needs fixing
+- Table usage inconsistency between ChatStore and ScriptStore
+- Incomplete ARCHIVE_DAYS feature
+
+================================================================================
+VERDICT
+================================================================================
+
+NEEDS FIX - The COALESCE SQL bug (Issue #1) is a correctness issue that will
+cause drafts to be incorrectly classified. The other issues are lower priority
+but should be tracked for future improvement.
+
+Recommended actions:
+1. Fix COALESCE to use MAX across all timestamps (HIGH PRIORITY)
+2. Clarify chat_events vs chat_messages usage (MEDIUM)
+3. Either implement or remove ARCHIVE_DAYS feature (LOW)

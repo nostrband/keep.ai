@@ -1,0 +1,135 @@
+COMMIT: 97d6c45 - feat: Implement auth system refactoring (specs #14-17)
+DATE: 2026-01-23
+AUTHOR: Artur Briugeman
+CO-AUTHOR: Claude Opus 4.5
+
+=== CHANGES SUMMARY ===
+
+This commit implements 4 auth-related specs that simplify the authentication architecture,
+transitioning from BLOCKING auth (preventing app access) to NON-BLOCKING auth (dismissable modals).
+
+Spec #14: Fix Proactive needAuth Detection
+- Enhanced /check_config endpoint to return {ok, hasApiKey, hasBaseUrl}
+- Updated useNeedAuth to proactively check config validity
+- Added isFirstLaunch flag for distinguishing new vs returning users
+
+Spec #15: Remove Blocking Auth from App.tsx
+- Removed 38 lines of blocking auth check that prevented app browsing
+- Users can now access app freely; auth prompts appear as dismissable modals
+
+Spec #16: Consolidate Auth/Config Hooks
+- Deleted useConfig.ts (49 lines) - consolidated into useNeedAuth
+- Updated HeaderAuthNotice and AuthEventItem to use only useNeedAuth
+
+Spec #17: Deprecate AuthDialog Component
+- Replaced 368-line AuthDialog.tsx with 5-line re-export of AuthPopup
+- Maintains backward compatibility with deprecation notice
+
+Files changed:
+- apps/server/src/server.ts (+6 lines)
+- apps/web/src/App.tsx (-38 lines)
+- apps/web/src/components/AuthDialog.tsx (-363 lines, now 5 lines)
+- apps/web/src/components/AuthEventItem.tsx (-8 lines)
+- apps/web/src/components/HeaderAuthNotice.tsx (-8 lines)
+- apps/web/src/hooks/useConfig.ts (DELETED)
+- apps/web/src/hooks/useNeedAuth.ts (+40 lines)
+
+=== ISSUES FOUND ===
+
+IMPORTANT:
+
+1. Missing HTTP Response Status Check
+   File: apps/web/src/hooks/useNeedAuth.ts:42-43
+   Code:
+     const configResponse = await fetch(`${API_ENDPOINT}/check_config`);
+     const configData = await configResponse.json();
+   Problem: No check for configResponse.ok before parsing JSON. If /check_config
+   returns HTTP 500, the code attempts to parse error response as JSON. If server
+   returns HTML error page, JSON.parse throws, hitting catch block with isServerError=true.
+   Impact: Works correctly (fallback to server error display) but masks the real issue.
+   Proposal: Add status check:
+     if (!configResponse.ok) {
+       throw new Error(`Failed to check config: HTTP ${configResponse.status}`);
+     }
+
+MODERATE:
+
+2. Race Condition Between DB and Config Check
+   File: apps/web/src/hooks/useNeedAuth.ts:39-48
+   Problem: Both DB query and config fetch are in same try block. If config
+   check fails while DB check succeeds, entire operation throws.
+   Impact: Server temporarily unreachable shows "Server error" instead of using
+   the database flag. Acceptable since fallback behavior is reasonable.
+   Proposal: (Optional) Separate into independent checks with individual error handling.
+
+3. Optimistic State Update in clearNeedAuth
+   File: apps/web/src/hooks/useNeedAuth.ts:90-100
+   Code:
+     await api.setNeedAuth(false);
+     setState({ needed: false });  // Optimistically updates
+   Problem: If setNeedAuth fails, UI still updates state, creating inconsistency.
+   Impact: Low - next 5-second poll will correct this.
+   Proposal: Call refresh() after setNeedAuth to verify state was actually cleared.
+
+LOW:
+
+4. Unused Imports Could Remain in Other Files
+   Problem: Deleted useConfig.ts but any file still importing it would fail.
+   Verified: No orphaned imports found - all consumers updated correctly.
+   Status: NOT AN ISSUE
+
+=== ARCHITECTURAL ASSESSMENT ===
+
+isFirstLaunch Logic (Correct):
+  const firstLaunch = !configData.hasApiKey && !configData.hasBaseUrl;
+  - Both must be empty to be considered "first launch"
+  - Correctly distinguishes new users from returning users who lost API key
+
+Auth State Flow (Correct):
+  1. First Load: DB needed=false, no API key -> authNeeded=true, isFirstLaunch=true -> "Sign up"
+  2. After Signup: setNeedAuth(false) -> state.needed=false -> prompt disappears
+  3. Server Error: fetch fails -> isServerError=true -> red "Server error" button
+  4. API Key Added: next poll detects hasApiKey -> authNeeded=false -> prompt disappears
+
+Can Users Get Stuck? (No):
+  - Server error: Shows red button with retry
+  - Offline: Shows red button with retry
+  - API key removed: Next poll detects and shows prompt
+  - All states have paths forward
+
+=== PROPOSALS ===
+
+IMMEDIATE:
+1. Add HTTP status validation before JSON parsing in useNeedAuth.ts:42
+
+MEDIUM PRIORITY:
+2. Add response structure validation after parsing:
+     if (!configData || typeof configData !== 'object') {
+       throw new Error('Invalid config response format');
+     }
+
+LOW PRIORITY:
+3. Consider separating config and DB checks into independent operations
+4. Add refresh() call after clearNeedAuth to verify state was cleared
+
+=== TESTING RECOMMENDATIONS ===
+
+Critical test cases to add:
+1. /check_config returns HTTP 500
+2. Offline scenario (network unreachable)
+3. Malformed JSON response from server
+4. Rapid config changes (add/remove API key)
+5. Concurrent browser tabs (sync flag changes)
+6. "Server error" button retry functionality
+7. First-launch detection with no prior config
+8. Existing users without API key see "Sign in" not "Sign up"
+
+=== OVERALL ASSESSMENT ===
+
+QUALITY: GOOD
+The refactoring is well-implemented with proper fallbacks. The transition from
+blocking to non-blocking auth is clean. The only real issue is the missing
+response.ok check, which is partially mitigated by the catch block.
+
+RISK: LOW
+Users cannot get stuck in bad states - all error scenarios have recovery paths.

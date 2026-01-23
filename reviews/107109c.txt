@@ -1,0 +1,177 @@
+COMMIT REVIEW: 107109c
+Title: Fix async callback handling in database test
+Date: 2026-01-21
+
+================================================================================
+SUMMARY
+================================================================================
+
+This commit fixes a bug in database.test.ts where `db.run()` was being awaited
+directly even though sqlite3's db.run() is callback-based (not Promise-based).
+The fix wraps the db.run() call in a Promise to properly wait for the UPDATE
+query to complete before proceeding.
+
+================================================================================
+CHANGES DESCRIPTION
+================================================================================
+
+1. apps/user-server/src/__tests__/database.test.ts
+
+   Before (BROKEN):
+   ```typescript
+   await (database as any).db.run(
+     'UPDATE api_keys SET key_hash = ? WHERE id = ?',
+     [keyHash, apiKey.id]
+   );
+   ```
+
+   After (FIXED):
+   ```typescript
+   await new Promise<void>((resolve, reject) => {
+     (database as any).db.run(
+       'UPDATE api_keys SET key_hash = ? WHERE id = ?',
+       [keyHash, apiKey.id],
+       (err: Error | null) => {
+         if (err) reject(err);
+         else resolve();
+       }
+     );
+   });
+   ```
+
+   The fix properly:
+   - Wraps the callback-based db.run() in a Promise
+   - Handles errors by rejecting the Promise
+   - Resolves on successful completion
+   - Uses TypeScript typing for the callback parameter
+
+================================================================================
+POTENTIAL ISSUES
+================================================================================
+
+1. [CRITICAL] SAME BUG EXISTS IN server.test.ts (3 LOCATIONS)
+
+   Location: apps/user-server/src/__tests__/server.test.ts
+
+   The exact same bug (awaiting db.run() without Promise wrapper) exists in
+   THREE places in server.test.ts:
+
+   Line 96-99:
+   ```typescript
+   await (database as any).db.run(
+     'UPDATE api_keys SET key_hash = ? WHERE user_id = ?',
+     [keyHash, userId]
+   );
+   ```
+
+   Line 128-131:
+   ```typescript
+   await (database as any).db.run(
+     'UPDATE api_keys SET key_hash = ? WHERE user_id = ?',
+     [keyHash, userId]
+   );
+   ```
+
+   Line 168-171:
+   ```typescript
+   await (database as any).db.run(
+     'UPDATE api_keys SET key_hash = ? WHERE id = ?',
+     [keyHash, apiKey.id]
+   );
+   ```
+
+   Impact: Tests proceed without waiting for UPDATE to complete, creating a
+   race condition. Tests may pass locally due to fast I/O but fail intermittently
+   in CI environments. The subsequent findApiKey() or API requests may see stale
+   data if the UPDATE hasn't committed yet.
+
+   Proposal: Apply the same Promise wrapper fix to all three locations in
+   server.test.ts.
+
+2. [MEDIUM] No Shared Utility for Promisifying db.run()
+
+   The Promise wrapper pattern is now duplicated:
+   - database.test.ts: lines 80-90
+   - integration.test.ts: lines 29-35, 103-109
+
+   Each test file manually creates the Promise wrapper, which is error-prone
+   and verbose.
+
+   Proposal: Create a utility function:
+   ```typescript
+   function promisifyDbRun(
+     db: sqlite3.Database,
+     sql: string,
+     params: unknown[]
+   ): Promise<void> {
+     return new Promise((resolve, reject) => {
+       db.run(sql, params, (err) => {
+         if (err) reject(err);
+         else resolve();
+       });
+     });
+   }
+   ```
+
+   Or better: expose wrapped methods from the Database class so tests don't need
+   to access private `db` property.
+
+3. [LOW] Type Annotation Redundancy
+
+   The callback type annotation `(err: Error | null)` is correct but slightly
+   redundant since sqlite3 always provides this signature. However, it's good
+   defensive typing and improves code clarity.
+
+4. [INFO] The Fix is Correct
+
+   The Promise wrapper implementation is correct:
+   - Uses Promise<void> since no value is returned
+   - Properly rejects on error
+   - Properly resolves on success
+   - The await correctly waits for the Promise to settle
+
+================================================================================
+CODE QUALITY ASSESSMENT
+================================================================================
+
+Strengths:
+- Fix is correct and follows established patterns from integration.test.ts
+- Clear commit message explaining the problem and solution
+- Proper error handling in the Promise wrapper
+
+Areas for improvement:
+- Same bug left unfixed in server.test.ts
+- No utility abstraction for repeated pattern
+- Tests accessing private db property via (database as any) is a code smell
+
+================================================================================
+SIMILAR PATTERNS ELSEWHERE
+================================================================================
+
+integration.test.ts already has correct Promise wrappers (lines 29-35, 103-109):
+```typescript
+await new Promise<void>((resolve, reject) => {
+  db.run(
+    'INSERT INTO api_keys ...',
+    [...],
+    (err: Error | null) => err ? reject(err) : resolve()
+  );
+});
+```
+
+The Database class itself (packages/user-server/src/database.ts) correctly
+promisifies all its public methods. The issue is only when tests directly
+access the private `db` property.
+
+================================================================================
+VERDICT
+================================================================================
+
+INCOMPLETE - The fix itself is correct, but the same bug exists in THREE other
+locations in server.test.ts that were not fixed. These should be addressed
+urgently as they create flaky tests.
+
+Recommended actions:
+1. Apply same Promise wrapper fix to server.test.ts lines 96, 128, 168 (HIGH PRIORITY)
+2. Consider creating a shared utility function for db.run promisification (MEDIUM)
+3. Consider exposing safe methods from Database class for testing (LOW)

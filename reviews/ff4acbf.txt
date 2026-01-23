@@ -1,0 +1,148 @@
+# Review: ff4acbf - Replace custom LCS diff algorithm with jsdiff library
+
+## Commit Summary
+The ScriptDiff component was using a custom O(n*m) LCS algorithm that had several issues:
+- High memory usage that could crash browsers on large files
+- Tie-breaking bugs
+- Edge cases with empty strings
+
+Replaced with the battle-tested `diff` library (jsdiff) which uses the Myers diff algorithm with better memory characteristics. Added a safety check for extremely large files (50,000+ lines).
+
+## Files Changed
+- apps/web/src/components/ScriptDiff.tsx (main implementation)
+- apps/web/package.json (added `diff` dependency)
+- apps/web/package.json (added `@types/diff` devDependency)
+- package-lock.json (updated)
+- IMPLEMENTATION_PLAN.md
+- Moved 3 spec files to specs/done/
+
+---
+
+## Changes Analysis
+
+### 1. Dependency Addition
+- Added `diff@^8.0.3` - well-maintained, uses Myers algorithm
+- Added `@types/diff@^7.0.2` for TypeScript support
+
+### 2. Algorithm Replacement
+
+**Before:** Custom LCS algorithm with O(n*m) memory
+**After:** `diffLines()` from jsdiff with Myers algorithm
+
+**Benefits:**
+- Industry-standard algorithm (same as Git)
+- Better memory characteristics
+- Handles edge cases correctly
+- Simpler, more maintainable code
+
+### 3. Safety Check Added
+
+```typescript
+const MAX_DIFF_LINES = 50000;
+
+if (oldLines.length + newLines.length > MAX_DIFF_LINES) {
+  // Return error message
+}
+```
+
+### 4. Line Number Tracking
+
+The new implementation properly tracks line numbers:
+- Separate counters for old/new files
+- Correct handling of added/removed/unchanged lines
+- Proper handling of trailing newlines (lines.pop() for empty string)
+
+---
+
+## Potential Issues Found
+
+### Issue 1: Error Message Renders as Fake Diff Lines
+**Severity:** Medium
+**Location:** ScriptDiff.tsx:28-38
+
+When files exceed 50K lines, the error is returned as fake diff lines:
+```typescript
+return [
+  { type: "removed", content: `[File too large to diff: ${oldLines.length} lines]`, oldLineNum: 1 },
+  { type: "added", content: `[File too large to diff: ${newLines.length} lines]`, newLineNum: 1 },
+];
+```
+
+This renders as a red line followed by a green line, which is confusing UX.
+
+**Proposal:**
+Return a single unchanged line or handle this case specially in the render logic:
+```typescript
+return [{
+  type: "unchanged",
+  content: `File comparison unavailable: Combined size exceeds ${MAX_DIFF_LINES} line limit`,
+  oldLineNum: undefined,
+  newLineNum: undefined,
+}];
+```
+
+Or better, detect this case in render and show a proper alert component.
+
+### Issue 2: Lost "No Newline at EOF" Information
+**Severity:** Low
+**Location:** ScriptDiff.tsx:52-54
+
+The code removes trailing empty strings from split:
+```typescript
+if (lines[lines.length - 1] === "") {
+  lines.pop();
+}
+```
+
+This works correctly but loses the information about whether files end with newlines. Traditional diffs show "\ No newline at end of file" markers.
+
+**Proposal:**
+Not critical for this use case (comparing script versions), but could track and display this metadata if needed.
+
+### Issue 3: MAX_DIFF_LINES Chosen Without Benchmarking
+**Severity:** Low
+**Location:** ScriptDiff.tsx:23
+
+The 50,000 line limit seems reasonable but was likely chosen arbitrarily.
+
+**Proposal:**
+The limit is conservative and appropriate for browser UIs. Typical automation scripts are 100-2000 lines, so this provides ample headroom. No change needed, but consider documenting the rationale.
+
+### Issue 4: No Warning Threshold
+**Severity:** Low
+**Location:** ScriptDiff.tsx
+
+Files with 40,000+ lines will take noticeable time to diff but show no warning.
+
+**Proposal:**
+Consider adding a warning threshold at 25K lines or displaying a "large file" indicator.
+
+### Issue 5: Array Index Used as React Key
+**Severity:** Low
+**Location:** ScriptDiff.tsx (in rendering)
+
+If the rendering uses array index as key (e.g., `key={idx}`), this could cause issues with React reconciliation.
+
+**Proposal:**
+Use a combination of line number and type for the key:
+```typescript
+key={`${line.type}-${line.oldLineNum ?? ''}-${line.newLineNum ?? ''}`}
+```
+
+---
+
+## Code Quality Assessment
+
+| Aspect | Rating | Notes |
+|--------|--------|-------|
+| Correctness | Good | Myers algorithm is well-tested |
+| Performance | Good | O(ND) instead of O(n*m) memory |
+| Edge Cases | Good | Empty strings, trailing newlines handled |
+| Error Handling | Fair | Error message UX could be better |
+| Maintainability | Excellent | Replaced 40+ lines with library call |
+
+---
+
+## Summary
+
+Excellent improvement that replaces a buggy custom implementation with a battle-tested library. The safety check for large files is appropriate. Minor UX improvements could be made to the error message rendering, but no critical issues found. The change significantly reduces risk of browser crashes and improves code maintainability.

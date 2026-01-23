@@ -1,0 +1,108 @@
+COMMIT: d535307 - Drop old plan
+DATE: Thu Jan 22 11:27:35 2026 +0100
+FILES CHANGED: 1 file (+0 -1,418)
+
+================================================================================
+SUMMARY OF CHANGES
+================================================================================
+
+This commit deletes the entire IMPLEMENTATION_PLAN.md file (1,418 lines).
+
+The deleted file contained:
+- P0 Critical items (7 issues) - All marked FIXED with detailed resolution notes
+- P1 High Priority items (multiple issues) - Mix of fixed and pending
+- P2 Medium Priority items (numerous specs and issues)
+- Detailed tracking of implementation status, complexity estimates, file paths
+- Root cause analysis and fix descriptions for each item
+
+This deletion follows commit d296440 which introduced a new documentation and
+spec-driven workflow. The old monolithic plan is replaced by:
+- Distributed spec files in specs/new/*.md
+- Review files tracking code changes
+- Idea documents for future work
+
+================================================================================
+POTENTIAL ISSUES
+================================================================================
+
+ISSUE 1: Loss of historical context and fix documentation
+Severity: Medium (Documentation)
+Location: IMPLEMENTATION_PLAN.md (deleted)
+
+The deleted file contained valuable information:
+- Detailed root cause analysis for P0 bugs
+- Exact line numbers where issues occurred
+- Resolution notes describing what was changed and why
+- Complexity estimates that were validated through implementation
+
+This information is now lost and cannot be easily reconstructed.
+
+PROPOSAL: Before deleting, the historical information could have been:
+- Archived to docs/history/implementation-plan-v1.md
+- Extracted into post-mortems for significant bugs
+- Summarized in a "lessons learned" document
+
+Going forward, consider keeping resolved plans in an archive directory rather
+than deleting them entirely.
+
+--------------------------------------------------------------------------------
+
+ISSUE 2: No migration of pending items to new spec system
+Severity: Low (Completeness)
+Location: N/A
+
+The plan contained pending P1/P2 items that may not all have corresponding
+specs in the new specs/new/*.md directory. Some tracking information may be
+lost.
+
+PROPOSAL: Before deletion, pending items should have been verified to have
+corresponding specs, or explicitly marked as deprioritized/cancelled.
+
+--------------------------------------------------------------------------------
+
+ISSUE 3: Deletion timing relative to new system readiness
+Severity: Low (Process)
+Location: N/A
+
+The deletion occurs just 2 minutes after commit d296440 (11:25 vs 11:27).
+This tight timing suggests the deletion may have been hasty, without full
+verification that all useful information was preserved.
+
+PROPOSAL: For future major process transitions, allow a buffer period where
+both old and new systems coexist, enabling validation that nothing is lost.
+
+================================================================================
+ARCHITECTURAL OBSERVATIONS
+================================================================================
+
+This commit represents the final step in transitioning from:
+
+OLD SYSTEM (IMPLEMENTATION_PLAN.md):
+- Single monolithic document
+- Manual status tracking
+- Centralized priority management
+- Direct fix documentation inline
+
+NEW SYSTEM (specs/new/*.md + reviews/*.txt):
+- Distributed spec files
+- Automated review tracking
+- Decentralized issue identification
+- Specs describe "what" not "how"
+
+BENEFITS OF NEW APPROACH:
+- Scales better with codebase growth
+- Supports AI-assisted code review workflow
+- Creates audit trail via review files
+- Separates specification from implementation details
+
+RISKS:
+- Historical knowledge may be harder to find
+- No single place to see overall project status
+- Relies on consistent spec creation process
+
+RECOMMENDATIONS:
+
+1. Create an archive policy for deleted planning documents
+2. Consider a summary dashboard that aggregates spec status
+3. Establish clear criteria for when old documents can be deleted
+4. Document the transition in a "process changelog" for future reference

@@ -1,0 +1,134 @@
+COMMIT: 4892589 - feat: Implement 13 UI/UX specs for v1.0.0 SLC release
+DATE: 2026-01-23
+AUTHOR: Artur Briugeman
+CO-AUTHOR: Claude Opus 4.5
+
+=== CHANGES SUMMARY ===
+
+This commit implements 13 UI/UX specifications:
+
+1. Fix autonomy toggle form submit - Added type="button" to MainPage.tsx:361
+2. Hide scroll message in empty chat - Added rows.length > 0 check in ChatInterface.tsx:306
+3. Workflow title fallback - Changed from "Workflow {id}" to "New workflow" in 6 locations
+4. Autonomy toggle on ChatPage - Added toggle with tooltip (ChatPage.tsx:217-244)
+5. Sticky WorkflowInfoBox - Added sticky positioning in ChatDetailPage.tsx:122-124
+6. Mermaid fullscreen background fix - CSS override in index.css:14-18
+7. Rename Chat to Edit button - WorkflowDetailPage.tsx:317
+8. Move automation summary section - Relocated from lines 564-581 to after line 377
+9. Button reordering - Primary actions (Activate/Pause/Resume) now first
+10. Human-readable cron - Export formatCronSchedule from WorkflowInfoBox.tsx
+11. Active vs Running badge fix - Changed "Running" to "Active" for workflow status
+12. Schedule in workflow list - Added cron display in MainPage.tsx:521
+13. Remove Task section - Deleted lines 406-428 from WorkflowDetailPage
+
+Files changed:
+- IMPLEMENTATION_PLAN.md (major rewrite)
+- apps/web/src/components/ChatDetailPage.tsx (+6 lines)
+- apps/web/src/components/ChatInterface.tsx (+1 line)
+- apps/web/src/components/ChatPage.tsx (+32 lines)
+- apps/web/src/components/MainPage.tsx (+11 lines)
+- apps/web/src/components/StatusBadge.tsx (1 line change)
+- apps/web/src/components/TaskDetailPage.tsx (1 line change)
+- apps/web/src/components/WorkflowDetailPage.tsx (+/-42 lines restructured)
+- apps/web/src/components/WorkflowInfoBox.tsx (+3 lines)
+- apps/web/src/components/WorkflowsPage.tsx (1 line change)
+- apps/web/src/index.css (+6 lines)
+
+=== ISSUES FOUND ===
+
+CRITICAL:
+
+1. formatCronSchedule Missing NaN Validation
+   File: apps/web/src/components/WorkflowInfoBox.tsx:33-36
+   Code:
+     const hourNum = parseInt(hour, 10);
+     const displayHour = hourNum === 0 ? 12 : hourNum > 12 ? hourNum - 12 : hourNum;
+   Problem: parseInt returns NaN for non-numeric strings. No validation before arithmetic.
+   Impact: Could display "NaN:NaN AM" for malformed cron expressions.
+   Proposal: Add validation:
+     const hourNum = parseInt(hour, 10);
+     if (isNaN(hourNum)) return cron; // Return raw cron for invalid hour
+
+2. Title Field Not Saved by updateWorkflowFields (related to spec 19 in next commit)
+   File: packages/agent/src/ai-tools/save.ts:73-88
+   Problem: save.ts tries to pass {title} to updateWorkflowFields(), but the method's
+   type signature in script-store.ts:757 doesn't include 'title' in the Pick type.
+   The title is simply ignored at runtime.
+   Impact: Workflow titles will never be updated by the agent save tool.
+   Proposal: Add 'title' to the Pick type in updateWorkflowFields and add the
+   corresponding if-block to handle fields.title.
+
+MEDIUM:
+
+3. Overly Broad CSS Selector for Mermaid Fullscreen
+   File: apps/web/src/index.css:16-17
+   Code: .fixed.inset-0.z-50 { background-color: hsl(var(--background) / 1) !important; }
+   Problem: Targets ANY element with these 3 classes, not just Mermaid diagrams.
+   Impact: Could affect other fullscreen overlays from different libraries.
+   Proposal: Use more specific selector based on Streamdown's actual class names,
+   or add a wrapper class for Mermaid-specific styling.
+
+4. Hardcoded Magic Number for Sticky Header
+   File: apps/web/src/components/ChatDetailPage.tsx:122
+   Code: <div className="sticky top-[49px] z-10 ...">
+   Problem: Assumes SharedHeader height is exactly 49px.
+   Impact: Breaks if header height changes for responsive design.
+   Proposal: Use CSS variable --header-height or component prop to centralize value.
+
+5. formatCronSchedule in Wrong Module
+   File: apps/web/src/components/WorkflowInfoBox.tsx:12
+   Problem: A utility function exported from a UI component file, violates SoC.
+   Used in: WorkflowInfoBox.tsx, MainPage.tsx:10, WorkflowDetailPage.tsx:18
+   Proposal: Move to apps/web/src/lib/formatCronSchedule.ts or utils folder.
+
+6. Inconsistent isRunning Calculation
+   File: apps/web/src/components/MainPage.tsx:216
+   Code: const isRunning = latestRun && !latestRun.end_timestamp;
+   Problem: This business logic exists only in MainPage; WorkflowDetailPage doesn't
+   show a "Running" badge at all, creating UI inconsistency.
+   Proposal: Extract to shared hook useWorkflowRunningState() or add to both pages.
+
+LOW:
+
+7. Fallback Text Hardcoded in Multiple Places
+   Files: MainPage.tsx:511, WorkflowDetailPage.tsx:222,247, WorkflowInfoBox.tsx:74,
+          WorkflowsPage.tsx:50, TaskDetailPage.tsx:188
+   Code: {workflow.title || "New workflow"}
+   Problem: Same fallback in 6 locations - violates DRY.
+   Proposal: Create constant/utility: getWorkflowTitle(workflow) => workflow.title || "New workflow"
+
+8. Missing Error Boundary for Schedule Display
+   File: apps/web/src/components/MainPage.tsx:521-523
+   Code: {workflow.cron && (<span>{formatCronSchedule(workflow.cron)} · </span>)}
+   Problem: If formatCronSchedule throws, the entire workflow list item breaks.
+   Proposal: Wrap in try-catch or add error handling in formatCronSchedule itself.
+
+9. Boolean Logic Overly Complex
+   File: apps/web/src/components/ChatPage.tsx:249
+   Code: disabled={(!input && !uploadState.isUploading) || uploadState.isUploading}
+   Problem: Simplifies to: disabled={!input || uploadState.isUploading}
+   Proposal: Use simpler form for readability.
+
+=== PROPOSALS ===
+
+IMMEDIATE (before next release):
+1. Add NaN validation to formatCronSchedule()
+2. Fix updateWorkflowFields to include 'title' field (critical for spec 19)
+
+HIGH PRIORITY:
+3. Use more specific CSS selector for Mermaid fullscreen
+4. Move formatCronSchedule to lib/ directory
+
+MEDIUM PRIORITY:
+5. Use CSS variable for header height
+6. Extract isRunning calculation to shared utility
+7. Centralize workflow title fallback
+
+LOW PRIORITY:
+8. Add error handling around formatCronSchedule calls
+9. Simplify disabled boolean logic
+
+=== TESTING NOTES ===
+
+Verified via type-check and test commands mentioned in AGENTS.md.
+Tests pass: 216 in packages/tests, 37 in user-server.

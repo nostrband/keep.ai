@@ -1,0 +1,162 @@
+COMMIT REVIEW: 8f073e7
+======================
+Title: Implement Spec 04: Workflow Hub Page completion
+Author: Artur <artur@keep.ai>
+Date: Thu Jan 22 14:18:01 2026 +0100
+Co-Authored-By: Claude Opus 4.5
+
+FILES CHANGED:
+- IMPLEMENTATION_PLAN.md (+13/-4)
+- apps/web/src/components/WorkflowDetailPage.tsx (+8)
+- apps/web/src/components/WorkflowErrorAlert.tsx (NEW, +111)
+- apps/web/src/hooks/useNotifications.ts (+20/-1)
+
+SUMMARY OF CHANGES:
+===================
+This commit completes Spec 04: Workflow Hub Page by adding:
+
+1. **useUnresolvedWorkflowError hook** - Fetches the latest unresolved error for a workflow
+   - Added to useNotifications.ts
+   - Uses api.notificationStore.getUnresolvedError(workflowId)
+
+2. **WorkflowErrorAlert component** - Error alert banner for workflow detail page
+   - Shows error type, service name, and message
+   - Action buttons based on error type:
+     - auth: "Reconnect" → navigates to /settings
+     - permission: "Check Permissions" → navigates to /settings
+     - network: "Retry Now" → resolves notification
+     - internal: "View Details" → navigates to /notifications/{workflowId}
+   - Dismiss button to acknowledge notification
+
+3. **WorkflowDetailPage integration** - Adds error alert at top of workflow content
+
+ISSUES IDENTIFIED:
+==================
+
+### Issue 1: CRITICAL - Incorrect Query Key for useUnresolvedWorkflowError (HIGH)
+**Location:** useNotifications.ts:116
+**Problem:** The hook uses `qk.notification(workflowId)` as the query key, but
+`qk.notification(id)` is semantically designed for notification IDs, not workflow IDs.
+
+Looking at queryKeys.ts:69:
+```typescript
+notification: (id: string) => [{ scope: "notification", id }] as const,
+```
+
+This creates several problems:
+1. **Cache collision risk**: If a notification ID ever matches a workflow ID, they'd
+   share the same cache entry with completely different data.
+2. **Incorrect invalidation**: When mutations resolve/acknowledge notifications,
+   they invalidate `qk.notifications()` and `qk.unresolvedNotifications()` but NOT
+   `qk.notification(workflowId)`, leaving stale error alerts.
+3. **Semantic confusion**: The query key misleads maintainers about cached data type.
+
+**Proposal:** Add a dedicated query key and use it:
+```typescript
+// In queryKeys.ts
+unresolvedWorkflowError: (workflowId: string) =>
+  [{ scope: "unresolvedWorkflowError", workflowId }] as const,
+
+// In useNotifications.ts
+queryKey: qk.unresolvedWorkflowError(workflowId),
+
+// In mutation onSuccess handlers, add:
+queryClient.invalidateQueries({ queryKey: qk.unresolvedWorkflowError() });
+```
+
+### Issue 2: Layout Structure - Unnecessary Nested Container (MEDIUM)
+**Location:** WorkflowDetailPage.tsx:236-243
+**Problem:** The WorkflowErrorAlert is placed inside an outer container with
+`bg-white rounded-lg border border-gray-200 p-6`, and immediately after there's
+ANOTHER div with identical classes `bg-white rounded-lg border border-gray-200 p-6 mb-6`.
+
+This creates:
+- Visual redundancy (white box inside white box with same styling)
+- Confusing hierarchy where error alert floats between containers
+- Extra padding/spacing that doesn't match the intent
+
+Looking at the structure:
+```
+<div className="bg-white rounded-lg border...">  <!-- OUTER - unnecessary? -->
+  <WorkflowErrorAlert />                          <!-- error with its own styling -->
+  <div className="bg-white rounded-lg border..."> <!-- Workflow Metadata -->
+    ...
+  </div>
+</div>
+```
+
+**Proposal:** Remove the outer wrapper or restructure so error alert sits ABOVE
+the workflow metadata container, not nested inside an invisible wrapper:
+```tsx
+{unresolvedError && <WorkflowErrorAlert notification={unresolvedError} />}
+<div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
+  {/* Workflow Metadata */}
+</div>
+```
+
+### Issue 3: Incorrect Import Path (MEDIUM)
+**Location:** WorkflowErrorAlert.tsx:3
+**Problem:** Uses `import { Notification } from "packages/db/dist"` instead of `@app/db`.
+Same issue as in commit 52042af.
+
+**Proposal:** Change to `import type { Notification } from "@app/db";`
+
+### Issue 4: Code Duplication with NotificationCard (MEDIUM)
+**Location:** WorkflowErrorAlert.tsx:12-44
+**Problem:** Duplicates code from NotificationCard.tsx:
+- `parsePayload` function (lines 12-19) - identical logic
+- `errorTypeLabels` object (lines 39-44) - exact duplicate
+- Similar error type handling logic
+
+**Proposal:** Extract to shared modules as described in 52042af review.
+
+### Issue 5: Dismiss Uses Acknowledge Instead of Resolve (LOW)
+**Location:** WorkflowErrorAlert.tsx:73-75, 97-103
+**Problem:** The "Dismiss" button calls `acknowledgeMutation.mutateAsync()` which
+marks the notification as "seen" but NOT "resolved". This means:
+- The error will still appear in unresolved counts
+- The notification won't be filtered out by unresolvedOnly queries
+- User expectation is "dismiss = go away" but it just marks as acknowledged
+
+The "Retry Now" action correctly uses `resolveMutation` which actually dismisses it.
+
+**Proposal:** Change Dismiss to use `resolveNotification` instead of `acknowledgeNotification`:
+```tsx
+const handleDismiss = async () => {
+  await resolveMutation.mutateAsync(notification.id);
+};
+```
+
+### Issue 6: Error Alert Inside Wrong Container in DOM (LOW)
+**Location:** WorkflowDetailPage.tsx:238-240
+**Problem:** The error alert is rendered INSIDE the main content container, but
+OUTSIDE the "Workflow Metadata" section. This placement is technically correct
+visually, but the DOM structure suggests it's part of the white card when it's
+actually meant to be a separate alert banner above the content.
+
+The WorkflowErrorAlert itself has `bg-red-50 border border-red-200` styling, so
+it will appear distinct, but the nesting is semantically confusing.
+
+**Proposal:** Move error alert to be a sibling of the main content container, not
+a child of it.
+
+POSITIVE ASPECTS:
+=================
+1. Clean hook abstraction with useUnresolvedWorkflowError
+2. WorkflowErrorAlert is self-contained with its own styling
+3. Good action button variety based on error type
+4. Uses standard Button component consistently
+5. Proper loading states with isPending on buttons
+6. Clear visual hierarchy with red-50 background for alerts
+
+CONCLUSION:
+===========
+The implementation achieves the spec goals, but has a critical query key issue that
+will cause stale data problems. The layout nesting is confusing and should be
+cleaned up. The dismiss functionality using acknowledge vs resolve may not match
+user expectations.
+
+Priority fixes:
+1. Fix the query key to use a dedicated unresolvedWorkflowError key
+2. Fix invalidation to include the new query key
+3. Consider using resolve instead of acknowledge for dismiss

@@ -1,0 +1,165 @@
+# Review: Commit 3c62f5d
+
+## Summary
+
+**Commit**: 3c62f5d94bf3b86dfb3867e8f2dcfc07b770dc69
+**Date**: Wed Jan 21 16:28:29 2026 +0100
+**Title**: Fix UI quality issues: type safety, service worker, and performance
+
+This commit implements several UI quality improvements across 6 files:
+1. MainPage.tsx - Replace `Record<string, any>` with proper types (ScriptRun, Workflow, Task)
+2. SharedHeader.tsx - Memoize debug mode to avoid reading localStorage on every render
+3. WorkflowDetailPage.tsx - Add useMemo for mermaid diagram markdown
+4. main.tsx - Change service worker update detection from statechange to controllerchange
+5. tooltip.tsx - Update styling (solid background, remove arrow, left-align text)
+6. IMPLEMENTATION_PLAN.md - Mark items as fixed
+
+---
+
+## Changes in Detail
+
+### MainPage.tsx - Type Safety Improvements
+- Imported `ScriptRun`, `Workflow`, `Task` types from `@app/db`
+- Changed `getSecondaryLine` function signature from `(workflow: any, latestRun: any, task: any)` to proper types
+- Changed `latestRuns` state from `Record<string, any>` to `Record<string, ScriptRun>`
+- Changed `taskMap` from `Record<string, any>` to `Record<string, Task>`
+- Moved autonomy toggle from below input area into the PromptInputTools toolbar
+
+### SharedHeader.tsx - Debug Mode Memoization
+- Changed from reading localStorage on every render to using useState initializer
+- This ensures localStorage is only read once on component mount
+
+### WorkflowDetailPage.tsx - Mermaid Optimization
+- Added useMemo for `diagramMarkdown` string creation
+- Dependencies: `[activeScript?.diagram]`
+- This maintains referential stability for the Response component's memo
+
+### main.tsx - Service Worker Update Detection
+- Replaced `updatefound` + `statechange` approach with `controllerchange` event
+- Added `hadController` flag to distinguish first install from updates
+- Fires `APP_UPDATE_EVENT` only when there was a previous controller
+
+### tooltip.tsx - Styling Changes
+- Changed sideOffset from 0 to 4px
+- Background changed from dark (`bg-foreground`) to light (`bg-white`)
+- Text color changed from `text-background` to `text-gray-900`
+- Added border and shadow
+- Removed arrow element
+- Text alignment changed from `text-balance` to `text-left`
+
+---
+
+## Potential Issues
+
+### ISSUE 1: SharedHeader.tsx - Unsafe localStorage Access [CRITICAL]
+**Severity**: Critical
+**Status**: Fixed in later commit (current code uses safeLocalStorageGet)
+
+**Problem**: The commit introduced `localStorage.getItem()` directly without the safe wrapper:
+```typescript
+const [debugMode] = useState(() => localStorage.getItem("keep-ai-debug-mode") === "true");
+```
+
+**Why this is problematic**:
+- In private/incognito mode, direct localStorage access can throw exceptions in some browsers
+- The codebase has `safeLocalStorageGet()` utility specifically for this (apps/web/src/lib/safe-storage.ts)
+- This inconsistency could cause the app to crash in incognito mode
+
+**Resolution**: Use `safeLocalStorageGet()` instead of `localStorage.getItem()`. This appears to have been fixed in a subsequent commit.
+
+---
+
+### ISSUE 2: main.tsx - Service Worker Detection Logic [HIGH]
+**Severity**: High
+
+**Problem**: The new `controllerchange` approach has subtle timing issues.
+
+**Old approach**:
+```typescript
+registration.addEventListener("updatefound", () => {
+  const newWorker = registration.installing;
+  if (newWorker) {
+    newWorker.addEventListener("statechange", () => {
+      if (newWorker.state === "activated") {
+        if (navigator.serviceWorker.controller) {
+          window.dispatchEvent(new CustomEvent(APP_UPDATE_EVENT));
+        }
+      }
+    });
+  }
+});
+```
+
+**New approach**:
+```typescript
+let hadController = !!navigator.serviceWorker.controller;
+navigator.serviceWorker.addEventListener('controllerchange', () => {
+  if (hadController) {
+    window.dispatchEvent(new CustomEvent(APP_UPDATE_EVENT));
+  }
+  hadController = true;
+});
+```
+
+**Potential issues**:
+1. **Event listener registration timing**: The `controllerchange` listener is registered BEFORE `navigator.serviceWorker.register()` is called. If the browser has a cached controller from a previous session, the event might fire during initial page load before the listener is attached (race condition).
+
+2. **First controller scenario**: If user loads page with no controller (hadController=false), then an old SW activates, then a new SW updates and takes control, the notification won't fire because hadController was false when the first controller change happened.
+
+3. **Lost registration reference**: The code no longer captures the registration object, losing the ability to check registration state or manually update.
+
+**Proposal**: Consider keeping the `updatefound` approach but fixing the edge case that prompted this change. The old approach explicitly waits for the `activated` state which is more precise.
+
+---
+
+### ISSUE 3: tooltip.tsx - Visual Consistency [LOW]
+**Severity**: Low (UX consideration)
+
+**Problem**: The tooltip styling change (dark to light, removed arrow) may create visual inconsistency:
+- If other parts of the app still use the old dark tooltip style, users may experience inconsistent UX
+- Removing the arrow makes it less clear which element the tooltip is pointing to
+- The change affects ALL tooltips in the app, not just the autonomy toggle
+
+**Proposal**: Verify this styling change is intentional for the entire app, not just the autonomy toggle tooltip.
+
+---
+
+### ISSUE 4: MainPage.tsx - Workflow Type Import Unused? [TRIVIAL]
+**Severity**: Trivial
+
+**Observation**: The `Workflow` type is imported but I initially thought it might not be used. Upon closer inspection, it IS used in the `getSecondaryLine` function parameter.
+
+**Status**: No issue - types are correctly used.
+
+---
+
+## Positive Aspects
+
+1. **Type safety improvement**: Replacing `any` with proper types is excellent for maintainability and catching bugs at compile time.
+
+2. **Performance optimization**: The useMemo for mermaid diagram prevents unnecessary re-renders of the Response component.
+
+3. **Consistent UX**: Moving the autonomy toggle into the toolbar provides better visual consistency with other toolbar elements.
+
+4. **Debug mode optimization**: Reading localStorage once on mount is more efficient than reading on every render.
+
+---
+
+## Summary Table
+
+| Issue | Severity | Type | Status |
+|-------|----------|------|--------|
+| localStorage without safe wrapper | Critical | Bug | Fixed in later commit |
+| Service worker detection timing | High | Logic | Needs review |
+| Tooltip visual consistency | Low | UX | Consider verifying |
+| Type imports | Trivial | N/A | No issue |
+
+---
+
+## Recommendations
+
+1. **Verify service worker behavior**: Test the update notification in various scenarios (first install, update, refresh after update)
+
+2. **Test in incognito mode**: Ensure the app works correctly in private browsing mode
+
+3. **Review tooltip changes globally**: Ensure the new tooltip styling is desired across the entire application

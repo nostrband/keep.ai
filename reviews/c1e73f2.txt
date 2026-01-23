@@ -1,0 +1,126 @@
+# Review: c1e73f2 - Fix app update banner and UI consistency issues
+
+## Commit Summary
+- Add Reload button to app update banner (#59)
+- Increase banner z-index to z-[60] to stay above modals (#60)
+- Clear success message when showing warning in WorkflowDetailPage (#62)
+- Verified CodeBlock timeout null assignment already fixed (#63)
+
+## Files Changed
+- apps/web/src/App.tsx (AppUpdateBanner component)
+- apps/web/src/components/WorkflowDetailPage.tsx
+- IMPLEMENTATION_PLAN.md
+- Moved 4 spec files to specs/done/
+
+---
+
+## Changes Analysis
+
+### 1. AppUpdateBanner Reload Button & Z-Index (App.tsx)
+
+**Changes:**
+- Added "Reload" button that calls `window.location.reload()`
+- Increased z-index from z-50 to z-[60]
+- Wrapped buttons in flex container for proper alignment
+
+**Assessment:**
+- Z-index change is CORRECT - banner now appears above modal dialogs (z-50)
+- `window.location.reload()` is the standard approach for PWA updates
+- Button styling (white on blue) has good contrast
+
+### 2. WorkflowDetailPage Warning Message (WorkflowDetailPage.tsx)
+
+**Change:**
+- Added `setSuccessMessage("")` when showing warning to prevent both messages displaying
+
+**Assessment:**
+- CORRECT fix - prevents confusing UX with both success and warning visible
+
+### 3. CodeBlock Timeout Verification
+
+- Confirmed that `copyTimeoutRef.current = null` is already present at line 146
+- No code changes needed
+
+---
+
+## Potential Issues Found
+
+### Issue 1: AppUpdateBanner Accessibility Missing
+**Severity:** Medium
+**Location:** App.tsx:146-166
+
+The banner lacks accessibility attributes:
+- Missing `role="alert"` or `role="status"` - screen readers won't announce it
+- No `aria-live` attribute
+
+**Proposal:**
+Add accessibility attributes to the banner div:
+```tsx
+<div
+  className="fixed top-0 left-0 right-0 bg-blue-600..."
+  role="alert"
+  aria-live="polite"
+>
+```
+
+### Issue 2: Auto-dismiss Timing May Be Too Short
+**Severity:** Low
+**Location:** App.tsx (useEffect in AppUpdateBanner)
+
+The banner auto-dismisses after 10 seconds. Users on slow networks or distracted users might not notice or have time to click Reload.
+
+**Proposal:**
+Consider extending to 15-20 seconds, or adding a countdown indicator.
+
+### Issue 3: No Loading State on Reload Button
+**Severity:** Low
+**Location:** App.tsx:150-153
+
+After clicking Reload, there's no visual feedback before the page reloads.
+
+**Proposal:**
+Add a loading state:
+```tsx
+const [isReloading, setIsReloading] = useState(false);
+// ...
+onClick={() => {
+  setIsReloading(true);
+  window.location.reload();
+}}
+disabled={isReloading}
+```
+
+### Issue 4: Message Clarity Could Be Improved
+**Severity:** Low
+**Location:** App.tsx:148
+
+"App updated to a new version" is passive and doesn't explain the action needed.
+
+**Proposal:**
+Consider: "New version available - reload to update"
+
+### Issue 5: Inconsistent Message Clearing Pattern
+**Severity:** Low
+**Location:** WorkflowDetailPage.tsx vs ScriptDetailPage.tsx/TaskDetailPage.tsx
+
+The commit adds clearing success when showing warning in WorkflowDetailPage, but other pages (ScriptDetailPage, TaskDetailPage) clear BOTH messages BEFORE mutations, not just during showWarning.
+
+**Proposal:**
+Standardize the message clearing pattern across all detail pages for consistency.
+
+---
+
+## Code Quality Assessment
+
+| Aspect | Rating | Notes |
+|--------|--------|-------|
+| Correctness | Good | All fixes work as intended |
+| Completeness | Good | Addressed all spec items |
+| Consistency | Fair | Pattern differs slightly from other pages |
+| Accessibility | Needs Work | Banner missing ARIA attributes |
+
+---
+
+## Summary
+
+The commit successfully implements the four spec items. The z-index fix and reload button are appropriate solutions. Minor improvements could be made to accessibility and UX feedback, but no critical issues found.

@@ -1,0 +1,130 @@
+COMMIT REVIEW: 68d5379
+======================
+
+Title: Update IMPLEMENTATION_PLAN.md: mark Specs 07, 08, 09, 11 as completed
+
+Author: Claude Agent (Artur)
+Date: Thu Jan 22 13:46:57 2026 +0100
+
+Files Changed: 1 file, +40 insertions, -36 deletions
+
+## SUMMARY
+
+This commit updates the IMPLEMENTATION_PLAN.md document to reflect the completion
+of four P0 specifications. It is a documentation-only change with no code impact.
+
+## CHANGES IN PLAIN ENGLISH
+
+### Summary Section Updates
+- Changed "All P0 specs (07, 08, 09, 10, 11, 12): NOT STARTED" to split view:
+  - "P0 specs (07, 08, 09, 11): COMPLETED"
+  - "P0 specs (10, 12): NOT STARTED"
+
+### Infrastructure Gaps Section
+- Updated migration version from v26 to v28
+- Struck through the "no direct chat<->workflow links" gap (now resolved)
+- Added spec references to remaining gaps
+
+### Spec Status Table
+- Spec 07: COMPLETED (all code removed)
+- Spec 08: COMPLETED (all code removed)
+- Spec 09: COMPLETED (v28 migration, workflow.chat_id added)
+- Spec 11: COMPLETED (v27 migration, explicit status values)
+
+### Spec 09 Section
+- Changed heading to "COMPLETED"
+- Added "Status: COMPLETED" field
+- Replaced "Verified Current State" with "Completion Notes"
+- Listed what was implemented:
+  - Migration v28 created
+  - getWorkflowByChatId() method added
+  - getChatByWorkflowId() and getChatFirstMessage() methods added
+  - createChat and createTask updated for bidirectional links
+  - WorkflowDetailPage updated
+  - Join queries updated
+  - Noted ChatSidebar.tsx doesn't exist
+
+### Spec 11 Section
+- Changed heading to "COMPLETED"
+- Added "Status: COMPLETED" field
+- Replaced "Verified Current State" with "Completion Notes"
+- Listed what was implemented:
+  - Migration v27 with status value updates
+  - StatusBadge.tsx updated
+  - WorkflowDetailPage.tsx updated
+  - save.ts updated for draft->ready transition
+  - workflow-worker.ts updated for error status
+  - All status comparisons updated
+
+### Migration Order Section
+- Updated to show v27 and v28 as COMPLETED
+- Corrected the migration numbering:
+  - v27 = Spec 11 (was listed as Spec 09)
+  - v28 = Spec 09 (was listed as Spec 10)
+  - v29 = Spec 10 (pending)
+  - v30 = Spec 12 (pending)
+
+### Execution Checklist
+- Marked completed specs with [x]
+- Updated Spec 09 to reference v28 (not v27)
+- Added verification notes as completed
+
+## ISSUES FOUND
+
+### Critical Issues: NONE
+
+### Potential Issues:
+
+1. **Stale Action Items**
+
+   The "Action Items" subsections under Spec 09 and Spec 11 still contain the
+   original implementation instructions even though the specs are marked COMPLETED.
+
+   Example: Spec 09 still has "1. Create migration v27..." as an action item.
+
+   Impact: Could confuse future readers.
+   Recommendation: Either remove action items or clearly mark them as "completed".
+   Severity: LOW - Documentation only, no runtime impact.
+
+2. **Migration Order Mismatch with Original Plan**
+
+   Original plan had:
+   - v27 = Spec 09 (chat/workflow links)
+   - v29 = Spec 11 (status values)
+
+   Actual implementation:
+   - v27 = Spec 11 (status values)
+   - v28 = Spec 09 (chat/workflow links)
+
+   This is noted in the updated document but the historical context could confuse.
+   Impact: None - the correct order is documented.
+
+3. **Missing v29 Reference**
+
+   The document says v28 was created for Spec 09, but doesn't mention that the
+   data backfill is in v29 (which was created in a subsequent commit 28d458e).
+
+   The completion notes say "Created migration v28 with chat_id..." but the actual
+   data population requires v29 as well.
+
+   Impact: Incomplete documentation of the migration split.
+   Recommendation: Add note about v29 containing the data backfill.
+
+## PROPOSALS
+
+### Proposal 1: Clean Up Action Items (LOW PRIORITY)
+
+For completed specs, either:
+- Remove the action items entirely, or
+- Add a clear header like "Completed Implementation:" before them
+
+### Proposal 2: Document v29 Requirement (LOW PRIORITY)
+
+In Spec 09 completion notes, add:
+- "Data backfill for existing workflows is in v29 (separate migration per cr-sqlite requirements)"
+
+## VERDICT
+
+**APPROVED** - Documentation accurately reflects the completed work. The minor
+inconsistencies noted are cosmetic and don't affect understanding of the
+implementation status. The core information is correct.

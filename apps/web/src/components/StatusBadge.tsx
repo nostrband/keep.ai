@@ -2,17 +2,19 @@ import React from "react";
 import { Badge } from "../ui";
 
 // Workflow status badge - based on workflow.status field
-// Status values: 'draft', 'ready', 'active', 'paused', 'error' (Spec 11)
+// Status values: 'draft', 'ready', 'active', 'paused', 'error', 'archived' (Spec 11)
 export function WorkflowStatusBadge({ status }: { status: string }) {
   switch (status) {
     case "active":
-      return <Badge className="bg-green-100 text-green-800">Running</Badge>;
+      return <Badge className="bg-green-100 text-green-800">Active</Badge>;
     case "paused":
       return <Badge className="bg-yellow-100 text-yellow-800">Paused</Badge>;
     case "error":
       return <Badge className="bg-red-100 text-red-800">Error</Badge>;
     case "ready":
       return <Badge className="bg-blue-100 text-blue-800">Ready</Badge>;
+    case "archived":
+      return <Badge variant="outline" className="text-gray-400">Archived</Badge>;
     case "draft":
     default:
       return <Badge variant="outline">Draft</Badge>;

@@ -7,11 +7,11 @@ import { createDBNode } from "@app/node";
  * This allows testing the store in isolation without CR-SQLite dependencies.
  */
 async function createTaskTables(db: DBInterface): Promise<void> {
-  // Create tasks table
+  // Create tasks table (matches production v1 + v15 + v31 migrations)
   await db.exec(`
     CREATE TABLE IF NOT EXISTS tasks (
       id TEXT PRIMARY KEY NOT NULL,
-      timestamp INTEGER NOT NULL,
+      timestamp INTEGER NOT NULL DEFAULT 0,
       reply TEXT NOT NULL DEFAULT '',
       state TEXT NOT NULL DEFAULT '',
       thread_id TEXT NOT NULL DEFAULT '',
@@ -21,19 +21,19 @@ async function createTaskTables(db: DBInterface): Promise<void> {
       chat_id TEXT NOT NULL DEFAULT '',
       workflow_id TEXT NOT NULL DEFAULT '',
       asks TEXT NOT NULL DEFAULT '',
-      deleted INTEGER DEFAULT 0
+      deleted INTEGER NOT NULL DEFAULT 0
     )
   `);
   await db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_chat_id ON tasks(chat_id)`);
   await db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_workflow_id ON tasks(workflow_id)`);
 
-  // Create task_runs table
+  // Create task_runs table (matches production v6 + later migrations)
   await db.exec(`
     CREATE TABLE IF NOT EXISTS task_runs (
       id TEXT PRIMARY KEY NOT NULL,
-      task_id TEXT NOT NULL,
+      task_id TEXT NOT NULL DEFAULT '',
       type TEXT NOT NULL DEFAULT '',
-      start_timestamp TEXT NOT NULL,
+      start_timestamp TEXT NOT NULL DEFAULT '',
       thread_id TEXT NOT NULL DEFAULT '',
       reason TEXT NOT NULL DEFAULT '',
       inbox TEXT NOT NULL DEFAULT '',

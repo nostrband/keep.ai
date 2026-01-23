@@ -1,0 +1,123 @@
+COMMIT REVIEW: d51b40f
+Title: Verify and complete final P2 items: cost tracking, input positioning, focus param
+Date: 2026-01-21
+
+================================================================================
+SUMMARY
+================================================================================
+
+This commit verifies and completes 3 P2 items from the implementation plan:
+- #40 MainPage Input Positioning
+- #46 Cost Tracking Helper
+- #47 Focus Input URL Param
+
+The commit makes significant changes to MainPage.tsx layout (refactoring from
+fixed bottom input to conditional inline/centered layout), removes custom event
+handling in favor of URL parameters, and standardizes cost tracking across 9
+agent tools with a new type-safe helper.
+
+================================================================================
+CHANGES DESCRIPTION
+================================================================================
+
+1. IMPLEMENTATION_PLAN.md
+   - Updated status of items #40, #46, #47 from "NOT VERIFIED" to "VERIFIED"
+   - Updated summary table showing all P0-P3 items complete (67 of 67)
+   - Added detailed verification notes explaining existing implementations
+
+2. apps/web/src/App.tsx
+   - Removed FOCUS_INPUT_EVENT custom event constant and its export
+   - Removed useLocation dependency from ElectronIPCHandler
+   - Simplified handleFocusInput: now just navigates to '/?focus=input'
+   - Removed locationRef that was tracking current path
+
+3. apps/web/src/components/MainPage.tsx (MAJOR REFACTOR)
+   - Added useSearchParams from react-router-dom
+   - Removed FOCUS_INPUT_EVENT import and window event listener
+   - Removed promptHeight state and promptContainerRef (no longer needed)
+   - Removed ResizeObserver for tracking input container height
+   - Extracted renderPromptInput() function to avoid JSX duplication
+   - Added new useEffect for handling ?focus=input URL parameter
+   - Split rendering into two paths:
+     a) Empty state (!hasWorkflows): centered layout with examples
+     b) With workflows: top-positioned input + workflow list below
+   - Removed fixed-position input div at viewport bottom
+   - Changed layout from dynamic bottom padding to static pb-6
+
+4. packages/agent/src/errors.ts
+   - Added EventUsageData interface: { usage: { cost: number } }
+   - Added formatUsageForEvent() helper function with JSDoc documentation
+   - Helper enforces correct nested structure for cost tracking
+
+5. packages/agent/src/index.ts
+   - Exported formatUsageForEvent function
+   - Exported EventUsageData type
+
+6. 9 Tool Files Updated (text-generate, text-summarize, text-classify,
+   text-extract, images-explain, images-generate, images-transform,
+   pdf-explain, audio-explain):
+   - Added import for formatUsageForEvent from errors
+   - Replaced `usage: { cost: usage.cost }` with `...formatUsageForEvent(usage)`
+
+================================================================================
+POTENTIAL ISSUES
+================================================================================
+
+1. [LOW] Race condition in MainPage conditional rendering
+
+   The hasWorkflows condition depends on sortedWorkflows computed from:
+   - workflows (from useWorkflows query)
+   - latestRuns (from separate API call)
+   - taskMap (derived from useTasks query)
+
+   When workflows arrive before latestRuns/taskMap, secondary text may briefly
+   show incomplete status (e.g., "No schedule" instead of correct status).
+
+   Impact: Minimal - getSecondaryLine() handles undefined gracefully and the
+   data loads quickly. This is cosmetic and doesn't affect functionality.
+
+   Proposal: No fix needed. If desired, could add skeleton loading state.
+
+2. [LOW] searchParams effect dependency
+
+   The useEffect for focus=input handling includes both searchParams and
+   setSearchParams in dependencies. While this follows React hooks rules
+   correctly, it creates a brief re-render cycle:
+   - Effect detects focus=input
+   - Calls setSearchParams({})
+   - searchParams changes (now empty)
+   - Effect runs again (but exits early since focus param is gone)
+
+   Impact: Negligible - one extra effect run that exits immediately.
+
+   Proposal: No fix needed. This is idiomatic React Router v6 usage.
+
+3. [INFO] Layout behavior change
+
+   Old behavior: Input fixed at bottom of viewport, content scrolls behind it
+   New behavior: Input inline with content, scrolls with page
+
+   This is an intentional UX change, not a bug. The new layout is cleaner
+   for the empty state (centered) and more intuitive with workflows (top input).
+
+================================================================================
+CODE QUALITY ASSESSMENT
+================================================================================
+
+Strengths:
+- Clean extraction of renderPromptInput() eliminates 100+ lines of duplication
+- Type-safe formatUsageForEvent helper prevents cost tracking bugs
+- URL parameter approach is more debuggable than custom events
+- Good JSDoc documentation on new helper function
+- All 9 tools consistently updated with same pattern
+
+Minor observations:
+- MainPage.tsx is still 500+ lines; could benefit from further component extraction
+- formatUsageForEvent could accept null (not just undefined) for extra safety
+
+================================================================================
+VERDICT
+================================================================================
+
+APPROVED - No critical issues found. The commit is well-implemented with good
+separation of concerns, type safety improvements, and cleaner UX layout.

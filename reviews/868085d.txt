@@ -1,0 +1,80 @@
+COMMIT REVIEW: 868085d
+=======================
+Title: fix: Add missing workflow_id and asks fields to CLI Task mock
+Date: 2026-01-22 14:44:19 +0100
+Co-Authored-By: Claude Opus 4.5
+
+SUMMARY OF CHANGES
+------------------
+This commit adds two missing required fields to a mock Task object in the CLI agent
+command, fixing a type-check failure introduced by Spec 10.
+
+File changed: apps/cli/src/commands/agent.ts
+
+The change adds:
+  - workflow_id: ""
+  - asks: ""
+
+to the mock Task object at approximately lines 188-189.
+
+CONTEXT
+-------
+The Task interface in packages/db/src/task-store.ts was updated in Spec 10 to include:
+  - workflow_id: string  // Direct link to workflow
+  - asks: string         // Moved from deprecated task_states table
+
+The CLI agent command creates a mock Task object that is passed to ReplEnv constructor.
+This mock must satisfy the Task interface for TypeScript compilation.
+
+ANALYSIS
+--------
+This is a straightforward type-compliance fix. The mock Task object is used ONLY for
+type satisfaction when initializing ReplEnv. Research confirmed:
+
+1. The mock Task (with all empty/zero values) is passed to ReplEnv constructor
+2. ReplEnv stores it but rarely accesses it directly
+3. During actual agent execution, a DIFFERENT agentTask is created per iteration
+4. The original mock remains static and provides no real functionality
+
+The empty string values ("") are appropriate because:
+- This is a CLI REPL context, not a real workflow execution
+- There's no actual workflow to link to (workflow_id: "")
+- There are no pending asks (asks: "")
+
+POTENTIAL ISSUES
+----------------
+
+1. NONE - This is a minimal, correct fix
+
+The fix:
+- Uses the correct field names matching the Task interface
+- Uses appropriate default values (empty strings)
+- Maintains consistency with other mock/test Task objects in the codebase
+- Does not introduce any behavioral changes
+
+OBSERVATIONS
+------------
+
+1. PATTERN: Mock Task objects in codebase
+   Other locations with Task mock objects that correctly include these fields:
+   - packages/tests/src/task-store.test.ts: createTask() helper includes both fields
+   - packages/agent/src/tools/add-task.ts: Uses workflow_id: "", asks: ""
+   - packages/agent/src/tools/add-task-recurring.ts: Uses workflow_id: "", asks: ""
+
+2. COMMIT MESSAGE QUALITY: Good
+   - Clear description of what was added
+   - Explains WHY (Task interface updated in Spec 10, required fields)
+   - Notes the consequence (type-check failures)
+
+PROPOSALS
+---------
+None required. This is a correct, minimal fix that resolves a type-check failure.
+
+VERDICT: ACCEPTABLE
+Clean, minimal fix that properly satisfies the updated Task interface requirements
+without introducing any new functionality or side effects.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+No issues found.

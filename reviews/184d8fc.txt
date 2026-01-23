@@ -1,0 +1,90 @@
+# Review: 184d8fc - Add atomic pauseAllWorkflows SQL method
+
+## Summary
+
+This commit replaces a loop-based workflow pause implementation with a single atomic SQL UPDATE operation. The change affects:
+- `packages/db/src/script-store.ts` - Added new `pauseAllWorkflows()` method
+- `apps/web/src/App.tsx` - Updated to use the new method instead of fetch-and-update loop
+- `IMPLEMENTATION_PLAN.md` - Marked spec as completed
+- Moved spec file to `specs/done/`
+
+### Changes in Plain English
+
+1. **New method in ScriptStore** (`script-store.ts:808-825`):
+   - Added `pauseAllWorkflows(tx?: DBInterface)` that performs a single atomic UPDATE
+   - First queries COUNT of active workflows
+   - If count > 0, executes `UPDATE workflows SET status = 'paused' WHERE status = 'active'`
+   - Returns the count of affected workflows for UI feedback
+
+2. **Simplified App.tsx handler** (`App.tsx:83-106`):
+   - Removed fetch of all workflows with `listWorkflows()`
+   - Removed filter for active workflows
+   - Removed loop that called `updateWorkflow()` for each
+   - Now just calls `await apiRef.current.scriptStore.pauseAllWorkflows()` and uses returned count
+
+---
+
+## Issues Identified
+
+### Issue 1: Potential Race Condition Between COUNT and UPDATE (Low Severity)
+
+**Location**: `script-store.ts:812-822`
+
+The method performs SELECT COUNT then UPDATE as two separate queries. Between these queries, another process could:
+- Change a workflow's status from 'active' to something else
+- Add new 'active' workflows
+
+This would cause the returned count to differ from the actual number of rows updated.
+
+**Impact**: Low - The count is only used for UI feedback (notification message). The actual pause operation is atomic and correct. This is a cosmetic issue only.
+
+**Proposal**:
+For absolute correctness, SQLite's `changes()` function could be used after the UPDATE to get the actual count:
+```typescript
+await db.exec(`UPDATE workflows SET status = 'paused' WHERE status = 'active'`);
+const countResult = await db.execO<{ count: number }>(`SELECT changes() as count`);
+```
+
+However, this is over-engineering for a simple UI feedback use case. The current implementation is acceptable.
+
+### Issue 2: No Timestamp Update (Low Severity)
+
+**Location**: `script-store.ts:819-822`
+
+The UPDATE only changes `status` but doesn't update `timestamp`. Other workflow update methods like `updateWorkflow()` update the timestamp field.
+
+**Impact**: Low - The timestamp field appears to track when the workflow was last modified. Batch pausing without updating timestamps means clients won't see the workflows as "recently modified". For a batch pause operation, this is probably fine since users don't need to see individual modification times.
+
+**Proposal**: No action needed. The batch pause is a system-level operation, not a user edit.
+
+### Issue 3: No Sync Consideration (Informational)
+
+**Location**: `script-store.ts:819-822`
+
+The workflows table is a CRR (CR-SQLite Replicated table). Direct UPDATE statements work correctly but the exploration showed other methods use the standard pattern. The atomic UPDATE should still sync correctly since CR-SQLite handles UPDATEs at the row level.
+
+**Impact**: None - CR-SQLite handles this correctly.
+
+---
+
+## Code Quality Assessment
+
+### Positive Aspects
+
+1. **Clean atomic operation**: Single UPDATE eliminates N+1 queries pattern
+2. **Transaction support**: Accepts optional `tx` parameter for composition
+3. **Good documentation**: JSDoc comment explains purpose and benefits
+4. **Follows established pattern**: Uses same `tx || this.db.db` pattern as other methods
+5. **Early return optimization**: Returns 0 immediately if no active workflows
+6. **Correct status value**: Uses 'paused' (not old 'disabled' terminology)
+7. **Test coverage exists**: Test in `script-store.test.ts:622-637` validates the behavior
+
+### Minor Style Notes
+
+The method is well-written and follows the codebase conventions. No changes recommended.
+
+---
+
+## Verdict
+
+**APPROVED** - This is a clean, well-implemented performance improvement. The identified issues are low severity and the benefits (performance, atomicity, no count limits) outweigh the minor imperfections.

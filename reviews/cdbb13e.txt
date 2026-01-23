@@ -1,0 +1,119 @@
+COMMIT REVIEW: cdbb13e
+=======================
+Title: Implement Spec 06: Home Page Cleanup
+Date: 2026-01-22
+
+SUMMARY
+-------
+This commit implements Spec 06 by:
+1. Redirecting /new route to / instead of rendering NewPage component
+2. Removing NewPage import from App.tsx
+3. Updating IMPLEMENTATION_PLAN.md to mark Spec 06 as completed
+
+The commit correctly identifies that MainPage already has all required functionality:
+- Workflow cards with status badges and last run info
+- Empty state with example suggestions
+- Creation flow that navigates to chat
+
+CHANGES ANALYSIS
+----------------
+1. IMPLEMENTATION_PLAN.md (+11 lines, -3 lines)
+   - Updated spec status from "~50%" to "COMPLETED"
+   - Added completion notes documenting what was verified
+   - Updated last modified date
+
+2. apps/web/src/App.tsx (-3 lines, +2 lines)
+   - Removed: import NewPage from "./components/NewPage";
+   - Changed: <Route path="/new" element={<NewPage />} />
+   - To: <Route path="/new" element={<Navigate to="/" replace />} />
+
+ISSUES IDENTIFIED
+-----------------
+
+### ISSUE 1: Dead Code - NewPage.tsx Not Deleted (LOW)
+Location: apps/web/src/components/NewPage.tsx
+Description: The NewPage component file still exists (5348 bytes, created Jan 21) but is
+no longer imported or used anywhere in the application. This is dead code that should be
+deleted to maintain codebase cleanliness.
+File: /home/artur/keep.ai/apps/web/src/components/NewPage.tsx
+Proposed fix: Delete apps/web/src/components/NewPage.tsx
+Severity: LOW - No functional impact, just code hygiene.
+
+### ISSUE 2: Navigation Still Points to /new (MEDIUM)
+Location: apps/web/src/components/WorkflowsPage.tsx line 21
+Description: WorkflowsPage has a "Create Workflow" button that navigates to "/new" instead
+of "/" directly. While this works due to the redirect, it causes an unnecessary redirect
+and is semantically incorrect after Spec 06.
+Current behavior: navigate("/new") -> redirect -> "/" (two navigation events)
+Expected: navigate("/") (direct navigation, no redirect)
+Proposed fix: Change onClick={() => navigate("/new")} to onClick={() => navigate("/")}
+Severity: MEDIUM - Works but creates extra redirect; could confuse browser history.
+
+### ISSUE 3: ChatSidebar Uses /chat/new Route (LOW)
+Location: apps/web/src/components/ChatSidebar.tsx line 59
+Description: ChatSidebar has a "New Chat" link pointing to /chat/new. This route also
+redirects to / per App.tsx routing. The naming is confusing - is this intentional
+to create a new chat, or should it go directly to home?
+Current behavior: <Link to="/chat/new"> -> redirects to /
+Proposed fix: Either:
+  a) Remove the button if MainPage is the only entry point, or
+  b) Change to to="/" for direct navigation
+Severity: LOW - Works via redirect, but semantically confusing.
+
+### ISSUE 4: Incomplete Cleanup Documentation (INFO)
+Location: IMPLEMENTATION_PLAN.md
+Description: The completion notes say "Removed NewPage import from App.tsx" but don't
+mention that the actual NewPage.tsx file should be deleted. This led to Issue 1.
+Proposed fix: Future cleanup commits should explicitly delete unused component files.
+Severity: INFO - Not a code issue, just a process observation.
+
+PROPOSALS
+---------
+1. For ISSUE 1 (dead code cleanup):
+   ```bash
+   rm apps/web/src/components/NewPage.tsx
+   ```
+
+2. For ISSUE 2 (most impactful - proper navigation):
+   In apps/web/src/components/WorkflowsPage.tsx, change:
+   ```typescript
+   onClick={() => navigate("/new")}
+   ```
+   To:
+   ```typescript
+   onClick={() => navigate("/")}
+   ```
+
+3. For ISSUE 3 (ChatSidebar cleanup):
+   Consider whether ChatSidebar's "New Chat" button is still needed. If MainPage is the
+   canonical entry point for new workflows, this button may be redundant.
+
+ARCHITECTURAL NOTES
+-------------------
+The decision to redirect /new to / is correct for backwards compatibility:
+- Users with bookmarks to /new will still reach the app
+- External links (if any) will continue to work
+- The redirect is seamless (using replace, so no back-button issues)
+
+However, the internal navigation should be updated to go directly to / to avoid the
+extra redirect round-trip.
+
+VERDICT
+-------
+The commit correctly implements Spec 06 functionality. The MainPage does have all the
+required features (workflow cards, empty state suggestions, creation flow). The redirect
+approach is appropriate for backwards compatibility.
+
+The main issue is incomplete cleanup - NewPage.tsx should be deleted, and internal
+navigation should be updated to point directly to / instead of /new.
+
+Risk: LOW
+Blocking: NO
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Dead code NewPage.tsx) - created specs/new/delete-newpage-component.md
+- Issue #2 (Navigation points to /new) - created specs/new/fix-navigation-to-home.md
+- Issue #3 (ChatSidebar /chat/new) - covered by specs/new/fix-navigation-to-home.md
+- Issue #4 (Incomplete cleanup docs) - skipped (info only)

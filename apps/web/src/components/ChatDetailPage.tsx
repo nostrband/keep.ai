@@ -119,8 +119,10 @@ export default function ChatDetailPage() {
 
       {/* Workflow info box - shows which workflow this chat belongs to */}
       {workflow && (
-        <div className="max-w-4xl mx-auto px-6 pt-4">
-          <WorkflowInfoBox workflow={workflow} onClick={handleWorkflowClick} />
+        <div className="sticky top-[49px] z-10 bg-gray-50 border-b border-gray-200">
+          <div className="max-w-4xl mx-auto px-6 py-4">
+            <WorkflowInfoBox workflow={workflow} onClick={handleWorkflowClick} />
+          </div>
         </div>
       )}
 

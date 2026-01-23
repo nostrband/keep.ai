@@ -1,0 +1,57 @@
+# Review: 54b0a92 - Remove parseAsks re-export from @app/agent
+
+## Summary
+
+This commit removes unnecessary backward-compatibility re-exports of `parseAsks` and `StructuredAsk` from the `@app/agent` package. These utilities now live exclusively in `@app/proto`.
+
+### Changes in Plain English
+
+1. **Removed re-export from ask.ts** (`packages/agent/src/ai-tools/ask.ts`):
+   - Deleted line: `export { parseAsks, type StructuredAsk } from "@app/proto";`
+   - The ask tool file now only contains the tool definition itself
+
+2. **Removed re-export from index.ts** (`packages/agent/src/index.ts`):
+   - Deleted lines that re-exported `parseAsks` and `StructuredAsk` from the ask.ts file
+   - These were marked as "Ask tool utilities for UI" but weren't being used from @app/agent
+
+3. **Updated IMPLEMENTATION_PLAN.md**:
+   - Marked spec as completed
+   - Documented that no imports were using @app/agent for these utilities
+
+4. **Moved spec to done folder**
+
+---
+
+## Issues Identified
+
+### No Issues Found
+
+This is a clean code cleanup commit with no problems.
+
+**Verification performed by exploration agent**:
+- Searched entire codebase for imports of `parseAsks` or `StructuredAsk` from `@app/agent`
+- Found none - all imports already use `@app/proto` directly
+- The only active import is in `apps/web/src/components/ChatPage.tsx:8` using `@app/proto`
+
+---
+
+## Code Quality Assessment
+
+### Positive Aspects
+
+1. **Safe removal**: Verified no consumers exist before removing
+2. **Clean deletion**: No commented-out code or TODO markers left behind
+3. **Single source of truth**: `@app/proto` is now the only place to import these from
+4. **Package boundary improvement**: `@app/agent` is a heavy Node.js package; keeping lightweight types in `@app/proto` (which is browser-compatible) is the right architecture
+
+### Why This Change is Good
+
+- **Reduced confusion**: Developers won't be uncertain about which package to import from
+- **Cleaner dependency graph**: UI code importing from `@app/proto` doesn't accidentally pull in agent dependencies
+- **Maintenance**: One place to update the implementation
+
+---
+
+## Verdict
+
+**APPROVED** - This is a clean code cleanup that improves package organization with zero risk.

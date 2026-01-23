@@ -1,8 +1,7 @@
 import { Command } from 'commander';
 import { createDBNode, getCurrentUser, getDBPath } from '@app/node';
-import { KeepDb, KeepDbApi } from '@app/db';
+import { KeepDb, KeepDbApi, ChatMessage } from '@app/db';
 import { AssistantUIMessage } from '@app/proto';
-;
 import * as readline from 'readline';
 import debug from 'debug';
 
@@ -15,6 +14,28 @@ export function registerChatCommand(program: Command): void {
     .action(async () => {
       await runChatCommand();
     });
+}
+
+/**
+ * Parses a ChatMessage's content into AssistantUIMessage format.
+ * If the content is already valid JSON, returns it directly.
+ * Otherwise, wraps the plain text content in the expected structure.
+ */
+function parseMessageContent(msg: ChatMessage): AssistantUIMessage {
+  try {
+    return JSON.parse(msg.content);
+  } catch {
+    // Fallback for messages that aren't JSON
+    return {
+      id: msg.id,
+      role: msg.role,
+      parts: [{ type: "text", text: msg.content }],
+      metadata: {
+        threadId: msg.chat_id,
+        createdAt: msg.timestamp,
+      },
+    };
+  }
 }
 
 // Helper function to print messages - removes code duplication
@@ -49,19 +70,19 @@ async function runChatCommand(): Promise<void> {
     // Get and display 5 latest messages from 'main' chat
     let lastMessageTimestamp: string | undefined;
     try {
-      const messages = await api.chatStore.getChatMessages({
+      const rawMessages = await api.chatStore.getNewChatMessages({
         chatId: 'main',
         limit: 5
       });
-      
-      if (messages.length > 0) {
+
+      if (rawMessages.length > 0) {
         console.log('Recent messages:');
-        messages.forEach(printMessage);
+        rawMessages.map(parseMessageContent).forEach(printMessage);
         console.log('');
-        
+
         // Set initial timestamp from the last message
-        const lastMessage = messages[messages.length - 1];
-        lastMessageTimestamp = lastMessage.metadata?.createdAt;
+        const lastMessage = rawMessages[rawMessages.length - 1];
+        lastMessageTimestamp = lastMessage.timestamp;
       }
     } catch (error) {
       debugChat('No previous messages found or error loading them:', error);

@@ -1,0 +1,267 @@
+COMMIT REVIEW: 7fb66d4
+======================
+
+Title: Implement Specs 09 and 11: Workflow status cleanup and direct chat-workflow linking
+
+Author: Claude Agent (Artur)
+Date: Thu Jan 22 13:45:51 2026 +0100
+
+Files Changed: 11 files, +255 insertions, -51 deletions
+
+## SUMMARY
+
+This commit implements two major specifications:
+- Spec 11: Replace implicit workflow status values with explicit ones
+- Spec 09: Add direct bidirectional links between workflows and chats
+
+The implementation is SOLID with minor observations. The migration data backfill
+was moved to a subsequent commit (28d458e, v29.ts) for proper ALTER/write separation.
+
+## CHANGES IN PLAIN ENGLISH
+
+### Spec 11: Workflow Status Cleanup
+
+**Purpose:** Replace implicit empty string status with explicit, meaningful values.
+
+1. **Status Values Standardized:**
+   - '' (empty) -> 'draft' (no script yet, cannot run)
+   - 'disabled' -> 'paused' (user manually paused)
+   - NEW 'ready' (has script, not yet activated by user)
+   - 'active' unchanged (running on schedule)
+   - NEW 'error' (escalated, needs user attention)
+
+2. **Migration v27 Created** (packages/db/src/migrations/v27.ts)
+   - Updates existing '' status to 'draft'
+   - Updates existing 'disabled' status to 'paused'
+   - Transitions workflows with active_script_id to 'ready'
+
+3. **StatusBadge.tsx Updated**
+   - Now handles all 5 status values with appropriate colors:
+     - draft: outline badge
+     - ready: blue badge
+     - active: green badge ("Running")
+     - paused: yellow badge
+     - error: red badge
+
+4. **WorkflowDetailPage.tsx Updated**
+   - Button visibility logic updated for new statuses
+   - "Activate" shows for 'ready' status only
+   - "Run now" shows for draft/ready/active with script
+   - "Resume" shows for 'paused' OR 'error' status
+   - Status comparisons changed from '' and 'disabled'
+
+5. **save.ts Updated**
+   - Transitions draft -> ready on first script save
+   - Other statuses keep their current value
+
+6. **workflow-worker.ts Updated**
+   - Escalation now sets 'error' instead of 'disabled'
+   - Clear semantic difference: error = needs attention, paused = user choice
+
+7. **workflow-scheduler.ts Updated**
+   - Comment updated to list all non-running statuses
+
+8. **pauseAllWorkflows() Updated**
+   - Now sets status to 'paused' instead of 'disabled'
+
+### Spec 09: Direct Chat-Workflow Linking
+
+**Purpose:** Eliminate indirect navigation through task to get chat.
+
+1. **Workflow Interface Extended**
+   - Added chat_id field to Workflow type
+
+2. **Migration v28 Created** (packages/db/src/migrations/v28.ts)
+   - Adds chat_id column to workflows table
+   - Adds workflow_id column to chats table
+   - Creates indexes for both new columns
+   - NOTE: Data backfill moved to v29 (separate commit)
+
+3. **chat-store.ts Updated**
+   - createChat() accepts optional workflowId parameter
+   - Chat queries now include workflow_id field
+   - NEW: getChatByWorkflowId() method
+   - NEW: getChatFirstMessage() method for previews
+
+4. **script-store.ts Updated**
+   - All workflow queries now include/handle chat_id
+   - NEW: getWorkflowByChatId() method
+   - addWorkflow() saves chat_id
+   - updateWorkflow() updates chat_id
+   - getAbandonedDrafts() uses chat_id in JOIN
+
+5. **api.ts Updated**
+   - createTask() now sets workflow.chat_id
+   - createChat() receives workflowId for bidirectional link
+   - New workflows created with status='draft' (explicit)
+
+6. **WorkflowDetailPage.tsx Updated**
+   - Uses workflow.chat_id directly instead of task.chat_id
+   - Chat button conditional on workflow.chat_id
+
+7. **database.ts Updated**
+   - Imports and registers migrateV27 and migrateV28
+
+## ISSUES FOUND
+
+### Critical Issues: NONE
+
+### Potential Issues:
+
+1. **Migration v28 Data Backfill Deferred (EXPECTED)**
+
+   Location: packages/db/src/migrations/v28.ts
+
+   The v28 migration only adds columns with DEFAULT ''. The actual backfill
+   queries that populate chat_id and workflow_id are in v29 (commit 28d458e).
+
+   This is correct per AGENTS.md: "if you do ALTER table on CRR tables then
+   you can't write to these tables in the same migration"
+
+   Impact: Between v28 and v29 application, workflows have empty chat_id.
+   Status: RESOLVED in subsequent commit.
+
+2. **Subquery NULL Handling in Backfill**
+
+   Location: packages/db/src/migrations/v29.ts (subsequent commit)
+
+   The backfill query:
+   ```sql
+   UPDATE workflows SET chat_id = (
+     SELECT t.chat_id FROM tasks t WHERE t.id = workflows.task_id
+   )
+   WHERE chat_id = ''
+   ```
+
+   If task doesn't exist, subquery returns NULL. Could use COALESCE for safety:
+   ```sql
+   SET chat_id = COALESCE((SELECT t.chat_id FROM tasks...), '')
+   ```
+
+   Risk: LOW - Workflows always created with tasks, so orphan workflows unlikely.
+   Status: Acceptable as-is, could strengthen in future.
+
+3. **getChatFirstMessage() Silent Error Handling**
+
+   Location: packages/db/src/chat-store.ts, getChatFirstMessage()
+
+   The catch block silently returns null without logging:
+   ```typescript
+   } catch {
+     return null;  // Silent catch-all
+   }
+   ```
+
+   Impact: Malformed JSON in chat_events won't produce diagnostic output.
+   Recommendation: Add console.debug for troubleshooting.
+   Risk: LOW - Returns null safely, just hard to debug.
+
+4. **Unused useTask() Query**
+
+   Location: packages/db/src/components/WorkflowDetailPage.tsx:29
+
+   ```typescript
+   const { data: task } = useTask(workflow?.task_id || "");  // Still exists
+   const { data: chat } = useChat(workflow?.chat_id || "");  // Now used
+   ```
+
+   The task query is no longer needed since chat is accessed directly.
+   Impact: Wastes a database query, confuses readers.
+   Recommendation: Remove in future cleanup.
+
+5. **Empty chat_id During Migration Window**
+
+   For workflows created before v28/v29 migrations run:
+   - workflow.chat_id will be '' until migration completes
+   - Conditionals like `if (workflow?.chat_id)` will be falsy
+   - Chat button won't show even though chat exists
+
+   Impact: Temporary during migration, resolves after v29 runs.
+   Status: Acceptable - migration must complete for full functionality.
+
+### Verified Complete:
+
+1. **No Old Status Values in Code**
+   - No `status === ''` found outside migrations
+   - No `status === 'disabled'` found outside migrations
+   - All status comparisons use new values
+
+2. **All Workflow Queries Updated**
+   - getWorkflow() includes chat_id: YES
+   - getWorkflowByTaskId() includes chat_id: YES
+   - listWorkflows() includes chat_id: YES
+   - getAbandonedDrafts() includes chat_id: YES
+   - addWorkflow() saves chat_id: YES
+   - updateWorkflow() updates chat_id: YES
+
+3. **Bidirectional Links Created Atomically**
+   - Chat receives workflowId in createChat()
+   - Workflow receives chat_id in createTask()
+   - Both established in same transaction
+
+4. **StatusBadge Handles All Values**
+   - draft: outline (default)
+   - ready: blue
+   - active: green
+   - paused: yellow
+   - error: red
+
+## PROPOSALS
+
+### Proposal 1: Strengthen Backfill Query (LOW PRIORITY)
+
+In v29 migration, change:
+```sql
+SET chat_id = (SELECT t.chat_id FROM tasks t WHERE t.id = workflows.task_id)
+```
+To:
+```sql
+SET chat_id = COALESCE((SELECT t.chat_id FROM tasks t WHERE t.id = workflows.task_id), '')
+```
+
+This ensures NULL from missing tasks becomes '' instead of potentially failing.
+
+### Proposal 2: Add Debug Logging to getChatFirstMessage (LOW PRIORITY)
+
+```typescript
+} catch (e) {
+  console.debug('getChatFirstMessage parse error:', e);
+  return null;
+}
+```
+
+### Proposal 3: Remove Unused useTask Query (LOW PRIORITY)
+
+In WorkflowDetailPage.tsx, remove or conditionally load the task query:
+```typescript
+// Remove this line:
+const { data: task } = useTask(workflow?.task_id || "");
+```
+
+Task is only needed if other parts of the page still use it. Verify and remove.
+
+## TESTING RECOMMENDATIONS
+
+1. Test status transitions:
+   - Create new workflow: should be 'draft'
+   - Save first script: should become 'ready'
+   - Activate: should become 'active'
+   - Pause: should become 'paused'
+   - Escalation error: should become 'error'
+
+2. Test bidirectional navigation:
+   - From workflow detail, click chat button
+   - From chat, navigate to workflow (if UI supports)
+
+3. Test migration on existing data:
+   - Run v27, verify status values updated
+   - Run v28, verify columns added
+   - Run v29, verify chat_id/workflow_id populated
+
+4. Test StatusBadge rendering for all 5 statuses
+
+## VERDICT
+
+**APPROVED** - Implementation is solid and comprehensive. The migration split
+between v28 (schema) and v29 (data) is correct per cr-sqlite requirements.
+Minor improvements suggested but not blocking.

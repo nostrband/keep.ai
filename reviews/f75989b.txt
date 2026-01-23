@@ -1,0 +1,191 @@
+# Review: f75989b - Fix Electron error handling and add IN clause length limits
+
+## Commit Summary
+
+**Electron Improvements:**
+- Add promise rejection when window closes (prevents hanging callers)
+- Add try-catch to all IPC handlers for consistent error handling
+- Add try-catch around notification click handler
+- Add try-catch for SVG icon creation with fallback
+- Add ensureWindowReady() to pause-all menu handler
+
+**Database Safety:**
+- Add MAX_IN_CLAUSE_LENGTH = 1000 constant to prevent resource exhaustion
+- Add validateInClauseLength() helper function
+- Apply validation to: getLatestRunsByWorkflowIds, getTasks, getStates, getFiles, deletePeers
+
+## Files Changed
+- apps/electron/src/main.ts (165 insertions, major refactor)
+- packages/db/src/interfaces.ts (new validation framework)
+- packages/db/src/file-store.ts
+- packages/db/src/nostr-peer-store.ts
+- packages/db/src/script-store.ts
+- packages/db/src/task-store.ts
+- IMPLEMENTATION_PLAN.md
+
+---
+
+## Changes Analysis
+
+### 1. Electron Window Ready Promise Rejection
+
+**Before:** Promise created in ensureWindowReady() would hang forever if window closed
+**After:** windowReadyReject stored and called in window "closed" handler
+
+```typescript
+mainWindow.on("closed", () => {
+  if (windowReadyReject) {
+    windowReadyReject(new Error('Window was closed'));
+  }
+  // ... cleanup
+});
+```
+
+**Assessment:** CORRECT - Prevents callers from hanging indefinitely.
+
+### 2. IPC Handler Error Handling
+
+All IPC handlers now have consistent try-catch:
+- `app:getVersion` - returns 'unknown' on error
+- `open-external` - returns boolean success indicator
+- `show-notification` - dual-layer try-catch (outer + notification click handler)
+- `update-tray-badge` - returns boolean success indicator
+
+**Assessment:** EXCELLENT - Comprehensive and consistent pattern.
+
+### 3. Tray Menu Handler Error Handling
+
+All tray menu handlers wrapped in try-catch:
+- "Open Keep.AI" - catches ensureWindowReady rejection
+- "New automation..." - catches ensureWindowReady rejection
+- "Pause all automations" - now calls ensureWindowReady() first
+- Tray single-click - catches ensureWindowReady rejection
+- Global shortcut CmdOrCtrl+N - catches ensureWindowReady rejection
+
+**Assessment:** 100% of ensureWindowReady() callers now handle rejection properly.
+
+### 4. SVG Icon Creation Error Handling
+
+```typescript
+try {
+  // SVG icon creation
+  return nativeImage.createFromDataURL(dataUrl);
+} catch (error) {
+  debugMain('Could not create icon from SVG:', error);
+  return nativeImage.createEmpty();
+}
+```
+
+**Assessment:** GOOD - Graceful fallback prevents app crash.
+
+### 5. Database IN Clause Validation
+
+```typescript
+export const MAX_IN_CLAUSE_LENGTH = 1000;
+
+export function validateInClauseLength(ids: unknown[], methodName: string): void {
+  if (ids.length > MAX_IN_CLAUSE_LENGTH) {
+    throw new Error(
+      `${methodName}: Array too large for IN clause. ` +
+      `Maximum ${MAX_IN_CLAUSE_LENGTH} items allowed, got ${ids.length}. ` +
+      `Consider using pagination or batch processing.`
+    );
+  }
+}
+```
+
+**Assessment:** CORRECT - SQLite default limit is 999 variables, 1000 is appropriate.
+
+---
+
+## Potential Issues Found
+
+### Issue 1: CRITICAL - Missing IN Clause Validation in chat-store.ts
+**Severity:** HIGH
+**Location:** packages/db/src/chat-store.ts - getLastChatActivities()
+
+The commit claims to apply validation to IN clause methods, but `getLastChatActivities(chatIds: string[])` in chat-store.ts is MISSING validation:
+
+```typescript
+async getLastChatActivities(chatIds: string[]): Promise<Map<string, string>> {
+  if (chatIds.length === 0) {
+    return new Map();
+  }
+  // MISSING: validateInClauseLength(chatIds, 'getLastChatActivities');
+  const placeholders = chatIds.map(() => '?').join(', ');
+  // ... IN clause query
+}
+```
+
+**Proposal:**
+Add validation to chat-store.ts:
+```typescript
+import { validateInClauseLength } from "./interfaces";
+// ...
+async getLastChatActivities(chatIds: string[]): Promise<Map<string, string>> {
+  if (chatIds.length === 0) return new Map();
+  validateInClauseLength(chatIds, 'getLastChatActivities');
+  // ... rest of method
+}
+```
+
+### Issue 2: Error Messages Not Propagated to Users
+**Severity:** Low
+**Location:** apps/electron/src/main.ts (various handlers)
+
+IPC handlers catch errors and log them, but return generic values ('unknown', false) without propagating error details to the renderer process.
+
+**Proposal:**
+For debugging purposes, consider returning structured error objects:
+```typescript
+return { success: false, error: error.message };
+```
+
+### Issue 3: No Retry Logic for ensureWindowReady Failures
+**Severity:** Low
+**Location:** apps/electron/src/main.ts
+
+When ensureWindowReady() fails (window closed), callers simply log and ignore. For some operations (like notification clicks), this is fine. For critical operations, user might expect retry.
+
+**Proposal:**
+Current behavior is acceptable for this use case - users can manually retry actions.
+
+### Issue 4: Global Shortcut Registration Not Atomic with Error Handling
+**Severity:** Low
+**Location:** apps/electron/src/main.ts:439-459
+
+The global shortcut callback has error handling, but if registration fails, there's no retry mechanism.
+
+**Proposal:**
+Current implementation logs failure, which is appropriate. No change needed.
+
+### Issue 5: Potential Race in Window State After Rejection
+**Severity:** Very Low
+**Location:** apps/electron/src/main.ts:170-181
+
+After windowReadyReject is called, references are set to null. Any code that kept a reference to the old promise would see rejection, but there's a brief window where state is inconsistent.
+
+**Proposal:**
+Not a practical concern since all callers use try-catch and don't retain promise references.
+
+---
+
+## Code Quality Assessment
+
+| Aspect | Rating | Notes |
+|--------|--------|-------|
+| Correctness | Good | All patterns work correctly |
+| Completeness | Fair | chat-store.ts method missed |
+| Consistency | Excellent | Same error handling pattern everywhere |
+| Error Messages | Good | Descriptive, includes method names |
+| Documentation | Good | Clear comments explaining rationale |
+
+---
+
+## Summary
+
+Significant and important improvements to both Electron error handling and database safety. The promise rejection for ensureWindowReady() prevents callers from hanging indefinitely, and the consistent try-catch pattern ensures the app doesn't crash on errors.
+
+**Critical Finding:** The `getLastChatActivities()` method in chat-store.ts was missed and needs IN clause validation added.
+
+Otherwise, excellent defensive programming practices implemented throughout.

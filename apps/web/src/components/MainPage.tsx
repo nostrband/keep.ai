@@ -7,8 +7,10 @@ import { useDbQuery } from "../hooks/dbQuery";
 import { useAutonomyPreference } from "../hooks/useAutonomyPreference";
 import SharedHeader from "./SharedHeader";
 import { WorkflowStatusBadge } from "./StatusBadge";
+import { formatCronSchedule } from "./WorkflowInfoBox";
 import { StaleDraftsBanner } from "./StaleDraftsBanner";
 import {
+  Badge,
   PromptInput,
   PromptInputAttachment,
   PromptInputAttachments,
@@ -204,16 +206,23 @@ export default function MainPage() {
     return map;
   }, [tasks]);
 
-  // Compute attention count and sort workflows
-  const { sortedWorkflows, attentionCount } = useMemo(() => {
-    const workflowsWithStatus = workflows.map(workflow => {
+  // Compute attention count, sort workflows, and count archived
+  const { sortedWorkflows, attentionCount, archivedCount } = useMemo(() => {
+    // Filter out archived workflows from main list
+    const nonArchived = workflows.filter(w => w.status !== "archived");
+    const archived = workflows.filter(w => w.status === "archived");
+
+    const workflowsWithStatus = nonArchived.map(workflow => {
       const latestRun = latestRuns[workflow.id];
       const task = taskMap[workflow.task_id];
       const { text, isAttention } = getSecondaryLine(workflow, latestRun, task);
+      // A workflow is "running" if it has a script run with no end_timestamp
+      const isRunning = latestRun && !latestRun.end_timestamp;
       return {
         ...workflow,
         secondaryText: text,
         needsAttention: isAttention,
+        isRunning,
         lastActivity: latestRun?.end_timestamp || latestRun?.start_timestamp || workflow.timestamp,
       };
     });
@@ -226,7 +235,7 @@ export default function MainPage() {
     });
 
     const count = sorted.filter(w => w.needsAttention).length;
-    return { sortedWorkflows: sorted, attentionCount: count };
+    return { sortedWorkflows: sorted, attentionCount: count, archivedCount: archived.length };
   }, [workflows, latestRuns, taskMap]);
 
   // Filter workflows if showing attention only
@@ -356,6 +365,7 @@ export default function MainPage() {
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <button
+                      type="button"
                       onClick={toggleAutonomyMode}
                       className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700 transition-colors py-1 px-2 rounded hover:bg-gray-100"
                     >
@@ -502,19 +512,35 @@ export default function MainPage() {
                       <div className="flex-1">
                         <div className="flex items-center gap-2 mb-1">
                           <h3 className="font-medium text-gray-900">
-                            {workflow.title || `Workflow ${workflow.id.slice(0, 8)}`}
+                            {workflow.title || "New workflow"}
                           </h3>
                           <WorkflowStatusBadge status={workflow.status} />
+                          {workflow.isRunning && (
+                            <Badge className="bg-blue-100 text-blue-800">Running</Badge>
+                          )}
                         </div>
                         <div className={`text-sm ${
                           workflow.needsAttention ? "text-red-600" : "text-gray-500"
                         }`}>
+                          {workflow.cron && (
+                            <span className="text-gray-400">{formatCronSchedule(workflow.cron)} · </span>
+                          )}
                           {workflow.secondaryText}
                         </div>
                       </div>
                     </div>
                   </Link>
                 ))}
+
+                {/* Link to archived workflows if any exist */}
+                {archivedCount > 0 && (
+                  <Link
+                    to="/archived"
+                    className="block text-center py-3 text-sm text-gray-400 hover:text-gray-600 transition-colors"
+                  >
+                    View {archivedCount} archived workflow{archivedCount !== 1 ? "s" : ""}
+                  </Link>
+                )}
               </div>
             )}
           </div>

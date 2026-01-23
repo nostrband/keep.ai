@@ -1,0 +1,164 @@
+COMMIT REVIEW: 119b586
+=======================
+Title: Implement Spec 10: Tasks Table Cleanup
+Date: 2026-01-22
+
+SUMMARY
+-------
+This commit implements Spec 10 by restructuring the tasks system:
+1. Adds workflow_id and asks columns to tasks table (v30 migration)
+2. Moves asks from task_states to tasks table
+3. Removes goal/notes/plan fields from agent context
+4. Simplifies ask/finish tools to only use asks field
+5. Updates UI components to use task.asks directly
+6. Marks task_states table and related methods as deprecated
+
+NOTE: The v30 migration in this commit was later reorganized by commit 28d458e:
+- Original v30 (Spec 10 tasks cleanup) -> moved to v31-v32
+- New v30 now contains Spec 12 (chat_events split)
+
+CHANGES ANALYSIS
+----------------
+Files modified: 20
+Lines added: 215
+Lines removed: 249
+Net change: -34 lines (simplification)
+
+Key changes:
+1. packages/db/src/migrations/v30.ts - NEW (later replaced, see note above)
+2. packages/db/src/task-store.ts - Added workflow_id, asks fields; new methods
+3. packages/agent/src/task-worker.ts - Updated to use task.asks directly
+4. packages/agent/src/ai-tools/ask.ts - Removed notes/plan parameters
+5. packages/agent/src/ai-tools/finish.ts - Removed notes/plan parameters
+6. packages/agent/src/agent-env.ts - Only passes asks to agent context
+7. apps/web/src/components/*.tsx - UI updates to use task.asks
+
+ISSUES IDENTIFIED
+-----------------
+
+### ISSUE 1: Outdated System Prompts Reference goal/notes/plan (MEDIUM)
+Location: packages/agent/src/agent-env.ts lines 311, 318, 362
+Description: System prompts still tell the agent "You will be given a task info
+(goal, notes, plan, etc)" but the code no longer provides these fields. This could
+confuse the LLM agent about what information is available.
+Current state:
+  - Line 311: "You will be given a task info (goal, notes, plan, etc) for the current..."
+  - Line 318: "Use 'finish' if the task is completed and you want to updated task notes and plan"
+  - Line 362: "You will be given a task info (goal, notes, plan, etc) as input..."
+Proposed fix: Update prompts to only reference "asks" field:
+  - "You will be given task asks (pending questions/requests) if any"
+  - "Use 'finish' when the task is completed"
+Severity: MEDIUM - Could cause agent to expect unavailable data or try to use removed tools.
+
+### ISSUE 2: TaskState Type Still Contains Deprecated Fields (LOW)
+Location: packages/agent/src/agent-types.ts lines 7-12
+Description: The TaskState type still defines goal, notes, plan as optional fields:
+```typescript
+export type TaskState = {
+  goal?: string;
+  notes?: string;
+  plan?: string;
+  asks?: string;
+};
+```
+While this provides backwards compatibility, it allows TypeScript to accept code that
+references these removed fields without error.
+Proposed fix: Add JSDoc @deprecated comments or remove fields entirely:
+```typescript
+export type TaskState = {
+  /** @deprecated No longer used - see Spec 10 */
+  goal?: string;
+  // ...
+  asks?: string;
+};
+```
+Severity: LOW - Optional fields don't cause runtime errors, just type confusion.
+
+### ISSUE 3: add-task and add-task-recurring Accept Unused Parameters (MEDIUM)
+Location: packages/agent/src/tools/add-task.ts, add-task-recurring.ts
+Description: These tools still accept goal and notes parameters in their schemas,
+but the code doesn't use them (they're passed as initial inbox content per comments,
+but the actual implementation just ignores them).
+Current state: Schema accepts opts.goal, opts.notes but they're never used.
+Proposed fix: Either:
+  a) Remove goal/notes from schema if not needed, or
+  b) Actually implement passing them to task inbox if the feature is desired
+Severity: MEDIUM - Agents may try to use these parameters expecting behavior.
+
+### ISSUE 4: Potential Data Loss in get-task Tool (LOW)
+Location: packages/agent/src/tools/get-task.ts
+Description: The get-task tool now only returns asks, removing goal/notes/plan from
+its response. If any existing code depends on these fields, it could break.
+Previous return: { id, title, state, error, runTime, goal, notes, plan, asks }
+New return: { id, title, state, error, runTime, asks }
+Proposed fix: None needed if all consumers were updated. Verify no external consumers.
+Severity: LOW - Part of intentional deprecation, verified internally.
+
+### ISSUE 5: Migration Split Confusion (INFO)
+Location: packages/db/src/migrations/v30.ts
+Description: This commit created v30 for Spec 10, but a later commit (28d458e) replaced
+v30 content with Spec 12 and moved Spec 10 to v31-v32. This isn't an issue with this
+commit, but should be noted for understanding the final migration structure:
+- v30: Spec 12 (chat_events -> chat_messages, notifications, execution_logs)
+- v31: Spec 10 (ALTER tasks table: add workflow_id, asks)
+- v32: Spec 10 (UPDATE tasks: populate workflow_id, asks from task_states)
+Severity: INFO - Historical note for code archaeology.
+
+### ISSUE 6: Duplicate TaskState Interface (LOW)
+Location: packages/db/src/task-store.ts vs packages/agent/src/agent-types.ts
+Description: There are now two TaskState types:
+1. task-store.ts: interface TaskState { id, goal, notes, plan, asks } (deprecated)
+2. agent-types.ts: type TaskState = { goal?, notes?, plan?, asks? }
+The agent code imports from agent-types.ts which is correct, but the naming collision
+could cause confusion during future maintenance.
+Proposed fix: Rename task-store.ts version to DeprecatedTaskState or similar.
+Severity: LOW - No runtime impact, just naming confusion.
+
+ARCHITECTURAL NOTES
+-------------------
+The refactoring is well-designed:
+1. Proper use of cr-sqlite ALTER table pattern (crsql_begin_alter/commit_alter)
+2. Correct data migration from task_states.asks to tasks.asks
+3. Backwards compatibility via deprecated methods (saveState, getState, getStates)
+4. Clean separation of concerns: tasks table now has workflow_id for direct linking
+
+The split into v31-v32 (done in later commit) correctly follows cr-sqlite requirements:
+ALTER TABLE must be committed before UPDATE can operate on new columns.
+
+PROPOSALS
+---------
+1. For ISSUE 1 (most impactful - fix system prompts):
+   In packages/agent/src/agent-env.ts, update the worker/planner prompts:
+   - Replace "goal, notes, plan, etc" with "pending asks (questions)"
+   - Remove references to updating notes/plan in finish tool
+
+2. For ISSUE 3 (unused parameters):
+   In packages/agent/src/tools/add-task.ts and add-task-recurring.ts:
+   - Either remove goal/notes from the schema, or
+   - Add comment explaining they're intentionally ignored
+
+3. For ISSUE 2 and 6 (type cleanup):
+   Add @deprecated JSDoc comments to TaskState fields in agent-types.ts
+   Consider renaming task-store.ts TaskState to LegacyTaskState
+
+VERDICT
+-------
+The commit is a significant and well-executed refactoring that simplifies the task
+system by removing unused complexity (goal, notes, plan fields). The migration pattern
+is correct, deprecation is properly documented, and UI components are updated.
+
+The main issue is outdated system prompts that could confuse agents. This should be
+fixed to ensure agents understand what information is actually available.
+
+Risk: MEDIUM (due to system prompt inconsistency)
+Blocking: NO (functionality works, prompts are guidance not functional)
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Outdated system prompts) - created specs/new/fix-agent-system-prompts.md
+- Issue #2 (TaskState deprecated fields) - created specs/new/remove-taskstate-struct.md
+- Issue #3 (add-task unused parameters) - covered by specs/new/deprecate-tasks-api-tools.md
+- Issue #4 (get-task data loss) - skipped (covered by deprecation)
+- Issue #5 (Migration split confusion) - skipped (info only)
+- Issue #6 (Duplicate TaskState interface) - covered by specs/new/remove-taskstate-struct.md

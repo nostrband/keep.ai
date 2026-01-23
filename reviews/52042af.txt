@@ -1,0 +1,144 @@
+COMMIT REVIEW: 52042af
+======================
+Title: Implement Spec 03: Notifications Page
+Author: Artur <artur@keep.ai>
+Date: Thu Jan 22 14:15:33 2026 +0100
+Co-Authored-By: Claude Opus 4.5
+
+FILES CHANGED:
+- IMPLEMENTATION_PLAN.md (+16/-10)
+- apps/web/src/components/NotificationCard.tsx (NEW, +256)
+- apps/web/src/components/NotificationsPage.tsx (+113/-10)
+- apps/web/src/hooks/useNotifications.ts (NEW, +106)
+
+SUMMARY OF CHANGES:
+===================
+This commit implements Spec 03: Notifications Page, adding:
+
+1. **useNotifications hook** - Infinite scroll pagination for fetching notifications
+   - Uses React Query's useInfiniteQuery
+   - Supports filtering by workflowId and unresolvedOnly
+   - Uses timestamp as cursor for pagination
+   - Flattens pages into a single notifications array
+
+2. **useAcknowledgeNotification hook** - Mutation to mark notifications as seen
+3. **useResolveNotification hook** - Mutation to mark notifications as resolved
+
+4. **NotificationCard component** - Renders 4 notification types:
+   - error: Auth/permission/network/internal errors with action buttons
+   - escalated: Auto-fix failure after max attempts
+   - script_message: Messages from running scripts
+   - script_ask: Future confirmation requests with option buttons
+
+5. **NotificationsPage** - Full page implementation:
+   - Loading state, empty state with "All caught up!" message
+   - Notification list with infinite scroll via "Load more" button
+   - Action handlers for reconnect, retry, dismiss
+   - Filter by workflowId via route parameter
+
+ISSUES IDENTIFIED:
+==================
+
+### Issue 1: Incorrect Import Path Pattern (MEDIUM)
+**Location:** NotificationCard.tsx:1, NotificationsPage.tsx:6, useNotifications.ts:5
+**Problem:** Uses `import { Notification } from "packages/db/dist"` instead of the correct
+path alias `@app/db`. The codebase has a tsconfig path alias system that maps `@app/db`
+to `packages/db/src/*`. Using `packages/db/dist` directly:
+- Bypasses the TypeScript path alias system
+- References compiled output instead of source
+- Inconsistent with 39+ other files using `@app/db`
+
+**Proposal:** Change all `packages/db/dist` imports to:
+```typescript
+import type { Notification } from "@app/db";
+```
+
+### Issue 2: getRelativeTime Function Duplication (LOW)
+**Location:** NotificationCard.tsx:35-47
+**Problem:** A `getRelativeTime` function is implemented here, but a similar `formatTimeAgo`
+function exists in MainPage.tsx:120-132. While not identical (one returns "2 hours ago",
+the other returns "2h ago"), this is conceptually duplicated time formatting logic.
+
+**Proposal:** Consider creating a shared `lib/time-utils.ts` module with configurable
+format options (long vs short). Low priority since the implementations differ intentionally.
+
+### Issue 3: parsePayload Function Should Be Generic and Shared (LOW)
+**Location:** NotificationCard.tsx:26-33
+**Problem:** The `parsePayload<T>` function is a generic JSON parser with error handling.
+This will be duplicated in WorkflowErrorAlert.tsx (commit 8f073e7).
+
+**Proposal:** Extract to a shared utility:
+```typescript
+// lib/payload-utils.ts
+export function parsePayload<T>(payload: string): T | null {
+  if (!payload) return null;
+  try { return JSON.parse(payload) as T; }
+  catch { return null; }
+}
+```
+
+### Issue 4: errorTypeLabels Duplication (LOW)
+**Location:** NotificationCard.tsx:135-140
+**Problem:** The `errorTypeLabels` object mapping error types to display labels will be
+duplicated in WorkflowErrorAlert.tsx.
+
+**Proposal:** Extract to shared constants:
+```typescript
+// constants/notification-constants.ts
+export const ERROR_TYPE_LABELS: Record<string, string> = {
+  auth: "Authentication",
+  permission: "Permission",
+  network: "Network",
+  internal: "Internal",
+};
+```
+
+### Issue 5: Missing Error Boundary for JSON Parsing in Cards (LOW)
+**Location:** NotificationCard.tsx (various card components)
+**Problem:** While `parsePayload` returns null on parse errors, the card components
+don't gracefully handle completely malformed/missing payload data beyond basic fallbacks.
+If payload fields have unexpected types (e.g., options is a string instead of array),
+this could cause runtime errors in ScriptAskCard.
+
+**Proposal:** Add defensive checks:
+```typescript
+const options = Array.isArray(payload?.options) ? payload.options : [];
+```
+
+### Issue 6: Potential Race Condition in handleAction (LOW)
+**Location:** NotificationsPage.tsx:38-55
+**Problem:** In the `answer_*` action handler, the mutation is awaited but navigation
+actions (for reconnect, retry, etc.) navigate immediately without waiting. This is
+inconsistent - some actions await async operations, others don't.
+
+**Proposal:** This is actually fine since the navigation actions don't need to wait,
+but consider adding comments explaining the intentional difference.
+
+### Issue 7: action Buttons Not Fully Implemented (EXPECTED)
+**Location:** NotificationsPage.tsx:29-42
+**Problem:** Actions like "reconnect" navigate to /settings but don't actually
+trigger reconnection. "retry" navigates to workflow but doesn't trigger a retry.
+These are placeholder navigations rather than fully functional actions.
+
+**Proposal:** This is expected for a v1 implementation. Consider adding TODO comments
+or tracking this for future enhancement. The user can manually perform actions
+after navigation.
+
+POSITIVE ASPECTS:
+=================
+1. Clean separation of concerns with dedicated hooks for data fetching and mutations
+2. Good use of React Query's useInfiniteQuery for pagination
+3. Proper cache invalidation after mutations (invalidates both notifications and unresolvedNotifications)
+4. Well-structured card components with type-specific rendering
+5. Accessible loading and empty states
+6. Uses the standard Button component from ui library consistently
+7. Relative time formatting provides good UX
+
+CONCLUSION:
+===========
+The implementation is solid and functional. The main concerns are:
+1. Incorrect import paths (should use @app/db)
+2. Code duplication that will be exacerbated by subsequent commits
+
+These are minor issues that don't affect functionality but should be addressed for
+codebase consistency and maintainability.

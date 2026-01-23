@@ -1,0 +1,136 @@
+# Review: Commit 2a3b14f - Add test badge, standardize debug version, add @types/debug
+
+## Summary of Changes
+
+This commit makes three distinct improvements:
+1. Adds a test badge to the ScriptRunDetailPage header for visual consistency
+2. Standardizes the debug package version to ^4.4.3 across all packages in the monorepo
+3. Adds @types/debug devDependency to apps/web for proper TypeScript support
+
+### Files Changed:
+1. `apps/web/src/components/ScriptRunDetailPage.tsx` - Added test badge (6 lines)
+2. `apps/web/package.json` - Updated debug version, added @types/debug
+3. `apps/push/package.json` - Updated debug from ^4.3.4 to ^4.4.3
+4. `apps/server/package.json` - Updated debug from ^4.3.4 to ^4.4.3
+5. `packages/agent/package.json` - Updated debug from ^4.3.4 to ^4.4.3
+6. `packages/browser/package.json` - Updated debug from ^4.3.4 to ^4.4.3
+7. `packages/db/package.json` - Updated debug from ^4.3.4 to ^4.4.3
+8. `packages/node/package.json` - Updated debug from ^4.3.4 to ^4.4.3
+9. `packages/sync/package.json` - Updated debug from ^4.3.4 to ^4.4.3
+10. `package-lock.json` - Updated lockfile
+11. `IMPLEMENTATION_PLAN.md` - Updated specs 61, 66, 67
+
+---
+
+## Potential Issues
+
+### Issue 1: Missing @types/debug in Multiple Packages (Medium Severity)
+
+**Location**: packages/agent, packages/sync, packages/node, packages/browser, apps/push, apps/server, apps/cli
+
+**Problem**: The commit only adds `@types/debug` to `apps/web/package.json`, but 7 other packages also use the debug package and don't have explicit `@types/debug` in their devDependencies:
+
+```
+packages/agent/package.json - has debug, NO @types/debug
+packages/sync/package.json - has debug, NO @types/debug
+packages/node/package.json - has debug, NO @types/debug
+packages/browser/package.json - has debug, NO @types/debug
+apps/push/package.json - has debug, NO @types/debug
+apps/server/package.json - has debug, NO @types/debug
+apps/cli/package.json - has debug, NO @types/debug
+```
+
+**Why it works currently**: The root `package.json` has `@types/debug@^4.1.12` in devDependencies, and npm workspace hoisting makes it available to all packages. This is implicit and fragile.
+
+**Risk**: If workspace hoisting behavior changes, or if a package is published/moved independently, TypeScript compilation could fail with missing type definitions.
+
+**Proposal**: Add `@types/debug: ^4.1.12` to devDependencies in all packages that directly import `debug`. This makes the dependency explicit and self-contained. Priority packages: `packages/db` (already has it), `packages/agent`, `packages/sync`.
+
+---
+
+### Issue 2: Test Badge Not Consolidated with StatusBadge (Low Severity)
+
+**Location**: ScriptRunDetailPage.tsx lines 50-54
+
+**Problem**: The test badge is added as inline JSX:
+```tsx
+{run.type === 'test' && (
+  <Badge variant="outline" className="text-amber-700 border-amber-300 bg-amber-50">
+    Test
+  </Badge>
+)}
+```
+
+This same pattern exists in WorkflowDetailPage.tsx and potentially other locations. The previous commit (7446fc8) consolidated status badges but this commit doesn't follow the same consolidation pattern for test badges.
+
+**Related to commit 7446fc8 Issue #2**: Multiple inline test badge implementations with identical styling.
+
+**Proposal**: Create a `TestRunBadge` component in StatusBadge.tsx and use it in both ScriptRunDetailPage and WorkflowDetailPage for consistency.
+
+---
+
+### Issue 3: Partial Package.json Updates (Non-Issue, Verified)
+
+**Location**: package-lock.json analysis
+
+**Observation**: The lockfile shows debug version updates in all expected locations:
+- apps/push: ^4.4.3
+- apps/server: ^4.4.3
+- apps/web: ^4.4.3
+- packages/agent: ^4.4.3
+- packages/browser: ^4.4.3
+- packages/db: ^4.4.3
+- packages/node: ^4.4.3
+- packages/sync: ^4.4.3
+
+**Status**: All packages are correctly updated. The commit message and implementation are consistent.
+
+---
+
+### Issue 4: Debug Version Caret Range (Very Low Severity)
+
+**Location**: All package.json files
+
+**Observation**: Using `^4.4.3` allows automatic updates to 4.4.x patch versions but not minor/major versions.
+
+**Status**: This is appropriate for a logging library. The debug package has a stable API and patch updates should be safe. No action needed.
+
+---
+
+### Issue 5: Missing Test Badge in WorkflowDetailPage Header (Potential Gap)
+
+**Location**: WorkflowDetailPage.tsx
+
+**Observation**: The commit adds a test badge to ScriptRunDetailPage but doesn't verify if WorkflowDetailPage has consistent test badge placement.
+
+After investigation: WorkflowDetailPage does have test badge rendering in the runs list (lines 586-591), but the styling and location may differ from ScriptRunDetailPage.
+
+**Proposal**: Verify that test badge styling is consistent between:
+- WorkflowDetailPage runs list
+- ScriptRunDetailPage header
+- ScriptRunDetailPage retry list
+
+---
+
+## Code Quality Observations
+
+### Positive Aspects:
+1. Version standardization across 8 packages improves maintainability
+2. Adding @types/debug improves TypeScript experience in apps/web
+3. Test badge improves UX consistency - users now see test status in ScriptRunDetailPage
+4. Clean, focused commit with clear scope
+5. IMPLEMENTATION_PLAN.md updates provide good documentation
+
+### Areas for Improvement:
+1. @types/debug should be added to all packages using debug, not just apps/web
+2. Test badge could follow the consolidation pattern established by StatusBadge components
+
+---
+
+## Summary
+
+This commit successfully standardizes the debug package version across the monorepo and adds a test badge for improved UX. The main gap is that `@types/debug` is only added to `apps/web` when several other packages also use the debug package and would benefit from explicit type definitions.
+
+The test badge implementation works but doesn't follow the consolidation pattern from the previous commit (7446fc8), leaving opportunity for future deduplication.
+
+**Overall Assessment**: Good maintenance commit that improves version consistency. The @types/debug gap should be addressed in a follow-up to make all packages self-contained with their type dependencies.

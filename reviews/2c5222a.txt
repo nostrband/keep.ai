@@ -1,0 +1,230 @@
+COMMIT REVIEW: 2c5222a "Extract shared event processing logic to reduce duplication"
+===================================================================================
+
+SUMMARY OF CHANGES
+------------------
+This commit extracts shared event processing logic from TaskEventGroup and
+WorkflowEventGroup into reusable helpers and a new shared component:
+
+New files:
+- apps/web/src/components/EventListWithCollapse.tsx (105 lines)
+
+Modified files:
+- apps/web/src/lib/event-helpers.ts (+83 lines)
+  - BaseEvent interface
+  - consolidateGmailEvents() - consolidates multiple Gmail API events into one
+  - processEventsForDisplay() - filters markers, consolidates Gmail events
+- apps/web/src/components/TaskEventGroup.tsx (-99 lines)
+- apps/web/src/components/WorkflowEventGroup.tsx (-102 lines)
+- IMPLEMENTATION_PLAN.md - Updated spec statuses
+
+Net reduction: ~75 lines of duplicated code (matching spec estimate)
+
+ARCHITECTURE CONTEXT
+--------------------
+TaskEventGroup and WorkflowEventGroup are rendered in ChatInterface.tsx
+to display execution events grouped by task_run_id or script_run_id.
+
+Both components had nearly identical logic for:
+1. Filtering out marker events (task_run, workflow_run, etc.)
+2. Consolidating multiple Gmail API calls into a single display event
+3. Partitioning events into high-signal (always visible) and low-signal (collapsible)
+4. Rendering events with collapse/expand behavior
+
+This refactoring creates a single source of truth for these behaviors.
+
+CODE QUALITY ASSESSMENT
+-----------------------
+Strengths:
++ Significant code deduplication (~75 lines)
++ Single source of truth for Gmail consolidation logic
++ Single source of truth for event collapse behavior
++ Uses generic typing (<T extends BaseEvent>) for flexibility
++ Maintains backward compatibility (no behavioral changes)
++ Clean separation of concerns (helpers vs components)
+
+ISSUES FOUND
+------------
+
+Issue 1: Duplicate BaseEvent Interface Definitions
+Severity: LOW
+Location:
+- apps/web/src/lib/event-helpers.ts (lines 21-26) - exported
+- apps/web/src/components/EventListWithCollapse.tsx (lines 11-17) - internal
+
+The BaseEvent interface is defined twice with identical structure:
+```typescript
+interface BaseEvent {
+  id: string;
+  type: string;
+  content: any;
+  timestamp: string;
+}
+```
+
+EventListWithCollapse does NOT import the exported version from event-helpers.
+This creates maintenance risk: if one definition changes, the other won't.
+
+Proposed Fix:
+In EventListWithCollapse.tsx, replace the local interface with an import:
+```typescript
+import { BaseEvent } from "../lib/event-helpers";
+```
+
+---
+
+Issue 2: Magic Strings for Workflow Event Types
+Severity: LOW
+Location: apps/web/src/components/WorkflowEventGroup.tsx line 80
+
+The marker types for workflow events are hardcoded strings, not constants:
+```typescript
+const allVisibleEvents = processEventsForDisplay(events, ["workflow_run", "workflow_run_end"]);
+```
+
+Compare with task events which use EVENT_TYPES constants (defined in events.ts):
+- EVENT_TYPES.TASK_RUN ("task_run")
+- EVENT_TYPES.TASK_RUN_END ("task_run_end")
+
+But "workflow_run" and "workflow_run_end" are NOT defined in EVENT_TYPES.
+This creates fragility: typos won't be caught at compile time.
+
+Proposed Fix:
+Add to apps/web/src/types/events.ts:
+```typescript
+export const EVENT_TYPES = {
+  // ... existing types ...
+  WORKFLOW_RUN: "workflow_run",
+  WORKFLOW_RUN_END: "workflow_run_end",
+} as const;
+```
+
+Then in WorkflowEventGroup.tsx:
+```typescript
+const allVisibleEvents = processEventsForDisplay(events, [
+  EVENT_TYPES.WORKFLOW_RUN,
+  EVENT_TYPES.WORKFLOW_RUN_END
+]);
+```
+
+---
+
+Issue 3: Type Casting with 'as any' and 'as EventType'
+Severity: LOW
+Location: apps/web/src/components/EventListWithCollapse.tsx lines 63-64, 83-84, 97-98
+
+Multiple type casts are used because BaseEvent.type is string, not EventType:
+```typescript
+<EventItem
+  key={event.id}
+  type={event.type as EventType}
+  content={event.content as EventPayload}
+  usage={(event.content as any)?.usage}
+/>
+```
+
+The casts are necessary given the current architecture but reduce type safety.
+Unknown event types would not be caught at compile time.
+
+This is acceptable given that events are pre-validated before reaching these
+components, but could be improved with stricter typing in BaseEvent:
+```typescript
+interface BaseEvent {
+  id: string;
+  type: EventType;  // Instead of string
+  content: EventPayload;  // Instead of any
+  timestamp: string;
+}
+```
+
+---
+
+Issue 4: consolidateGmailEvents Doesn't Handle Empty Methods
+Severity: TRIVIAL
+Location: apps/web/src/lib/event-helpers.ts line 53
+
+If all Gmail events have empty/null method names, the result would be:
+```typescript
+method: ""  // Empty string
+```
+
+This is unlikely in practice since Gmail events always have methods, but
+a defensive check could be added:
+```typescript
+method: uniqueMethods.length > 0 ? uniqueMethods.join(", ") : "gmail"
+```
+
+---
+
+Issue 5: hasError Boolean Coercion
+Severity: NONE (CORRECT)
+Location: Both TaskEventGroup.tsx and WorkflowEventGroup.tsx
+
+The commit changes hasError from truthy check to explicit boolean:
+```typescript
+// Before:
+const hasError = run?.error && run.error.length > 0;
+
+// After:
+const hasError = !!(run?.error && run.error.length > 0);
+```
+
+This is a GOOD change that ensures hasError is always a boolean, preventing
+potential issues when passing to child components that expect boolean props.
+
+TEST COVERAGE
+-------------
+- No unit tests for consolidateGmailEvents()
+- No unit tests for processEventsForDisplay()
+- No component tests for EventListWithCollapse
+- No tests for partitionEventsBySignal() (existing function)
+
+RISK: Refactored code has no automated tests. Manual testing required.
+
+TEST RECOMMENDATIONS:
+```typescript
+describe('consolidateGmailEvents', () => {
+  it('returns null for empty array', () => {
+    expect(consolidateGmailEvents([])).toBeNull();
+  });
+
+  it('consolidates multiple gmail events into one', () => {
+    const events = [
+      { id: '1', type: 'gmail_api_call', content: { method: 'users.messages.list' }, timestamp: '2024-01-01' },
+      { id: '2', type: 'gmail_api_call', content: { method: 'users.messages.get' }, timestamp: '2024-01-01' },
+    ];
+    const result = consolidateGmailEvents(events);
+    expect(result?.content.method).toBe('read messages, read messages');
+    expect(result?.id).toBe('gmail-consolidated-1');
+  });
+});
+```
+
+PERFORMANCE ANALYSIS
+--------------------
+- consolidateGmailEvents: O(n) for n Gmail events
+- processEventsForDisplay: O(n) for n events
+- partitionEventsBySignal: O(n) with O(m) Gmail method check (m=11 methods)
+- No memory leaks detected
+- No circular references
+- Appropriate use of functional patterns (filter, reduce, map)
+
+CONSISTENCY CHECK
+-----------------
+The refactoring maintains behavioral parity with the original code:
+1. Same marker events filtered
+2. Same Gmail consolidation logic
+3. Same collapse/expand behavior
+4. Same cost calculation (TaskEventGroup from run, WorkflowEventGroup from events)
+
+VERDICT
+-------
+This is a well-executed refactoring that reduces code duplication without
+changing behavior. The single source of truth for event processing logic
+will make future changes easier. The issues found are minor typing and
+definition cleanups that don't affect functionality.
+
+Overall quality: GOOD
+Blocking issues: NONE
+Suggested improvements: 4 (3 LOW, 1 TRIVIAL)
+Code deduplication achieved: ~75 lines (matches spec estimate)

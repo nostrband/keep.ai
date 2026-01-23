@@ -1,0 +1,147 @@
+# Review: Commit 73a5f3b
+
+## Summary
+Implements the database layer for Spec 12, splitting the monolithic `chat_events` table into three purpose-specific tables for better UX and data organization:
+- `chat_messages`: User-visible conversation with metadata links
+- `notifications`: Actionable workflow items requiring user attention
+- `execution_logs`: Tool calls and debugging data
+
+## Changes Made
+
+### 1. New Migration v29 (packages/db/src/migrations/v29.ts)
+- Creates three new CRR tables with proper indexes and NOT NULL DEFAULT constraints
+- Migrates existing data from chat_events to new tables:
+  - `message` type events → `chat_messages`
+  - Tool events → `execution_logs`
+  - `task_run`/`task_run_end` events → `execution_logs` as run_start/run_end markers
+
+### 2. New NotificationStore (packages/db/src/notification-store.ts)
+- Notification interface with workflow_id, type, payload, timestamps
+- Methods: saveNotification, getNotifications, acknowledgeNotification, resolveNotification
+- Specialized queries: getUnresolvedError, countUnresolved, getUnresolvedNotifications
+
+### 3. New ExecutionLogStore (packages/db/src/execution-log-store.ts)
+- ExecutionLog interface with run_id, run_type, event_type, tool_name, input/output, cost
+- Methods: saveExecutionLog, getExecutionLogs, getExecutionLog, listExecutionLogs
+- Aggregation queries: getRunCost, countToolCalls
+
+### 4. Updated ChatStore (packages/db/src/chat-store.ts)
+- Added ChatMessage interface with metadata fields (task_run_id, script_id, failed_script_run_id)
+- New methods: saveChatMessage, getNewChatMessages, getChatMessageById, countNewMessages, getLastMessageActivity
+- Clear documentation on UI rendering behavior for metadata links
+
+### 5. Updated api.ts and index.ts
+- Integrated new stores into KeepDbApi class
+- Exported new types: ChatMessage, Notification, ExecutionLog, etc.
+
+### 6. Updated IMPLEMENTATION_PLAN.md
+- Marked Spec 12 database layer as ~30% complete
+- Updated infrastructure gaps section
+
+---
+
+## Potential Issues
+
+### ISSUE 1: Data Migration May Set NULL in NOT NULL Columns [MODERATE]
+**Location:** packages/db/src/migrations/v29.ts (lines 113-124)
+
+The data migration for task_run events uses COALESCE but the fallback for run_id returns empty string only when both nested paths are null:
+```sql
+COALESCE(json_extract(content, '$.task_run_id'), json_extract(content, '$.id'), '') as run_id
+```
+
+If `content` is malformed or neither field exists, run_id would be empty string which is correct. However, the tool events migration (lines 98-107) may have issues where `task_run_id` is missing from legacy events.
+
+**Risk:** Legacy tool events may have empty run_id values which is semantically odd (a tool call without knowing which run it belongs to), but not a schema violation.
+
+**Proposal:** Accept as-is. The empty run_id is valid per schema and the UI/queries can handle it. Alternatively, generate synthetic run_ids for orphaned tool events if needed later.
+
+---
+
+### ISSUE 2: Role Type Casting Without Validation [MINOR]
+**Location:** packages/db/src/chat-store.ts (line 43)
+
+```typescript
+role: row.role as "user" | "assistant",
+```
+
+The role is cast without validation. If the database contains an invalid role value (e.g., "system", "tool"), it would be silently accepted as the union type.
+
+**Risk:** Low - all write paths use explicit 'user' or 'assistant' values.
+
+**Proposal:** Could add runtime validation: `if (!['user', 'assistant'].includes(row.role)) throw new Error(...)`. Not urgent given write paths are controlled.
+
+---
+
+### ISSUE 3: Defensive Empty String Fallbacks in rowToChatMessage [MINOR]
+**Location:** packages/db/src/chat-store.ts (lines 47-49)
+
+```typescript
+task_run_id: row.task_run_id || "",
+script_id: row.script_id || "",
+failed_script_run_id: row.failed_script_run_id || "",
+```
+
+The database schema defines these as `NOT NULL DEFAULT ''`, so they can never be null. The `|| ""` fallback is redundant.
+
+**Risk:** None - purely cosmetic.
+
+**Proposal:** Remove the `|| ""` fallbacks for cleaner code, or leave as defensive coding if preferred.
+
+---
+
+### ISSUE 4: Deprecated Methods Still Present [MINOR]
+**Location:** packages/db/src/chat-store.ts
+
+The old `saveChatEvent()` and `getChatEvents()` methods remain without deprecation warnings. Code comments mention deprecation for Spec 12 but the methods don't emit warnings.
+
+**Risk:** Low - Spec 01 will migrate callers away from these methods.
+
+**Proposal:** Add `console.warn('DEPRECATED: Use saveChatMessage instead')` or JSDoc `@deprecated` tags to make the deprecation visible to developers.
+
+---
+
+### ISSUE 5: Message Sort by timestamp May Differ from Old createdAt Sort [MINOR]
+**Location:** packages/db/src/chat-store.ts
+
+Old `getChatMessages()` sorts by `metadata.createdAt` from JSON content, while new `getNewChatMessages()` sorts by `timestamp` column. If these values diverge, sort order would differ.
+
+**Risk:** Low - the timestamp column is populated from the same source during migration. All new writes use the same timestamp.
+
+**Proposal:** No action needed. Document in comments that timestamp is the source of truth for ordering.
+
+---
+
+### ISSUE 6: Notification Type Enum Doesn't Include All Future Types [INFO]
+**Location:** packages/db/src/notification-store.ts (lines 9-15)
+
+Current types: "error" | "escalated" | "script_message" | "script_ask"
+
+The comment mentions script_ask is "v2", indicating future expansion. The schema uses TEXT allowing any string.
+
+**Risk:** None - the typing is advisory, database accepts any string.
+
+**Proposal:** No action needed. Good design for forward compatibility.
+
+---
+
+## Code Quality Observations
+
+### Positive
+- Well-documented migration with clear purpose explanation
+- Proper CRR table setup with all NOT NULL DEFAULT constraints
+- Good index choices (workflow_id, timestamp, type, run_id)
+- Transaction support in save methods
+- Clean separation of concerns between stores
+- Comprehensive store methods covering common query patterns
+
+### Style Notes
+- Consistent with existing codebase patterns
+- Good JSDoc comments explaining UI rendering behavior
+- Properly exports types alongside classes
+
+---
+
+## Conclusion
+
+This is a solid database layer implementation for Spec 12. The issues identified are minor and don't affect functionality. The migration properly handles legacy data and the new stores provide a clean API for the refactored event system. The main work remaining is in the agent layer (Spec 01) to write to the new tables and the UI layer to read from them.

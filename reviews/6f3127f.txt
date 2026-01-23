@@ -1,0 +1,37 @@
+COMMIT: 6f3127f
+TITLE: docs: Verify code paths and fix orphaned comment reference
+DATE: 2026-01-22 15:09:12 +0100
+CO-AUTHORED-BY: Claude Opus 4.5
+
+FILES CHANGED:
+- IMPLEMENTATION_PLAN.md (documentation update)
+- packages/db/src/migrations/v23.ts (comment fix)
+
+=== SUMMARY ===
+
+This commit fixes an orphaned documentation reference in v23.ts migration file. The commit:
+
+1. Changed comment from: "Per the FIXME in MessageNotifications.ts (line 35), the current implementation uses a global `read_at` timestamp..."
+2. Changed to: "Original problem: The app used a global `read_at` timestamp..."
+
+This removes a reference to MessageNotifications.ts which was deleted in commit f9d363e (same day, ~1.5 hours earlier) as part of Spec 07 implementation.
+
+The migration v23.ts creates the (now deprecated) chat_notifications table for per-device notification tracking. The original design had a global read_at timestamp issue for multi-device users, and this migration was part of the solution. Since the entire feature was deprecated and the related code deleted, the comment now correctly uses past tense and doesn't reference deleted files.
+
+=== ISSUES FOUND ===
+
+None.
+
+The change is:
+- Technically accurate about the read_at timestamp issue
+- Self-contained and doesn't require knowledge of deleted code
+- Properly uses past tense since this describes a deprecated feature
+- Applied same day as the deletion, preventing merge conflicts
+
+=== PROPOSALS ===
+
+No changes needed. This is a well-executed maintenance task.
+
+=== VERDICT ===
+
+EXCELLENT - Good code hygiene removing orphaned documentation reference.

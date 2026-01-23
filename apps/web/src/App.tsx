@@ -21,6 +21,7 @@ import ScriptDetailPage from "./components/ScriptDetailPage";
 import ScriptRunDetailPage from "./components/ScriptRunDetailPage";
 import WorkflowsPage from "./components/WorkflowsPage";
 import WorkflowDetailPage from "./components/WorkflowDetailPage";
+import ArchivedPage from "./components/ArchivedPage";
 import NotesPage from "./components/NotesPage";
 import NoteDetailPage from "./components/NoteDetailPage";
 import FilesPage from "./components/FilesPage";
@@ -29,11 +30,7 @@ import ConsolePage from "./components/ConsolePage";
 import SettingsPage from "./components/SettingsPage";
 import NotificationsPage from "./components/NotificationsPage";
 import { ConnectDeviceDialog } from "./components/ConnectDeviceDialog";
-import { AuthDialog } from "./components/AuthDialog";
-import { ClerkAuthProvider } from "./components/ClerkAuthProvider";
 import { useDbQuery } from "./hooks/dbQuery";
-import { useConfig } from "./hooks/useConfig";
-import { CLERK_PUBLISHABLE_KEY } from "./constants/auth";
 
 // Access build-time constants
 declare const __SERVERLESS__: boolean;
@@ -260,42 +257,9 @@ function App() {
   const { dbStatus, error } = useDbQuery();
   const isServerless = __SERVERLESS__;
   const isElectron = __ELECTRON__;
-  const {
-    isConfigValid,
-    isLoading: configLoading,
-    error: configError,
-    recheckConfig,
-  } = useConfig();
 
-  // For non-serverless mode, check configuration first
-  if (!isServerless) {
-    if (configLoading) {
-      return (
-        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-          <div>Checking configuration...</div>
-        </div>
-      );
-    }
-
-    if (configError) {
-      return (
-        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-          <div>Configuration error: {configError}</div>
-        </div>
-      );
-    }
-
-    if (isConfigValid === false) {
-      return (
-        <ClerkAuthProvider clerkPublishableKey={CLERK_PUBLISHABLE_KEY}>
-          <AuthDialog 
-            onAuthenticated={recheckConfig}
-            clerkPublishableKey={CLERK_PUBLISHABLE_KEY}
-          />
-        </ClerkAuthProvider>
-      );
-    }
-  }
+  // Auth is now handled by HeaderAuthNotice and AuthEventItem (non-blocking)
+  // Users can browse the app freely; auth prompts appear as dismissable modals
 
   if (dbStatus === "initializing") {
     return (
@@ -376,6 +340,7 @@ function App() {
         <Route path="/threads/:id" element={<ThreadDetailPage />} />
         <Route path="/workflows" element={<WorkflowsPage />} />
         <Route path="/workflows/:id" element={<WorkflowDetailPage />} />
+        <Route path="/archived" element={<ArchivedPage />} />
         <Route path="/tasks" element={<TasksPage />} />
         <Route path="/tasks/:id" element={<TaskDetailPage />} />
         <Route path="/tasks/:id/run/:runId" element={<TaskRunDetailPage />} />

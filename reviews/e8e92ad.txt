@@ -1,0 +1,120 @@
+COMMIT: e8e92ad - feat: Implement specs #18-19 (server error notice, save tool title)
+DATE: 2026-01-23
+AUTHOR: Artur Briugeman
+CO-AUTHOR: Claude Opus 4.5
+
+=== CHANGES SUMMARY ===
+
+Spec #18: Server Error Header Notice
+- Added isServerError state to useNeedAuth hook
+- HeaderAuthNotice shows "Server error" (red) when server is unreachable
+- Clicking "Server error" retries the config check
+
+Spec #19: Agent Save Tool Title
+- Added required title field to SaveInfoSchema
+- Workflow title only updated if currently empty
+
+Files changed:
+- IMPLEMENTATION_PLAN.md (-21 lines status updates)
+- apps/web/src/components/HeaderAuthNotice.tsx (+22 lines)
+- apps/web/src/hooks/useNeedAuth.ts (+5 lines)
+- packages/agent/src/ai-tools/save.ts (+16 lines)
+
+=== ISSUES FOUND ===
+
+CRITICAL:
+
+1. Title Field Not Saved by updateWorkflowFields
+   File: packages/agent/src/ai-tools/save.ts:73-88
+   File: packages/db/src/script-store.ts:757
+
+   Code in save.ts:
+     const updates: { status: string; active_script_id: string; title?: string } = {
+       status: 'ready',
+       active_script_id: newScript.id,
+     };
+     if (shouldUpdateTitle) {
+       updates.title = info.title;
+     }
+     await opts.scriptStore.updateWorkflowFields(workflow.id, updates);
+
+   Problem: The updateWorkflowFields method's type signature:
+     fields: Partial<Pick<Workflow, 'timestamp' | 'next_run_timestamp' | 'status' |
+             'cron' | 'maintenance' | 'maintenance_fix_count' | 'active_script_id'>>
+
+   'title' is NOT included in the Pick type. The TypeScript compiler may not catch
+   this due to loose typing, and at runtime the title field is silently ignored
+   because there's no if-block handling fields.title in the method body.
+
+   Impact: SPEC #19 IS NOT WORKING. Workflow titles will never be updated by the
+   agent save tool, even though the code appears to do so.
+
+   Proposal:
+   In packages/db/src/script-store.ts:757, add 'title' to the Pick type:
+     fields: Partial<Pick<Workflow, 'timestamp' | 'next_run_timestamp' | 'status' |
+             'cron' | 'maintenance' | 'maintenance_fix_count' | 'active_script_id' | 'title'>>
+
+   And add handling in the method body (around line 792):
+     if (fields.title !== undefined) {
+       setClauses.push('title = ?');
+       values.push(fields.title);
+     }
+
+=== NO ISSUES ===
+
+2. Server Error Detection - CORRECT
+   File: apps/web/src/hooks/useNeedAuth.ts:31,66,71
+   - isServerError = false on successful load (line 66)
+   - isServerError = true in catch block (line 71)
+   - Correctly distinguishes server errors from API-returned errors
+
+3. Server Error UI Display - CORRECT
+   File: apps/web/src/components/HeaderAuthNotice.tsx:22-52
+   - __SERVERLESS__ guard prevents display in serverless mode (line 22)
+   - Red styling distinguishes from amber auth notices (lines 52-54)
+   - Retry calls refresh() not auth popup (lines 39-42)
+
+4. Title Whitespace Check Logic - CORRECT
+   File: packages/agent/src/ai-tools/save.ts:70
+   Code: const shouldUpdateTitle = info.title && (!workflow.title || workflow.title.trim() === '');
+   - Correctly handles empty string, whitespace-only, and existing titles
+   - Only updates if info.title is truthy AND workflow.title is empty/whitespace
+
+5. __SERVERLESS__ Definition - CORRECT
+   File: apps/web/vite.config.ts:37
+   - Properly defined in build configuration
+   - Declared in HeaderAuthNotice.tsx:7
+
+6. SaveInfo Type Export - CORRECT
+   File: packages/agent/src/ai-tools/save.ts:22
+   - SaveInfo type properly exported for external use
+   - SaveInfoSchema kept internal (appropriate)
+
+=== PROPOSALS ===
+
+IMMEDIATE (MUST FIX):
+1. Add 'title' to updateWorkflowFields Pick type in script-store.ts:757
+2. Add if-block to handle fields.title in updateWorkflowFields method
+
+TESTING:
+3. Add integration test verifying title is actually persisted to database
+4. Test that existing non-empty titles are NOT overwritten
+
+=== WHY TESTS PASS DESPITE BUG ===
+
+The 216 tests pass because:
+1. TypeScript doesn't catch this due to the way Partial<Pick<...>> interacts
+   with object literals containing extra properties
+2. No integration tests verify the title was actually saved to the database
+3. Unit tests likely mock the scriptStore, not testing the actual method
+
+=== OVERALL ASSESSMENT ===
+
+QUALITY: POOR for spec #19 (critical bug), GOOD for spec #18
+
+Spec #18 (Server Error Notice): Well implemented, correct error detection and UI.
+Spec #19 (Save Tool Title): BROKEN - the feature does not work due to missing
+database layer support. The title field is added to the schema and the logic
+appears correct, but the data never reaches the database.
+
+RISK: HIGH for spec #19 - feature is completely non-functional.

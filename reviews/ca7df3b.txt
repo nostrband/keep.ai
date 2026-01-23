@@ -1,0 +1,302 @@
+# Code Review: Commit ca7df3b
+
+**Commit**: ca7df3b - Add active_script_id and fix workflow timestamp
+**Date**: 2026-01-21 15:30:13 +0100
+**Author**: Artur <artur@keep.ai>
+**Co-Authored-By**: Claude Opus 4.5 <noreply@anthropic.com>
+
+## Summary of Changes
+
+This commit implements two major improvements:
+
+### P1: Active Script Version Pointer (#8)
+1. Added `active_script_id` column to workflows table via migration v26
+2. Migration backfills existing workflows with their latest script ID
+3. Changed `workflow-worker.ts` to use `workflow.active_script_id` instead of querying for latest script
+4. Renamed `useRollbackScript` to `useActivateScriptVersion` (now just updates pointer, no script duplication)
+5. Updated `save.ts` to set `active_script_id` when saving new scripts
+6. Updated UI to show "Active" badge and "Activate" button instead of "Current" and "Rollback"
+
+### P1: Workflow Timestamp Bug Fix (#16)
+1. Removed timestamp updates from `workflow-scheduler.ts` (4 places)
+2. Removed timestamp update from `workflow-worker.ts`
+3. `workflow.timestamp` now correctly represents creation time only
+
+### Files Changed:
+- `IMPLEMENTATION_PLAN.md` (~65 lines)
+- `apps/web/src/components/WorkflowDetailPage.tsx` (~77 lines)
+- `apps/web/src/hooks/dbWrites.ts` (~67 lines)
+- `packages/agent/src/ai-tools/save.ts` (+6 lines)
+- `packages/agent/src/workflow-scheduler.ts` (~7 lines)
+- `packages/agent/src/workflow-worker.ts` (~30 lines)
+- `packages/db/src/api.ts` (+1 line)
+- `packages/db/src/database.ts` (+2 lines)
+- `packages/db/src/migrations/v26.ts` (new file)
+- `packages/db/src/script-store.ts` (~26 lines)
+
+---
+
+## Issues Identified
+
+### ISSUE 1: Race Condition - Script Creation Not Atomic with active_script_id Update (CRITICAL)
+
+**Location**: `packages/agent/src/ai-tools/save.ts` lines 57-77
+
+**Problem**: Script creation and `active_script_id` update are TWO SEPARATE database operations:
+
+```typescript
+await opts.scriptStore.addScript(newScript);           // Operation 1
+
+await opts.scriptStore.updateWorkflowFields(workflow.id, {
+  active_script_id: newScript.id,                      // Operation 2
+});
+```
+
+Between these two operations, the scheduler could:
+1. Read the workflow (sees status='active')
+2. Use the OLD `active_script_id` (not yet updated)
+3. Execute the OLD script instead of the newly saved one
+
+**Impact**: When saving a script fix, the old buggy script might execute one more time before the pointer updates.
+
+**Severity**: CRITICAL - Can cause incorrect workflow execution during script updates.
+
+**Proposal**: Wrap both operations in a transaction:
+
+```typescript
+await opts.scriptStore.db.tx(async (tx) => {
+  await opts.scriptStore.addScript(newScript, tx);
+  await opts.scriptStore.updateWorkflowFields(workflow.id, {
+    active_script_id: newScript.id,
+  }, tx);
+});
+```
+
+---
+
+### ISSUE 2: Empty active_script_id Allows Workflow Activation (HIGH)
+
+**Location**: `packages/db/src/api.ts` line 323, `packages/agent/src/workflow-worker.ts` lines 74-77
+
+**Problem**: When a workflow is created, `active_script_id` is initialized to empty string:
+
+```typescript
+active_script_id: "",  // No active script yet
+```
+
+A user can potentially activate a workflow (set status='active') BEFORE any script is saved. The scheduler will try to execute, and `workflow-worker.ts` throws:
+
+```typescript
+if (!workflow.active_script_id) {
+  throw new Error(`No active script for workflow ${workflow.id}...`);
+}
+```
+
+But this error occurs at execution time, not at activation time.
+
+**Impact**: Workflows can be activated without scripts, causing execution failures.
+
+**Proposal**: Add validation in the activation endpoint/mutation to prevent activating workflows with empty `active_script_id`:
+
+```typescript
+// In useUpdateWorkflow or server endpoint
+if (status === 'active' && !workflow.active_script_id) {
+  throw new Error('Cannot activate workflow without an active script');
+}
+```
+
+---
+
+### ISSUE 3: No Protection for Deleted Scripts (HIGH)
+
+**Location**: `packages/agent/src/workflow-worker.ts` lines 79-83
+
+**Problem**: If a script pointed to by `active_script_id` is deleted from the database:
+
+```typescript
+const script = await this.api.scriptStore.getScript(workflow.active_script_id);
+if (!script) {
+  throw new Error(`Active script ${workflow.active_script_id} not found...`);
+}
+```
+
+The workflow fails with a cryptic error about a missing script ID.
+
+**Impact**: Users won't understand why their workflow suddenly stopped working after script deletion.
+
+**Proposal**: Either:
+1. Prevent deletion of scripts that are referenced by `active_script_id`
+2. Add ON DELETE CASCADE behavior that clears `active_script_id`
+3. Auto-select the next most recent script if active is missing
+
+---
+
+### ISSUE 4: Idempotency Claim is False (MEDIUM)
+
+**Location**: `packages/agent/src/ai-tools/save.ts` lines 37-40
+
+**Problem**: Commit message claims "Idempotent operations (double-click safe)" but save.ts is NOT idempotent:
+
+```typescript
+const script = await opts.scriptStore.getLatestScriptByWorkflowId(taskId);
+const version = script ? script.version + 1 : 1;
+```
+
+If called twice quickly with identical code:
+1. First call: Queries latest (v1), creates v2
+2. Second call: Queries latest (v1, still), creates v2 with different ID
+3. Result: Two v2 scripts with different IDs exist
+
+**Impact**: Double-clicking save button creates duplicate scripts.
+
+**Proposal**: Check if the new script code matches the current active script before creating:
+
+```typescript
+const currentScript = await opts.scriptStore.getScript(workflow.active_script_id);
+if (currentScript?.code === newScript.code) {
+  return "Script unchanged, no new version created";
+}
+```
+
+---
+
+### ISSUE 5: Migration Handles Missing Scripts Silently (MEDIUM)
+
+**Location**: `packages/db/src/migrations/v26.ts` lines 29-38
+
+**Problem**: The migration backfill sets `active_script_id` to empty string if no scripts exist:
+
+```sql
+UPDATE workflows SET active_script_id = COALESCE(
+  (SELECT id FROM scripts ...),
+  ''  -- Fallback to empty string
+)
+```
+
+This silently creates workflows with empty `active_script_id` that will fail when executed.
+
+**Impact**: Post-migration, some workflows may be "active" but have no active script.
+
+**Proposal**: Add a post-migration validation query that identifies affected workflows:
+
+```sql
+SELECT id FROM workflows WHERE status = 'active' AND active_script_id = '';
+```
+
+Log these as warnings requiring manual attention.
+
+---
+
+### ISSUE 6: UI Shows "Activate" Button When No Script Exists (LOW)
+
+**Location**: `apps/web/src/components/WorkflowDetailPage.tsx` lines 255-264
+
+**Problem**: The `activeScript` variable falls back to `latestScript`:
+
+```typescript
+const activeScript = useMemo(() => {
+  if (!workflow?.active_script_id || scriptVersions.length === 0) {
+    return latestScript; // Fallback
+  }
+  return scriptVersions.find(...) || latestScript;
+}, ...);
+```
+
+If both `workflow.active_script_id` is empty AND `latestScript` is null, `activeScript` is null. But the "Activate" button still appears (guarded by status check, not script check).
+
+**Impact**: User confusion when button doesn't work.
+
+**Current Mitigation**: `handleActivate` has guard `if (!workflow || !activeScript) return;` but UI should hide the button entirely.
+
+**Proposal**: Add explicit UI check:
+
+```tsx
+{workflow.status === "" && activeScript && (
+  <Button onClick={handleActivate}>Activate</Button>
+)}
+```
+
+---
+
+### ISSUE 7: Maintenance Fix Doesn't Validate Script Change (LOW)
+
+**Location**: `packages/agent/src/ai-tools/save.ts` lines 82-90
+
+**Problem**: When maintenance mode is cleared after a script save:
+
+```typescript
+if (wasInMaintenance) {
+  await opts.scriptStore.updateWorkflowFields(workflow.id, {
+    maintenance: false,
+    next_run_timestamp: new Date().toISOString(),
+  });
+}
+```
+
+There's no check that the new script is actually different from the one that failed. An agent could "fix" a script by adding a comment only, which doesn't address the underlying issue.
+
+**Impact**: Workflow immediately re-runs with essentially the same buggy logic.
+
+**Proposal**: Compare old and new script code, or track which line numbers changed to ensure substantive modifications.
+
+---
+
+### ISSUE 8: Missing "Last Modified" Timestamp in UI (LOW)
+
+**Location**: `apps/web/src/components/WorkflowDetailPage.tsx` line 348
+
+**Problem**: After the timestamp fix, `workflow.timestamp` correctly shows creation time. However, there's no "last modified" or "last activated" time shown in the UI.
+
+**Impact**: Users can't tell when a workflow was last changed or activated.
+
+**Proposal**: Consider adding `last_modified_timestamp` column or derive it from script/run timestamps.
+
+---
+
+### ISSUE 9: Deprecated Alias Without Documentation (LOW)
+
+**Location**: `apps/web/src/hooks/dbWrites.ts` line 240
+
+**Problem**: A deprecated alias is provided:
+
+```typescript
+/**
+ * @deprecated Use useActivateScriptVersion instead.
+ */
+export const useRollbackScript = useActivateScriptVersion;
+```
+
+But there's no migration guide or timeline for removal.
+
+**Impact**: Old code using `useRollbackScript` continues to work but is confusing.
+
+**Proposal**: Add removal timeline in comment (e.g., "Will be removed in v2.0") and search codebase for any usages.
+
+---
+
+## Positive Observations
+
+1. **Architectural improvement**: The active_script_id pointer pattern is cleaner than querying for "latest" each time. It enables proper version switching without script duplication.
+
+2. **Timestamp fix**: Correctly separating creation time from execution time is semantically correct.
+
+3. **Query invalidation**: `useActivateScriptVersion` properly invalidates both workflow and script queries on success.
+
+4. **Migration backfill**: Using a correlated subquery for backfill is efficient and handles the bulk update correctly.
+
+5. **Backward compatibility**: The fallback to `latestScript` when `active_script_id` is empty maintains compatibility during migration.
+
+6. **UI rename**: Changing "Rollback" to "Activate" better describes the new behavior (pointer update vs. script duplication).
+
+---
+
+## Overall Assessment
+
+This commit implements a significant architectural improvement by introducing the `active_script_id` pointer. The approach is sound and eliminates several problems with the previous "query latest script" pattern.
+
+**Main concerns**:
+- Race condition between script creation and pointer update needs transaction wrapping (CRITICAL)
+- Validation needed to prevent activating workflows without scripts (HIGH)
+- Script deletion protection needed (HIGH)
+
+**Recommendation**: The commit needs a follow-up fix for the transaction wrapping before heavy production use. The validation issues should also be addressed to prevent user confusion.

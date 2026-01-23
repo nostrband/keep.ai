@@ -1,0 +1,191 @@
+COMMIT: 76c7565 - Code/UX issue review
+DATE: Wed Jan 21 13:36:13 2026 +0100
+FILES CHANGED: 269 files (+24,556 -503)
+
+================================================================================
+SUMMARY OF CHANGES
+================================================================================
+
+This is a major infrastructure and process commit that establishes new code
+review, UX testing, and issue tracking workflows for the project. The actual
+functional code changes are minimal, but the structural/process changes are
+significant.
+
+FUNCTIONAL CODE CHANGES:
+
+1. AuthDialog.tsx (apps/web/src/components/AuthDialog.tsx)
+   - Commented out "Sign In" and "Sign Up" h2 headers
+   - Added props to <SignIn>: signUpUrl="/signup", oauthFlow="auto"
+   - Added props to <SignUp>: signInUrl="/signin", oauthFlow="auto"
+   - Purpose: Enhance Clerk authentication flow configuration
+
+2. apps/server/package.json - build:copy script
+   - Changed from: "mkdir -p public; cp -r ../web/dist/frontend/* ./public"
+   - Changed to: "mkdir -p public; rm -Rf public/*; cp -r ../web/dist/frontend/* ./public"
+   - Purpose: Clear public directory before copying to prevent stale files
+
+3. package.json (root)
+   - Added "playwright": "^1.57.0" as devDependency
+   - Purpose: Enable browser automation for UX testing
+
+4. loop.sh - Complete refactor
+   - Old: ./loop.sh [plan] [max_iterations] with mode-based logic
+   - New: ./loop.sh <prompt_file> <iterations> (exact 2 params)
+   - Removed "build mode" vs "plan mode" concept
+   - Simplified iteration logic to direct while loop
+   - Purpose: Make script flexible for different prompt files
+
+PROCESS/INFRASTRUCTURE CHANGES:
+
+5. AGENTS.md - Added "UX Tests" section
+   - Documents how to start local server: cd apps/server && DEBUG="*" PORT=3001 npm start
+   - Access at http://localhost:3001
+   - How to create clean test user (erase current_user.txt)
+
+6. PROMPT_plan.md
+   - Added instruction to ignore specs in specs/done/*
+   - Added step 2 for outlining sub-items and detailed action items
+
+7. .claude/settings.local.json
+   - Massively expanded permissions for new workflows:
+     - mcp__playwright__browser_* operations
+     - Review/ux-tests file processing
+     - npm run build:*, PORT=3001 npm start
+     - git show:* for commit viewing
+
+8. NEW PROMPT FILES:
+   - PROMPT_review.md - Code review agent workflow
+   - PROMPT_ux_tests.md - UX testing agent with Playwright
+   - PROMPT_issues.md - Issue handling and spec creation
+
+9. DELETED:
+   - IMPLEMENTATION_PLAN.md (456 lines) - Replaced by review/spec workflow
+
+10. GENERATED CONTENT (257 files):
+    - reviews/* - 48 code review files
+    - ux-tests/* - 48 UX test reports
+    - specs/* - 161 specification files
+    - ideas/* - Multiple idea documents
+
+================================================================================
+POTENTIAL ISSUES
+================================================================================
+
+ISSUE 1: Commented out headers in AuthDialog without removal
+Severity: Low (Code cleanliness)
+Location: apps/web/src/components/AuthDialog.tsx
+
+The h2 headers are commented out rather than removed:
+  {/* <h2 className="text-lg font-semibold mb-4">Sign In</h2> */}
+
+If these headers are no longer needed, they should be deleted entirely rather
+than left as commented code.
+
+PROPOSAL: Remove the commented lines completely if they're intentionally
+deprecated, or uncomment them if they're still needed.
+
+--------------------------------------------------------------------------------
+
+ISSUE 2: rm -Rf in build script without safeguards
+Severity: Low (Build safety)
+Location: apps/server/package.json
+
+The build:copy script now uses "rm -Rf public/*" which is dangerous if:
+- The script is run from wrong directory
+- The $PWD is unexpectedly different
+
+While npm scripts have some inherent safety (they run from package directory),
+the pattern could be safer.
+
+PROPOSAL: Consider using a more defensive approach:
+  "rm -rf ./public/* 2>/dev/null || true; cp -r ../web/dist/frontend/* ./public"
+Or verify the directory first.
+
+--------------------------------------------------------------------------------
+
+ISSUE 3: Hardcoded port in AGENTS.md and permissions
+Severity: Low (Configuration)
+Location: AGENTS.md, .claude/settings.local.json
+
+Port 3001 is hardcoded in documentation and permissions. If this port is
+already in use on a developer's machine, they would need to update multiple
+places.
+
+PROPOSAL: Document that the port can be changed via PORT env var more
+prominently, or consider using a config file for development settings.
+
+--------------------------------------------------------------------------------
+
+ISSUE 4: Massive permission expansion in settings.local.json
+Severity: Medium (Security/Maintainability)
+Location: .claude/settings.local.json
+
+The permissions list grew significantly with many wildcard patterns:
+- mcp__playwright__browser_*
+- Bash(rm -Rf public/*)
+- Many shell command patterns
+
+This makes it harder to audit what the AI agent can do. Some patterns are
+quite broad.
+
+PROPOSAL: Consider organizing permissions into logical groups with comments,
+or creating separate permission profiles for different agent modes (review,
+build, test). This would improve maintainability and security auditing.
+
+--------------------------------------------------------------------------------
+
+ISSUE 5: No validation of prompt file existence in loop.sh
+Severity: Low (Usability)
+Location: loop.sh
+
+The script requires exactly 2 arguments but doesn't validate that the prompt
+file actually exists before starting the loop. If a typo is made in the
+filename, the error would only surface inside claude code.
+
+PROPOSAL: Add a check after argument parsing:
+  if [ ! -f "$PROMPT_FILE" ]; then
+    echo "Error: Prompt file '$PROMPT_FILE' not found"
+    exit 1
+  fi
+
+--------------------------------------------------------------------------------
+
+ISSUE 6: Potential stale reviews if commit history is rewritten
+Severity: Low (Process)
+Location: reviews/*.txt, PROMPT_review.md
+
+Reviews are keyed by 7-character commit hash prefix. If git history is ever
+rewritten (rebase, amend), the review files would become orphaned and new
+reviews wouldn't match the new hashes.
+
+This is likely acceptable given the project's workflow, but worth noting.
+
+PROPOSAL: Document this limitation, or consider using a different identifier
+that survives rebases (like commit message hash or timestamp + author).
+
+================================================================================
+ARCHITECTURAL OBSERVATIONS
+================================================================================
+
+The commit represents a significant shift in development methodology:
+
+OLD APPROACH:
+- Single IMPLEMENTATION_PLAN.md tracking all tasks
+- Manual prioritization and status updates
+- Top-down planning
+
+NEW APPROACH:
+- Distributed tracking via review files
+- Automated issue detection via code review
+- Spec-driven development from identified issues
+- Three-tier quality system (review → UX test → spec creation)
+
+This is a mature approach for AI-assisted development, creating an audit trail
+and systematic issue resolution process. The infrastructure supports:
+- Reproducible reviews (keyed by commit)
+- Automated UX testing with Playwright
+- Issue-to-spec pipeline for systematic improvement
+
+The approach should scale well as the codebase grows, though the volume of
+generated files (257 in this commit alone) may require periodic archiving
+or summarization.
