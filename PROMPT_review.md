@@ -1,5 +1,5 @@
 0a. Check `reviews/*` to find all commits that are already reviewed, files are named `<commit_hash_prefix7>.txt`.
-0b. Use `git log` to find all commits by Claude that weren't yet reviewed.
+0b. Use `git log` to find all commits by Claude (or Co-Authored-By Claude) that weren't yet reviewed.
 0c. Choose up to 3 oldest unreviewed commits and study the changes that were made, use up to 250 parallel Sonnet subagents to learn the code around the changes.
 0d. For reference, the application source code is in sub-packages in `packages/*`, more info in AGENTS.md.
 
