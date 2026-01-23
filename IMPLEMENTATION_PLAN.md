@@ -1,20 +1,25 @@
 # Keep.AI v1.0.0 Implementation Plan
 
-> **Note (2026-01-23):** Sections 1.1 (Build-Time Secrets), 1.2 (Core Connectors Package), and 1.3 (Connection Manager + Database) are now fully implemented.
+> **Note (2026-01-23):** Sections 1.1 (Build-Time Secrets), 1.2 (Core Connectors Package), 1.3 (Connection Manager + Database), 1.4 (Gmail Refactor), and 1.5 (Server Endpoints) are now fully implemented.
 
 ## Priority 1: Connectors Framework (Current Focus - BLOCKING)
 
 The connectors framework enables multi-account OAuth connections for Gmail and other services. This is the current development focus and blocks all new service integrations.
 
-**Current State (Verified via Code Analysis):**
-- `packages/connectors` does NOT exist - must be created from scratch
-- Gmail OAuth currently implemented inline in `apps/server/src/server.ts`:
-  - Lines 88-92: Hardcoded client ID `642393276548-lfrhhkuf7nfuo6o3542tmibj8306a17m.apps.googleusercontent.com`
-  - Lines 116-190: `createGmailOAuth2Client()` function with token refresh listener
-  - Lines 1105-1492: Four Gmail endpoints (`/api/gmail/status`, `/connect`, `/callback`, `/check`)
-- Single account only, stored in `{userPath}/gmail.json`
-- Token refresh via `oAuth2Client.on("tokens")` event listener pattern (to be replaced)
-- Current tool registration in `packages/agent/src/sandbox/api.ts:370-375` is conditional on OAuth client
+**Current State (Updated 2026-01-23):**
+- `packages/connectors` is fully implemented with:
+  - OAuth2 handler, credential store, connection manager, database adapter
+  - Google service definitions (Gmail, Drive, Sheets, Docs)
+  - Type-safe interfaces for multi-account support
+- New generic endpoints at `/api/connectors/*`:
+  - `POST /api/connectors/:service/connect` - Start OAuth flow
+  - `GET /api/connectors/:service/callback` - OAuth callback
+  - `DELETE /api/connectors/:service/:accountId` - Disconnect
+  - `POST /api/connectors/:service/:accountId/check` - Test connection
+- Old Gmail endpoints deprecated (warnings logged, still functional for backwards compatibility)
+- Credentials stored per-account at `{userPath}/connectors/{service}/{accountId}.json`
+- Connection metadata in database `connections` table (syncs across clients)
+- Gmail tool uses ConnectionManager for credentials (multi-account ready)
 
 ### 1.1 Build-Time Secrets (spec: connectors-00-build-secrets.md)
 
@@ -205,10 +210,10 @@ The connectors framework enables multi-account OAuth connections for Gmail and o
 - Latest migration is v32 (verified), so connections table goes in v33
 - Never do schema ALTER and data UPDATE in same migration transaction
 
-### 1.4 Gmail Refactor (spec: connectors-03-gmail-refactor.md)
+### 1.4 Gmail Refactor (spec: connectors-03-gmail-refactor.md) - FULLY IMPLEMENTED
 
 **Action Items:**
-- [ ] Create `packages/connectors/src/services/google.ts`:
+- [x] Create `packages/connectors/src/services/google.ts`:
   ```typescript
   const googleOAuthBase = {
     authorizationUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
@@ -226,24 +231,24 @@ The connectors framework enables multi-account OAuth connections for Gmail and o
     extractAccountId: (profile) => profile.email,
   };
   ```
-- [ ] Update `packages/agent/src/tools/gmail.ts`:
+- [x] Update `packages/agent/src/tools/gmail.ts`:
   - Change signature: `makeGmailTool(getContext, connectionManager: ConnectionManager)`
   - Add required `account` parameter to input schema
   - Fetch credentials: `const creds = await connectionManager.getCredentials('gmail', input.account)`
   - Create OAuth2 client from credentials (not passed in)
   - On AuthError, call `connectionManager.markError('gmail', input.account, error.message)`
   - Throw `LogicError` if no `account` provided, listing available accounts
-- [ ] Update `packages/agent/src/sandbox/api.ts`:
+- [x] Update `packages/agent/src/sandbox/api.ts`:
   - Remove `gmailOAuth2Client` from SandboxAPIConfig
   - Add `connectionManager: ConnectionManager` to SandboxAPIConfig
   - Always register Gmail tool (lines 370-375): remove conditional, always call `addTool()`
   - Pass `connectionManager` to `makeGmailTool()`
-- [ ] Update worker files to pass `connectionManager` instead of `gmailOAuth2Client`:
+- [x] Update worker files to pass `connectionManager` instead of `gmailOAuth2Client`:
   - `packages/agent/src/task-scheduler.ts` - constructor and fields
   - `packages/agent/src/workflow-scheduler.ts` - constructor and fields
   - `packages/agent/src/task-worker.ts` - config and createEnv
   - `packages/agent/src/workflow-worker.ts` - config and createEnv
-- [ ] Implement migration logic (in `apps/server/src/server.ts` startup):
+- [x] Implement migration logic (in `apps/server/src/server.ts` startup):
   ```typescript
   async function migrateOldGmailCredentials(userPath: string, connectionManager: ConnectionManager) {
     const oldPath = path.join(userPath, 'gmail.json');
@@ -264,94 +269,31 @@ The connectors framework enables multi-account OAuth connections for Gmail and o
     fs.unlinkSync(oldPath);  // Delete old file regardless of success
   }
   ```
-- [ ] Remove `oAuth2Client.on("tokens")` listener from server.ts (lines ~165-185)
-- [ ] Delete `createGmailOAuth2Client()` function (lines 116-190)
-- [ ] Mark old endpoints as deprecated (add console.warn, plan removal in next version)
+- [x] Remove `oAuth2Client.on("tokens")` listener from server.ts (lines ~165-185)
+- [x] Delete `createGmailOAuth2Client()` function (lines 116-190)
+- [x] Mark old endpoints as deprecated (add console.warn, plan removal in next version)
 
 **Breaking Change:**
 - Gmail tool now requires `account` parameter
 - Scripts using `Gmail.api({ method: ... })` must become `Gmail.api({ method: ..., account: "user@gmail.com" })`
 - Agent will auto-correct if error message lists available accounts
 
-### 1.5 Server Endpoints (spec: connectors-04-server-endpoints.md)
+### 1.5 Server Endpoints (spec: connectors-04-server-endpoints.md) - FULLY IMPLEMENTED
 
 **Action Items:**
-- [ ] Create `apps/server/src/routes/connectors.ts`:
-  ```typescript
-  import { FastifyInstance } from 'fastify';
-  import { ConnectionManager } from '@app/connectors';
-
-  export async function registerConnectorRoutes(
-    fastify: FastifyInstance,
-    connectionManager: ConnectionManager,
-    getServerBaseUrl: () => string
-  ) {
-    // POST /connectors/:service/connect
-    fastify.post<{ Params: { service: string } }>('/connectors/:service/connect', async (req) => {
-      const redirectUri = `${getServerBaseUrl()}/api/connectors/${req.params.service}/callback`;
-      const { authUrl, state } = connectionManager.startOAuthFlow(req.params.service, redirectUri);
-      return { authUrl, state };
-    });
-
-    // GET /connectors/:service/callback
-    fastify.get<{ Params: { service: string }; Querystring: { code: string; state: string } }>(
-      '/connectors/:service/callback', async (req, reply) => {
-        try {
-          const connection = await connectionManager.completeOAuthFlow(
-            req.params.service, req.query.code, req.query.state
-          );
-          return reply.type('text/html').send(successHtml(connection));
-        } catch (err) {
-          return reply.type('text/html').send(errorHtml(err.message));
-        }
-      }
-    );
-
-    // DELETE /connectors/:service/:accountId
-    fastify.delete<{ Params: { service: string; accountId: string } }>(
-      '/connectors/:service/:accountId', async (req) => {
-        await connectionManager.disconnect(req.params.service, req.params.accountId);
-        return { success: true };
-      }
-    );
-
-    // POST /connectors/:service/:accountId/check
-    fastify.post<{ Params: { service: string; accountId: string } }>(
-      '/connectors/:service/:accountId/check', async (req) => {
-        const creds = await connectionManager.getCredentials(req.params.service, req.params.accountId);
-        // Service-specific check (e.g., Gmail profile fetch)
-        return { connected: true, accountId: req.params.accountId };
-      }
-    );
-  }
-  ```
-- [ ] Create HTML response templates:
-  ```typescript
-  const successHtml = (connection: Connection) => `
-    <!DOCTYPE html><html><body>
-    <h1>Connected!</h1><p>Account: ${connection.accountId}</p>
-    <script>setTimeout(() => window.close(), 2000)</script>
-    </body></html>
-  `;
-  const errorHtml = (message: string) => `
-    <!DOCTYPE html><html><body>
-    <h1>Connection Failed</h1><p>${message}</p>
-    </body></html>
-  `;
-  ```
-- [ ] Register routes in `apps/server/src/server.ts` (after line ~793):
-  ```typescript
-  await app.register(
-    async function (fastify) {
-      await registerConnectorRoutes(fastify, connectionManager, () => `http://127.0.0.1:${PORT}`);
-    },
-    { prefix: "/api" }
-  );
-  ```
-- [ ] Helper function `getServerBaseUrl()`:
-  - Use `127.0.0.1:PORT` (more reliable than `localhost` for OAuth)
-  - PORT default: 4681 (from existing server config)
-- [ ] Mark old Gmail endpoints as deprecated (add `// DEPRECATED` comments, log warnings)
+- [x] Create `apps/server/src/routes/connectors.ts` with all endpoints:
+  - `POST /connectors/:service/connect` - Start OAuth flow
+  - `GET /connectors/:service/callback` - OAuth callback with HTML responses
+  - `DELETE /connectors/:service/:accountId` - Disconnect
+  - `POST /connectors/:service/:accountId/check` - Test connection with profile fetch
+  - `GET /connectors/list` - List all connections
+  - `GET /connectors/:service/list` - List connections by service
+  - `GET /connectors/services` - List available services
+- [x] Create HTML response templates with styled success/error pages, auto-close with countdown
+- [x] Register routes in `apps/server/src/server.ts` under `/api` prefix
+- [x] Helper function `getServerBaseUrl()` using `127.0.0.1:PORT`
+- [x] Register all Google services (Gmail, Drive, Sheets, Docs) in ConnectionManager
+- [x] Mark old Gmail endpoints as deprecated (log warnings via debugServer)
 
 **OAuth Provider Configuration Required:**
 - Register redirect URIs in Google Cloud Console:

@@ -60,6 +60,16 @@ import {
 import { bytesToHex, hexToBytes } from "nostr-tools/utils";
 import { randomBytes } from "crypto";
 import { google } from "googleapis";
+import {
+  ConnectionManager,
+  CredentialStore,
+  createConnectionDbAdapter,
+  gmailService,
+  gdriveService,
+  gsheetsService,
+  gdocsService,
+} from "@app/connectors";
+import { registerConnectorRoutes } from "./routes/connectors";
 
 const debugServer = debug("server:server");
 
@@ -113,99 +123,131 @@ setEnvFromProcess(process.env);
 // For CommonJS compatibility
 const __dirname = process.cwd();
 
-async function createGmailOAuth2Client(userPath: string) {
+/**
+ * Create ConnectionManager and migrate old Gmail credentials.
+ *
+ * Migration: Old gmail.json is converted to new connectors format.
+ * The new format stores credentials per-account at:
+ *   {userPath}/connectors/gmail/{email}.json
+ */
+async function createConnectionManager(
+  keepDB: KeepDb,
+  userPath: string
+): Promise<ConnectionManager> {
+  // Create credential store (file-based)
+  const credentialStore = new CredentialStore(userPath);
+
+  // Create database adapter
+  const api = new KeepDbApi(keepDB);
+  const dbAdapter = createConnectionDbAdapter(api.connectionStore);
+
+  // Create connection manager
+  const connectionManager = new ConnectionManager(credentialStore, dbAdapter);
+
+  // Register all Google services
+  connectionManager.registerService(gmailService);
+  connectionManager.registerService(gdriveService);
+  connectionManager.registerService(gsheetsService);
+  connectionManager.registerService(gdocsService);
+
+  // Migrate old gmail.json if it exists
+  await migrateOldGmailCredentials(userPath, connectionManager);
+
+  // Reconcile database with credential files
+  await connectionManager.reconcile();
+
+  return connectionManager;
+}
+
+/**
+ * Migrate old gmail.json to new connectors format.
+ *
+ * On success: Old file is deleted, new credentials stored per-account.
+ * On failure: Old file is deleted anyway (user will need to re-auth).
+ */
+async function migrateOldGmailCredentials(
+  userPath: string,
+  connectionManager: ConnectionManager
+): Promise<void> {
+  const oldGmailPath = path.join(userPath, "gmail.json");
+
+  if (!fs.existsSync(oldGmailPath)) {
+    return;
+  }
+
+  debugServer("Found old gmail.json, attempting migration...");
+
   try {
-    if (!GMAIL_CLIENT_SECRET) {
-      return null;
-    }
+    // Read old tokens
+    const tokenData = await fsPromises.readFile(oldGmailPath, "utf8");
+    const oldTokens = JSON.parse(tokenData);
 
-    const gmailTokenPath = path.join(userPath, "gmail.json");
-
-    if (!fs.existsSync(gmailTokenPath)) {
-      return null;
-    }
-
-    // Load stored tokens
-    const tokenData = await fsPromises.readFile(gmailTokenPath, "utf8");
-    const tokens = JSON.parse(tokenData);
-
-    // Create OAuth client with stored tokens
-    const oAuth2Client = new google.auth.OAuth2(
-      GMAIL_CLIENT_ID,
-      GMAIL_CLIENT_SECRET
-    );
-    oAuth2Client.setCredentials(tokens);
-
-    // Listen for token refresh events and save new tokens
-    oAuth2Client.on("tokens", async (newTokens) => {
-      try {
-        debugServer("Gmail OAuth2 tokens refreshed, saving to file");
-
-        // Read current tokens from file
-        let currentTokens = tokens;
-        try {
-          const currentTokenData = await fsPromises.readFile(
-            gmailTokenPath,
-            "utf8"
-          );
-          currentTokens = JSON.parse(currentTokenData);
-        } catch (readError) {
-          debugServer(
-            "Could not read current tokens, using initial tokens:",
-            readError
-          );
-        }
-
-        // Update tokens
-        if (newTokens.refresh_token) {
-          debugServer("Saving new refresh token");
-          currentTokens.refresh_token = newTokens.refresh_token;
-        }
-        if (newTokens.access_token) {
-          debugServer("Saving new access token + expiry_date");
-          currentTokens.access_token = newTokens.access_token;
-          if (newTokens.expiry_date) {
-            currentTokens.expiry_date = newTokens.expiry_date;
-          }
-        }
-
-        // Save updated tokens back to file
-        await fsPromises.writeFile(
-          gmailTokenPath,
-          JSON.stringify(currentTokens, null, 2),
-          { mode: 0o600 }
-        );
-
-        debugServer("Gmail tokens successfully saved to file");
-      } catch (saveError) {
-        debugServer("Failed to save refreshed Gmail tokens:", saveError);
+    // Fetch profile to get email address (accountId)
+    const profileResponse = await fetch(
+      "https://www.googleapis.com/oauth2/v2/userinfo",
+      {
+        headers: { Authorization: `Bearer ${oldTokens.access_token}` },
       }
-    });
+    );
 
-    return oAuth2Client;
-  } catch (error) {
-    debugServer("Failed to create Gmail OAuth2 client:", error);
-    return null;
+    if (!profileResponse.ok) {
+      throw new Error(`Failed to fetch profile: ${profileResponse.statusText}`);
+    }
+
+    const profile = (await profileResponse.json()) as { email: string };
+    const accountId = profile.email;
+
+    if (!accountId) {
+      throw new Error("Could not extract email from profile");
+    }
+
+    // Save to new location using credential store
+    const credentialStore = new CredentialStore(userPath);
+    await credentialStore.save(
+      { service: "gmail", accountId },
+      {
+        accessToken: oldTokens.access_token,
+        refreshToken: oldTokens.refresh_token,
+        expiresAt: oldTokens.expiry_date,
+        metadata: { email: accountId },
+      }
+    );
+
+    debugServer(`Successfully migrated Gmail credentials for ${accountId}`);
+  } catch (err) {
+    debugServer(
+      "Gmail migration failed, user will need to reconnect:",
+      err instanceof Error ? err.message : err
+    );
+  }
+
+  // Always delete old file - either migrated successfully or credentials were stale
+  try {
+    await fsPromises.unlink(oldGmailPath);
+    debugServer("Deleted old gmail.json");
+  } catch (unlinkErr) {
+    debugServer("Failed to delete old gmail.json:", unlinkErr);
   }
 }
 
 async function createScheduler(keepDB: KeepDb, userPath: string) {
-  const gmailOAuth2Client = await createGmailOAuth2Client(userPath);
+  // Create connection manager for OAuth-based tools
+  const connectionManager = await createConnectionManager(keepDB, userPath);
 
   const taskScheduler = new TaskScheduler({
     api: new KeepDbApi(keepDB),
     stepLimit: 20,
     userPath,
-    gmailOAuth2Client,
+    connectionManager,
   });
 
   const workflowScheduler = new WorkflowScheduler({
     api: new KeepDbApi(keepDB),
     userPath,
-    gmailOAuth2Client,
+    connectionManager,
   });
 
-  return { taskScheduler, workflowScheduler };
+  return { taskScheduler, workflowScheduler, connectionManager };
 }
 
 class KeyStore implements NostrSigner {
@@ -559,10 +601,8 @@ export async function createServer(config: ServerConfig = {}) {
   await nostr.start(peer.getConfig());
 
   // Performs background operations
-  const { taskScheduler, workflowScheduler } = await createScheduler(
-    keepDB,
-    userPath
-  );
+  const { taskScheduler, workflowScheduler, connectionManager } =
+    await createScheduler(keepDB, userPath);
 
   // File transfer instances for each peer
   const fileSenders = new Map<string, FileSender>();
@@ -807,6 +847,21 @@ export async function createServer(config: ServerConfig = {}) {
       await http.registerRoutes(fastify);
     },
     { prefix: "/api/worker" }
+  );
+
+  // Helper to get server base URL for OAuth redirect URIs
+  // Uses 127.0.0.1 for better OAuth compatibility (more reliable than localhost)
+  const getServerBaseUrl = (): string => {
+    const port = config.port || Number(process.env.PORT || 3000);
+    return `http://127.0.0.1:${port}`;
+  };
+
+  // Register connector routes under /api prefix
+  await app.register(
+    async function (fastify) {
+      await registerConnectorRoutes(fastify, connectionManager, getServerBaseUrl);
+    },
+    { prefix: "/api" }
   );
 
   app.get("/api/check_config", async (request, reply) => {
@@ -1124,8 +1179,12 @@ export async function createServer(config: ServerConfig = {}) {
     }
   });
 
-  // Gmail integration endpoints
+  // DEPRECATED: Old Gmail-specific endpoints
+  // These will be removed in a future version. Use /api/connectors/* endpoints instead.
+  // See specs/connectors-04-server-endpoints.md for the new API.
+
   app.get("/api/gmail/status", async (request, reply) => {
+    debugServer("DEPRECATED: /api/gmail/status called - use /api/connectors/gmail/list instead");
     try {
       const gmailTokenPath = path.join(userPath, "gmail.json");
       const isConnected = fs.existsSync(gmailTokenPath);
@@ -1140,6 +1199,7 @@ export async function createServer(config: ServerConfig = {}) {
   });
 
   app.post("/api/gmail/connect", async (request, reply) => {
+    debugServer("DEPRECATED: /api/gmail/connect called - use /api/connectors/gmail/connect instead");
     try {
       if (!GMAIL_CLIENT_SECRET) {
         debugServer("Gmail client secret not configured");
@@ -1177,6 +1237,7 @@ export async function createServer(config: ServerConfig = {}) {
   });
 
   app.get("/api/gmail/callback", async (request, reply) => {
+    debugServer("DEPRECATED: /api/gmail/callback called - use /api/connectors/gmail/callback instead");
     try {
       const query = request.query as { code?: string; error?: string };
       const { code, error } = query;
@@ -1277,6 +1338,9 @@ export async function createServer(config: ServerConfig = {}) {
         request.hostname === "localhost" ? `:${process.env.PORT || 3000}` : ""
       }/api/gmail/callback`;
 
+      // DEPRECATED: This endpoint will be replaced by /api/connectors/gmail/callback in v1.5
+      // For now, use the old approach but save to the new connectors format
+
       const oAuth2Client = new google.auth.OAuth2(
         GMAIL_CLIENT_ID,
         GMAIL_CLIENT_SECRET,
@@ -1285,15 +1349,47 @@ export async function createServer(config: ServerConfig = {}) {
 
       const { tokens } = await oAuth2Client.getToken(code);
 
-      taskScheduler.gmailOAuth2Client?.setCredentials(tokens);
-      workflowScheduler.gmailOAuth2Client?.setCredentials(tokens);
-
-      const gmailTokenPath = path.join(userPath, "gmail.json");
-      await fsPromises.writeFile(
-        gmailTokenPath,
-        JSON.stringify(tokens, null, 2),
-        { mode: 0o600 }
+      // Fetch profile to get email (accountId)
+      const profileResponse = await fetch(
+        "https://www.googleapis.com/oauth2/v2/userinfo",
+        { headers: { Authorization: `Bearer ${tokens.access_token}` } }
       );
+
+      if (!profileResponse.ok) {
+        throw new Error(`Failed to fetch profile: ${profileResponse.statusText}`);
+      }
+
+      const profile = (await profileResponse.json()) as { email: string };
+      const accountId = profile.email;
+
+      if (!accountId) {
+        throw new Error("Could not extract email from Google profile");
+      }
+
+      // Save to new connectors format
+      const credentialStore = new CredentialStore(userPath);
+      await credentialStore.save(
+        { service: "gmail", accountId },
+        {
+          accessToken: tokens.access_token || "",
+          refreshToken: tokens.refresh_token ?? undefined,
+          expiresAt: tokens.expiry_date ?? undefined,
+          metadata: { email: accountId },
+        }
+      );
+
+      // Also save connection to database
+      const api = new KeepDbApi(keepDB);
+      await api.connectionStore.upsertConnection({
+        id: `gmail:${accountId}`,
+        service: "gmail",
+        account_id: accountId,
+        status: "connected",
+        label: null,
+        error: null,
+        created_at: Date.now(),
+        last_used_at: null,
+      });
 
       reply.header("Content-Type", "text/html");
       return reply.send(`
@@ -1455,6 +1551,7 @@ export async function createServer(config: ServerConfig = {}) {
   });
 
   app.post("/api/gmail/check", async (request, reply) => {
+    debugServer("DEPRECATED: /api/gmail/check called - use /api/connectors/gmail/:accountId/check instead");
     try {
       const gmailTokenPath = path.join(userPath, "gmail.json");
 
@@ -1674,11 +1771,11 @@ export async function createServer(config: ServerConfig = {}) {
       inProgressTestRuns.set(workflow.id, scriptRunId);
 
       // Create a standalone WorkflowWorker for test execution
-      const gmailOAuth2Client = await createGmailOAuth2Client(userPath);
+      // Reuse the connectionManager from the scheduler for OAuth-based tools
       const testWorker = new WorkflowWorker({
         api: new KeepDbApi(keepDB),
         userPath,
-        gmailOAuth2Client,
+        connectionManager,
         // No onSignal - test runs don't emit signals to scheduler
       });
 
