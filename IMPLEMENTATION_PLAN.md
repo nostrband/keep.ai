@@ -494,6 +494,14 @@ The connectors framework enables multi-account OAuth connections for Gmail and o
 
 - [x] **complete-chat-messages-migration.md** - Already completed. Server.ts and CLI already use `getNewChatMessages()` instead of deprecated `getChatMessages()`.
 
+## Code Quality Improvements Completed (2026-01-23)
+
+- [x] **Fixed inconsistent error logging** - Changed `console.error` to debug logger in `task-scheduler.ts` and `workflow-scheduler.ts` for consistency with the rest of the codebase's logging patterns.
+
+- [x] **Fixed unprofessional @ts-ignore comment** - Replaced `@ts-ignore` with proper `@ts-expect-error` with explanation in `prompt-input.tsx`. The comment now explains why the type suppression is needed (clipboard items iterator type issues).
+
+- [x] **Improved startup error message** - Made the startup error in `start.ts` more descriptive to help with debugging when the application fails to start.
+
 ## Spec 10 Completion (TaskState Cleanup) - Completed 2026-01-23
 
 - [x] **remove-taskstate-struct.md** - Removed obsolete TaskState type/interface entirely:
