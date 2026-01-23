@@ -517,7 +517,7 @@ The connectors framework enables multi-account OAuth connections for Gmail and o
 Essential fixes and improvements for workflow reliability in v1.
 
 ### 2.1 Error Handling Improvements
-- [ ] Add `classifyNotionError()` function (part of Notion connector - see 1.7b)
+- [x] Add `classifyNotionError()` function (part of Notion connector - see 1.7b) - Already implemented in packages/agent/src/errors.ts
 - [ ] Review existing error classification completeness for Google APIs
 - [ ] Ensure all tools use appropriate error classification
 
