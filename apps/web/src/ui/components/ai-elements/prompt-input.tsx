@@ -521,7 +521,7 @@ export const PromptInputTextarea = ({
     }
 
     const files: File[] = [];
-    // @ts-ignore idk wtf
+    // @ts-expect-error DataTransferItemList is iterable but TypeScript types don't reflect this
     for (const item of items) {
       if (item.kind === "file") {
         const file = item.getAsFile();

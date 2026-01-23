@@ -187,7 +187,7 @@ export class WorkflowScheduler {
       // Get workflows and check if any should run
       processed = await this.processNextWorkflow();
     } catch (e) {
-      console.error("Error processing workflow", e);
+      this.debug("Error processing workflow:", e);
     }
 
     // Done

@@ -13,7 +13,7 @@ const start = async () => {
     
     await server.listen();
   } catch (err) {
-    console.error("error", err);
+    console.error("Server startup failed:", err);
     process.exit(1);
   }
 };

@@ -141,7 +141,7 @@ export class TaskScheduler {
       // Any tasks?
       processed = await this.processNextTask(items);
     } catch (e) {
-      console.error("Error processing task", e);
+      this.debug("Error processing task:", e);
     }
 
     // Done
