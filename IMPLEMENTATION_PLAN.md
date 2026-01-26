@@ -228,13 +228,24 @@ All security issues have been addressed for v1.0.0 release.
   - Tests use real Fastify server for integration testing
   - **Location:** `packages/tests/src/transport-client-http.test.ts`
 
-### 4.3 Technical Debt (From FIXME Comments)
+### 4.3 Error Handling Fixes
+- [x] Periodic sync check loop unhandled error
+  - Added try/catch to prevent sync loop from stopping on errors
+  - Errors are now logged via debug module
+  - **Location:** `apps/server/src/server.ts:843-850`
+
+- [x] TransportClientHttp empty catch block
+  - Added error logging to `.catch()` handler that was silently swallowing errors
+  - Errors are now logged via debugTransport
+  - **Location:** `packages/sync/src/TransportClientHttp.ts:214`
+
+### 4.4 Technical Debt (From FIXME Comments)
 - [ ] `packages/sync/src/nostr/stream/StreamWriter.ts:515` - Find optimal chunk size
   - Hardcoded limit of 10 pending chunks needs tuning
 - [ ] `packages/sync/src/Peer.ts:788` - Ensure tx delivery
   - CRSQLite change batch organization needs investigation
 
-### 4.4 Type Safety
+### 4.5 Type Safety
 **Library type issues (post-v1):**
 - `packages/browser/src/startWorker.ts:74` - SharedWorker module type options
 - `packages/agent/src/agent.ts:256,315,338` - AI SDK provider metadata types

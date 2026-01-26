@@ -211,7 +211,10 @@ export class TransportClientHttp implements Transport {
               throw error;
             }
           })
-          .catch(); // stop the queue processing on error
+          .catch((error) => {
+            // Log the error but stop queue processing to prevent cascade
+            debugTransport("Queue processing stopped due to error:", error);
+          });
       };
 
       this.eventSource.onerror = (error) => {

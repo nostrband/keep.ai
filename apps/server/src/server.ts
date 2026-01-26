@@ -841,7 +841,11 @@ export async function createServer(config: ServerConfig = {}) {
   // Check regularly for changes (fallback for any edge cases)
   // Now with a longer interval since mutations trigger sync immediately
   const check = async () => {
-    await peer.checkLocalChanges();
+    try {
+      await peer.checkLocalChanges();
+    } catch (error) {
+      debugServer("Error in periodic sync check:", error);
+    }
     setTimeout(check, 5000);
   };
   check();
