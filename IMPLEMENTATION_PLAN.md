@@ -210,8 +210,10 @@ All security issues have been addressed for v1.0.0 release.
 ## Priority 4: Nice-to-Have / Optimization
 
 ### 4.1 Performance
-- [ ] `specs/new/optimize-has-script-subquery.md` - Query optimization
-  - Replace COUNT subquery with EXISTS
+- [x] `specs/new/optimize-has-script-subquery.md` - Query optimization
+  - Replaced `COUNT(DISTINCT s.id) > 0` with `MAX(s.id IS NOT NULL)`
+  - More efficient: MAX tracks single value vs COUNT scanning all rows
+  - **Location:** `packages/db/src/script-store.ts:867`
 
 ### 4.2 Test Coverage
 - [ ] `specs/new/add-transport-client-http-tests.md` - Missing tests

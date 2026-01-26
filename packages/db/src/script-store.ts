@@ -864,7 +864,7 @@ export class ScriptStore {
           COALESCE(MAX(s.timestamp), w.timestamp),
           w.timestamp
         ) as last_activity,
-        COUNT(DISTINCT s.id) > 0 as has_script,
+        MAX(s.id IS NOT NULL) as has_script,
         t.state as task_state
       FROM workflows w
       LEFT JOIN chat_messages cm ON cm.chat_id = w.chat_id
