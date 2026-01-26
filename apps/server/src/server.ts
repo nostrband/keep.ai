@@ -2042,7 +2042,15 @@ export async function createServer(config: ServerConfig = {}) {
       return { port, host };
     },
     async close() {
-      // Clean up file transfer instances
+      debugServer("Initiating graceful shutdown...");
+
+      // 1. Stop schedulers first (prevents new work from being scheduled)
+      debugServer("Stopping schedulers...");
+      await taskScheduler.close();
+      await workflowScheduler.close();
+
+      // 2. Clean up file transfer instances
+      debugServer("Stopping file transfer instances...");
       for (const sender of fileSenders.values()) {
         sender.stop();
       }
@@ -2052,8 +2060,29 @@ export async function createServer(config: ServerConfig = {}) {
       fileSenders.clear();
       fileReceivers.clear();
 
+      // 3. Stop transports (nostr and http)
+      debugServer("Stopping transports...");
+      nostr.stop();
+      http.stop();
+
+      // 4. Stop the cr-sqlite peer
+      debugServer("Stopping peer...");
+      peer.stop();
+
+      // 5. Close the SimplePool
+      debugServer("Closing nostr pool...");
+      pool.close(getNostrRelays());
+
+      // 6. Close HTTP server
+      debugServer("Closing HTTP server...");
       await app.close();
+
+      // 7. Close database and key store
+      debugServer("Closing database and key store...");
       await keyStore.stop();
+      await keepDB.close();
+
+      debugServer("Graceful shutdown complete");
     },
   };
 }

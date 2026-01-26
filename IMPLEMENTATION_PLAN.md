@@ -7,7 +7,7 @@
 **✅ Critical Security Fixes COMPLETE** - All 8 security vulnerabilities in OAuth/connectors and server configuration have been addressed.
 
 **Remaining Work:**
-- Bug fixes (Priority 2) - 3 items
+- Bug fixes (Priority 2) - 0 items ✅ ALL COMPLETE
 - Code quality improvements (Priority 3) - 10 items
 - Nice-to-have optimizations (Priority 4) - 6 items
 - Post-v1 features (Priority 5)
@@ -76,13 +76,16 @@ All security issues have been addressed for v1.0.0 release.
   - Drafts now correctly use the most recent timestamp from chat messages, scripts, or workflow
   - **Location:** `packages/db/src/script-store.ts` (getAbandonedDrafts and getDraftActivitySummary)
 
-- [ ] `specs/new/audit-workflow-timestamp-updates.md` - Timestamp overwritten on update
-  - Creation timestamp lost on workflow updates
-  - **Location:** Multiple workflow update calls
+- [x] `specs/new/audit-workflow-timestamp-updates.md` - Timestamp overwritten on update
+  - Removed timestamp from UPDATE statement in updateWorkflow
+  - Removed timestamp from updateWorkflowFields type signature
+  - timestamp is now preserved as creation-only timestamp
+  - **Location:** `packages/db/src/script-store.ts`
 
-- [ ] `specs/new/fix-tasks-deleted-type-mismatch.md` - Schema inconsistency
-  - Test schema uses INTEGER, production uses BOOLEAN
-  - **Location:** Test setup files
+- [x] `specs/new/fix-tasks-deleted-type-mismatch.md` - Schema inconsistency
+  - Changed test schema from `INTEGER NOT NULL DEFAULT 0` to `BOOLEAN DEFAULT FALSE`
+  - Now matches production migration schema
+  - **Location:** `packages/tests/src/task-store.test.ts` and `packages/tests/src/script-store.test.ts`
 
 ### 2.2 UI State Management Bugs
 - [x] `specs/new/fix-connections-section-timeout-leak.md` - Memory leak
@@ -136,8 +139,10 @@ All security issues have been addressed for v1.0.0 release.
   - **Location:** `apps/web/src/lib/WorkflowNotifications.ts`
 
 ### 2.5 Server Infrastructure
-- [ ] `specs/new/fix-server-shutdown-handling.md` - Resource leaks on shutdown
-  - Schedulers, database, connections not properly cleaned up
+- [x] `specs/new/fix-server-shutdown-handling.md` - Resource leaks on shutdown
+  - Added comprehensive shutdown logic with correct order
+  - Closes schedulers, file transfers, transports, peer, pool, HTTP server, and database
+  - Includes debug logging for shutdown progress
   - **Location:** `apps/server/src/server.ts`
 
 ---

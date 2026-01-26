@@ -81,7 +81,7 @@ async function createScriptTables(db: DBInterface): Promise<void> {
       chat_id TEXT NOT NULL DEFAULT '',
       workflow_id TEXT NOT NULL DEFAULT '',
       asks TEXT NOT NULL DEFAULT '',
-      deleted INTEGER NOT NULL DEFAULT 0
+      deleted BOOLEAN DEFAULT FALSE
     )
   `);
 

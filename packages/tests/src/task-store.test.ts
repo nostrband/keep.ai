@@ -21,7 +21,7 @@ async function createTaskTables(db: DBInterface): Promise<void> {
       chat_id TEXT NOT NULL DEFAULT '',
       workflow_id TEXT NOT NULL DEFAULT '',
       asks TEXT NOT NULL DEFAULT '',
-      deleted INTEGER NOT NULL DEFAULT 0
+      deleted BOOLEAN DEFAULT FALSE
     )
   `);
   await db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_chat_id ON tasks(chat_id)`);

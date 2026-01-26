@@ -587,11 +587,12 @@ export class ScriptStore {
   // Update a workflow
   async updateWorkflow(workflow: Workflow, tx?: DBInterface): Promise<void> {
     const db = tx || this.db.db;
+    // Note: timestamp is NOT updated - it's the creation timestamp and should be preserved
     await db.exec(
       `UPDATE workflows
-       SET title = ?, task_id = ?, chat_id = ?, timestamp = ?, cron = ?, events = ?, status = ?, next_run_timestamp = ?, maintenance = ?, maintenance_fix_count = ?, active_script_id = ?
+       SET title = ?, task_id = ?, chat_id = ?, cron = ?, events = ?, status = ?, next_run_timestamp = ?, maintenance = ?, maintenance_fix_count = ?, active_script_id = ?
        WHERE id = ?`,
-      [workflow.title, workflow.task_id, workflow.chat_id || '', workflow.timestamp, workflow.cron, workflow.events, workflow.status, workflow.next_run_timestamp, workflow.maintenance ? 1 : 0, workflow.maintenance_fix_count || 0, workflow.active_script_id || '', workflow.id]
+      [workflow.title, workflow.task_id, workflow.chat_id || '', workflow.cron, workflow.events, workflow.status, workflow.next_run_timestamp, workflow.maintenance ? 1 : 0, workflow.maintenance_fix_count || 0, workflow.active_script_id || '', workflow.id]
     );
   }
 
@@ -753,9 +754,10 @@ export class ScriptStore {
 
   // Update only specific fields of a workflow atomically
   // This prevents concurrent update issues where stale workflow objects overwrite concurrent changes
+  // Note: timestamp is NOT included - it's the creation timestamp and should never be updated
   async updateWorkflowFields(
     workflowId: string,
-    fields: Partial<Pick<Workflow, 'timestamp' | 'next_run_timestamp' | 'status' | 'cron' | 'maintenance' | 'maintenance_fix_count' | 'active_script_id' | 'title'>>,
+    fields: Partial<Pick<Workflow, 'next_run_timestamp' | 'status' | 'cron' | 'maintenance' | 'maintenance_fix_count' | 'active_script_id' | 'title'>>,
     tx?: DBInterface
   ): Promise<void> {
     const db = tx || this.db.db;
@@ -763,10 +765,6 @@ export class ScriptStore {
     const setClauses: string[] = [];
     const values: (string | number)[] = [];
 
-    if (fields.timestamp !== undefined) {
-      setClauses.push('timestamp = ?');
-      values.push(fields.timestamp);
-    }
     if (fields.next_run_timestamp !== undefined) {
       setClauses.push('next_run_timestamp = ?');
       values.push(fields.next_run_timestamp);
