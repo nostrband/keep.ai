@@ -7,7 +7,7 @@
  * See specs/connectors-05-ui-connections-page.md for design details.
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Mail, HardDrive, Sheet, FileText, BookOpen, MoreVertical, Plus, RefreshCw, Unlink, Check, AlertCircle, Pencil } from "lucide-react";
 import { useConnections } from "../hooks/dbConnectionReads";
 import { useUpdateConnectionLabel } from "../hooks/dbWrites";
@@ -143,6 +143,13 @@ function ConnectionCard({
 }) {
   const [isRenaming, setIsRenaming] = useState(false);
   const [newLabel, setNewLabel] = useState(connection.label || "");
+
+  // Sync newLabel with external label changes when not actively renaming
+  useEffect(() => {
+    if (!isRenaming) {
+      setNewLabel(connection.label || "");
+    }
+  }, [connection.label, isRenaming]);
 
   const handleRenameSubmit = () => {
     if (newLabel.trim() !== connection.label) {
@@ -325,14 +332,30 @@ export default function ConnectionsSection() {
   const [checkingConnections, setCheckingConnections] = useState<Set<string>>(new Set());
   const success = useAutoHidingMessage({ duration: 3000 });
   const [error, setError] = useState<string | null>(null);
+  const pendingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Cleanup pending timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (pendingTimeoutRef.current) {
+        clearTimeout(pendingTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Clear pending state when connection for that service appears
+  // Note: success.show is stable (wrapped in useCallback), so we only depend on it
   useEffect(() => {
     if (pendingService && connections.some((c) => c.service === pendingService)) {
+      // Clear the timeout since connection was successful
+      if (pendingTimeoutRef.current) {
+        clearTimeout(pendingTimeoutRef.current);
+        pendingTimeoutRef.current = null;
+      }
       setPendingService(null);
       success.show("Account connected successfully!");
     }
-  }, [connections, pendingService, success]);
+  }, [connections, pendingService, success.show]);
 
   const handleConnect = async (serviceId: string) => {
     try {
@@ -351,9 +374,15 @@ export default function ConnectionsSection() {
       const data = await response.json();
       openUrl(data.authUrl);
 
+      // Clear any existing pending timeout
+      if (pendingTimeoutRef.current) {
+        clearTimeout(pendingTimeoutRef.current);
+      }
+
       // Set a timeout to clear pending state if user doesn't complete auth
-      setTimeout(() => {
+      pendingTimeoutRef.current = setTimeout(() => {
         setPendingService((prev) => (prev === serviceId ? null : prev));
+        pendingTimeoutRef.current = null;
       }, 120000); // 2 minutes
     } catch (err) {
       setPendingService(null);
@@ -397,6 +426,21 @@ export default function ConnectionsSection() {
         `${API_ENDPOINT}/connectors/${service}/${encodeURIComponent(accountId)}/check`,
         { method: "POST" }
       );
+
+      // Check response status before parsing JSON
+      if (!response.ok) {
+        // Try to get error message from response body
+        let errorMessage = "Connection check failed";
+        try {
+          const data = await response.json();
+          errorMessage = data.error || errorMessage;
+        } catch {
+          // Response body wasn't JSON, use status text
+          errorMessage = response.statusText || errorMessage;
+        }
+        setError(errorMessage);
+        return;
+      }
 
       const data = await response.json();
 

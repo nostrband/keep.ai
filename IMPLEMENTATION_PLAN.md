@@ -7,7 +7,7 @@
 **✅ Critical Security Fixes COMPLETE** - All 8 security vulnerabilities in OAuth/connectors and server configuration have been addressed.
 
 **Remaining Work:**
-- Bug fixes (Priority 2) - 14 items
+- Bug fixes (Priority 2) - 10 items
 - Code quality improvements (Priority 3) - 10 items
 - Nice-to-have optimizations (Priority 4) - 6 items
 - Post-v1 features (Priority 5)
@@ -84,16 +84,18 @@ All security issues have been addressed for v1.0.0 release.
   - **Location:** Test setup files
 
 ### 2.2 UI State Management Bugs
-- [ ] `specs/new/fix-connections-section-timeout-leak.md` - Memory leak
-  - 2-minute timeout not cleared on unmount
+- [x] `specs/new/fix-connections-section-timeout-leak.md` - Memory leak
+  - Added timeout ref and cleanup on unmount
+  - Clear timeout when connection succeeds or on unmount
   - **Location:** `apps/web/src/components/ConnectionsSection.tsx`
 
-- [ ] `specs/new/fix-connections-useeffect-dependency.md` - Unnecessary re-renders
-  - Effect depends on entire object instead of specific property
+- [x] `specs/new/fix-connections-useeffect-dependency.md` - Unnecessary re-renders
+  - Changed dependency from `success` object to `success.show` (stable callback)
   - **Location:** `apps/web/src/components/ConnectionsSection.tsx`
 
-- [ ] `specs/new/fix-connections-rename-state-sync.md` - Stale state
-  - newLabel doesn't sync with external updates
+- [x] `specs/new/fix-connections-rename-state-sync.md` - Stale state
+  - Added useEffect to sync newLabel when connection.label changes externally
+  - Only syncs when not actively renaming to preserve user edits
   - **Location:** `apps/web/src/components/ConnectionsSection.tsx`
 
 - [ ] `specs/new/fix-disconnect-query-invalidation.md` - UI not updating
@@ -109,8 +111,9 @@ All security issues have been addressed for v1.0.0 release.
   - Shows "Every hour at :NaN"
   - **Location:** `apps/web/src/lib/formatCronSchedule.ts`
 
-- [ ] `specs/new/fix-handle-check-response-validation.md` - JSON parse on error
-  - Attempts JSON parsing without checking response.ok
+- [x] `specs/new/fix-handle-check-response-validation.md` - JSON parse on error
+  - Added response.ok check before parsing JSON
+  - Gracefully handles error responses with proper error messages
   - **Location:** `apps/web/src/components/ConnectionsSection.tsx`
 
 - [ ] `specs/new/fix-check-endpoint-status-codes.md` - Always returns 200
