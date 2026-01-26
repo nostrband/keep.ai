@@ -216,8 +216,10 @@ All security issues have been addressed for v1.0.0 release.
   - **Location:** `packages/db/src/script-store.ts:867`
 
 ### 4.2 Test Coverage
-- [ ] `specs/new/add-transport-client-http-tests.md` - Missing tests
-  - Add tests for SSE connection lifecycle, error recovery
+- [x] `specs/done/add-transport-client-http-tests.md` - TransportClientHttp tests
+  - Added 16 integration tests covering SSE connection lifecycle, message sending/receiving, error handling
+  - Tests use real Fastify server for integration testing
+  - **Location:** `packages/tests/src/transport-client-http.test.ts`
 
 ### 4.3 Technical Debt (From FIXME Comments)
 - [ ] `packages/sync/src/nostr/stream/StreamWriter.ts:515` - Find optimal chunk size

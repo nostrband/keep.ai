@@ -1,20 +1,33 @@
-# Spec: Optimize has_script subquery in script-store.ts
+# Spec: Optimize has_script Subquery
 
 ## Problem
-In `packages/db/src/script-store.ts:863`, the subquery `(SELECT COUNT(*) FROM scripts WHERE workflow_id = w.id) > 0 as has_script` executes once per returned row (N+1 query pattern). This could cause performance issues with large result sets.
+The `getAbandonedDrafts()` query uses a correlated COUNT subquery to check if a workflow has scripts:
 
-## Solution
-Replace the correlated subquery with a COUNT using the existing LEFT JOIN on the scripts table:
 ```sql
-CASE WHEN COUNT(DISTINCT s.id) > 0 THEN 1 ELSE 0 END as has_script
+(SELECT COUNT(*) FROM scripts WHERE workflow_id = w.id) > 0 as has_script
 ```
 
+This runs the COUNT for every workflow row, which is inefficient. COUNT scans all matching rows even though we only need to know if at least one exists.
+
+## Solution
+Use EXISTS instead of COUNT for better performance:
+
+```sql
+EXISTS(SELECT 1 FROM scripts WHERE workflow_id = w.id) as has_script
+```
+
+Or use a CASE expression:
+```sql
+CASE WHEN EXISTS(SELECT 1 FROM scripts WHERE workflow_id = w.id) THEN 1 ELSE 0 END as has_script
+```
+
+EXISTS stops at the first match, while COUNT must scan all matching rows.
+
 ## Expected Outcome
-- Single query execution instead of N+1
-- Better performance for queries returning many workflows
-- Same functional behavior
+- Faster query execution for draft detection
+- Reduced database load, especially with many scripts per workflow
 
 ## Considerations
-- Verify the LEFT JOIN on scripts is already present in the query
-- Ensure GROUP BY clause is appropriate for the aggregation
-- Test with larger datasets to confirm performance improvement
+- File: `packages/db/src/script-store.ts`
+- Method: `getAbandonedDrafts()` (~line 863)
+- Also check `getDraftActivitySummary()` for similar patterns
