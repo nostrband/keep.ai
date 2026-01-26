@@ -7,7 +7,7 @@
 **✅ Critical Security Fixes COMPLETE** - All 8 security vulnerabilities in OAuth/connectors and server configuration have been addressed.
 
 **Remaining Work:**
-- Bug fixes (Priority 2) - 10 items
+- Bug fixes (Priority 2) - 7 items
 - Code quality improvements (Priority 3) - 10 items
 - Nice-to-have optimizations (Priority 4) - 6 items
 - Post-v1 features (Priority 5)
@@ -107,8 +107,9 @@ All security issues have been addressed for v1.0.0 release.
   - **Location:** `apps/web/src/components/ArchivedPage.tsx`
 
 ### 2.3 Validation/Error Handling Bugs
-- [ ] `specs/new/fix-cron-hourly-nan-validation.md` - NaN in hourly pattern
-  - Shows "Every hour at :NaN"
+- [x] `specs/new/fix-cron-hourly-nan-validation.md` - NaN in hourly pattern
+  - Added parseInt and NaN check for minute field in hourly cron patterns
+  - Falls back to raw cron string on invalid format
   - **Location:** `apps/web/src/lib/formatCronSchedule.ts`
 
 - [x] `specs/new/fix-handle-check-response-validation.md` - JSON parse on error
@@ -116,12 +117,14 @@ All security issues have been addressed for v1.0.0 release.
   - Gracefully handles error responses with proper error messages
   - **Location:** `apps/web/src/components/ConnectionsSection.tsx`
 
-- [ ] `specs/new/fix-check-endpoint-status-codes.md` - Always returns 200
-  - Returns 200 even on failure
+- [x] `specs/new/fix-check-endpoint-status-codes.md` - Always returns 200
+  - Returns 401 for auth errors (unauthorized, invalid_grant, token, expired, revoked)
+  - Returns 503 for service unavailable (timeout, econnrefused, rate limit)
+  - Returns 500 for other errors
   - **Location:** `apps/server/src/routes/connectors.ts`
 
-- [ ] `specs/new/fix-console-log-quote-escaping.md` - Malformed output
-  - Single quotes not escaped in console log
+- [x] `specs/new/fix-console-log-quote-escaping.md` - Malformed output
+  - Added escaping for single quotes in log messages using backslash escape
   - **Location:** `packages/agent/src/tools/console-log.ts`
 
 ### 2.4 Notification/Workflow Bugs

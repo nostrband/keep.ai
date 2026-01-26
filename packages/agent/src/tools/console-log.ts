@@ -16,11 +16,14 @@ Messages are timestamped and stored in run logs.`,
       line: z.string().describe("The message to log"),
     }),
     execute: async (input) => {
+      // Escape single quotes in the message to prevent malformed output
+      const escapedLine = input.line.replace(/'/g, "\\'");
+
       // Crop the line to 1000 chars max
       const croppedLine =
-        input.line.length > 1000
-          ? "'" + input.line.substring(0, 1000) + "..."
-          : "'" + input.line + "'";
+        escapedLine.length > 1000
+          ? "'" + escapedLine.substring(0, 1000) + "..."
+          : "'" + escapedLine + "'";
 
       // Get current ISO timestamp
       const timestamp = new Date().toISOString();

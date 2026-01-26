@@ -19,7 +19,11 @@ export function formatCronSchedule(cron?: string): string {
 
     // Every hour at specific minute
     if (minute !== "*" && hour === "*") {
-      return `Every hour at :${minute.padStart(2, "0")}`;
+      const minuteNum = parseInt(minute, 10);
+      if (isNaN(minuteNum)) {
+        return cron; // Return raw cron for invalid format
+      }
+      return `Every hour at :${minuteNum.toString().padStart(2, "0")}`;
     }
 
     // Daily at specific time

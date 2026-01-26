@@ -225,9 +225,10 @@ describe("Utility Tools", () => {
         const loggedLine = (mockContext.onLog as any).mock.calls[0][0];
 
         // The message is wrapped in single quotes by the tool
-        // So the output will have the quotes embedded: 'It's a test with 'nested quotes''
-        // This documents the current behavior (no escaping)
-        expect(loggedLine).toContain("It's a test with 'nested quotes'");
+        // Single quotes in the message are escaped with backslash
+        // Input: It's a test with 'nested quotes'
+        // Output: 'It\'s a test with \'nested quotes\''
+        expect(loggedLine).toContain("It\\'s a test with \\'nested quotes\\'");
       });
 
       it("should handle message containing newlines", async () => {
@@ -388,8 +389,9 @@ describe("Utility Tools", () => {
         expect(mockContext.onLog).toHaveBeenCalled();
         const loggedLine = (mockContext.onLog as any).mock.calls[0][0];
 
-        // All special characters are passed through
-        expect(loggedLine).toContain("!@#$%^&*()_+-=[]{}|;':\",./<>?`~");
+        // All special characters are passed through (single quotes are escaped)
+        expect(loggedLine).toContain("!@#$%^&*()_+-=[]{}|;\\':\",./");
+        expect(loggedLine).toContain("<>?`~");
       });
     });
   });

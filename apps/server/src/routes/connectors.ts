@@ -198,9 +198,33 @@ export async function registerConnectorRoutes(
           error instanceof Error ? error.message : "Connection check failed"
         );
 
-        return reply.status(200).send({
+        // Determine appropriate HTTP status code based on error type
+        const errorMessage = error instanceof Error ? error.message : "Connection check failed";
+        const errorMessageLower = errorMessage.toLowerCase();
+
+        let statusCode = 500; // Default to internal server error
+        if (
+          errorMessageLower.includes("unauthorized") ||
+          errorMessageLower.includes("invalid_grant") ||
+          errorMessageLower.includes("token") ||
+          errorMessageLower.includes("expired") ||
+          errorMessageLower.includes("revoked") ||
+          errorMessageLower.includes("invalid credentials")
+        ) {
+          statusCode = 401; // Auth error
+        } else if (
+          errorMessageLower.includes("unavailable") ||
+          errorMessageLower.includes("timeout") ||
+          errorMessageLower.includes("econnrefused") ||
+          errorMessageLower.includes("service") ||
+          errorMessageLower.includes("rate limit")
+        ) {
+          statusCode = 503; // Service unavailable
+        }
+
+        return reply.status(statusCode).send({
           success: false,
-          error: error instanceof Error ? error.message : "Connection check failed",
+          error: errorMessage,
         });
       }
     }
