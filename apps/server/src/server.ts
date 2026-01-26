@@ -16,6 +16,7 @@ import {
   NostrPeerStore,
   ChatStore,
   FileStore,
+  parseMessageContent,
   type File,
 } from "@app/db";
 
@@ -375,22 +376,7 @@ async function handlePushNotifications(
     // Only notify about assistant messages and parse content to AssistantUIMessage
     const messages = rawMessages
       .filter((m) => m.role === "assistant")
-      .map((msg) => {
-        try {
-          return JSON.parse(msg.content);
-        } catch {
-          // Fallback for messages that aren't JSON
-          return {
-            id: msg.id,
-            role: msg.role,
-            parts: [{ type: "text", text: msg.content }],
-            metadata: {
-              threadId: msg.chat_id,
-              createdAt: msg.timestamp,
-            },
-          };
-        }
-      });
+      .map(parseMessageContent);
 
     if (messages.length === 0) {
       return lastMessageTime;

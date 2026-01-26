@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { createDBNode, getCurrentUser, getDBPath } from '@app/node';
-import { KeepDb, KeepDbApi, ChatMessage } from '@app/db';
+import { KeepDb, KeepDbApi, parseMessageContent } from '@app/db';
 import { AssistantUIMessage } from '@app/proto';
 import * as readline from 'readline';
 import debug from 'debug';
@@ -14,28 +14,6 @@ export function registerChatCommand(program: Command): void {
     .action(async () => {
       await runChatCommand();
     });
-}
-
-/**
- * Parses a ChatMessage's content into AssistantUIMessage format.
- * If the content is already valid JSON, returns it directly.
- * Otherwise, wraps the plain text content in the expected structure.
- */
-function parseMessageContent(msg: ChatMessage): AssistantUIMessage {
-  try {
-    return JSON.parse(msg.content);
-  } catch {
-    // Fallback for messages that aren't JSON
-    return {
-      id: msg.id,
-      role: msg.role,
-      parts: [{ type: "text", text: msg.content }],
-      metadata: {
-        threadId: msg.chat_id,
-        createdAt: msg.timestamp,
-      },
-    };
-  }
 }
 
 // Helper function to print messages - removes code duplication

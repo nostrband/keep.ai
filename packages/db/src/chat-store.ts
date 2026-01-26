@@ -49,6 +49,30 @@ function rowToChatMessage(row: ChatMessageRow): ChatMessage {
   };
 }
 
+/**
+ * Parses a ChatMessage's content into AssistantUIMessage format.
+ * If the content is already valid JSON, returns it directly.
+ * Otherwise, wraps the plain text content in the expected structure.
+ *
+ * This is the single source of truth for ChatMessage -> AssistantUIMessage conversion.
+ */
+export function parseMessageContent(msg: ChatMessage): AssistantUIMessage {
+  try {
+    return JSON.parse(msg.content);
+  } catch {
+    // Fallback for messages that aren't JSON
+    return {
+      id: msg.id,
+      role: msg.role,
+      parts: [{ type: "text", text: msg.content }],
+      metadata: {
+        threadId: msg.chat_id,
+        createdAt: msg.timestamp,
+      },
+    };
+  }
+}
+
 export class ChatStore {
   private db: CRSqliteDB;
 

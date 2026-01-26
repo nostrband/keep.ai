@@ -10,7 +10,7 @@ export { MemoryStore } from "./memory-store";
 export type { Thread as StorageThreadType } from "./memory-store";
 
 // Chat store
-export { ChatStore } from "./chat-store";
+export { ChatStore, parseMessageContent } from "./chat-store";
 export type { ChatMessage } from "./chat-store";
 
 // Connection store

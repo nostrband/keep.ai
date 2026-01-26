@@ -8,29 +8,7 @@ import { qk } from "./queryKeys";
 import { useDbQuery } from "./dbQuery";
 import { ChatEvent } from "packages/proto/dist";
 import { queryClient } from "../queryClient";
-import { ChatMessage } from "@app/db";
-
-/**
- * Parses a ChatMessage's content into AssistantUIMessage format.
- * If the content is already valid JSON, returns it directly.
- * Otherwise, wraps the plain text content in the expected structure.
- */
-function parseMessageContent(msg: ChatMessage) {
-  try {
-    return JSON.parse(msg.content);
-  } catch {
-    // Fallback for messages that aren't JSON
-    return {
-      id: msg.id,
-      role: msg.role,
-      parts: [{ type: "text", text: msg.content }],
-      metadata: {
-        threadId: msg.chat_id,
-        createdAt: msg.timestamp,
-      },
-    };
-  }
-}
+import { parseMessageContent } from "@app/db";
 
 export function useChatMessages(chatId: string) {
   const { api } = useDbQuery();

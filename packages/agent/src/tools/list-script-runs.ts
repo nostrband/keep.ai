@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { tool } from "ai";
 import { ScriptStore } from "@app/db";
 import { EvalContext } from "../sandbox/sandbox";
 
@@ -6,8 +7,30 @@ export function makeListScriptRunsTool(
   scriptStore: ScriptStore,
   getContext: () => EvalContext
 ) {
-  return {
-    execute: async (task_id?: string) => {
+  return tool({
+    description:
+      "Get list of script runs for a task ID. If no task_id provided, uses current task. Returns all script run fields except result and logs.",
+    inputSchema: z
+      .object({
+        task_id: z
+          .string()
+          .optional()
+          .describe("Task ID (optional, defaults to current task)"),
+      })
+      .optional()
+      .nullable(),
+    outputSchema: z.array(
+      z.object({
+        id: z.string(),
+        script_id: z.string(),
+        start_timestamp: z.string(),
+        end_timestamp: z.string(),
+        error: z.string(),
+      })
+    ),
+    execute: async (input) => {
+      let task_id = input?.task_id;
+
       // If no task_id provided, get it from context
       if (!task_id) {
         const context = getContext();
@@ -31,20 +54,5 @@ export function makeListScriptRunsTool(
         error: run.error,
       }));
     },
-    description:
-      "Get list of script runs for a task ID. If no task_id provided, uses current task. Returns all script run fields except result and logs.",
-    inputSchema: z
-      .string()
-      .optional()
-      .describe("Task ID (optional, defaults to current task)"),
-    outputSchema: z.array(
-      z.object({
-        id: z.string(),
-        script_id: z.string(),
-        start_timestamp: z.string(),
-        end_timestamp: z.string(),
-        error: z.string(),
-      })
-    ),
-  };
+  });
 }

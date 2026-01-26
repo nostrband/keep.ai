@@ -3,12 +3,9 @@ import { tool } from "ai";
 import { EvalContext } from "../sandbox/sandbox";
 import debug from "debug";
 import { google } from "googleapis";
-import {
-  AuthError,
-  LogicError,
-  classifyGoogleApiError,
-} from "../errors";
-import type { ConnectionManager, Connection } from "@app/connectors";
+import { AuthError, classifyGoogleApiError } from "../errors";
+import type { ConnectionManager } from "@app/connectors";
+import { getGoogleCredentials, createGoogleOAuthClient } from "./google-common";
 
 const debugGmail = debug("agent:gmail");
 
@@ -51,21 +48,12 @@ export function makeGmailTool(
     execute: async (input) => {
       const { method, params = {}, account } = input;
 
-      // Validate account is specified
-      if (!account) {
-        const connections =
-          await connectionManager.listConnectionsByService("gmail");
-        if (connections.length === 0) {
-          throw new AuthError(
-            "Gmail not connected. Please connect Gmail in Settings.",
-            { source: "Gmail.api" }
-          );
-        }
-        throw new LogicError(
-          `Gmail account required. Available accounts: ${connections.map((c: Connection) => c.accountId).join(", ")}`,
-          { source: "Gmail.api" }
-        );
-      }
+      const creds = await getGoogleCredentials(
+        connectionManager,
+        "gmail",
+        account,
+        "Gmail.api"
+      );
 
       const connectionId = { service: "gmail", accountId: account };
 
@@ -82,18 +70,7 @@ export function makeGmailTool(
       });
 
       try {
-        // Get fresh credentials (auto-refreshes if needed)
-        const creds = await connectionManager.getCredentials(connectionId);
-
-        // Create OAuth2 client with credentials
-        const oAuth2Client = new google.auth.OAuth2();
-        oAuth2Client.setCredentials({
-          access_token: creds.accessToken,
-          refresh_token: creds.refreshToken,
-          expiry_date: creds.expiresAt,
-        });
-
-        // Create Gmail API client
+        const oAuth2Client = createGoogleOAuthClient(creds);
         const gmail = google.gmail({ version: "v1", auth: oAuth2Client });
 
         // Call the appropriate method

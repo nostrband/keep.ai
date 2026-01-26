@@ -8,7 +8,7 @@
 
 **Remaining Work:**
 - Bug fixes (Priority 2) - 0 items ✅ ALL COMPLETE
-- Code quality improvements (Priority 3) - 10 items
+- Code quality improvements (Priority 3) - 7 items (3 completed)
 - Nice-to-have optimizations (Priority 4) - 6 items
 - Post-v1 features (Priority 5)
 - Manual OAuth configuration (external, user-facing)
@@ -150,18 +150,22 @@ All security issues have been addressed for v1.0.0 release.
 ## Priority 3: Improvements
 
 ### 3.1 Code Quality
-- [ ] `specs/new/consolidate-parse-message-content.md` - DRY violation
-  - Function duplicated in 3 locations
-  - Create shared utility in common package
+- [x] `specs/done/consolidate-parse-message-content.md` - DRY violation
+  - Created shared `parseMessageContent()` utility in `packages/db/src/chat-store.ts`
+  - Exported from `@app/db` package
+  - Updated 3 locations: `apps/web/src/hooks/dbChatReads.ts`, `apps/cli/src/commands/chat.ts`, `apps/server/src/server.ts`
+  - **Location:** `packages/db/src/chat-store.ts`
 
-- [ ] `specs/new/standardize-tool-patterns.md` - Inconsistent tool patterns
-  - 5 tools use plain objects instead of AI SDK's tool()
-  - Silently ignore ToolCallOptions
-  - Standardize on AI SDK's tool() pattern
+- [x] `specs/done/standardize-tool-patterns.md` - Inconsistent tool patterns
+  - Converted 5 tools from plain objects to AI SDK's `tool()` pattern
+  - `get-script.ts`, `get-script-run.ts`, `list-scripts.ts`, `list-script-runs.ts`, `script-history.ts`
+  - All tools now receive ToolCallOptions (toolCallId, messages, abortSignal)
+  - **Location:** `packages/agent/src/tools/`
 
-- [ ] `specs/new/refactor-gmail-use-google-common.md` - Duplicated logic
-  - Gmail tool duplicates credential/OAuth client creation
-  - Use shared google-common.ts utilities
+- [x] `specs/done/refactor-gmail-use-google-common.md` - Duplicated logic
+  - Refactored Gmail tool to use shared `getGoogleCredentials()` and `createGoogleOAuthClient()`
+  - Now consistent with gdrive, gsheets, and gdocs tools
+  - **Location:** `packages/agent/src/tools/gmail.ts`
 
 ### 3.2 Feature Enhancements
 - [ ] `specs/new/expand-archive-to-paused-workflows.md` - Expand archive scope

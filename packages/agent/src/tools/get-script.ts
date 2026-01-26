@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { tool } from "ai";
 import { ScriptStore } from "@app/db";
 import { EvalContext } from "../sandbox/sandbox";
 
@@ -6,8 +7,33 @@ export function makeGetScriptTool(
   scriptStore: ScriptStore,
   getContext: () => EvalContext
 ) {
-  return {
-    execute: async (id?: string) => {
+  return tool({
+    description:
+      "Get a script by ID, or get the latest script for current task if no ID provided",
+    inputSchema: z
+      .object({
+        id: z
+          .string()
+          .optional()
+          .describe(
+            "Script ID (optional, defaults to latest script version for current task)"
+          ),
+      })
+      .optional()
+      .nullable(),
+    outputSchema: z
+      .object({
+        id: z.string(),
+        task_id: z.string(),
+        version: z.number(),
+        timestamp: z.string(),
+        code: z.string(),
+        change_comment: z.string(),
+      })
+      .nullable(),
+    execute: async (input) => {
+      const id = input?.id;
+
       // If no ID provided, get the latest script for the current task
       if (!id) {
         const context = getContext();
@@ -44,21 +70,5 @@ export function makeGetScriptTool(
         change_comment: script.change_comment,
       };
     },
-    description:
-      "Get a script by ID, or get the latest script for current task if no ID provided",
-    inputSchema: z
-      .string()
-      .optional()
-      .describe("Script ID (optional, defaults to latest script version for current task)"),
-    outputSchema: z
-      .object({
-        id: z.string(),
-        task_id: z.string(),
-        version: z.number(),
-        timestamp: z.string(),
-        code: z.string(),
-        change_comment: z.string(),
-      })
-      .nullable(),
-  };
+  });
 }
