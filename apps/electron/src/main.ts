@@ -459,6 +459,9 @@ function registerGlobalShortcuts(): void {
 }
 
 function setupDownloadHandler() {
+  // Allowed directory for serving local files (the bundled SPA)
+  const allowedBaseDir = path.resolve(__dirname, "../public");
+
   // Handle all file:// requests in this session
   protocol.handle("file", async (request) => {
     debugMain("fetch", request.url);
@@ -480,12 +483,22 @@ function setupDownloadHandler() {
         return net.fetch(apiUrl);
       }
 
-      // Everything else: serve local file from disk
+      // Serve local file from disk with path traversal protection
       // request.url is file:///absolute/path/to/file
       const filePath = fileURLToPath(request.url);
 
-      const data = await fs.promises.readFile(filePath);
-      const mimeType = guessMimeType(filePath);
+      // SECURITY: Resolve to canonical path and verify it's within allowed directory
+      const resolvedPath = path.resolve(filePath);
+      if (!resolvedPath.startsWith(allowedBaseDir + path.sep) && resolvedPath !== allowedBaseDir) {
+        debugMain("[protocol.handle(file)] blocked path traversal attempt:", resolvedPath);
+        return new Response("Forbidden", {
+          status: 403,
+          headers: { "content-type": "text/plain" },
+        });
+      }
+
+      const data = await fs.promises.readFile(resolvedPath);
+      const mimeType = guessMimeType(resolvedPath);
 
       return new Response(data, {
         headers: { "content-type": mimeType },

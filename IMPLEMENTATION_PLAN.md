@@ -66,6 +66,13 @@ All security issues have been addressed for v1.0.0 release.
   - Redacted sensitive values (`OPENROUTER_API_KEY`, `EXA_API_KEY`) in response
   - **Location:** `apps/server/src/server.ts:902-905`
 
+### 1.9 Electron File Protocol Path Traversal
+- [x] File protocol handler served arbitrary files without path validation
+  - Added path traversal protection using `path.resolve()` and directory restriction
+  - Local files are now restricted to the bundled `public/` directory only
+  - Attempts to access files outside allowed directory return 403 Forbidden
+  - **Location:** `apps/electron/src/main.ts:461-514`
+
 ---
 
 ## Priority 2: Bug Fixes
@@ -526,4 +533,4 @@ These are external configuration steps that users must complete in their OAuth p
 ### apps/electron
 - `index.html` references undefined `electronAPI.sendMessage()`
 - Extensive `any` type usage in main.ts
-- Path traversal vulnerability in file handler (line 470-471)
+- ~~Path traversal vulnerability in file handler (line 470-471)~~ ✅ Fixed - Added path validation to restrict file serving to public directory only
