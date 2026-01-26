@@ -12,6 +12,8 @@ import { Mail, HardDrive, Sheet, FileText, BookOpen, MoreVertical, Plus, Refresh
 import { useConnections } from "../hooks/dbConnectionReads";
 import { useUpdateConnectionLabel } from "../hooks/dbWrites";
 import { useAutoHidingMessage } from "../hooks/useAutoHidingMessage";
+import { useQueryProvider } from "../QueryProvider";
+import { notifyTablesChanged } from "../queryClient";
 import { API_ENDPOINT } from "../const";
 import { openUrl } from "../lib/url-utils";
 import {
@@ -328,6 +330,7 @@ function ServiceGroup({
 export default function ConnectionsSection() {
   const { data: connections = [], isLoading } = useConnections();
   const updateLabelMutation = useUpdateConnectionLabel();
+  const { api } = useQueryProvider();
   const [pendingService, setPendingService] = useState<string | null>(null);
   const [checkingConnections, setCheckingConnections] = useState<Set<string>>(new Set());
   const success = useAutoHidingMessage({ duration: 3000 });
@@ -403,6 +406,12 @@ export default function ConnectionsSection() {
       if (!response.ok) {
         const data = await response.json();
         throw new Error(data.error || "Failed to disconnect");
+      }
+
+      // Notify query system to invalidate connections data
+      // This ensures the UI updates immediately after disconnect
+      if (api) {
+        notifyTablesChanged(["connections"], true, api);
       }
 
       success.show("Account disconnected");

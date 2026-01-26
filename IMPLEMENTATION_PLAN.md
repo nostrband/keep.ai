@@ -7,7 +7,7 @@
 **✅ Critical Security Fixes COMPLETE** - All 8 security vulnerabilities in OAuth/connectors and server configuration have been addressed.
 
 **Remaining Work:**
-- Bug fixes (Priority 2) - 7 items
+- Bug fixes (Priority 2) - 3 items
 - Code quality improvements (Priority 3) - 10 items
 - Nice-to-have optimizations (Priority 4) - 6 items
 - Post-v1 features (Priority 5)
@@ -71,9 +71,10 @@ All security issues have been addressed for v1.0.0 release.
 ## Priority 2: Bug Fixes
 
 ### 2.1 Database/Query Bugs
-- [ ] `specs/new/fix-draft-activity-coalesce-bug.md` - SQL logic error (COALESCE vs MAX)
-  - Drafts incorrectly marked as stale
-  - **Location:** `packages/db/src/script-store.ts`
+- [x] `specs/new/fix-draft-activity-coalesce-bug.md` - SQL logic error (COALESCE vs MAX)
+  - Changed from COALESCE to MAX across all activity sources
+  - Drafts now correctly use the most recent timestamp from chat messages, scripts, or workflow
+  - **Location:** `packages/db/src/script-store.ts` (getAbandonedDrafts and getDraftActivitySummary)
 
 - [ ] `specs/new/audit-workflow-timestamp-updates.md` - Timestamp overwritten on update
   - Creation timestamp lost on workflow updates
@@ -98,12 +99,14 @@ All security issues have been addressed for v1.0.0 release.
   - Only syncs when not actively renaming to preserve user edits
   - **Location:** `apps/web/src/components/ConnectionsSection.tsx`
 
-- [ ] `specs/new/fix-disconnect-query-invalidation.md` - UI not updating
-  - Disconnected connection remains visible until sync
-  - **Location:** `apps/server/src/routes/connectors.ts`
+- [x] `specs/new/fix-disconnect-query-invalidation.md` - UI not updating
+  - Added notifyTablesChanged call after successful disconnect
+  - Connection list now updates immediately after disconnect
+  - **Location:** `apps/web/src/components/ConnectionsSection.tsx`
 
-- [ ] `specs/new/fix-archived-page-restore-feedback.md` - Missing feedback
-  - No success/error messages on restore
+- [x] `specs/new/fix-archived-page-restore-feedback.md` - Missing feedback
+  - Added useAutoHidingMessage for success/error feedback
+  - Consistent UX with WorkflowDetailPage
   - **Location:** `apps/web/src/components/ArchivedPage.tsx`
 
 ### 2.3 Validation/Error Handling Bugs
@@ -128,9 +131,9 @@ All security issues have been addressed for v1.0.0 release.
   - **Location:** `packages/agent/src/tools/console-log.ts`
 
 ### 2.4 Notification/Workflow Bugs
-- [ ] `specs/new/fix-archived-workflow-notifications.md` - Notifications for archived
-  - Users receive notifications about archived workflows
-  - **Location:** Notification generation code
+- [x] `specs/new/fix-archived-workflow-notifications.md` - Notifications for archived
+  - Added check to skip archived workflows in notification loop
+  - **Location:** `apps/web/src/lib/WorkflowNotifications.ts`
 
 ### 2.5 Server Infrastructure
 - [ ] `specs/new/fix-server-shutdown-handling.md` - Resource leaks on shutdown

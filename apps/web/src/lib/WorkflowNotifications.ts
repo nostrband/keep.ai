@@ -69,6 +69,11 @@ export class WorkflowNotifications {
 
       // Check each workflow's latest run for errors
       for (const workflow of workflows) {
+        // Skip archived workflows - users have intentionally hidden these
+        if (workflow.status === 'archived') {
+          continue;
+        }
+
         const latestRun = latestRunsMap.get(workflow.id) || null;
 
         // Check if workflow is in maintenance mode (agent is auto-fixing)

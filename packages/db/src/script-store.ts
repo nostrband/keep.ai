@@ -854,15 +854,16 @@ export class ScriptStore {
     const now = new Date();
 
     // Single query to get drafts with their last activity and related data
-    // Uses COALESCE to find the most recent of: chat messages, script saves, or workflow timestamp
+    // Uses MAX() across all activity sources to find true most recent activity
+    // Note: COALESCE picks first non-null which is wrong - we need the max across all
     // Note: Uses chat_messages table per Spec 12
     const results = await this.db.db.execO<Record<string, unknown>>(
       `SELECT
         w.id, w.title, w.task_id, w.chat_id, w.timestamp, w.cron, w.events, w.status,
         w.next_run_timestamp, w.maintenance, w.maintenance_fix_count, w.active_script_id,
-        COALESCE(
-          MAX(cm.timestamp),
-          MAX(s.timestamp),
+        MAX(
+          COALESCE(MAX(cm.timestamp), w.timestamp),
+          COALESCE(MAX(s.timestamp), w.timestamp),
           w.timestamp
         ) as last_activity,
         COUNT(DISTINCT s.id) > 0 as has_script,
@@ -932,13 +933,15 @@ export class ScriptStore {
     abandonedThreshold.setDate(abandonedThreshold.getDate() - DRAFT_THRESHOLDS.ABANDONED_DAYS);
 
     // Get all drafts with their last activity in one query
+    // Uses MAX() across all activity sources to find true most recent activity
+    // Note: COALESCE picks first non-null which is wrong - we need the max across all
     // Note: Uses chat_messages table per Spec 12
     const results = await this.db.db.execO<Record<string, unknown>>(
       `SELECT
         w.id,
-        COALESCE(
-          MAX(cm.timestamp),
-          MAX(s.timestamp),
+        MAX(
+          COALESCE(MAX(cm.timestamp), w.timestamp),
+          COALESCE(MAX(s.timestamp), w.timestamp),
           w.timestamp
         ) as last_activity,
         t.state as task_state

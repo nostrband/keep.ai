@@ -1090,13 +1090,11 @@ describe("ScriptStore", () => {
       expect(summary.staleDrafts).toBe(0);
     });
 
-    it("should document COALESCE behavior: chat_messages take precedence over scripts", async () => {
-      // NOTE: This test documents the current COALESCE behavior where chat_messages
-      // timestamp is checked BEFORE scripts timestamp. This means if there's ANY
-      // chat message (even old), it will use that timestamp instead of a newer script.
-      // This is a known limitation of the current query structure:
-      //   COALESCE(MAX(cm.timestamp), MAX(s.timestamp), w.timestamp)
-      // Future improvement could use: MAX(cm.timestamp, s.timestamp, w.timestamp)
+    it("should use MAX across all activity sources (fix for COALESCE bug)", async () => {
+      // This test verifies the fix for the COALESCE bug where chat_messages
+      // timestamp was checked BEFORE scripts timestamp. The fix uses:
+      //   MAX(COALESCE(MAX(cm.timestamp), w.timestamp), COALESCE(MAX(s.timestamp), w.timestamp), w.timestamp)
+      // Now the most recent activity across ALL sources is used.
       const now = new Date();
 
       // Create task
@@ -1144,13 +1142,10 @@ describe("ScriptStore", () => {
         diagram: "",
       });
 
-      // Due to COALESCE order, it uses chat_messages timestamp (15 days ago)
-      // even though script is more recent (2 days ago)
-      // This means the workflow IS considered abandoned (15 days > 7 days threshold)
+      // With the fix, the most recent activity (script at 2 days ago) is used
+      // Since 2 days < 7 day threshold, the workflow should NOT be abandoned
       const abandoned = await scriptStore.getAbandonedDrafts(7);
-      expect(abandoned).toHaveLength(1);
-      expect(abandoned[0].workflow.id).toBe("workflow-coalesce-order");
-      expect(abandoned[0].daysSinceActivity).toBeGreaterThanOrEqual(14); // Based on chat message, not script
+      expect(abandoned).toHaveLength(0); // Not abandoned - has recent script activity
     });
 
     it("should fallback to workflow timestamp when no scripts or messages exist", async () => {

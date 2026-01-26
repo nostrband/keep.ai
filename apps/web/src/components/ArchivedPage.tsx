@@ -1,17 +1,19 @@
 import React from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { useWorkflows } from "../hooks/dbScriptReads";
 import { useUpdateWorkflow } from "../hooks/dbWrites";
 import SharedHeader from "./SharedHeader";
 import { WorkflowStatusBadge } from "./StatusBadge";
 import { Button } from "../ui";
-import { Archive, RotateCcw, Trash2, ArrowLeft } from "lucide-react";
+import { Archive, RotateCcw, ArrowLeft } from "lucide-react";
 import { getWorkflowTitle } from "../lib/workflowUtils";
+import { useAutoHidingMessage } from "../hooks/useAutoHidingMessage";
 
 export default function ArchivedPage() {
-  const navigate = useNavigate();
   const { data: workflows = [], isLoading } = useWorkflows();
   const updateWorkflowMutation = useUpdateWorkflow();
+  const success = useAutoHidingMessage({ duration: 3000 });
+  const error = useAutoHidingMessage({ duration: 5000 });
 
   // Filter to only archived workflows
   const archivedWorkflows = workflows.filter(w => w.status === "archived");
@@ -23,8 +25,10 @@ export default function ArchivedPage() {
         workflowId,
         status: "draft"
       });
-    } catch (error) {
-      console.error("Failed to restore workflow:", error);
+      success.show("Workflow restored");
+    } catch (err) {
+      console.error("Failed to restore workflow:", err);
+      error.show(err instanceof Error ? err.message : "Failed to restore workflow");
     }
   };
 
@@ -56,6 +60,18 @@ export default function ArchivedPage() {
           <Archive className="inline w-5 h-5 mr-2 text-gray-400" />
           Archived Workflows ({archivedWorkflows.length})
         </h1>
+
+        {success.message && (
+          <div className="text-sm text-green-600 bg-green-50 p-3 rounded-md border border-green-200 mb-4">
+            {success.message}
+          </div>
+        )}
+
+        {error.message && (
+          <div className="text-sm text-red-600 bg-red-50 p-3 rounded-md border border-red-200 mb-4">
+            {error.message}
+          </div>
+        )}
 
         {isLoading ? (
           <div className="flex items-center justify-center py-12">
