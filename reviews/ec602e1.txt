@@ -1,0 +1,156 @@
+COMMIT REVIEW: ec602e1
+=======================
+Title: Fix PROMPT_review.md to include commits co authored by Claude, create specs for bugs discovered while manually testing the app
+Author: Claude Agent
+Date: Fri Jan 23 12:18:48 2026 +0100
+
+SUMMARY
+-------
+This commit makes two key changes: (1) fixes the review/test prompt files to include
+co-authored commits in their search scope, and (2) creates 21 specification files
+documenting UX bugs and architectural issues discovered during manual testing.
+
+CHANGES IN DETAIL
+-----------------
+
+1. PROMPT_review.md (line 2 change)
+   - BEFORE: "Use `git log` to find all commits by Claude that weren't yet reviewed."
+   - AFTER: "Use `git log` to find all commits by Claude (or Co-Authored-By Claude) that weren't yet reviewed."
+   - Purpose: Ensures co-authored commits (using Co-Authored-By footer) are included in reviews
+
+2. PROMPT_ux_tests.md (line 2 change)
+   - Identical change as PROMPT_review.md
+   - Purpose: Ensures UX testing also covers co-authored commits
+
+3. ISSUES.md (NEW - empty file)
+   - Created as placeholder for tracking issues
+   - Currently empty
+
+4. specs/new/*.md (21 NEW specification files)
+   Created comprehensive specs for bugs discovered during manual testing:
+
+   UI/UX IMPROVEMENTS:
+   - 01-chat-page-autonomy-toggle.md: Add missing AI toggle to chat input form
+   - 02-workflow-info-box-sticky.md: Make workflow info sticky; add cursor-pointer
+   - 03-mermaid-fullscreen-background.md: Fix transparent fullscreen background
+   - 04-workflow-chat-button-rename.md: Rename "Chat" to "Edit"
+   - 05-workflow-move-automation-summary.md: Reorder sections on workflow page
+   - 06-workflow-pause-resume-button-position.md: Fix button positioning consistency
+   - 07-workflow-human-readable-cron.md: Display cron as "Daily at 9am" format
+   - 08-workflow-active-vs-running-badge.md: Fix "Active" vs "Running" badge confusion
+   - 09-agent-save-tool-title.md: Add required title field to save tool
+   - 10-workflow-list-schedule-display.md: Show schedule in homepage list
+   - 11-server-error-header-notice.md: Show "Server error" not "Sign up" when down
+
+   AUTH SYSTEM REFACTORING:
+   - consolidate-auth-config-hooks.md: Merge overlapping useConfig/useNeedAuth
+   - deprecate-auth-dialog.md: Replace AuthDialog with AuthPopup re-export
+   - fix-autonomy-toggle-form-submit.md: Add type="button" to prevent form submit
+   - fix-proactive-needauth-detection.md: Detect missing API key proactively
+   - remove-blocking-auth-from-app.md: Remove blocking auth check from App.tsx
+
+   CLEANUP SPECS:
+   - hide-scroll-message-empty-chat.md: Hide scroll prompt in empty chat
+   - remove-workflow-task-row.md: Remove internal Task section from UI
+   - workflow-title-new-workflow-fallback.md: Use "New workflow" fallback
+
+POTENTIAL ISSUES
+----------------
+
+1. **Empty ISSUES.md file**: The file is created but empty. Either populate it with
+   content or remove it - empty files can be confusing.
+   - Severity: Very Low (cosmetic)
+   - Recommendation: Either delete or add initial content explaining its purpose
+
+2. **Spec file naming inconsistency**: Some specs use numbered prefixes (01-, 02-),
+   others use descriptive names (consolidate-auth-config-hooks.md). This makes it
+   unclear which order they should be addressed.
+   - Severity: Low (organizational)
+   - Recommendation: Establish consistent naming convention (numbers for priority
+     or implementation order, descriptive for type/category)
+
+3. **Line number references may become stale**: Many specs reference specific line
+   numbers (e.g., "lines 358-364", "line 29"). These will become incorrect as code
+   evolves.
+   - Severity: Low (documentation maintenance)
+   - Recommendation: Use function/component names as primary references, line numbers
+     as secondary guidance
+
+4. **Interdependencies not clearly marked**: Some specs depend on others (e.g.,
+   consolidate-auth-config-hooks depends on fix-proactive-needauth-detection and
+   remove-blocking-auth-from-app). The dependencies are in prose but not structured.
+   - Severity: Low (implementation guidance)
+   - Recommendation: Add "Dependencies" section to specs with explicit links
+
+5. **Spec quality variance**: Most specs are well-structured with Problem/Solution/
+   Testing sections, but some are more detailed than necessary for small fixes while
+   others could use more context.
+   - Severity: Very Low (documentation style)
+   - Example: fix-autonomy-toggle-form-submit.md is appropriately concise for a
+     one-line fix, but some others could be shorter
+
+POSITIVE OBSERVATIONS
+---------------------
+
+1. **Comprehensive audit**: 21 specs from one testing session shows thorough attention
+   to detail. Issues range from tiny UX tweaks to architectural improvements.
+
+2. **Well-structured spec format**: Consistent sections across specs:
+   - Problem: What's wrong
+   - Root Cause: Why it happens (with code references)
+   - Solution: How to fix (with code samples)
+   - Expected Outcome/Testing: Verification checklist
+
+3. **Practical solutions**: Specs propose minimal, targeted fixes rather than
+   over-engineering. Examples:
+   - type="button" to fix form submission (1-line fix)
+   - Export existing formatCronSchedule instead of duplicating
+   - Re-export AuthPopup as AuthDialog for backward compatibility
+
+4. **Captures system-level patterns**: Auth specs (4 related specs) identify a
+   coherent refactoring path for the authentication system, not just individual bugs
+
+5. **Fixes important process gap**: The PROMPT_review.md fix ensures co-authored
+   commits get reviewed, which is critical for quality assurance in a human-AI
+   collaborative workflow
+
+PROPOSALS
+---------
+
+1. **Add priority/effort estimates to specs**: Consider adding metadata like:
+   ```
+   Priority: P0/P1/P2
+   Effort: XS/S/M/L
+   Dependencies: [list of other spec files]
+   ```
+   This helps with sprint planning and implementation order
+
+2. **Create spec index**: Add a specs/README.md that lists all specs by category
+   with status (pending/in-progress/done), making it easier to track progress
+
+3. **Remove or populate ISSUES.md**: Either:
+   - Delete the empty file
+   - Add a header explaining its purpose and link to specs/
+
+4. **Batch related specs**: The 4 auth-related specs could be combined into one
+   larger spec with phases, since they're interdependent:
+   - Phase 1: fix-proactive-needauth-detection
+   - Phase 2: remove-blocking-auth-from-app
+   - Phase 3: consolidate-auth-config-hooks + deprecate-auth-dialog
+
+VERDICT: APPROVED
+-----------------
+This commit adds valuable documentation of UX issues and fixes an important gap in
+the review process (co-authored commits). The specs are well-structured and provide
+clear implementation guidance. The empty ISSUES.md file is the only minor issue.
+The thorough testing session that produced 21 specs demonstrates strong quality
+assurance practices.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Empty ISSUES.md file) - skipped
+- Issue #2 (Spec file naming inconsistency) - skipped
+- Issue #3 (Line number references stale) - skipped
+- Issue #4 (Interdependencies not marked) - skipped
+- Issue #5 (Spec quality variance) - skipped

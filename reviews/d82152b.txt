@@ -1,0 +1,338 @@
+COMMIT: d82152b
+DATE: 2026-01-23
+TITLE: feat: Implement Notion connector (spec 1.7b)
+
+================================================================================
+SUMMARY
+================================================================================
+
+This commit implements Notion as the first non-Google OAuth connector, validating
+that the connectors framework is generic enough to support different OAuth
+providers. The implementation includes service definition, tool, error handling,
+and UI integration.
+
+Files modified/created (11):
+- IMPLEMENTATION_PLAN.md (status update)
+- apps/server/src/server.ts (register notionService)
+- apps/web/src/components/ConnectionsSection.tsx (add Notion UI)
+- package-lock.json (dependency tree)
+- packages/agent/package.json (add @notionhq/client)
+- packages/agent/src/errors.ts (add classifyNotionError)
+- packages/agent/src/sandbox/api.ts (register Notion tool)
+- packages/agent/src/tools/index.ts (export makeNotionTool)
+- packages/agent/src/tools/notion.ts (NEW - 184 lines)
+- packages/connectors/src/index.ts (export notionService)
+- packages/connectors/src/services/notion.ts (NEW - 42 lines)
+
+================================================================================
+DETAILED CHANGES
+================================================================================
+
+NEW: packages/connectors/src/services/notion.ts (42 lines)
+- Defines notionService following ServiceDefinition interface
+- Uses Basic auth for token exchange (useBasicAuth: true)
+- No refresh support (supportsRefresh: false) - Notion tokens don't expire
+- No fetchProfile - workspace info is in token response
+- Account ID is workspace_id (not email like Google)
+- Display name is workspace_name
+
+NEW: packages/agent/src/tools/notion.ts (184 lines)
+- Implements Notion tool with 8 supported methods:
+  databases.query, databases.retrieve, pages.retrieve, pages.create,
+  pages.update, blocks.children.list, blocks.children.append, search
+- Requires explicit `account` parameter (workspace_id)
+- Uses @notionhq/client official SDK
+- Custom getNotionCredentials() helper with workspace_name in error messages
+- Event logging for significant operations (not retrieves)
+- Error marking on AuthError
+
+NEW: classifyNotionError in errors.ts (lines 364-414)
+- Handles Notion-specific error codes: unauthorized, invalid_token,
+  restricted_resource, object_not_found, validation_error, invalid_json,
+  invalid_request, invalid_request_url, rate_limited, internal_server_error,
+  service_unavailable, conflict_error, database_connection_unavailable
+- Falls back to classifyGenericError for unknown errors
+
+UI: ConnectionsSection.tsx
+- Added Notion to SERVICES array with BookOpen icon
+- Description: "Access workspaces, databases, and pages"
+
+================================================================================
+POTENTIAL ISSUES
+================================================================================
+
+ISSUE 1: Conflicting Status/Code Field Interpretation in classifyNotionError
+Severity: HIGH
+Location: packages/agent/src/errors.ts lines 369-370
+
+```typescript
+const status = err?.status || err?.response?.status || err?.code;
+const notionCode = err?.code as string | undefined;
+```
+
+The code extracts `err?.code` for BOTH:
+1. `status` - expected to be numeric HTTP status
+2. `notionCode` - expected to be string Notion error code
+
+If an error has `code: "unauthorized"`:
+- `status` becomes "unauthorized" (not a number)
+- `notionCode` becomes "unauthorized"
+- Line 375: `typeof status === 'number'` is false (correct, string is not used)
+- Line 380: `notionCode` is truthy and correctly handled
+
+If an error has `code: 401`:
+- `status` becomes 401
+- `notionCode` becomes "401" (string "401")
+- Line 375: `typeof status === 'number'` is true, classifyHttpError handles it
+- This works correctly because numeric path is checked first
+
+However, the @notionhq/client SDK throws APIResponseError with:
+- `status`: HTTP status code (number)
+- `code`: Notion error code (string like "unauthorized")
+
+So both fields exist independently and the current code should work. But the
+variable naming is confusing - `status` could contain a string code from
+`err?.code` fallback.
+
+Proposal: Be more explicit about extraction:
+```typescript
+const httpStatus = err?.status || err?.response?.status;
+const notionCode = typeof err?.code === 'string' ? err.code : undefined;
+
+if (typeof httpStatus === 'number') {
+  return classifyHttpError(httpStatus, message, { cause: err, source });
+}
+```
+
+--------------------------------------------------------------------------------
+
+ISSUE 2: Notion Tool Uses Custom Helper Instead of Shared Pattern
+Severity: MEDIUM
+Location: packages/agent/src/tools/notion.ts lines 40-68
+
+The Notion tool defines its own `getNotionCredentials()` helper function inline:
+```typescript
+async function getNotionCredentials(
+  connectionManager: ConnectionManager,
+  accountId: string | undefined,
+  toolName: string
+): Promise<OAuthCredentials> { ... }
+```
+
+This duplicates the pattern from google-common.ts `getGoogleCredentials()` with
+Notion-specific enhancements (workspace_name display).
+
+While there are legitimate differences:
+- Notion uses workspace_id (not email) as account identifier
+- Notion shows workspace_name in error messages for better UX
+- Service name is hardcoded to "notion"
+
+The core logic is identical. Consider extracting a generic helper:
+```typescript
+// In a new oauth-tool-common.ts
+export async function getOAuthCredentials(
+  connectionManager: ConnectionManager,
+  service: string,
+  accountId: string | undefined,
+  toolName: string,
+  formatAccount?: (c: Connection) => string
+): Promise<OAuthCredentials>
+```
+
+Proposal: Create shared helper or accept the duplication. Given this is only
+the second OAuth service and the differences are meaningful, the current approach
+is acceptable. Document the pattern for future services.
+
+--------------------------------------------------------------------------------
+
+ISSUE 3: workspace_name Display Logic Duplicated
+Severity: LOW
+Location: notion.ts lines 54-59, ConnectionsSection.tsx lines 156+
+
+The logic to display workspace_name (falling back to accountId) appears in:
+1. notion.ts getNotionCredentials() error messages
+2. ConnectionsSection.tsx ConnectionCard rendering
+
+```typescript
+// notion.ts
+const name = c.metadata?.workspace_name || c.accountId;
+return name !== c.accountId ? `${name} (${c.accountId})` : c.accountId;
+
+// ConnectionsSection.tsx
+connection.metadata?.workspace_name || connection.accountId
+```
+
+This duplication is minor but could lead to inconsistent display if one is
+updated without the other.
+
+Proposal: Accept minor duplication - the contexts are different (error messages
+vs UI cards) and the logic is simple.
+
+--------------------------------------------------------------------------------
+
+ISSUE 4: Notion Tokens Don't Expire - No Expiration Handling
+Severity: LOW (by design)
+Location: packages/connectors/src/services/notion.ts line 36
+
+```typescript
+supportsRefresh: false, // Notion tokens don't expire
+```
+
+This is correct per Notion's API documentation. However, Notion tokens CAN be
+revoked by the user in Notion settings. When this happens:
+- API calls will fail with "unauthorized" error
+- classifyNotionError correctly classifies this as AuthError
+- connectionManager.markError() is called
+- User sees the error in Settings and can reconnect
+
+The flow handles revocation correctly, but there's no proactive token validation.
+This is acceptable for a personal automation tool.
+
+No action required.
+
+--------------------------------------------------------------------------------
+
+ISSUE 5: Missing owner Parameter in Token Exchange
+Severity: LOW
+Location: packages/connectors/src/services/notion.ts lines 27-29
+
+```typescript
+extraAuthParams: {
+  owner: "user", // Request user-level access
+},
+```
+
+This is added to the auth URL, but Notion's token response includes the `owner`
+field which is stored in metadata (oauth.ts lines 185-187). The `owner` param
+in auth URL requests user-level access (vs workspace-level). This is correct.
+
+No action required.
+
+--------------------------------------------------------------------------------
+
+ISSUE 6: Notion Methods Use Any Type for Params
+Severity: LOW
+Location: packages/agent/src/tools/notion.ts line 82
+
+```typescript
+params: z.any().optional().describe("Parameters to pass to the Notion API method"),
+```
+
+Using `z.any()` provides no type safety for API parameters. This is consistent
+with Gmail and other tools that use dynamic method dispatch. The @notionhq/client
+SDK provides its own type checking at runtime.
+
+The description correctly notes "Knowledge of param and output structure is
+expected from the assistant." This is acceptable given the dynamic nature of
+the API tool pattern.
+
+No action required.
+
+--------------------------------------------------------------------------------
+
+ISSUE 7: Event Logging Criteria Different from Gmail
+Severity: VERY LOW (intentional)
+Location: packages/agent/src/tools/notion.ts lines 141-152
+
+Gmail: Logs only "list" methods
+GDrive: Logs "list", "create", "delete" methods
+Notion: Logs "query", "create", "update", "append", "search" methods
+
+```typescript
+if (
+  method.includes("query") ||
+  method.includes("create") ||
+  method.includes("update") ||
+  method.includes("append") ||
+  method === "search"
+) {
+  await getContext().createEvent("notion_api_call", {...});
+}
+```
+
+The criteria differ but are reasonable for each service:
+- Gmail "list" is the main discovery operation
+- GDrive modifying operations are important to track
+- Notion query/create/update/append/search are all significant operations
+
+This is acceptable - different services have different significant operations.
+
+No action required.
+
+--------------------------------------------------------------------------------
+
+ISSUE 8: ensureClassified() Won't Use classifyNotionError
+Severity: MEDIUM
+Location: packages/agent/src/errors.ts lines 283-298
+
+The `ensureClassified()` helper doesn't know about Notion:
+```typescript
+if ('code' in err && typeof (err as any).code === 'string') {
+  return classifyFileError(err as NodeJS.ErrnoException, source);
+}
+return classifyGenericError(err, source);
+```
+
+If a Notion error escapes the tool's try/catch and is wrapped by
+ensureClassified(), it will be classified by classifyGenericError() instead of
+classifyNotionError(), losing Notion-specific handling.
+
+However, this is unlikely because:
+1. The Notion tool catches all errors in its try/catch
+2. classifyNotionError() is called explicitly
+3. The classified error is re-thrown
+
+If an error somehow escapes (e.g., from a bug), the generic classification would
+still produce reasonable results.
+
+Proposal: Consider adding source-aware classification in ensureClassified() for
+future robustness, but not critical for this commit.
+
+================================================================================
+PROPOSALS
+================================================================================
+
+PROPOSAL 1: Clarify status/code extraction in classifyNotionError
+Priority: P2 (should do)
+Files: packages/agent/src/errors.ts
+
+Improve variable naming and extraction to be more explicit:
+```typescript
+export function classifyNotionError(err: any, source?: string): ClassifiedError {
+  const httpStatus = err?.status || err?.response?.status;
+  const notionCode = typeof err?.code === 'string' ? err.code : undefined;
+  const message = err?.message || err?.body?.message || String(err);
+
+  // Handle numeric HTTP status first
+  if (typeof httpStatus === 'number') {
+    return classifyHttpError(httpStatus, message, { cause: err, source });
+  }
+  // ... rest unchanged
+}
+```
+
+--------------------------------------------------------------------------------
+
+PROPOSAL 2: Document OAuth tool pattern for future services
+Priority: P3 (nice-to-have)
+Files: AGENTS.md or new docs/CONNECTORS.md
+
+Document the pattern for implementing new OAuth service tools:
+1. Service definition in packages/connectors/src/services/<service>.ts
+2. Tool implementation in packages/agent/src/tools/<service>.ts
+3. Error classification in packages/agent/src/errors.ts
+4. Registration in server.ts and sandbox/api.ts
+5. UI in ConnectionsSection.tsx
+
+================================================================================
+VERDICT
+================================================================================
+
+APPROVED - Well-implemented feature that validates the generic OAuth framework.
+The Notion connector follows established patterns while correctly handling
+Notion-specific differences (Basic auth, non-expiring tokens, workspace_id
+account format). The error classification is comprehensive with all 9 Notion
+error codes handled. Minor improvements suggested for code clarity.
+
+This commit successfully demonstrates that the connectors framework can support
+non-Google OAuth providers, achieving its stated goal.

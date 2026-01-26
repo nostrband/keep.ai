@@ -1,0 +1,230 @@
+# Code Review: Commit de3c65b
+
+## Commit Information
+- **Hash**: de3c65b26e7aba04e39969e667195a94da90519c
+- **Author**: Artur Briugeman
+- **Date**: Fri Jan 23 18:10:19 2026 +0100
+- **Message**: feat: Add connection label persistence to database
+
+## Summary
+
+This commit implements database persistence for connection labels in the keep.ai application. Previously, the label rename functionality showed a placeholder success message "Label updated (local only for now)" without actually persisting changes. This commit:
+
+- Adds a new mutation hook `useUpdateConnectionLabel()` in dbWrites.ts
+- Updates `ConnectionsSection.tsx` to call the mutation when users rename a connection
+- Integrates with the existing TanStack Query invalidation system to sync changes across clients
+- Resolves the TODO comment at line 422 in ConnectionsSection.tsx
+
+The implementation allows users to assign custom labels like "Work Gmail" or "Personal Drive" to their OAuth connections, with changes persisted to the local SQLite database and synced via CRSQLite.
+
+---
+
+## Code Changes Analysis
+
+### 1. apps/web/src/hooks/dbWrites.ts (Lines 247-269)
+
+**Added `useUpdateConnectionLabel()` mutation hook:**
+
+```typescript
+export function useUpdateConnectionLabel() {
+  const { api } = useDbQuery();
+
+  return useMutation({
+    mutationFn: async (input: { connectionId: string; label: string }) => {
+      if (!api) throw new Error("Connection store not available");
+
+      await api.connectionStore.updateLabel(input.connectionId, input.label);
+      return input;
+    },
+    onSuccess: (_result, { connectionId }) => {
+      queryClient.invalidateQueries({ queryKey: qk.connection(connectionId) });
+      queryClient.invalidateQueries({ queryKey: qk.allConnections() });
+
+      notifyTablesChanged(["connections"], true, api!);
+    },
+  });
+}
+```
+
+**Analysis:**
+- Follows the established pattern used by other mutation hooks in the file
+- Properly checks for `api` availability before proceeding
+- Calls `api.connectionStore.updateLabel()` which executes `UPDATE connections SET label = ? WHERE id = ?`
+- Returns the input for potential use in the `onSuccess` callback
+- Invalidates both specific connection and all-connections queries
+- Notifies other clients via `notifyTablesChanged()` for CRSQLite sync
+
+### 2. apps/web/src/components/ConnectionsSection.tsx
+
+**Changes:**
+
+1. **Import added (line 13):**
+   ```typescript
+   import { useUpdateConnectionLabel } from "../hooks/dbWrites";
+   ```
+
+2. **Hook instantiation (line 323):**
+   ```typescript
+   const updateLabelMutation = useUpdateConnectionLabel();
+   ```
+
+3. **Updated `handleRename()` function (lines 419-430):**
+   ```typescript
+   const handleRename = async (connectionId: string, newLabel: string) => {
+     try {
+       setError(null);
+       await updateLabelMutation.mutateAsync({
+         connectionId,
+         label: newLabel,
+       });
+       success.show("Label updated");
+     } catch (err) {
+       setError(err instanceof Error ? err.message : "Failed to rename");
+     }
+   };
+   ```
+
+**Analysis:**
+- Replaces placeholder TODO code with actual database mutation
+- Uses `mutateAsync()` for proper async/await error handling
+- Updates success message from "Label updated (local only for now)" to "Label updated"
+- Maintains existing error handling pattern
+- The UI already trims the label before calling this
+
+---
+
+## Potential Issues
+
+### Issue 1: MEDIUM - Empty String Label Handling
+
+**Issue:** The UI allows setting an empty string as a label if the user clears the input field and saves.
+
+**Code Path:**
+1. User clicks "Rename" on a connection
+2. User clears the field completely (newLabel becomes "")
+3. User clicks "Save"
+4. Database stores empty string in label column
+
+**Why This Matters:**
+- Empty string labels are semantically different from `null` (no label)
+- The UI only displays label if `connection.label` is truthy
+- Empty string `""` is falsy in JavaScript, so it won't display, but it's still stored in DB
+- This creates database inconsistency - some connections have `null`, others have `""`
+- The database schema allows both `NULL` and empty strings (label TEXT without NOT NULL constraint)
+
+**Proposal:**
+Normalize empty strings to null in the mutation hook:
+```typescript
+const normalizedLabel = input.label.trim() || null;
+await api.connectionStore.updateLabel(input.connectionId, normalizedLabel);
+```
+
+### Issue 2: MEDIUM - No Validation on Label Length
+
+**Issue:** No maximum length constraint on labels.
+
+**Context:**
+- UI input field has no `maxLength` attribute
+- Database column is `TEXT` type with no CHECK constraint
+- ConnectionStore.updateLabel has no validation
+- Users could enter extremely long labels (100+ characters)
+
+**Impact:**
+- Long labels could break UI layout
+- Display area has no truncation
+- Could cause horizontal scrolling or text overflow issues
+
+**Proposal:**
+Add maxLength to the input field:
+```typescript
+<Input
+  value={newLabel}
+  onChange={(e) => setNewLabel(e.target.value)}
+  maxLength={50}  // Add reasonable limit
+  ...
+/>
+```
+
+### Issue 3: LOW - No Loading State During Mutation
+
+**Issue:** The mutation is async but there's no loading indicator.
+
+**Impact:**
+- On slow connections, users might think the save didn't work
+- Users might click "Save" multiple times
+- Could lead to race conditions with multiple rapid saves
+
+**Proposal:**
+Use `updateLabelMutation.isPending` to disable the Save button during mutation.
+
+### Issue 4: LOW - Missing Query Key for connectionsByService
+
+**Issue:** The mutation invalidates `qk.connection()` and `qk.allConnections()` but not `qk.connectionsByService()`.
+
+**Impact:**
+- Currently no impact since hook is unused
+- Future bug if someone uses `useConnectionsByService()` without updating the invalidation
+
+**Proposal:**
+Add the invalidation now for future-proofing:
+```typescript
+const [service] = connectionId.split(':');
+queryClient.invalidateQueries({ queryKey: qk.connectionsByService(service) });
+```
+
+### Issue 5: LOW - Inconsistency with ConnectionManager Implementation
+
+**Issue:** The web app uses `connectionStore.updateLabel()` directly, while `ConnectionManager.updateLabel()` uses a read-then-upsert pattern (2 operations vs 1).
+
+**Impact:**
+- Potential confusion for future maintainers
+- ConnectionManager's approach is less efficient
+
+**Proposal:**
+Update ConnectionManager to use the dedicated updateLabel method for consistency.
+
+---
+
+## Proposals Summary
+
+### Immediate Fixes (Should Be Done)
+
+1. **Normalize empty labels to null** in dbWrites.ts mutation
+2. **Add maxLength={50} to input field** in ConnectionsSection.tsx
+
+### Optional Improvements (Nice to Have)
+
+1. Add loading state during mutation
+2. Future-proof query invalidation (add connectionsByService)
+3. Align ConnectionManager with ConnectionStore implementation
+
+---
+
+## Overall Assessment
+
+**Strengths:**
+- Follows established patterns in the codebase consistently
+- Proper integration with TanStack Query invalidation system
+- Correctly uses CRSQLite sync notifications
+- Error handling matches existing mutations
+- Resolves the TODO and implements the promised feature
+- Clean, readable code
+
+**Weaknesses:**
+- No validation for empty string labels
+- No maximum length constraint on labels
+- Missing loading state during mutation
+- Minor inconsistency with ConnectionManager implementation
+
+**Risk Level:** Low
+- The commit works correctly for the happy path
+- Edge cases (empty labels, long labels) won't break anything but create minor UX/data inconsistencies
+- No security issues, no performance concerns, no breaking changes
+
+**Recommendation:**
+Accept the commit with minor fixes recommended for empty label handling and max length constraint. The loading state and ConnectionManager alignment can be addressed in future improvements.
+
+---
+
+**Review Completed**: 2026-01-25
+**Reviewer**: Claude Code (Opus 4.5)

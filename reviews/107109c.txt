@@ -175,3 +175,11 @@ Recommended actions:
 1. Apply same Promise wrapper fix to server.test.ts lines 96, 128, 168 (HIGH PRIORITY)
 2. Consider creating a shared utility function for db.run promisification (MEDIUM)
 3. Consider exposing safe methods from Database class for testing (LOW)
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (server.test.ts broken async pattern) - covered by specs/new/fix-server-test-async-pattern.md
+- Issue #2 (No shared utility for db.run) - created specs/new/extract-db-run-promise-utility.md
+- Issue #3 (Type annotation redundancy) - skipped (defensive typing is acceptable)
+- Issue #4 (Fix is correct) - not an issue (positive observation)

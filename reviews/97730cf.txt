@@ -1,0 +1,163 @@
+COMMIT: 97730cf - fix: Code quality improvements and bug fixes
+DATE: 2026-01-23 17:11:17 +0100
+REVIEWER: Claude Opus 4.5
+
+================================================================================
+SUMMARY OF CHANGES
+================================================================================
+
+This commit addresses several code quality issues including:
+1. Fixed inbox JSON parsing error logging in task-worker.ts
+2. Fixed pause notification grammar in App.tsx
+3. Fixed workflow name fallback in WorkflowNotifications.ts
+4. Extracted shared dbRun() utility for user-server tests
+5. Updated jest.config.js to exclude helper files from test discovery
+
+Files changed: 12 files, +148/-58 lines
+
+================================================================================
+DETAILED ANALYSIS
+================================================================================
+
+1. TASK-WORKER.TS - INBOX PARSING FIX (packages/agent/src/task-worker.ts)
+
+   Location: getInboxItems() method around line 689-700
+
+   Before: Empty catch block swallowing JSON.parse errors silently
+   After:  Logs warning with inbox item ID and error object:
+           console.warn("Failed to parse inbox item:", i.id, e);
+
+   Also fixed @ts-ignore by adding proper type annotation to filter callback:
+           .filter((x): x is string => x !== undefined);
+
+   ASSESSMENT: Good fix. The warning includes the inbox item ID for debugging,
+   and malformed items are gracefully filtered out. This prevents silent data
+   loss while allowing the system to continue processing valid items.
+
+--------------------------------------------------------------------------------
+
+2. APP.TSX - PAUSE NOTIFICATION GRAMMAR (apps/web/src/App.tsx)
+
+   Location: Around lines 88-93
+
+   Before: "All automations has been paused" (grammatically incorrect for all cases)
+   After:  Correct subject-verb agreement:
+           - count=1: "All automation has been paused"
+           - count>1: "All automations have been paused"
+
+   Implementation:
+   const workflowWord = count === 1 ? 'automation' : 'automations';
+   const verb = count === 1 ? 'has' : 'have';
+   body: `All ${workflowWord} ${verb} been paused...`
+
+   ASSESSMENT: Correct fix. Proper singular/plural handling.
+
+--------------------------------------------------------------------------------
+
+3. WORKFLOWNOTIFICATIONS.TS - FALLBACK CONSISTENCY (apps/web/src/lib/WorkflowNotifications.ts)
+
+   Location: Around line 244
+
+   Before: Hardcoded "Untitled" fallback
+   After:  Uses getWorkflowTitle() utility
+
+   Note: This changes the fallback text from "Untitled" to "New workflow"
+   (which is what getWorkflowTitle() returns). This is intentional - it makes
+   notification messages consistent with the rest of the UI.
+
+   ASSESSMENT: Good consistency fix. The getWorkflowTitle() utility is now
+   used consistently across all workflow display contexts.
+
+--------------------------------------------------------------------------------
+
+4. DBRUN HELPER EXTRACTION (apps/user-server/src/__tests__/helpers.ts)
+
+   Created new helper file with dbRun() function that promisifies sqlite3's
+   callback-based db.run() method:
+
+   export function dbRun(
+     db: Sqlite3Database,
+     sql: string,
+     params: unknown[] = []
+   ): Promise<void>
+
+   Updated test files to use it:
+   - database.test.ts: 1 usage
+   - integration.test.ts: 2 usages
+   - server.test.ts: 3 usages
+
+   ASSESSMENT: Good DRY improvement. The helper has proper TypeScript types
+   and JSDoc documentation. All instances of the old Promise wrapper pattern
+   have been replaced.
+
+--------------------------------------------------------------------------------
+
+5. JEST.CONFIG.JS - TEST MATCH UPDATE (apps/user-server/jest.config.js)
+
+   Before: testMatch: ['**/__tests__/**/*.ts', ...]
+   After:  testMatch: ['**/__tests__/**/*.test.ts', ...]
+
+   This prevents the new helpers.ts file from being treated as a test file.
+
+   ASSESSMENT: Correct fix. The pattern now only matches *.test.ts files
+   inside __tests__/. All current test files are properly named:
+   - auth-exchange.test.ts
+   - database.test.ts
+   - helpers.ts (correctly excluded)
+   - integration.test.ts
+   - openrouter-proxy.test.ts
+   - server.test.ts
+
+================================================================================
+ISSUES FOUND
+================================================================================
+
+No significant issues found. All changes are correct and well-implemented.
+
+--------------------------------------------------------------------------------
+
+MINOR OBSERVATION #1: Jest config restriction
+Severity: TRIVIAL
+
+The new testMatch pattern ['**/__tests__/**/*.test.ts'] would not match a
+*.spec.ts file if someone created one inside __tests__/. The old pattern
+would have matched it. However, this is arguably better - it enforces
+consistent naming conventions (all tests should be *.test.ts).
+
+--------------------------------------------------------------------------------
+
+MINOR OBSERVATION #2: generateTitleFromInbox silent error handling
+Severity: TRIVIAL (Not introduced in this commit)
+
+In task-worker.ts, the generateTitleFromInbox() function (around line 33-69)
+also has a try/catch that returns undefined without logging. However, this
+is acceptable since it's a best-effort title generation function - logging
+would create noise for a non-critical operation.
+
+================================================================================
+ARCHITECTURE ASSESSMENT
+================================================================================
+
+POSITIVES:
+1. Proper test utility extraction - reduces duplication, improves maintainability
+2. Correct grammar handling with ternary operators
+3. Consistent use of shared utilities (getWorkflowTitle)
+4. Proper error logging with context (inbox item ID)
+5. Type-safe filter callback using type predicate
+6. Clean test configuration that excludes helper files
+
+CODE PATTERNS:
+- Promise wrapper pattern properly abstracted into utility
+- Singular/plural handling follows JavaScript conventions
+- Error logging includes sufficient context for debugging
+
+================================================================================
+CONCLUSION
+================================================================================
+
+This is a solid code quality commit that addresses several small but meaningful
+issues. All fixes are correct and improve code maintainability. The dbRun
+helper extraction is a good DRY improvement. No bugs or issues found.
+
+RATING: GOOD
+ACTION REQUIRED: None

@@ -1,0 +1,116 @@
+COMMIT REVIEW: 0243571
+======================
+fix: Update test files to use new AI SDK tool execute signature
+Date: 2026-01-22 18:16:15 +0100
+Files: packages/tests/src/note-tools.test.ts, packages/tests/src/utility-tools.test.ts
+
+SUMMARY OF CHANGES
+------------------
+This commit updates test files to comply with a breaking change in the AI SDK's tool execute function signature. The AI SDK now requires two arguments: (input, ToolCallOptions) instead of just (input).
+
+Key changes:
+1. Added createToolCallOptions() helper function in both test files
+2. Changed EvalContext type from "chat" to "workflow"
+3. Added type casts for array results from list/search tools
+4. All execute() calls now pass a second argument with toolCallId, messages, abortSignal
+5. Added non-null assertion (!) on execute calls (tool.execute!)
+6. Added local type definitions (NoteMetadata, SearchResult) for cleaner type casts
+
+DETAILED CHANGES
+----------------
+packages/tests/src/utility-tools.test.ts:
+- Added createToolCallOptions() helper returning { toolCallId: "test-call", messages: [], abortSignal: new AbortController().signal }
+- Changed EvalContext.type from "chat" to "workflow"
+- Updated all 16 execute calls to include second argument
+- Added type cast (result as string) for binary data test charCodeAt access
+
+packages/tests/src/note-tools.test.ts:
+- Added createToolCallOptions() helper (same implementation)
+- Changed EvalContext.type from "chat" to "workflow"
+- Added NoteMetadata and SearchResult type definitions
+- Updated ~30 execute calls with second argument
+- Added type casts for listNotesTool and searchNotesTool results
+
+POTENTIAL ISSUES
+----------------
+
+1. INCONSISTENT TOOL PATTERNS IN CODEBASE (Medium Priority)
+   The codebase has two tool creation patterns:
+   - Pattern A (using AI SDK's tool()): Most tools in packages/agent/src/tools/
+   - Pattern B (plain objects): get-script.ts, list-scripts.ts, list-script-runs.ts, etc.
+
+   Pattern B tools don't actually receive ToolCallOptions as their second parameter - they
+   only have a single-argument execute function. The tests pass the second argument, but
+   Pattern B tools silently ignore it.
+
+   This means:
+   - No access to abortSignal for cancellation in Pattern B tools
+   - No access to toolCallId for tracking
+   - Tests pass but behavior is inconsistent
+
+   Proposal: Audit all tools in packages/agent/src/tools/ and standardize on Pattern A
+   using tool() from AI SDK. This ensures consistent handling of ToolCallOptions.
+
+2. UNUSED TOOLCALLOPTIONS IN ACTUAL TOOLS (Low Priority)
+   Even Pattern A tools that receive ToolCallOptions don't actually use them. For example:
+   - atob.ts: execute: async (input: string) => { return atobCompatAny(input); }
+   - get-note.ts: execute: async (id) => { ... }
+
+   The abortSignal is never checked, meaning long-running operations can't be cancelled.
+   The toolCallId is never logged, making it harder to debug tool calls.
+
+   Proposal: This is acceptable for v1 but should be addressed post-v1. Consider:
+   - Checking abortSignal.aborted before expensive operations
+   - Logging toolCallId in createEvent calls for better traceability
+
+3. HARDCODED TEST VALUES (Low Priority)
+   The createToolCallOptions() helper uses hardcoded values:
+   - toolCallId: "test-call" (same for all tests)
+   - messages: [] (empty array)
+   - abortSignal: new AbortController().signal (never actually aborted)
+
+   This is fine for current tests but limits the ability to test:
+   - Cancellation behavior
+   - Message context handling
+   - Multiple concurrent tool calls with distinct IDs
+
+   Proposal: No action needed for v1. If abort/cancel features are added later,
+   enhance the test helper to support configurable options.
+
+4. TYPE ASSERTION NON-NULL (!) ON EXECUTE (Informational)
+   All execute calls use the non-null assertion: tool.execute!()
+
+   This is correct because AI SDK's tool() returns CoreTool where execute is optional
+   (can be undefined if tool is "server-side only"). However, all tools in this codebase
+   define execute, so the assertion is safe.
+
+   Proposal: None - this is the correct pattern.
+
+5. TYPE CASTS FOR LIST/SEARCH RESULTS (Informational)
+   Results from listNotesTool and searchNotesTool are cast to NoteMetadata[] and
+   SearchResult[] respectively. This is because the AI SDK tool execute return type
+   includes AsyncIterable<OUTPUT> as a union member.
+
+   The casts are safe because:
+   - These tools return arrays synchronously
+   - The type definitions match the actual return shapes
+
+   Proposal: None - this is a reasonable workaround for the AI SDK's flexible return type.
+
+OVERALL ASSESSMENT
+------------------
+This is a well-executed fix for an AI SDK breaking change. The changes are mechanical
+and consistent. The main concern is the broader inconsistency in tool patterns across
+the codebase, which predates this commit. The commit correctly updates tests to match
+the new API but doesn't address underlying architectural inconsistencies.
+
+No bugs introduced. Tests should pass. The fix is appropriate for v1 release.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Inconsistent tool patterns) - created specs/new/standardize-tool-patterns.md
+- Issue #2 (Unused ToolCallOptions) - skipped (pause uses DB polling mechanism, not AbortSignal)
+- Issue #3 (Hardcoded test values) - skipped (acceptable for v1)
+- Issue #4 (Type assertion non-null) - not an issue (correct pattern)
+- Issue #5 (Type casts for results) - not an issue (reasonable workaround)

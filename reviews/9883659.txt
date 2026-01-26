@@ -1,0 +1,149 @@
+# Code Review: Commit 9883659
+
+## Summary
+
+**Commit:** 9883659 - feat: Implement connector server endpoints (spec 04)
+**Date:** Fri Jan 23 15:47:11 2026 +0100
+**Files Changed:** 3 (IMPLEMENTATION_PLAN.md, apps/server/src/routes/connectors.ts, apps/server/src/server.ts)
+**Lines:** +656, -176
+
+This commit implements a generic OAuth connector framework for managing external service connections (Gmail, Google Drive, Sheets, Docs). It adds new server endpoints at `/api/connectors/*` and deprecates the old Gmail-specific endpoints. It also creates the ConnectionManager infrastructure and migrates old gmail.json credentials to the new per-account format.
+
+## Changes Description
+
+### apps/server/src/routes/connectors.ts (new file, 441 lines)
+- POST `/connectors/:service/connect` - Initiates OAuth flow, returns auth URL
+- GET `/connectors/:service/callback` - OAuth callback with styled HTML success/error pages
+- DELETE `/connectors/:service/:accountId` - Disconnects an account
+- POST `/connectors/:service/:accountId/check` - Tests connection by fetching profile
+- GET `/connectors/list` - Lists all connections
+- GET `/connectors/:service/list` - Lists connections by service
+- GET `/connectors/services` - Lists available services
+- Proper XSS protection via `escapeHtml()` in HTML templates
+
+### apps/server/src/server.ts
+- Replaced `createGmailOAuth2Client()` with `createConnectionManager()`
+- Added migration logic for old gmail.json to new connectors format
+- Registered all Google services (Gmail, Drive, Sheets, Docs) on startup
+- Updated schedulers to use connectionManager instead of gmailOAuth2Client
+- Added deprecation warnings to old `/api/gmail/*` endpoints
+- Updated test workflow worker to use connectionManager
+
+### IMPLEMENTATION_PLAN.md
+- Updated documentation to reflect completed sections 1.4 and 1.5
+
+## Potential Issues
+
+### CRITICAL
+
+1. **Race Condition in OAuth State Validation** (packages/connectors/src/manager.ts:126-150)
+   - The OAuth state validation uses non-atomic check-and-delete
+   - Between checking state validity and consuming it, concurrent requests could pass validation
+   - Risk: Token replay attacks if OAuth callback URL is intercepted
+   - **Proposal:** Use atomic check-and-delete pattern or add mutex per state
+
+2. **Race Condition in Token Refresh** (packages/connectors/src/manager.ts:283-322)
+   - Multiple concurrent `getCredentials()` calls can trigger duplicate token refresh requests
+   - OAuth providers may invalidate tokens on concurrent refresh
+   - Risk: Service disruption from rate limiting or token invalidation
+   - **Proposal:** Add in-memory lock per connection ID to serialize refresh requests
+
+### HIGH SEVERITY
+
+3. **Gmail Migration Deletes Credentials on Network Failure** (apps/server/src/server.ts:228)
+   - If profile fetch fails (e.g., network error), the old gmail.json is still deleted
+   - User loses valid credentials and must re-authenticate
+   - **Proposal:** Only delete old file on successful migration; keep backup on failure
+
+4. **Incomplete Server Shutdown Handling** (apps/server/src/server.ts:2031-2044)
+   - Missing cleanup for: taskScheduler, workflowScheduler, connectionManager, pool, peer, http, nostr transports, keepDB
+   - Risk: Resource leaks, uncommitted database changes, orphaned processes
+   - **Proposal:** Add comprehensive shutdown:
+     ```typescript
+     taskScheduler.stop();
+     workflowScheduler.stop();
+     await peer.stop();
+     await keepDB.close();
+     ```
+
+### MEDIUM SEVERITY
+
+5. **Service Parameter Not Strictly Validated** (packages/connectors/src/store.ts:28-31)
+   - `id.service` used in file paths without path traversal prevention
+   - Mitigated by service registration check, but defense-in-depth needed
+   - **Proposal:** Add `id.service.replace(/[^a-z0-9_-]/gi, '')` sanitization
+
+6. **Account ID Collision Possible** (packages/connectors/src/store.ts:30)
+   - `encodeURIComponent().replace(/%/g, "_")` is lossy
+   - `user@example.com` and `user%40example.com` both become `user_40example.com`
+   - **Proposal:** Use URL-safe base64 encoding for account IDs
+
+7. **Check Endpoint Returns HTTP 200 on Failure** (apps/server/src/routes/connectors.ts:201-204)
+   - Violates HTTP semantics; failures should use 4xx/5xx status codes
+   - **Proposal:** Return 401 for auth errors, 500 for other failures
+
+8. **No Input Validation Schemas** (apps/server/src/routes/connectors.ts:34-37)
+   - URL parameters not validated for length, characters, or format
+   - **Proposal:** Add Fastify JSON Schema validation:
+     ```typescript
+     schema: {
+       params: {
+         type: 'object',
+         properties: {
+           service: { type: 'string', pattern: '^[a-z0-9_-]+$', maxLength: 50 }
+         }
+       }
+     }
+     ```
+
+### LOW SEVERITY
+
+9. **OAuth Error Details Lost in Callback** (apps/server/src/routes/connectors.ts:115-120)
+   - OAuth-specific error codes (access_denied, invalid_grant) converted to generic messages
+   - **Proposal:** Extract and display OAuth error codes for better debugging
+
+10. **Parent Directory Permissions Not Checked** (packages/connectors/src/store.ts:54-66)
+    - File written with 0o600 but parent dirs might have looser permissions
+    - **Proposal:** Ensure parent directories have 0o700 permissions
+
+## Architecture Notes
+
+The implementation follows good patterns:
+- Clean dependency injection (CredentialStore, DbAdapter passed to ConnectionManager)
+- Single ConnectionManager instance shared across schedulers
+- Proper service registration before use
+- Migration runs before reconciliation
+- Styled HTML pages for OAuth callbacks with auto-close countdown
+
+## Recommendations Priority
+
+**Immediate (Before Production):**
+1. Add mutex/lock for token refresh operations
+2. Fix OAuth state race condition with atomic operations
+3. Fix migration to preserve credentials on failure
+4. Add comprehensive server shutdown
+
+**High Priority:**
+1. Add path traversal prevention for service parameter
+2. Improve account ID sanitization
+3. Fix HTTP status codes for check endpoint
+4. Add input validation schemas
+
+**Medium Priority:**
+1. Encrypt credentials at rest
+2. Add rate limiting to OAuth endpoints
+3. Improve error messages in OAuth callback
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (OAuth state race condition) - created specs/new/fix-oauth-state-race-condition.md
+- Issue #2 (Token refresh race condition) - created specs/new/fix-token-refresh-race-condition.md
+- Issue #3 (Migration deletes credentials on failure) - skipped
+- Issue #4 (Incomplete server shutdown) - created specs/new/fix-server-shutdown-handling.md
+- Issue #5 (Service parameter path traversal) - created specs/new/add-service-path-sanitization.md
+- Issue #6 (Account ID collision) - created specs/new/fix-account-id-encoding.md
+- Issue #7 (Check endpoint HTTP status codes) - created specs/new/fix-check-endpoint-status-codes.md
+- Issue #8 (No input validation schemas) - skipped
+- Issue #9 (OAuth error details lost) - skipped
+- Issue #10 (Parent directory permissions) - skipped

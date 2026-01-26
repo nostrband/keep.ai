@@ -1,0 +1,146 @@
+COMMIT REVIEW: 28d458e
+=======================
+Title: Fix migrations 28 and 30
+Author: Claude Agent
+Date: Fri Jan 23 11:27:04 2026 +0100
+
+SUMMARY
+-------
+This commit fixes critical database migration failures caused by cr-sqlite's constraint
+that ALTER TABLE operations on CRR (Conflict-free Replicated Relations) tables cannot be
+followed by UPDATE/INSERT operations in the same transaction. The fix involves splitting
+combined migrations into separate schema-change and data-migration phases.
+
+CHANGES IN DETAIL
+-----------------
+
+1. AGENTS.md (documentation update)
+   - Added two critical cr-sqlite constraints to the documentation:
+     * "cr-sqlite requires all NOT NULL columns in CRR tables to have DEFAULT values"
+     * "if you do ALTER table on CRR tables then you can't write to these tables in the
+       same migration (same tx) - split this migration into two and do writes in the second one"
+   - These are hard-won learnings that will prevent future migration failures
+
+2. packages/db/src/database.ts
+   - Added imports and registration for new migrations v31 and v32
+   - Migration map now includes entries [31, migrateV31] and [32, migrateV32]
+
+3. packages/db/src/migrations/v28.ts (refactored)
+   - BEFORE: Combined ALTER TABLE + UPDATE statements for workflows.chat_id and chats.workflow_id
+   - AFTER: Only ALTER TABLE statements with proper crsql_begin_alter/crsql_commit_alter
+   - Removed data migration code (moved to v29)
+   - Added comment explaining the split: "Data migration moved to v29 due to cr-sqlite
+     requiring ALTER to be committed before UPDATE can see the new columns"
+
+4. packages/db/src/migrations/v29.ts (completely rewritten)
+   - BEFORE: Was the chat_events split migration (creating chat_messages, notifications,
+     execution_logs tables and migrating data)
+   - AFTER: Now only contains data migration for v28's schema changes:
+     * UPDATE workflows SET chat_id from tasks.chat_id
+     * UPDATE chats SET workflow_id from workflows.chat_id
+   - Clear docstring explaining this is data migration split from v28
+
+5. packages/db/src/migrations/v30.ts (expanded)
+   - BEFORE: Was the tasks table cleanup (Spec 10)
+   - AFTER: Now contains the chat_events split migration (Spec 12):
+     * Creates chat_messages, notifications, execution_logs tables
+     * All NOT NULL columns now have DEFAULT values (cr-sqlite requirement)
+     * Migrates data from chat_events to new tables
+   - Key fix: All column definitions changed from `TEXT NOT NULL` to
+     `TEXT NOT NULL DEFAULT ''` for CRR compatibility
+
+6. packages/db/src/migrations/v31.ts (NEW)
+   - Contains schema changes for tasks table (moved from old v30):
+     * ALTER TABLE tasks ADD COLUMN workflow_id TEXT NOT NULL DEFAULT ''
+     * ALTER TABLE tasks ADD COLUMN asks TEXT NOT NULL DEFAULT ''
+   - Comment explains data migration is in v32
+
+7. packages/db/src/migrations/v32.ts (NEW)
+   - Contains data migration for v31's schema changes:
+     * UPDATE tasks SET workflow_id from workflows.task_id relationship
+     * UPDATE tasks SET asks from task_states.asks
+
+8. package-lock.json
+   - Added "peer": true to numerous esbuild platform-specific packages
+   - Added tsx 4.21.0 as optional peer dependency for tsup
+   - This appears to be a side effect of npm operations during the fix
+
+POTENTIAL ISSUES
+----------------
+
+1. **Migration version gap handling**: The migration system should handle users who
+   already ran the broken v28/v29 partially. If someone's database is at v28 but has
+   corrupted state, manual intervention may be needed.
+   - Severity: Medium (affects existing databases that hit the bug)
+   - Mitigation: The migrations use INSERT OR IGNORE and UPDATE WHERE conditions
+     that should be idempotent, but this isn't explicitly tested
+
+2. **No rollback mechanism**: If v30's data migration fails partway, there's no way
+   to recover. The chat_events table is kept but the new tables may be in inconsistent state.
+   - Severity: Low (data migration uses OR IGNORE which prevents crashes)
+   - Recommendation: Consider adding explicit error handling or transaction verification
+
+3. **Execution logs migration accuracy**: The migration extracts run_id from
+   `json_extract(content, '$.task_run_id')` which may be empty for older events.
+   These get empty string run_id which may affect query filtering.
+   - Severity: Low (older data may have incomplete relationships)
+   - Note: Comment in code acknowledges this: "Future events will have proper run_id"
+
+4. **package-lock.json changes**: The large package-lock changes (567 lines of peer
+   dependency additions) are unrelated to the migration fix and should ideally be in
+   a separate commit.
+   - Severity: Very Low (cosmetic/organization)
+   - Recommendation: Keep npm changes in dedicated commits for cleaner history
+
+POSITIVE OBSERVATIONS
+---------------------
+
+1. **Excellent documentation**: The AGENTS.md update captures the cr-sqlite constraint
+   clearly, preventing future developers from repeating this mistake
+
+2. **Clean migration split pattern**: The schema/data split pattern is consistent:
+   - v28 (schema) -> v29 (data)
+   - v31 (schema) -> v32 (data)
+   This establishes a clear convention for future migrations
+
+3. **Preserved backwards compatibility**: Old chat_events table is kept (marked deprecated
+   in comments), allowing gradual migration of any code still reading from it
+
+4. **Proper CRR table handling**: All new tables use crsql_as_crr() and all NOT NULL
+   columns have DEFAULT values, following cr-sqlite requirements
+
+5. **Clear docstrings**: Each migration file has a clear comment block explaining
+   its purpose and relationship to specs and other migrations
+
+PROPOSALS
+---------
+
+1. **Add migration health check**: Consider adding a post-migration verification step
+   that checks row counts and critical relationships:
+   ```typescript
+   // After v29
+   const workflowsWithChat = await tx.execO(`SELECT COUNT(*) FROM workflows WHERE chat_id != ''`);
+   const chatsWithWorkflow = await tx.execO(`SELECT COUNT(*) FROM chats WHERE workflow_id != ''`);
+   // Log or verify counts match expectations
+   ```
+
+2. **Test migration idempotency**: Add tests that run migrations twice to verify they
+   don't fail or corrupt data on re-run (important for the INSERT OR IGNORE patterns)
+
+3. **Split npm changes**: For cleaner git history, keep package-lock.json changes in
+   dedicated npm update commits
+
+VERDICT: APPROVED
+-----------------
+This commit correctly fixes a critical migration bug that would prevent the application
+from starting on fresh databases or upgrades. The fix follows the correct pattern for
+cr-sqlite CRR tables and documents the constraint for future reference. The migration
+split is well-structured and the code is clear.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Migration version gap handling) - skipped
+- Issue #2 (No rollback mechanism) - skipped
+- Issue #3 (Execution logs migration accuracy) - skipped
+- Issue #4 (package-lock.json changes) - skipped

@@ -1,0 +1,72 @@
+COMMIT: 25b89e7
+TITLE: docs: Mark connection label persistence as complete in IMPLEMENTATION_PLAN
+DATE: Fri Jan 23 18:10:59 2026 +0100
+
+=== CHANGES DESCRIPTION ===
+
+This commit updates IMPLEMENTATION_PLAN.md to document that connection label persistence is now implemented. The changes include:
+
+1. Added checkbox item: "Implement connection label persistence via useUpdateConnectionLabel hook"
+2. Updated implementation notes:
+   - Changed "labels stored in database" note to clarify the full implementation
+   - Added detail about useUpdateConnectionLabel hook persisting to connections.label field
+   - Changed "Rename updates are local-only for now" to "Rename updates persist across sessions"
+
+=== VERIFICATION ===
+
+Claims verified against the actual codebase:
+
+1. useUpdateConnectionLabel hook: VERIFIED
+   - File: apps/web/src/hooks/dbWrites.ts:248-269
+   - Properly implemented as a useMutation hook
+   - Calls api.connectionStore.updateLabel(connectionId, label)
+   - Invalidates connection queries on success for cache consistency
+
+2. Database connections.label field: VERIFIED
+   - File: packages/db/src/migrations/v33.ts:20-32
+   - connections table includes "label TEXT" column
+   - Table marked for CRSQLite sync (line 40)
+
+3. Backend updateLabel implementation: VERIFIED
+   - File: packages/db/src/connection-store.ts:165-173
+   - Executes "UPDATE connections SET label = ? WHERE id = ?"
+
+4. Connection type includes label: VERIFIED
+   - File: packages/db/src/connection-store.ts:23-42
+   - Connection interface has "label: string | null"
+
+5. UI integration: VERIFIED
+   - File: apps/web/src/components/ConnectionsSection.tsx
+   - Hook imported (line 13)
+   - Hook initialized (line 323)
+   - handleRename uses mutateAsync (lines 419-430)
+   - Connected to UI via onRename prop (line 482)
+
+6. Persistence across sessions: VERIFIED
+   - Labels stored in SQLite database
+   - Fetched fresh on app load via connectionStore.listConnections()
+   - CRSQLite sync enabled for cross-device persistence
+
+=== ISSUES ===
+
+None identified. The documentation accurately reflects the implemented feature.
+
+NOTE: There is no REST API endpoint for updating connection labels - it's only available
+at the database layer for in-browser use. This is fine for the current architecture
+where the web app directly accesses the database via the API object. The commit
+documentation doesn't claim there's a server endpoint, so this is not a discrepancy.
+
+=== PROPOSALS ===
+
+None needed. This is a documentation-only commit that accurately reflects completed work.
+
+=== SUMMARY ===
+
+Clean documentation update. All claims verified. The connection label persistence
+feature is fully implemented with:
+- Database schema with label column
+- useUpdateConnectionLabel hook for mutations
+- ConnectionStore.updateLabel() for database updates
+- UI integration in ConnectionsSection
+- Proper cache invalidation for consistency
+- CRSQLite sync for cross-session/device persistence

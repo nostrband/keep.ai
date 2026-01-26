@@ -1,0 +1,201 @@
+COMMIT REVIEW: 939e148
+=======================
+Title: Create specs for connectors
+Author: Claude Agent
+Date: Fri Jan 23 14:41:37 2026 +0100
+
+SUMMARY
+-------
+This commit reorganizes the specs directory structure and creates 8 comprehensive
+specification files for a new "Connectors" feature that enables OAuth integration
+with external services (Gmail, Google Drive, Sheets, Docs, Notion). It also
+deletes the large IMPLEMENTATION_PLAN.md file (1081 lines).
+
+CHANGES IN DETAIL
+-----------------
+
+1. IMPLEMENTATION_PLAN.md (DELETED - 1081 lines)
+   - Removed the master implementation plan document
+   - Content presumably tracked elsewhere or superseded by spec-based planning
+
+2. PROMPT_issues.md (minor edit)
+   - Small change to prompts/workflow (exact change unclear from diff)
+
+3. Directory reorganization (NO CONTENT CHANGES - just moves):
+   - specs/new/*.md -> specs/*.md (13 bug specs moved to root)
+   - specs/*.md -> specs/done/*.md (12 completed v1 SLC specs moved to done/)
+
+4. specs/new/connectors-*.md (8 NEW specification files):
+
+   SPEC 00: BUILD SECRETS (connectors-00-build-secrets.md, 283 lines)
+   - Problem: OAuth credentials need embedding at build time for desktop app
+   - Solution: secrets.build.json + tsup define plugin
+   - Includes: Security analysis, CI/CD fallback, multi-platform considerations
+
+   SPEC 01: CORE PACKAGE (connectors-01-core-package.md, 203 lines)
+   - Creates: packages/connectors with OAuthHandler, CredentialStore
+   - Defines: TypeScript interfaces for Connection, OAuthCredentials, ServiceDefinition
+   - Pattern: File-based credential storage with 0o600 permissions
+
+   SPEC 02: CONNECTION MANAGER (connectors-02-connection-manager.md, 478 lines)
+   - Central orchestrator class for all OAuth flows
+   - Features: OAuth state validation, automatic token refresh, event emission
+   - Database: New 'connections' table schema for CRSQLite
+   - Key decision: No default account - tools must specify accountId explicitly
+
+   SPEC 03: GMAIL REFACTOR (connectors-03-gmail-refactor.md, 204 lines)
+   - Migrates existing Gmail integration to new framework
+   - Handles: Credential migration from old gmail.json format
+   - Tool update: Requires explicit account parameter
+
+   SPEC 04: SERVER ENDPOINTS (connectors-04-server-endpoints.md, 219 lines)
+   - Minimal HTTP API for OAuth flows (4 endpoints)
+   - Design: Most state from database sync, not server API
+   - Endpoints: /connect, /callback, DELETE, /check
+
+   SPEC 05: UI CONNECTIONS PAGE (connectors-05-ui-connections-page.md, 226 lines)
+   - Settings page for managing connections
+   - Features: Multi-account support, status badges, rename/disconnect
+   - Pattern: OAuth popup, UI updates via db sync (no postMessage)
+
+   SPEC 06: GOOGLE SERVICES (connectors-06-google-services.md, 276 lines)
+   - Adds: Drive, Sheets, Docs services
+   - Design: Separate connections per service (not scope aggregation)
+   - Shared: OAuth client across all Google services
+
+   SPEC 07: NOTION (connectors-07-notion.md, 259 lines)
+   - First non-Google OAuth provider (validates framework genericity)
+   - Handles Notion quirks: No refresh tokens, workspace-based ID, Basic auth
+   - Proves: Framework handles diverse OAuth implementations
+
+POTENTIAL ISSUES
+----------------
+
+1. **IMPLEMENTATION_PLAN.md deleted without replacement**: A 1081-line planning
+   document was removed. If this contained active/relevant information, it should
+   be preserved or migrated.
+   - Severity: Medium (potential loss of context)
+   - Recommendation: Verify IMPLEMENTATION_PLAN content is captured elsewhere
+     (possibly in the moved specs or project management tools)
+
+2. **Credential storage security**: The specs describe file-based credential storage
+   at {userPath}/connectors/{service}/{accountId}.json. While mode 0o600 is set,
+   consider:
+   - User data directory may be backed up to cloud services
+   - File-based storage may leak through file indexing
+   - Severity: Low-Medium (desktop app standard practice, but worth noting)
+   - Recommendation: Document security considerations for users; consider
+     OS keychain integration as future enhancement
+
+3. **OAuth redirect on localhost**: Using http://127.0.0.1:PORT for OAuth callbacks
+   is standard for desktop apps but has considerations:
+   - Port must be consistent or registered per-port with OAuth providers
+   - Some corporate firewalls block localhost callbacks
+   - Severity: Low (standard practice, but document limitations)
+
+4. **Spec 02 is very large (478 lines)**: The ConnectionManager spec is comprehensive
+   but could be overwhelming. Consider:
+   - Breaking into sub-specs (OAuth flow, token refresh, database integration)
+   - Adding a quick-start summary at the top
+   - Severity: Very Low (documentation organization)
+
+5. **No explicit error handling strategy**: The specs describe happy paths well but
+   error scenarios (network failures, invalid tokens, OAuth provider outages) could
+   be more explicitly documented.
+   - Severity: Low (implementation detail)
+   - Recommendation: Add "Error Handling" section to ConnectionManager spec
+
+6. **Build secrets in binary**: The decision to embed OAuth secrets in the desktop
+   binary is correct (secrets are inherently public in desktop apps) but should be
+   clearly documented for security reviewers who might flag it.
+   - Severity: Very Low (documented in spec, but worth highlighting)
+
+POSITIVE OBSERVATIONS
+---------------------
+
+1. **Excellent architecture documentation**: The specs include:
+   - ASCII architecture diagrams
+   - Complete TypeScript interfaces
+   - Database schemas
+   - Integration examples
+   - This is production-ready documentation
+
+2. **Progressive spec structure**: Specs 00-07 build logically:
+   - 00: Foundation (build-time secrets)
+   - 01-02: Core abstractions (OAuth, ConnectionManager)
+   - 03: First service migration (Gmail)
+   - 04-05: Infrastructure (server, UI)
+   - 06-07: Additional services (Google suite, Notion)
+
+3. **Framework validation through diversity**: Using Notion (spec 07) as the second
+   OAuth provider is smart - it has significantly different behavior (no refresh
+   tokens, workspace-based, Basic auth). If the framework handles both Google and
+   Notion, it's genuinely generic.
+
+4. **Security-conscious design**:
+   - No default account (prevents agent from mixing accounts)
+   - Explicit accountId required for tool calls
+   - File permissions set to owner-only
+   - Build-time secrets with clear security analysis
+
+5. **Database-first state management**: Using CRSQLite for connection metadata means:
+   - Automatic sync across clients
+   - UI updates via live queries (no manual refresh)
+   - Consistent with existing app patterns
+
+6. **Minimal server API**: Only 4 endpoints needed because:
+   - Connection list/details from database
+   - OAuth requires server (has secrets)
+   - Other operations are client-side db writes
+   This reduces complexity and attack surface
+
+7. **Proper credential isolation**: Credentials in files (not synced), metadata in
+   database (synced). Sensitive data stays on the device that authenticated.
+
+PROPOSALS
+---------
+
+1. **Add migration plan**: The Gmail refactor (spec 03) mentions credential migration
+   but a dedicated migration guide would help:
+   - What happens to existing gmail.json users?
+   - Is migration automatic or prompted?
+   - What if migration fails?
+
+2. **Add rate limiting/quota considerations**: OAuth providers have rate limits.
+   Consider documenting:
+   - Token refresh frequency limits
+   - API call quotas
+   - How the agent should handle 429 errors
+
+3. **Consider keychain integration roadmap**: For v2, OS keychain storage
+   (macOS Keychain, Windows Credential Manager, Linux Secret Service) would be
+   more secure than plain files. Add as future enhancement note.
+
+4. **Add automated tests section**: Each spec could include:
+   - Unit test scenarios for the component
+   - Integration test requirements
+   - Mock OAuth flow for CI
+
+5. **Document offline behavior**: What happens when:
+   - User is offline during OAuth callback?
+   - Token refresh fails due to network?
+   - Connection check fails?
+
+VERDICT: APPROVED
+-----------------
+This commit establishes a comprehensive, well-architected foundation for external
+service integration. The 8 specs provide clear implementation guidance with proper
+consideration for security, sync, and UX. The progressive structure (build -> core
+-> services -> UI) and validation through diverse OAuth providers (Google + Notion)
+demonstrates thoughtful design. The deletion of IMPLEMENTATION_PLAN.md is the only
+concern - verify that content is captured elsewhere.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (IMPLEMENTATION_PLAN.md deleted) - skipped
+- Issue #2 (Credential storage security) - skipped
+- Issue #3 (OAuth redirect on localhost) - skipped
+- Issue #4 (Spec 02 is very large) - skipped
+- Issue #5 (No explicit error handling strategy) - skipped
+- Issue #6 (Build secrets documentation) - skipped

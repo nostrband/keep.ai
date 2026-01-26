@@ -1,0 +1,72 @@
+COMMIT: 1c2ae8a
+TITLE: chore: Reorganize specs - move completed to done/, active to root
+DATE: Fri Jan 23 13:44:04 2026 +0100
+
+=== SUMMARY ===
+
+This commit reorganizes the specs directory structure:
+
+1. Moves 13 completed v1.0 SLC specs FROM specs/ TO specs/done/:
+   - 00-v1-slc-refactor-overview.md through 12-chat-events-split.md
+
+2. Moves 19 active specs FROM specs/new/ TO specs/ (root):
+   - 01-chat-page-autonomy-toggle.md through 11-server-error-header-notice.md
+   - consolidate-auth-config-hooks.md, deprecate-auth-dialog.md, and others
+
+The reorganization follows a clear pattern:
+- specs/done/ = completed specifications
+- specs/ (root) = active/in-progress specifications
+- specs/new/ = newly added specifications awaiting promotion
+
+Note: Subsequent commits (e.g., 954f6b2) moved the 19 specs to specs/done/ after
+they were implemented, which is the correct lifecycle.
+
+=== ANALYSIS ===
+
+File operations:
+- All moves are R100 (100% identical) rename operations
+- No content modifications made to any spec files
+- Clean directory reorganization
+
+Current state verification:
+- specs/ root: 8 specs (connectors framework specs - active work)
+- specs/done/: 197 specs (all completed)
+- specs/new/: 1 spec (audit-workflow-timestamp-updates.md)
+
+The directory structure follows a logical pattern:
+- Numbered specs (00-12) from v1.0 SLC release are in done/
+- Connectors specs (priority 1) are currently active in root
+- New/upcoming specs can be in new/ before promotion
+
+=== ISSUES ===
+
+1. MINOR - Broken relative link in documentation
+   Location: ideas/detect-abandoned-drafts.md
+   Line contains: `../specs/00-main-screen.md`
+   Should be: `../specs/done/00-main-screen.md`
+
+   Impact: Documentation only, not code-breaking. The ideas/ folder contains
+   brainstorming documents, not production code.
+
+=== PROPOSALS ===
+
+1. For issue #1 (broken link):
+   Fix the relative link in ideas/detect-abandoned-drafts.md:
+   ```markdown
+   - [Spec 00: Main Screen](../specs/done/00-main-screen.md) - Where abandoned draft indicators would appear
+   ```
+
+   This is a trivial fix and can be done in a cleanup commit.
+
+=== VERDICT ===
+
+APPROVED - Clean directory reorganization with no code impact. The commit
+correctly moves specs to their appropriate locations. One minor documentation
+link is broken but has no functional impact. The subsequent movement of the
+19 specs to specs/done/ (in later commits) confirms the proper lifecycle
+of specs: new/ -> root -> done/.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Broken relative link in documentation) - skipped

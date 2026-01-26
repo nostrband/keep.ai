@@ -1,0 +1,184 @@
+COMMIT: 5134a1f3fb970feb3f0f61632d71c57cebe48227
+DATE: Fri Jan 23 17:50:30 2026 +0100
+TITLE: feat: Add agent status display with orphaned run handling (Priority 4.1)
+
+================================================================================
+CHANGES SUMMARY
+================================================================================
+
+This commit adds two related features:
+1. Agent status display - Shows active task/workflow runs in the header
+2. Orphaned run handling - Marks stuck runs as interrupted on server startup
+
+FILES CHANGED:
+- packages/db/src/task-store.ts - Added getActiveTaskRuns, countActiveTaskRuns,
+  markOrphanedTaskRuns methods
+- packages/db/src/script-store.ts - Added getActiveScriptRuns, countActiveScriptRuns,
+  markOrphanedScriptRuns methods
+- apps/server/src/server.ts - Orphaned run handling at startup, /api/agent/status endpoint
+- apps/web/src/hooks/useAgentStatus.ts (NEW) - Hook for fetching agent status
+- apps/web/src/components/AgentStatusBadge.tsx (NEW) - Status badge component
+- apps/web/src/components/SharedHeader.tsx - Added AgentStatusBadge to header
+- apps/web/src/hooks/queryKeys.ts - Added agentStatus query key
+- IMPLEMENTATION_PLAN.md - Documentation updates
+
+DETAILED CHANGES:
+
+1. task-store.ts (+97 lines)
+   - getActiveTaskRuns(): Returns all runs where end_timestamp = ''
+   - countActiveTaskRuns(): COUNT(*) query for efficiency
+   - markOrphanedTaskRuns(thresholdMs): Marks active runs as interrupted with
+     state='error' and error message 'Run interrupted (server restart)'
+
+2. script-store.ts (+78 lines)
+   - getActiveScriptRuns(): Returns all runs where end_timestamp = ''
+   - countActiveScriptRuns(): COUNT(*) query for efficiency
+   - markOrphanedScriptRuns(thresholdMs): Marks active runs with error_type='logic'
+     and error message 'Run interrupted (server restart)'
+
+3. server.ts (+45 lines)
+   - Server startup: Gets active runs, marks them as orphaned if any exist
+   - New endpoint: GET /api/agent/status returns {activeTaskRuns, activeScriptRuns, isRunning}
+
+4. useAgentStatus.ts (+73 lines, NEW)
+   - React Query hook for polling agent status
+   - Adaptive polling: 5s when running, 30s when idle
+   - Includes formatAgentStatus() helper for display
+
+5. AgentStatusBadge.tsx (+36 lines, NEW)
+   - Compact badge showing "Idle" or "N tasks, M workflows running"
+   - Green background with pulse animation when active
+   - Gray background when idle
+
+================================================================================
+POTENTIAL ISSUES
+================================================================================
+
+ISSUE 1: RACE CONDITION IN ORPHANED RUN HANDLING AT STARTUP
+Severity: MEDIUM
+
+In server.ts lines 580-601:
+  const activeTaskRuns = await api.taskStore.getActiveTaskRuns();
+  const activeScriptRuns = await api.scriptStore.getActiveScriptRuns();
+  if (activeTaskRuns.length > 0 || activeScriptRuns.length > 0) {
+    await api.taskStore.markOrphanedTaskRuns(0);
+    await api.scriptStore.markOrphanedScriptRuns(0);
+  }
+
+Race condition scenario:
+1. Server starts, getActiveTaskRuns() returns 0 runs
+2. Before markOrphanedTaskRuns() is called, a worker starts a new run
+3. markOrphanedTaskRuns(0) is called with threshold=0, marking ALL active runs
+4. The newly started (legitimate) run is incorrectly marked as orphaned
+
+The thresholdMs=0 passed means "mark ALL active runs" regardless of age.
+
+PROPOSAL: Use a non-zero threshold based on startup time:
+  const startupTime = Date.now();
+  // ... startup code ...
+  // Only mark runs that started BEFORE server startup
+  await api.taskStore.markOrphanedTaskRuns(Date.now() - startupTime + 5000);
+
+Or use a fixed reasonable threshold (e.g., 60000ms) to only mark truly old runs.
+
+
+ISSUE 2: markOrphanedTaskRuns RETURN VALUE IS ALWAYS 0
+Severity: LOW
+
+In task-store.ts lines 648-649 and script-store.ts lines 1064-1065:
+  // Return count of affected rows - unfortunately cr-sqlite doesn't return this
+  // We'll just return 0 and log separately if needed
+  return 0;
+
+The method signature promises to return count of affected rows but always
+returns 0. This is misleading and prevents callers from knowing if anything
+was actually marked.
+
+PROPOSAL: Either:
+1. Change return type to Promise<void> and update JSDoc
+2. Query COUNT before update to know how many will be affected
+3. Query for affected rows after update (less efficient)
+
+
+ISSUE 3: INITIAL POLLING DELAY OF 30 SECONDS
+Severity: LOW
+
+In useAgentStatus.ts lines 27-32:
+  refetchInterval: (query) => {
+    const data = query.state.data;
+    if (data?.isRunning) {
+      return 5000; // 5 seconds when active
+    }
+    return 30000; // 30 seconds when idle
+  },
+
+Combined with initialData (lines 37-41) which sets isRunning: false, the first
+poll won't happen for 30 seconds. If runs start immediately after page load,
+the UI will show "Idle" for up to 30 seconds.
+
+PROPOSAL: Use a shorter initial poll interval or remove initialData so the
+first poll happens immediately. Example:
+  initialDataUpdatedAt: 0,  // Forces immediate refetch
+Or set initial refetchInterval to 5000 for the first poll only.
+
+
+ISSUE 4: NO ERROR HANDLING FOR STATUS ENDPOINT FAILURE
+Severity: LOW
+
+In useAgentStatus.ts, if /api/agent/status fails repeatedly, the UI will
+show the initialData (Idle) indefinitely with no indication of error.
+
+PROPOSAL: Add error state handling in AgentStatusBadge:
+  const { data: status, isLoading, isError } = useAgentStatus();
+  if (isError) return <ErrorIndicator />;  // Or null
+
+
+ISSUE 5: DUPLICATE CODE PATTERN IN TASK/SCRIPT STORES
+Severity: LOW (code quality)
+
+The getActive*, countActive*, and markOrphaned* methods are nearly identical
+between TaskStore and ScriptStore. This is code duplication that could
+become a maintenance burden.
+
+PROPOSAL: Consider extracting common run tracking logic to a shared utility
+or base class. However, given the different table schemas, the current
+approach may be acceptable for simplicity.
+
+
+ISSUE 6: queryKeys.ts FILE MISSING NEWLINE AT END
+Severity: TRIVIAL
+
+Line 75 shows the file doesn't end with a newline, which is a minor style issue.
+
+PROPOSAL: Add trailing newline to queryKeys.ts.
+
+================================================================================
+POSITIVE OBSERVATIONS
+================================================================================
+
++ Consistent use of end_timestamp = '' pattern matching existing codebase
++ Efficient COUNT(*) queries for status polling
++ Adaptive polling (5s active, 30s idle) is smart for resource usage
++ Clean component composition (hook -> badge -> header)
++ Non-fatal orphaned run handling (catches errors, logs, continues startup)
++ Good JSDoc documentation on new methods
++ meta: { tables: [...] } for automatic cache invalidation
++ Security: error message doesn't expose sensitive information
++ UI: Pulse animation provides clear visual feedback when running
+
+================================================================================
+VERDICT
+================================================================================
+
+APPROVE WITH RESERVATIONS
+
+The feature is well-designed and follows existing patterns. The race condition
+issue (ISSUE 1) is the most concerning but is an edge case that would only
+occur during concurrent server startup and task execution.
+
+Recommended improvements (in priority order):
+1. Add a reasonable threshold to markOrphaned* calls (e.g., 60000ms)
+2. Fix the always-zero return value or change signature
+3. Consider shorter initial polling interval
+
+The code is production-ready as-is but would benefit from these improvements.

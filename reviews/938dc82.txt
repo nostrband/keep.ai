@@ -1,0 +1,401 @@
+# Code Review: Commit 938dc82
+# test: Implement specs #21-24 (test quality improvements)
+
+## Overview
+This commit implements four test-related specs aimed at improving test quality and ensuring tests accurately reflect production behavior. The commit adds 719 lines of code across 4 files, including schema updates, boundary condition tests, boolean conversion tests, and special character handling tests.
+
+## Summary of Changes
+
+### 1. IMPLEMENTATION_PLAN.md (88 lines changed)
+- Added Priority 6: Test Quality Improvements section
+- Documented all 4 specs (#21-24) as IMPLEMENTED
+- Updated status counters (20 → 24 implemented specs)
+- Added detailed action items for each spec
+
+### 2. packages/tests/src/task-store.test.ts (12 lines changed)
+- Updated `createTaskTables()` to match production schema
+- Added `DEFAULT 0` to `timestamp INTEGER NOT NULL`
+- Added `NOT NULL` to `deleted INTEGER DEFAULT 0`
+- Added `DEFAULT ''` to task_runs columns without defaults
+
+### 3. packages/tests/src/script-store.test.ts (463 lines added)
+- Updated `createScriptTables()` to match production schema
+- Added 9 boolean-to-integer conversion tests for the `maintenance` field
+- Added 7 abandoned drafts boundary condition tests
+- Added comments documenting the known COALESCE bug
+
+### 4. packages/tests/src/utility-tools.test.ts (186 lines added)
+- Added 10 special character handling tests for `consoleLogTool`
+
+---
+
+## Detailed Analysis
+
+### Spec #21: Align Test Schemas with Production Constraints
+
+**Files Changed**: `task-store.test.ts`, `script-store.test.ts`
+
+**What Changed**:
+✅ **CORRECT**: Added `DEFAULT 0` to `tasks.timestamp INTEGER NOT NULL`
+✅ **CORRECT**: Changed `deleted INTEGER DEFAULT 0` to `deleted INTEGER NOT NULL DEFAULT 0`
+✅ **CORRECT**: Added `DEFAULT ''` to all `NOT NULL TEXT` columns in scripts, script_runs, workflows, tasks, chat_messages
+✅ **CORRECT**: Updated comments to reference specific migration versions (v1, v6, v11, v15, v16, v30, v31)
+
+**Schema Alignment Verification**:
+Comparing test schemas with production migrations:
+
+1. **tasks table** (v1 + v15 + v31):
+   - ✅ v1 defines: `timestamp INTEGER NOT NULL DEFAULT 0` - TEST MATCHES
+   - ⚠️ **MISMATCH FOUND**: v1 defines `deleted BOOLEAN DEFAULT FALSE`, but test uses `deleted INTEGER NOT NULL DEFAULT 0`
+   - The test schema is actually MORE strict (adds NOT NULL), which is acceptable for testing
+   - However, the type difference (BOOLEAN vs INTEGER) may cause subtle issues
+
+2. **scripts table** (v11 + v16):
+   - ✅ All columns match production DEFAULT values
+   - ✅ Correctly includes workflow_id and type from v16
+
+3. **script_runs table** (v11 + v12 + v16):
+   - ✅ Includes all fields from v11, v12 (result), and v16 (workflow_id, type)
+   - ✅ All DEFAULT values match production
+
+4. **workflows table** (v16):
+   - ⚠️ **ISSUE**: Test schema uses `status TEXT NOT NULL DEFAULT ''`
+   - ⚠️ **ISSUE**: Production v16 uses `status text not null default ''` (lowercase, but semantically identical)
+   - ✅ Actually matches - just case difference in SQL (not significant)
+
+5. **chat_messages table** (v30):
+   - ✅ All columns match production exactly
+   - ✅ Includes task_run_id, script_id, failed_script_run_id from v30
+
+**Issues Found**:
+1. ⚠️ **MINOR**: `tasks.deleted` type mismatch (BOOLEAN in v1 vs INTEGER in test)
+   - SQLite treats BOOLEAN as INTEGER internally, so this works
+   - But it's inconsistent with the stated goal of matching production exactly
+   - Recommendation: Change test to use `BOOLEAN DEFAULT FALSE` or update production to use INTEGER
+
+---
+
+### Spec #22: Test Abandoned Drafts Boundary Conditions
+
+**Files Changed**: `script-store.test.ts`
+
+**What Changed**:
+Added 7 comprehensive boundary condition tests for abandoned drafts detection.
+
+**Tests Added**:
+1. ✅ "should handle exact 7-day threshold boundary (just over - included)"
+2. ✅ "should handle exact 7-day threshold boundary (just under - excluded)"
+3. ✅ "should fallback to script timestamps when no chat_messages exist"
+4. ✅ "should detect task in 'asks' state as waiting for input"
+5. ✅ "should use most recent timestamp via COALESCE when multiple exist"
+6. ✅ "should document COALESCE behavior: chat_messages take precedence over scripts"
+7. ✅ "should fallback to workflow timestamp when no scripts or messages exist"
+
+**Code Quality**:
+✅ Tests are well-structured and clearly named
+✅ Each test has clear setup, execution, and verification phases
+✅ Tests use realistic time calculations (e.g., `7 * 24 * 60 * 60 * 1000 + 1000`)
+
+**Critical Issue Identified**:
+❌ **BUG DOCUMENTED**: Test #6 documents a known bug in the production code!
+
+```javascript
+// Test at line 575-636
+it("should document COALESCE behavior: chat_messages take precedence over scripts", async () => {
+  // NOTE: This test documents the current COALESCE behavior where chat_messages
+  // timestamp is checked BEFORE scripts timestamp. This means if there's ANY
+  // chat message (even old), it will use that timestamp instead of a newer script.
+  // This is a known limitation of the current query structure:
+  //   COALESCE(MAX(cm.timestamp), MAX(s.timestamp), w.timestamp)
+  // Future improvement could use: MAX(cm.timestamp, s.timestamp, w.timestamp)
+```
+
+This test documents that the production code has a SQL logic error (spec: `specs/new/fix-draft-activity-coalesce-bug.md`):
+- **Problem**: `COALESCE(MAX(cm.timestamp), MAX(s.timestamp), w.timestamp)` returns the FIRST non-NULL value, not the maximum
+- **Impact**: A workflow with old chat messages (15 days) and recent scripts (2 days) will be incorrectly marked as "15 days inactive"
+- **Expected**: Should be marked as "2 days inactive" based on the most recent activity
+
+**Recommendation**: This is a **CRITICAL BUG** that should be fixed in production. The test correctly documents it, but the implementation is wrong.
+
+**Other Issues**:
+1. ⚠️ Line 370: Test creates workflow "7 days + 1 second ago"
+   - Uses `7 * 24 * 60 * 60 * 1000 + 1000` (adds 1 second = 1000ms)
+   - This is correct for the "just over threshold" test
+
+2. ⚠️ Line 411: Test creates workflow "7 days - 1 hour ago"
+   - Uses `7 * 24 * 60 * 60 * 1000 - 60 * 60 * 1000` (subtracts 1 hour)
+   - This is correct for the "just under threshold" test
+
+---
+
+### Spec #23: Test Boolean-to-Integer Conversion Edge Cases
+
+**Files Changed**: `script-store.test.ts`
+
+**What Changed**:
+Added 9 tests for boolean-to-integer conversion of the `maintenance` field in workflows.
+
+**Tests Added**:
+1. ✅ "should correctly round-trip boolean true through database"
+2. ✅ "should correctly round-trip boolean false through database"
+3. ✅ "should interpret integer 1 as true from database"
+4. ✅ "should interpret integer 0 as false from database"
+5. ✅ "should interpret non-standard integer 2 as truthy"
+6. ✅ "should interpret negative integer -1 as truthy"
+7. ✅ "should handle default value when maintenance not specified in insert"
+8. ✅ "should persist maintenance=true through updateWorkflow"
+9. ✅ "should persist maintenance=false through updateWorkflowFields"
+
+**Code Quality**:
+✅ Tests cover normal cases (true/false round-trip)
+✅ Tests cover edge cases (2, -1, NULL/default)
+✅ Tests verify type correctness with `expect(typeof retrieved?.maintenance).toBe("boolean")`
+✅ Tests verify API methods (setWorkflowMaintenance, updateWorkflow, updateWorkflowFields)
+
+**Implementation Verification**:
+Checked production code in `script-store.ts`:
+
+1. ✅ `setWorkflowMaintenance`: Correctly converts `maintenance ? 1 : 0` (line 726)
+2. ✅ `updateWorkflowFields`: Correctly converts `fields.maintenance ? 1 : 0` (line 784)
+3. ✅ `getWorkflow`: Correctly converts `Boolean(row.maintenance)` (line 894)
+
+**Edge Case Behavior**:
+The tests document that:
+- `Boolean(2)` = true (non-zero integer is truthy)
+- `Boolean(-1)` = true (negative integer is truthy)
+- `Boolean(0)` = false
+- `Boolean(1)` = true
+
+This is JavaScript's standard Boolean() conversion behavior and is acceptable.
+
+**No Issues Found** - These tests are comprehensive and correct.
+
+---
+
+### Spec #24: Test Console-Log with Special Characters
+
+**Files Changed**: `utility-tools.test.ts`
+
+**What Changed**:
+Added 10 tests for special character handling in `consoleLogTool`.
+
+**Tests Added**:
+1. ✅ "should handle message containing single quotes"
+2. ✅ "should handle message containing newlines"
+3. ✅ "should handle message containing tabs"
+4. ✅ "should handle message containing carriage returns"
+5. ✅ "should handle message containing unicode characters"
+6. ✅ "should handle message containing emojis"
+7. ✅ "should handle message containing backslashes"
+8. ✅ "should handle message containing double quotes"
+9. ✅ "should handle message containing null character"
+10. ✅ "should handle message with only special characters"
+
+**Code Quality**:
+✅ Tests are well-structured
+✅ Cover a comprehensive range of special characters
+✅ Document current behavior (pass-through without escaping)
+
+**Implementation Verification**:
+Checked production code in `console-log.ts`:
+
+```javascript
+// Line 19-23
+const croppedLine =
+  input.line.length > 1000
+    ? "'" + input.line.substring(0, 1000) + "..."
+    : "'" + input.line + "'";
+```
+
+**Critical Issue Identified**:
+❌ **POTENTIAL BUG**: The console-log tool wraps messages in single quotes but doesn't escape single quotes within the message!
+
+Example from test #1:
+```javascript
+line: "It's a test with 'nested quotes'"
+// Becomes: 'It's a test with 'nested quotes''
+```
+
+This creates malformed output where single quotes within the message can break parsing or cause confusion.
+
+**Issues Found**:
+1. ❌ **BUG**: No escaping of single quotes in messages
+   - Input: `"It's a test"`
+   - Output: `'It's a test'`
+   - The output has unescaped quotes that could break log parsing
+
+2. ⚠️ **DOCUMENTATION**: The tests document this as "current behavior (no escaping)" but don't flag it as problematic
+   - Line 742: "This documents the current behavior (no escaping)"
+   - The test PASSES even though the behavior may be incorrect
+
+3. ⚠️ **INCONSISTENCY**: Test comments are misleading
+   - Line 741: "The message is wrapped in single quotes by the tool"
+   - Line 742: "So the output will have the quotes embedded"
+   - This suggests the behavior is intentional, but it's actually a bug
+
+**Recommendation**:
+- Either escape single quotes (replace `'` with `\'`)
+- Or switch to double quotes and escape double quotes
+- Or use template literals with backticks
+- Or use JSON.stringify() for proper escaping
+
+---
+
+## Cross-Cutting Issues
+
+### 1. Test Schema Drift Prevention
+⚠️ **ARCHITECTURAL CONCERN**: Test schemas are manually maintained and can drift from production
+
+**Current Approach**:
+- Tests manually recreate table schemas in `createScriptTables()` and `createTaskTables()`
+- Comments reference migration versions (e.g., "matches production v11 + v16")
+- This requires manual synchronization when migrations change
+
+**Risk**:
+- Future migrations could add columns that tests don't include
+- Tests would continue passing but not match production behavior
+
+**Recommendation**:
+Consider one of these approaches:
+1. Extract shared schema definitions to a common module
+2. Generate test schemas from migration code
+3. Add automated tests that compare test schemas vs production schemas
+4. Document in AGENTS.md that test schemas must be updated when migrations change
+
+### 2. COALESCE Bug in Production
+❌ **CRITICAL BUG** documented in test but not fixed in production
+
+**Location**: `packages/db/src/script-store.ts` lines 857-879 and 924-992
+**Test**: `script-store.test.ts` line 575-636
+
+**Impact**:
+- Workflows incorrectly marked as abandoned when they have recent activity
+- Users may be prompted to clean up workflows that are actually active
+- "Days since activity" shown to users is incorrect
+
+**Recommendation**: Fix this bug immediately. The spec exists (`specs/new/fix-draft-activity-coalesce-bug.md`) but is not yet implemented.
+
+### 3. Console-Log Quote Escaping
+❌ **BUG**: Single quotes in log messages are not escaped
+
+**Location**: `packages/agent/src/tools/console-log.ts` line 19-23
+**Test**: `utility-tools.test.ts` line 726-744
+
+**Impact**:
+- Log output with embedded single quotes is malformed
+- Could break log parsing or display
+
+**Recommendation**: Add proper escaping or switch quote style.
+
+---
+
+## Positive Aspects
+
+1. ✅ **Excellent Test Coverage**: The commit adds comprehensive tests for edge cases that were previously untested
+2. ✅ **Clear Documentation**: Test names are descriptive and comments explain complex scenarios
+3. ✅ **Spec-Driven Development**: Each test references its spec, making it easy to understand the intent
+4. ✅ **IMPLEMENTATION_PLAN.md Updated**: Properly documents all changes and tracks implementation status
+5. ✅ **Boolean Conversion Tests**: Thoroughly test a critical data type conversion that's easy to get wrong
+6. ✅ **Boundary Tests**: Cover exact threshold boundaries (7 days + 1 second, 7 days - 1 hour)
+7. ✅ **Production Alignment**: Test schemas now match production constraints more closely
+
+---
+
+## Issues Summary
+
+### Critical Issues (Must Fix)
+1. ❌ **COALESCE Bug**: Production code has SQL logic error causing incorrect abandoned draft detection
+   - Test documents it but doesn't flag as needing fix
+   - Spec exists: `specs/new/fix-draft-activity-coalesce-bug.md`
+   - **Action**: Implement the fix from the spec
+
+2. ❌ **Quote Escaping Bug**: Console-log tool doesn't escape single quotes in messages
+   - Test passes but documents broken behavior
+   - **Action**: Add proper quote escaping or switch to different quote style
+
+### Major Issues (Should Fix)
+3. ⚠️ **tasks.deleted Type Mismatch**: Production uses BOOLEAN, test uses INTEGER
+   - Works in practice but inconsistent
+   - **Action**: Align types between production and tests
+
+### Minor Issues (Consider Fixing)
+4. ⚠️ **Schema Drift Risk**: Test schemas manually maintained, could drift from production
+   - **Action**: Add documentation or automation to prevent drift
+
+---
+
+## Test Quality Assessment
+
+### Spec #21 (Schema Alignment)
+- **Grade**: A-
+- **Reasoning**: Excellent alignment with production, but minor type inconsistency (tasks.deleted)
+
+### Spec #22 (Abandoned Drafts Boundaries)
+- **Grade**: A+
+- **Reasoning**: Comprehensive coverage of edge cases, but documents a critical bug
+
+### Spec #23 (Boolean Conversion)
+- **Grade**: A+
+- **Reasoning**: Thorough testing of all edge cases, verifies round-trip correctness
+
+### Spec #24 (Special Characters)
+- **Grade**: B
+- **Reasoning**: Good coverage but tests document a bug without flagging it as problematic
+
+---
+
+## Recommendations
+
+### Immediate Actions
+1. **Fix COALESCE Bug** (Critical)
+   - Implement `specs/new/fix-draft-activity-coalesce-bug.md`
+   - Change `COALESCE(MAX(cm), MAX(s), w)` to `MAX(COALESCE(cm, '1970-01-01'), COALESCE(s, '1970-01-01'), w)`
+   - Update test #6 to verify the fix works correctly
+
+2. **Fix Quote Escaping** (Critical)
+   - Add escaping to `console-log.ts`
+   - Update tests to verify proper escaping
+
+3. **Align tasks.deleted Type** (Major)
+   - Decide on BOOLEAN vs INTEGER
+   - Update either production or test to match
+
+### Future Improvements
+4. **Prevent Schema Drift**
+   - Add automated schema comparison tests
+   - Document schema update process in AGENTS.md
+
+5. **Test Documentation**
+   - When tests document bugs, add TODO comments or create specs to track fixes
+   - Don't just document bad behavior; flag it for fixing
+
+---
+
+## Conclusion
+
+This is a **high-quality commit** that significantly improves test coverage and aligns test schemas with production. The tests are well-written, comprehensive, and properly documented.
+
+However, the commit reveals **two critical bugs** in production code:
+1. COALESCE logic error in abandoned draft detection
+2. Missing quote escaping in console-log tool
+
+These bugs should be fixed before release. The tests are correctly documenting current behavior, but the behavior itself is incorrect.
+
+**Overall Assessment**: ✅ Approve with required fixes
+- The test implementation is excellent
+- The tests correctly identify production bugs
+- Fix the documented bugs before merging to production
+
+**Stats**:
+- Tests Added: 26 new test cases
+- Lines Added: 719
+- Issues Found: 2 critical, 1 major, 1 minor
+- Specs Implemented: 4/4 (100%)
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (COALESCE bug in abandoned drafts) - covered by specs/new/fix-draft-activity-coalesce-bug.md
+- Issue #2 (Console-log quote escaping) - created specs/new/fix-console-log-quote-escaping.md
+- Issue #3 (tasks.deleted type mismatch) - created specs/new/fix-tasks-deleted-type-mismatch.md
+- Issue #4 (Schema drift risk) - skipped

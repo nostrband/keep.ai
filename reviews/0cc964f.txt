@@ -1,0 +1,312 @@
+# Code Review: Commit 0cc964f
+
+## Commit Information
+- **Hash**: 0cc964f0e53b20d1568cc5a6e57afe1254c5277e
+- **Author**: Artur Briugeman
+- **Date**: Fri Jan 23 18:26:23 2026 +0100
+- **Message**: chore: Improve logging consistency and code quality
+
+## Summary
+
+This commit improves logging consistency across the codebase by replacing `console.error` calls with proper debug logger instances in scheduler components, replacing an unprofessional `@ts-ignore` comment with a more descriptive `@ts-expect-error`, and improving the startup error message in the server's start.ts file.
+
+The changes are small but meaningful:
+1. **TaskScheduler** (packages/agent/src/task-scheduler.ts): Changed `console.error("Error processing task", e)` to `this.debug("Error processing task:", e)`
+2. **WorkflowScheduler** (packages/agent/src/workflow-scheduler.ts): Changed `console.error("Error processing workflow", e)` to `this.debug("Error processing workflow:", e)`
+3. **PromptInput** (apps/web/src/ui/components/ai-elements/prompt-input.tsx): Replaced `@ts-ignore idk wtf` with `@ts-expect-error DataTransferItemList is iterable but TypeScript types don't reflect this`
+4. **Server Start** (apps/server/src/start.ts): Changed `console.error("error", err)` to `console.error("Server startup failed:", err)`
+
+## Code Changes Analysis
+
+### 1. TaskScheduler Logging Change (packages/agent/src/task-scheduler.ts)
+
+**Change**: Line 144
+```typescript
+// Before
+console.error("Error processing task", e);
+
+// After
+this.debug("Error processing task:", e);
+```
+
+**Context**: The TaskScheduler class already uses the `debug` library and has a private instance `this.debug = debug("agent:TaskScheduler")` (line 32). This change makes the error logging consistent with the rest of the class, which uses `this.debug()` throughout (27 total debug calls in the file).
+
+**Good**:
+- Consistent with class logging pattern
+- Allows conditional debug output based on DEBUG environment variable
+- Error is caught in try/catch and scheduler continues processing
+
+**Considerations**:
+- This is in a catch block for the main task processing loop - the error might be worth surfacing at a higher log level since it indicates a task processing failure
+- However, the pattern is consistent with other error handling in the scheduler (e.g., lines 122, 165, 232, 238)
+
+### 2. WorkflowScheduler Logging Change (packages/agent/src/workflow-scheduler.ts)
+
+**Change**: Line 190
+```typescript
+// Before
+console.error("Error processing workflow", e);
+
+// After
+this.debug("Error processing workflow:", e);
+```
+
+**Context**: The WorkflowScheduler class mirrors the TaskScheduler pattern, with a private debug instance `this.debug = debug("agent:WorkflowScheduler")` (line 36). The class uses debug logging extensively throughout.
+
+**Good**:
+- Consistent with class logging pattern and TaskScheduler changes
+- Allows conditional debug output
+- Error handling continues gracefully
+
+**Same Consideration**: Top-level workflow processing errors might warrant higher visibility, but the pattern is consistent.
+
+### 3. TypeScript Comment Improvement (apps/web/src/ui/components/ai-elements/prompt-input.tsx)
+
+**Change**: Line 524
+```typescript
+// Before
+// @ts-ignore idk wtf
+
+// After
+// @ts-expect-error DataTransferItemList is iterable but TypeScript types don't reflect this
+```
+
+**Context**: This suppression is for iterating over `DataTransferItemList` when handling paste events to extract files from clipboard.
+
+**Good**:
+- `@ts-expect-error` is preferred over `@ts-ignore` because it will error if the type issue is fixed, preventing dead code
+- The explanation is professional and accurate - DataTransferItemList is indeed iterable in practice but TypeScript's built-in types don't reflect this
+- This follows TypeScript best practices
+
+**Perfect**: This is exactly the right fix for this situation.
+
+### 4. Server Startup Error Message (apps/server/src/start.ts)
+
+**Change**: Line 16
+```typescript
+// Before
+console.error("error", err);
+
+// After
+console.error("Server startup failed:", err);
+```
+
+**Context**: This is in the top-level catch block of the server startup function, right before `process.exit(1)`.
+
+**Good**:
+- More descriptive error message
+- Makes it immediately clear what failed
+- Appropriate use of console.error for a fatal startup error (not debug, since this should always be visible)
+
+**Perfect**: This is a critical error that should always be logged, so console.error is the right choice here.
+
+## Potential Issues
+
+### 1. Inconsistent Logging Pattern - console.warn in task-worker.ts
+
+**Issue**: While this commit changes console.error to debug in schedulers, there's still a `console.warn` in task-worker.ts (line 696):
+
+```typescript
+console.warn("Failed to parse inbox item:", i.id, e);
+```
+
+**Location**: /home/artur/keep.ai/packages/agent/src/task-worker.ts:696
+
+**Context**: This is in a try/catch when parsing inbox items. The TaskWorker class has a debug instance `this.debug = debug("agent:TaskWorker")` (line 92) and uses it consistently throughout (27 debug calls).
+
+**Severity**: Minor inconsistency
+
+**Impact**: Mixed logging approach makes it harder to control debug output uniformly
+
+### 2. Remaining console.error Calls in packages/node
+
+**Issue**: There are console.error calls in shared utility packages that should potentially use debug:
+
+**Location 1**: /home/artur/keep.ai/packages/node/src/fileUtils.ts:114
+```typescript
+console.error("Error in detectBufferMime", e);
+```
+
+**Location 2**: /home/artur/keep.ai/packages/node/src/fileUtils.ts:122
+```typescript
+console.error("Error in detectFilenameMime", e);
+```
+
+**Context**: The file already imports and uses debug: `const debugFileUtils = debug("fileUtils")` (line 8). These errors occur during MIME type detection and are non-fatal (the code continues with fallbacks).
+
+**Severity**: Minor inconsistency
+
+**Impact**: These are catch blocks where errors are swallowed anyway, so debug would be more appropriate
+
+**Location 3**: /home/artur/keep.ai/packages/node/src/TransportServerFastify.ts:190
+```typescript
+console.error("/sync error", error);
+```
+
+**Location 4**: /home/artur/keep.ai/packages/node/src/TransportServerFastify.ts:241
+```typescript
+console.error("/data error", error);
+```
+
+**Context**: The file has debug: `const debugTransport = debug("node:TransportServerFastify")` (line 14). These are in error handlers that send 500 responses to clients.
+
+**Severity**: Minor inconsistency
+
+**Counter-argument**: These might be intentionally console.error since they're server errors that should be visible in production logs. However, they don't follow the established debug pattern.
+
+### 3. Remaining @ts-ignore Comments
+
+**Issue**: While one @ts-ignore was fixed, several others remain in the codebase:
+
+**Location 1**: /home/artur/keep.ai/apps/web/src/db.ts:2
+```typescript
+// @ts-ignore
+import wasmUrl from '@vlcn.io/crsqlite-wasm/crsqlite.wasm?url';
+```
+
+**Location 2**: /home/artur/keep.ai/apps/server/src/server.ts:870
+```typescript
+// @ts-ignore
+await http.registerRoutes(fastify);
+```
+
+**Location 3**: /home/artur/keep.ai/apps/server/src/server.ts:2011
+```typescript
+// @ts-ignore
+return reply.sendFile("index.html");
+```
+
+**Location 4-6**: /home/artur/keep.ai/packages/agent/src/agent.ts (lines 256, 315, 338)
+```typescript
+// @ts-ignore
+stepResult.providerMetadata?.openrouter?.usage?.cost || 0;
+
+// @ts-ignore
+newMessage = uiMessage;
+
+// @ts-ignore
+this.debug("openRouterUsage", this.openRouterUsage);
+```
+
+**Severity**: Low - these should be converted to @ts-expect-error for consistency and better type safety
+
+### 4. Missing Colons in Debug Messages
+
+**Issue**: The commit adds colons to the debug messages ("Error processing task:" vs the original "Error processing task"), which is good for consistency. However, this creates a minor inconsistency pattern across the codebase.
+
+**Examples**:
+- task-scheduler.ts line 144: "Error processing task:" (with colon) ✓ FIXED
+- task-scheduler.ts line 122: "Error checking needAuth state:" (with colon) ✓ CONSISTENT
+- task-scheduler.ts line 232: "failed to process task:" (lowercase "failed", with colon) - slightly inconsistent capitalization
+
+**Severity**: Very minor - just a style inconsistency
+
+## Additional Observations
+
+### Positive Patterns
+1. The codebase consistently uses the `debug` library throughout packages (agent, node, browser, sync, db, connectors)
+2. Debug instances follow a clear naming convention: `debug("namespace:ClassName")`
+3. The transition from console.error to debug in schedulers is the right architectural choice
+
+### Logging Philosophy
+The codebase appears to follow this pattern:
+- **debug logger**: For operational logging that can be enabled/disabled via DEBUG env var
+- **console.error**: Reserved for critical errors (like startup failures) that should always be visible
+- **console.warn**: Appears to be used rarely, might be legacy
+
+The changes in this commit align well with this philosophy, with the exception that the start.ts console.error is appropriately kept since it's a fatal startup error.
+
+## Proposals
+
+### Proposal 1: Fix console.warn in task-worker.ts
+**File**: /home/artur/keep.ai/packages/agent/src/task-worker.ts
+**Line**: 696
+
+Change:
+```typescript
+console.warn("Failed to parse inbox item:", i.id, e);
+```
+
+To:
+```typescript
+this.debug("Failed to parse inbox item:", i.id, e);
+```
+
+**Rationale**: Consistent with scheduler changes and the class's existing debug pattern.
+
+### Proposal 2: Fix console.error calls in fileUtils.ts
+**File**: /home/artur/keep.ai/packages/node/src/fileUtils.ts
+**Lines**: 114, 122
+
+Change both console.error calls to use debugFileUtils:
+```typescript
+debugFileUtils("Error in detectBufferMime:", e);
+debugFileUtils("Error in detectFilenameMime:", e);
+```
+
+**Rationale**: These are non-fatal errors in fallback scenarios, debug is more appropriate.
+
+### Proposal 3: Fix console.error calls in TransportServerFastify.ts
+**File**: /home/artur/keep.ai/packages/node/src/TransportServerFastify.ts
+**Lines**: 190, 241
+
+**Option A** (recommended): Change to debug for consistency
+```typescript
+debugTransport("/sync error:", error);
+debugTransport("/data error:", error);
+```
+
+**Option B**: Keep as console.error if these should always be visible in production
+
+**Rationale**: Depends on whether transport errors should always be logged. Given that error responses are sent to clients, debug might be sufficient.
+
+### Proposal 4: Convert remaining @ts-ignore to @ts-expect-error
+**Files**: Multiple (see Issue #3 above)
+
+Convert all `@ts-ignore` comments to `@ts-expect-error` with explanatory comments following the pattern established in this commit.
+
+**Example** for apps/web/src/db.ts:2:
+```typescript
+// @ts-expect-error Vite's ?url import syntax not recognized by TypeScript
+import wasmUrl from '@vlcn.io/crsqlite-wasm/crsqlite.wasm?url';
+```
+
+**Rationale**: Better type safety - @ts-expect-error will error if the type issue is resolved, preventing dead comments.
+
+### Proposal 5: Standardize debug message capitalization
+**Scope**: Codebase-wide (low priority)
+
+Establish a convention:
+- Error messages: Start with capital letter ("Error processing task:")
+- Regular debug: Start with lowercase ("checking @ timestamp")
+
+**Example**: Change task-scheduler.ts line 232 from:
+```typescript
+this.debug("failed to process task:", error);
+```
+To:
+```typescript
+this.debug("Failed to process task:", error);
+```
+
+**Rationale**: Minor consistency improvement for better code quality.
+
+## Conclusion
+
+This is a **well-focused commit** that improves logging consistency and code professionalism. The changes are:
+
+✅ **Correct**: All changes follow established patterns and best practices
+✅ **Consistent**: Changes align with the codebase's debug library usage
+✅ **Complete**: The commit scope is appropriate (didn't try to fix everything at once)
+
+The commit successfully:
+- Aligns scheduler logging with debug pattern
+- Improves TypeScript suppression quality
+- Enhances error message clarity
+
+**Recommended Next Steps**:
+1. Apply Proposal 1 (task-worker.ts console.warn) as it directly relates to this commit's scope
+2. Consider Proposals 2-4 as follow-up work for broader logging consistency
+3. Proposal 5 is optional polish for future refactoring
+
+**Overall Assessment**: Good quality improvement commit. No bugs introduced, clear intent, follows project conventions.

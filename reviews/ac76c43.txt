@@ -1,0 +1,82 @@
+COMMIT REVIEW: ac76c43
+======================
+docs: Document type error fixes in agent tool tests
+Date: 2026-01-22 18:25:35 +0100
+Files: IMPLEMENTATION_PLAN.md
+
+SUMMARY OF CHANGES
+------------------
+This commit adds documentation to IMPLEMENTATION_PLAN.md describing the type error
+fix that was made in commit 0243571. It documents:
+- The issue: AI SDK tool execute signature changed to require ToolCallOptions
+- Files fixed: utility-tools.test.ts and note-tools.test.ts
+- Changes made: createToolCallOptions() helper, EvalContext type change, type casts
+- Verification: Type-check and tests pass, tagged v1.0.0-alpha.9
+
+DETAILED CHANGES
+----------------
+IMPLEMENTATION_PLAN.md (22 lines added):
+- Added new section "Type Error Fixes in Agent Tool Tests (2026-01-22)"
+- Documents the issue found (AI SDK signature change)
+- Lists files fixed with absolute paths
+- Describes the four changes made
+- Notes verification results (21 type tasks, 216 + 37 tests)
+- Mentions the resulting alpha tag (v1.0.0-alpha.9)
+
+POTENTIAL ISSUES
+----------------
+
+1. ABSOLUTE PATHS IN DOCUMENTATION (Low Priority)
+   The documentation uses absolute paths:
+   - /home/artur/keep.ai/packages/tests/src/utility-tools.test.ts
+   - /home/artur/keep.ai/packages/tests/src/note-tools.test.ts
+
+   While accurate, absolute paths with user-specific home directories are not ideal
+   for documentation that might be read by other developers or in different environments.
+
+   Proposal: Change to relative paths from repo root:
+   - packages/tests/src/utility-tools.test.ts
+   - packages/tests/src/note-tools.test.ts
+
+2. DOCUMENTATION-CODE CONSISTENCY (Informational)
+   The documentation accurately reflects the code changes in commit 0243571:
+   - ToolCallOptions helper: ✓ Correct
+   - EvalContext type change: ✓ Correct
+   - Type casts for arrays: ✓ Correct
+   - Second argument passing: ✓ Correct
+
+   Proposal: None - documentation is accurate.
+
+3. ALPHA TAG REFERENCE (Informational)
+   Documentation states the fix resulted in v1.0.0-alpha.9. This is useful for
+   tracking which version includes this fix. The sequential alpha versioning
+   (alpha.1 through alpha.41) provides good granularity for tracking progress.
+
+   Proposal: None - good practice to reference tags.
+
+4. SECTION PLACEMENT (Low Priority)
+   The new section is added at the end of the document before "Implementation Notes".
+   This follows the pattern of other date-stamped documentation sections. The
+   chronological ordering makes it easy to find recent changes.
+
+   However, there's no table of contents or index for these sections, which could
+   make navigation difficult as the document grows.
+
+   Proposal: Consider adding a "Recent Changes" index at the top of the document
+   linking to date-stamped sections. Not critical for v1.
+
+OVERALL ASSESSMENT
+------------------
+This is straightforward documentation that accurately describes the preceding code fix.
+The only minor issue is the use of absolute paths, which should be changed to relative
+paths for better portability.
+
+The documentation serves its purpose of creating an audit trail for the fix and
+providing context for anyone reviewing the changes later.
+
+No issues that would block v1 release.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+No actionable issues - documentation-only commit with style suggestions.

@@ -1,0 +1,226 @@
+COMMIT: 8b2c6f4
+DATE: 2026-01-23
+TITLE: feat: Refactor Gmail tool to use ConnectionManager (spec 1.4)
+
+================================================================================
+SUMMARY
+================================================================================
+
+This commit refactors the Gmail tool and all scheduler/worker infrastructure to
+use the new ConnectionManager instead of a single gmailOAuth2Client. This enables
+multi-account Gmail support and prepares the codebase for other OAuth services.
+
+Key changes:
+- Replaced gmailOAuth2Client with connectionManager in TaskScheduler, TaskWorker,
+  WorkflowScheduler, and WorkflowWorker
+- Updated Gmail tool to require explicit `account` parameter (email address)
+- Added automatic token refresh via ConnectionManager.getCredentials()
+- Added connection error marking on auth failures
+- Added @app/connectors dependency to relevant packages
+
+Files modified (8):
+- apps/server/package.json (dependency)
+- package-lock.json (dependency tree)
+- packages/agent/package.json (dependency)
+- packages/agent/src/task-scheduler.ts
+- packages/agent/src/task-worker.ts
+- packages/agent/src/tools/gmail.ts (major changes)
+- packages/agent/src/workflow-scheduler.ts
+- packages/agent/src/workflow-worker.ts
+
+================================================================================
+DETAILED CHANGES
+================================================================================
+
+SCHEDULER/WORKER CHANGES:
+- All 4 files (task-scheduler, task-worker, workflow-scheduler, workflow-worker)
+  follow the same pattern:
+  - Import ConnectionManager type from @app/connectors
+  - Replace `gmailOAuth2Client?: any` with `connectionManager?: ConnectionManager`
+  - Update config interface and constructor
+  - Pass connectionManager through to SandboxAPI
+
+GMAIL TOOL CHANGES (gmail.ts):
+- Added `account` parameter (required) to input schema
+- Added account validation with helpful error messages listing available accounts
+- Replaced direct OAuth2 client usage with ConnectionManager.getCredentials()
+- Creates fresh OAuth2 client per call (instead of reusing shared client)
+- Added connection error marking on AuthError
+- Updated event logging to include account
+- Fixed trailing newline (formatting)
+
+================================================================================
+POTENTIAL ISSUES
+================================================================================
+
+ISSUE 1: Gmail Tool Duplicates Logic from google-common.ts
+Severity: MEDIUM
+Location: packages/agent/src/tools/gmail.ts lines 54-68, 89-94
+
+The Gmail tool was refactored BEFORE google-common.ts was created. It duplicates
+the same credential validation and OAuth client creation logic that is now in
+google-common.ts:
+
+Duplicated credential validation (gmail.ts lines 54-68):
+```typescript
+if (!account) {
+  const connections = await connectionManager.listConnectionsByService("gmail");
+  if (connections.length === 0) {
+    throw new AuthError(
+      "Gmail not connected. Please connect Gmail in Settings.",
+      { source: "Gmail.api" }
+    );
+  }
+  throw new LogicError(
+    `Gmail account required. Available accounts: ${connections.map((c: Connection) => c.accountId).join(", ")}`,
+    { source: "Gmail.api" }
+  );
+}
+```
+
+This is nearly identical to google-common.ts getGoogleCredentials() lines 25-39.
+
+Duplicated OAuth client creation (gmail.ts lines 89-94):
+```typescript
+const oAuth2Client = new google.auth.OAuth2();
+oAuth2Client.setCredentials({
+  access_token: creds.accessToken,
+  refresh_token: creds.refreshToken,
+  expiry_date: creds.expiresAt,
+});
+```
+
+This is identical to google-common.ts createGoogleOAuthClient() lines 48-56.
+
+Compare to gdrive.ts which uses the shared helpers:
+```typescript
+const creds = await getGoogleCredentials(connectionManager, "gdrive", account, "GoogleDrive.api");
+const oAuth2Client = createGoogleOAuthClient(creds);
+```
+
+Proposal: Refactor gmail.ts to use the shared helpers from google-common.ts:
+```typescript
+import { getGoogleCredentials, createGoogleOAuthClient } from "./google-common";
+
+// In execute():
+const creds = await getGoogleCredentials(connectionManager, "gmail", account, "Gmail.api");
+const oAuth2Client = createGoogleOAuthClient(creds);
+```
+
+This reduces gmail.ts by ~20 lines and ensures consistent error messages across
+all Google tools.
+
+--------------------------------------------------------------------------------
+
+ISSUE 2: Missing Import for LogicError
+Severity: LOW (code works, but import list is messy)
+Location: packages/agent/src/tools/gmail.ts line 7
+
+The commit adds LogicError to imports:
+```typescript
+import {
+  AuthError,
+  LogicError,
+  classifyGoogleApiError,
+} from "../errors";
+```
+
+However, PermissionError was removed from imports even though it was used in
+the original file. Checking the new code, PermissionError is indeed no longer
+used (the error classification now happens via classifyGoogleApiError), so this
+is correct.
+
+No action required.
+
+--------------------------------------------------------------------------------
+
+ISSUE 3: Creates New OAuth2 Client Per API Call
+Severity: LOW (performance)
+Location: packages/agent/src/tools/gmail.ts lines 89-94
+
+Each Gmail API call creates a new OAuth2 client instance:
+```typescript
+const oAuth2Client = new google.auth.OAuth2();
+oAuth2Client.setCredentials({...});
+const gmail = google.gmail({ version: "v1", auth: oAuth2Client });
+```
+
+This is slightly less efficient than reusing a cached client, but:
+- Ensures credentials are always fresh (via ConnectionManager.getCredentials())
+- Avoids stale token issues
+- Matches the pattern used by other Google tools (gdrive, gsheets, gdocs)
+
+The overhead is minimal (object creation, not network calls), so this is an
+acceptable trade-off for correctness.
+
+No action required.
+
+--------------------------------------------------------------------------------
+
+ISSUE 4: Breaking Change Not Reflected in Version Bump
+Severity: LOW
+Location: Commit message and package.json
+
+The commit message correctly notes: "Breaking: Gmail.api now requires 'account'
+parameter (email address)."
+
+However, this is a breaking change for any workflow scripts that use the Gmail
+tool. Existing scripts will fail with a LogicError asking for the account param.
+
+Considerations:
+- This is pre-v1.0.0 software, so breaking changes are expected
+- The error message guides users to update their scripts
+- No version bump is strictly required for pre-release
+
+Recommendation: Consider adding a migration note in release notes or a spec file
+documenting the breaking change for users upgrading from older versions.
+
+--------------------------------------------------------------------------------
+
+ISSUE 5: Inconsistent Error Message Capitalization
+Severity: VERY LOW (cosmetic)
+Location: gmail.ts line 59 vs google-common.ts line 31
+
+Gmail tool: "Gmail not connected. Please connect Gmail in Settings."
+Google common: "Gmail not connected. Please connect Gmail in Settings."
+
+These happen to be identical for Gmail, but the pattern differs:
+- gmail.ts hardcodes "Gmail"
+- google-common.ts uses `getServiceDisplayName(service)` for consistency
+
+When refactoring to use the common helper, this will be automatically fixed.
+
+================================================================================
+PROPOSALS
+================================================================================
+
+PROPOSAL 1: Refactor Gmail to use google-common.ts helpers
+Priority: P2 (should do)
+Files: packages/agent/src/tools/gmail.ts
+
+Replace ~20 lines of duplicated code with 2 lines using shared helpers:
+```typescript
+import { getGoogleCredentials, createGoogleOAuthClient } from "./google-common";
+
+// Replace lines 54-94 with:
+const creds = await getGoogleCredentials(connectionManager, "gmail", account, "Gmail.api");
+const oAuth2Client = createGoogleOAuthClient(creds);
+```
+
+Benefits:
+- Reduces code duplication
+- Ensures consistent error messages
+- Easier maintenance
+
+================================================================================
+VERDICT
+================================================================================
+
+APPROVED WITH SUGGESTIONS - The refactoring is correct and enables the important
+multi-account feature. The architecture change from gmailOAuth2Client to
+connectionManager is well-executed across all scheduler/worker files.
+
+The main issue is that gmail.ts duplicates logic that was later extracted to
+google-common.ts. This is understandable given the commit sequence (Gmail was
+refactored first, then other Google services were added with the common helper).
+A follow-up refactor to use the shared helpers would improve maintainability.

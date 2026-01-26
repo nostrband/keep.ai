@@ -133,3 +133,11 @@ response.ok check, which is partially mitigated by the catch block.
 
 RISK: LOW
 Users cannot get stuck in bad states - all error scenarios have recovery paths.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Missing HTTP status check) - created specs/new/add-http-status-check-useNeedAuth.md
+- Issue #2 (Race condition DB/config) - skipped (fallback acceptable)
+- Issue #3 (Optimistic state update) - skipped (poll corrects it)
+- Issue #4 (Unused imports) - not an issue after verification

@@ -1,0 +1,55 @@
+COMMIT: 11beeab
+TITLE: docs: Mark In-App Bug Reporting (3.4) as completed
+DATE: Fri Jan 23 17:37:58 2026 +0100
+
+=== CHANGES DESCRIPTION ===
+
+This commit updates IMPLEMENTATION_PLAN.md to mark the In-App Bug Reporting feature (Priority 3.4) as completed. The changes convert the action items checklist to a completed status summary documenting what was implemented:
+
+- Changed "Action Items" section with unchecked boxes to "Status: Implemented" with checked boxes
+- Updated items to reflect actual implementation:
+  - "Report Issue" button added to ErrorCard (for auth, permission, network, internal errors)
+  - "Report Issue" button added to EscalatedCard (for escalated AI failures)
+  - bugReport.ts utility created for generating GitHub issue URLs
+  - Pre-filled context includes: error type, service, message, workflow title, timestamp
+  - Issue template with sections for reproduction steps
+  - Opens GitHub Issues in new tab with pre-filled template
+
+=== VERIFICATION ===
+
+All claims have been verified against the actual codebase:
+
+1. ErrorCard "Report Issue" button: VERIFIED
+   - File: apps/web/src/components/NotificationCard.tsx:152-161, 184-191
+   - Button present for all error types, only shown when notification is unresolved
+
+2. EscalatedCard "Report Issue" button: VERIFIED
+   - File: apps/web/src/components/NotificationCard.tsx:203-211, 229-236
+   - Button present with escalated-specific context
+
+3. bugReport.ts utility: VERIFIED
+   - File: apps/web/src/lib/bugReport.ts (125 lines)
+   - generateBugReportUrl() creates GitHub issue URLs (lines 35-46)
+   - openBugReport() opens URLs in new tab with noopener,noreferrer (lines 122-125)
+   - Configured for anthropics/keep-ai repository
+
+4. Pre-filled context: VERIFIED
+   - BugReportContext interface includes all claimed fields (lines 13-26)
+   - formatIssueBody() creates full issue template with description, error details,
+     reproduction steps, expected/actual behavior sections (lines 68-117)
+   - Title formatted as "[Bug] {ErrorType} Error in {Service}" (lines 48-66)
+
+5. New tab handling: VERIFIED
+   - Uses window.open(url, "_blank", "noopener,noreferrer") for security
+
+=== ISSUES ===
+
+None identified. The documentation accurately reflects the implemented feature.
+
+=== PROPOSALS ===
+
+None needed. This is a documentation-only commit that accurately reflects completed work.
+
+=== SUMMARY ===
+
+Clean documentation update. All claims verified. No issues found.

@@ -1,0 +1,177 @@
+COMMIT REVIEW: b1724cf
+=======================
+fix: Async patterns and system prompt corrections
+
+CHANGES OVERVIEW
+----------------
+This commit addresses three distinct issues:
+
+1. **Fix server.test.ts Async Database Pattern**
+   - Fixed 3 instances of incorrectly awaiting sqlite3's callback-based db.run()
+   - Wrapped in Promises with resolve/reject pattern
+   - Matches fix previously applied to database.test.ts and integration.test.ts
+
+2. **Handle showNotification Return Value in App.tsx**
+   - Added return value checking for all 3 showNotification calls
+   - Logs warnings when notifications fail to show
+   - Applied to handlePauseAllAutomations: no-workflows case, success case, error case
+
+3. **Update Agent System Prompts**
+   - Removed references to removed goal/notes/plan fields in worker/planner prompts
+   - Updated to reference only "asks" field (pending user questions)
+   - Part of Spec 10 cleanup
+
+FILES CHANGED
+-------------
+- apps/user-server/src/__tests__/server.test.ts: 3 db.run calls wrapped
+- apps/web/src/App.tsx: +15 lines for notification return checks
+- packages/agent/src/agent-env.ts: Updated worker/planner system prompts
+- specs/done/*: 4 spec files moved from new/
+- IMPLEMENTATION_PLAN.md: Updated with completion notes
+
+POTENTIAL ISSUES
+----------------
+
+### Issue 1: dbRun Helper Function Used - Need to Verify Import
+**Severity:** Low
+**Location:** server.test.ts
+
+Looking at the diff, the fix uses raw Promise wrapper pattern:
+```typescript
+await new Promise<void>((resolve, reject) => {
+  (database as any).db.run(
+    'UPDATE api_keys SET key_hash = ? WHERE user_id = ?',
+    [keyHash, userId],
+    (err: Error | null) => err ? reject(err) : resolve()
+  );
+});
+```
+
+However, based on context from the analysis, the file actually uses a `dbRun`
+helper function. Let me verify which pattern was actually used.
+
+**Status:** The diff shows raw Promise wrapping, not a helper. This is correct
+but creates some code duplication within the file.
+
+**Proposal:** Consider extracting a shared `promisifyDbRun` helper at the file
+level if more tests need this pattern. Low priority since only 3 instances.
+
+### Issue 2: Notification Return Check Only Logs - No Fallback
+**Severity:** Low
+**Location:** App.tsx lines 76-78, 93-95, 108-110
+
+When notification fails (`!shown`), only a console.warn is logged:
+```typescript
+if (!shown) {
+  console.warn('Failed to show notification: No automations to pause');
+}
+```
+
+No fallback UI (like a toast) is shown to the user.
+
+**Proposal:** For the "pause all" feature, users see the result in the UI
+anyway (workflows change to paused state). The notification is supplementary.
+Logging is sufficient for debugging. No action needed.
+
+### Issue 3: Agent System Prompt Still References "goal"
+**Severity:** Medium
+**Location:** agent-env.ts lines 309, 353
+
+Worker prompt (line 309):
+> "Your responsibility is to move this task toward the goal."
+
+Planner prompt (line 353):
+> "reliably achieve the task goal"
+
+These reference "goal" but the input no longer includes a distinct "goal" field.
+The goal must be inferred from the task description/inbox content.
+
+**Proposal:** This is semantically correct - "goal" refers to the task's
+objective, not a specific input field. The agent understands the goal from
+context. However, the prompts could be clearer about where goal info comes from.
+
+Consider adding clarification:
+> "You will be given the task description which states what the user wants to
+> accomplish. Your responsibility is to move this task toward that goal."
+
+### Issue 4: Planner Prompt Still References "notes" for Saving State
+**Severity:** Medium - Potential Confusion
+**Location:** agent-env.ts lines 391-392
+
+The planner prompt says:
+> "notes, i.e. by creating a note with id '<taskId>.<meaningful_note_name>'"
+
+This references creating notes for state persistence across runs. But if the
+"notes" field was removed from task INPUT, is the notes CREATE API still
+available? Need to verify.
+
+**Proposal:** Clarify in the prompt whether:
+1. The Notes API is still available for creating new notes (just not reading
+   old goal/notes/plan fields)
+2. Or if this guidance is now stale and should be removed
+
+Looking at the code: The agent tools likely still include note creation
+capabilities, so this guidance may be correct. But the wording is confusing
+given the removal of notes from task info.
+
+### Issue 5: Incomplete Spec 10 Reference
+**Severity:** Very Low (Documentation)
+**Location:** agent-env.ts line 108
+
+Comment says:
+```typescript
+// Spec 10: Only asks is used now (goal, notes, plan removed)
+```
+
+This is helpful but doesn't link to the actual spec or explain why these fields
+were removed.
+
+**Proposal:** Minor documentation improvement - link to spec file if it exists.
+
+### Issue 6: Missing showNotification Return Check in WorkflowNotifications.ts
+**Severity:** None - Already Handled
+**Location:** lib/WorkflowNotifications.ts
+
+Based on the context analysis, WorkflowNotifications.ts ALREADY has proper
+return value checking with retry logic. This commit correctly focuses on
+App.tsx which was missing the checks.
+
+**Status:** Not an issue - WorkflowNotifications.ts was already correct.
+
+ARCHITECTURAL NOTES
+-------------------
+
+1. **Promise Wrapping Pattern:**
+   The sqlite3 db.run() callback pattern is now consistently wrapped across
+   all test files. The pattern used:
+   ```typescript
+   await new Promise<void>((resolve, reject) => {
+     db.run(sql, params, (err: Error | null) => err ? reject(err) : resolve());
+   });
+   ```
+   This is standard and correct.
+
+2. **Notification Error Handling Strategy:**
+   The codebase has two levels of notification handling:
+   - WorkflowNotifications.ts: Checks return, skips failed notifications for retry
+   - App.tsx: Checks return, logs warning only (no retry needed for one-off events)
+
+   This differentiation makes sense given the use cases.
+
+3. **Agent Prompt Evolution:**
+   Spec 10 simplified the agent interface by removing goal/notes/plan fields.
+   The prompts now reference "asks" (pending questions) as the only structured
+   state. This reduces complexity but the prompts could be clearer about how
+   the agent should understand its objective.
+
+VERDICT
+-------
+Solid bugfix commit. The async pattern fixes are important for test reliability.
+The notification return checks improve debuggability.
+
+The agent prompt updates have some ambiguity around "goal" and "notes" references
+that could confuse the agent or developers. Consider a follow-up commit to:
+1. Clarify where goal information comes from in prompts
+2. Clarify whether Notes API is still available for state persistence
+
+No critical bugs. Medium-priority clarity improvements recommended for prompts.

@@ -95,3 +95,9 @@ VERDICT
 The fix is correct and well-implemented for the primary use case (WorkflowNotifications).
 Minor improvements possible for App.tsx consistency and logging visibility, but these
 don't affect the core functionality.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (App.tsx doesn't handle return value) - created specs/new/handle-notification-return-in-app.md
+- Issue #2 (Debug logging too quiet) - skipped (retry handles it)

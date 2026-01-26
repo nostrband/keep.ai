@@ -1,0 +1,34 @@
+Commit: 550b604
+Title: docs: Update IMPLEMENTATION_PLAN.md with completed items
+Date: Fri Jan 23 17:24:31 2026 +0100
+
+## Summary
+
+This commit updates IMPLEMENTATION_PLAN.md to mark two items as complete:
+
+1. `classifyNotionError()` function - marked as complete with note that it's in packages/agent/src/errors.ts
+2. Node.js EventSource item - marked as complete, noting usage of eventsource npm package
+
+The change is minimal: a single checkbox toggle from `[ ]` to `[x]` with an explanatory note.
+
+## Verification Results
+
+1. **classifyNotionError() function** - VERIFIED
+   - Location: packages/agent/src/errors.ts:364-414
+   - Fully implemented with:
+     - HTTP status code classification
+     - Notion-specific error codes (unauthorized, invalid_token, restricted_resource, object_not_found, validation_error, rate_limited, internal_server_error, service_unavailable, conflict_error, database_connection_unavailable)
+     - Proper routing to ClassifiedError types (AuthError, PermissionError, LogicError, NetworkError)
+
+2. **eventsource npm package** - VERIFIED
+   - Location: packages/sync/package.json:24
+   - Dependency declared as: "eventsource": "^4.1.0"
+   - Provides Node.js EventSource polyfill for SSE support
+
+## Issues
+
+None identified. The documentation accurately reflects implemented functionality.
+
+## Proposals
+
+None needed.

@@ -1,0 +1,185 @@
+COMMIT: 470c078
+DATE: 2026-01-23
+TITLE: chore: Export Google service definitions from connectors
+
+================================================================================
+SUMMARY
+================================================================================
+
+This commit adds a new file `packages/connectors/src/services/google.ts` and
+exports Google service definitions (Gmail, GDrive, GSheets, GDocs) from the
+@app/connectors package. This enables agent tools to access OAuth service
+definitions for multi-account Google API integrations.
+
+Changes:
+1. packages/connectors/src/index.ts - Added exports for Google services
+2. packages/connectors/src/services/google.ts - New file (194 lines)
+
+--------------------------------------------------------------------------------
+DETAILED CHANGES
+--------------------------------------------------------------------------------
+
+NEW FILE: packages/connectors/src/services/google.ts
+
+- Defines `GoogleProfile` interface for userinfo endpoint response
+- Defines `googleOAuthBase` shared config (authUrl, tokenUrl, extraAuthParams)
+- Defines `fetchGoogleProfile()` async function to fetch user profile
+- Defines 4 service definitions following ServiceDefinition interface:
+  - gmailService: gmail.modify scope
+  - gdriveService: drive scope (full access)
+  - gsheetsService: spreadsheets scope
+  - gdocsService: documents scope
+- Exports `googleServices` array containing all 4 services
+
+MODIFIED: packages/connectors/src/index.ts
+
+- Added re-exports for all Google services, googleOAuthBase, fetchGoogleProfile,
+  and GoogleProfile type
+
+================================================================================
+POTENTIAL ISSUES
+================================================================================
+
+ISSUE 1: Code Duplication Across Service Definitions
+Severity: LOW
+Location: google.ts lines 56-192
+
+Each of the 4 service definitions (gmail, gdrive, gsheets, gdocs) repeats nearly
+identical code for:
+- extractAccountId() - same implementation (~8 lines) x 4
+- extractDisplayName() - same implementation (~6 lines) x 4
+- supportsRefresh: true
+- fetchProfile: fetchGoogleProfile
+
+Only the `id`, `name`, `icon`, and `scopes` differ between services.
+
+Proposal: Extract a helper factory function:
+```typescript
+function createGoogleService(config: {
+  id: string;
+  name: string;
+  icon: string;
+  scopes: string[];
+}): ServiceDefinition {
+  return {
+    ...config,
+    oauthConfig: {
+      ...googleOAuthBase,
+      scopes: config.scopes,
+    },
+    supportsRefresh: true,
+    fetchProfile: fetchGoogleProfile,
+    extractAccountId: async (_tokenResponse, profile) => {
+      const googleProfile = profile as GoogleProfile | undefined;
+      if (!googleProfile?.email) {
+        throw new Error("Could not extract email from Google profile");
+      }
+      return googleProfile.email;
+    },
+    extractDisplayName: (_tokenResponse, profile) => {
+      const googleProfile = profile as GoogleProfile | undefined;
+      return googleProfile?.email;
+    },
+  };
+}
+```
+
+Then services become one-liners:
+```typescript
+export const gmailService = createGoogleService({
+  id: "gmail", name: "Gmail", icon: "mail",
+  scopes: ["https://www.googleapis.com/auth/gmail.modify"]
+});
+```
+
+--------------------------------------------------------------------------------
+
+ISSUE 2: Broad OAuth Scopes
+Severity: LOW (intentional design choice)
+Location: google.ts lines 88, 121, 154
+
+The services request broad scopes:
+- gdrive: "drive" (full access to all files)
+- gsheets: "spreadsheets" (full access to all spreadsheets)
+- gdocs: "documents" (full access to all documents)
+
+These could be narrowed to readonly or file-specific scopes if the use case
+allows. However, this appears intentional for a personal automation tool where
+the user controls their own data.
+
+No action required - just noting for awareness.
+
+--------------------------------------------------------------------------------
+
+ISSUE 3: No Error Handling in fetchGoogleProfile
+Severity: LOW
+Location: google.ts lines 37-49
+
+The `fetchGoogleProfile()` function throws a generic Error on failure:
+```typescript
+throw new Error(`Failed to fetch Google profile: ${response.statusText}`);
+```
+
+This error is caught higher up in ConnectionManager.completeOAuthFlow() (manager.ts
+lines 174-181) and logged but swallowed. However, if profile fetch fails for
+Google services, extractAccountId will fail because it depends on the profile
+email.
+
+The current behavior is acceptable since the auth flow will fail gracefully,
+but the error message could be more specific (e.g., include the HTTP status code
+and response body for debugging).
+
+Proposal: Enhance error message:
+```typescript
+if (!response.ok) {
+  const body = await response.text().catch(() => "");
+  throw new Error(
+    `Failed to fetch Google profile: ${response.status} ${response.statusText}${body ? ` - ${body}` : ""}`
+  );
+}
+```
+
+--------------------------------------------------------------------------------
+
+ISSUE 4: prompt: "consent" Forces Re-consent on Every Auth
+Severity: LOW (intentional)
+Location: google.ts lines 28-30
+
+```typescript
+extraAuthParams: {
+  access_type: "offline",
+  prompt: "consent", // Force refresh token on every auth
+}
+```
+
+This forces users to see the full consent screen every time they authenticate,
+even if they've previously granted access. This is intentional to ensure a
+refresh_token is always returned (Google only returns it on first consent or
+when prompt=consent).
+
+This is the correct approach for a personal automation tool that needs
+persistent access, but users may find the repeated consent prompts annoying.
+The comment documents this choice well.
+
+No action required.
+
+================================================================================
+PROPOSALS
+================================================================================
+
+PROPOSAL 1: Extract Google service factory (addresses Issue 1)
+Priority: P3 (nice-to-have)
+Files: packages/connectors/src/services/google.ts
+
+Create a `createGoogleService()` factory function to reduce duplication from
+~140 lines of service definitions to ~20 lines. This improves maintainability
+and makes it easier to add new Google services in the future.
+
+================================================================================
+VERDICT
+================================================================================
+
+APPROVED - Clean implementation that follows the ServiceDefinition pattern.
+The code duplication is minor and the services are correctly defined. The broad
+scopes are appropriate for a personal automation tool. Good documentation in
+comments explaining design choices.

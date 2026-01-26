@@ -1,0 +1,51 @@
+Commit: 954f6b2
+Title: docs: Move verified complete specs to specs/done
+Date: Fri Jan 23 17:21:41 2026 +0100
+
+## Summary
+
+This commit moves 6 specification files from `specs/new/` to `specs/done/` after verifying that all features described in those specs were already implemented in the codebase. The commit is purely organizational - file renames with no content changes.
+
+Specs moved:
+1. align-test-schemas-with-production.md - Test schemas with NOT NULL constraints
+2. extract-message-parsing-utility.md - parseMessageContent() utility
+3. optimize-has-script-subquery.md - COUNT(DISTINCT s.id) optimization
+4. test-abandoned-drafts-boundaries.md - Boundary tests for abandoned drafts
+5. test-boolean-integer-conversion.md - Boolean/integer conversion tests
+6. test-console-log-special-chars.md - Special character tests for console.log
+
+## Verification Results
+
+All 6 claims were verified by searching the codebase:
+
+1. **Test schemas with NOT NULL constraints** - VERIFIED
+   - packages/tests/src/script-store.test.ts contains createScriptTables() helper
+   - All tables (scripts, script_runs, workflows, tasks, chat_messages) have NOT NULL constraints
+
+2. **parseMessageContent() utility** - VERIFIED
+   - apps/cli/src/commands/chat.ts:24-39 contains the function
+   - Handles JSON parsing with fallback for non-JSON messages
+
+3. **COUNT(DISTINCT s.id) optimization** - VERIFIED
+   - packages/db/src/script-store.ts:868 uses this pattern in getAbandonedDrafts()
+   - Avoids counting duplicate rows when checking for script existence
+
+4. **Abandoned draft boundary tests** - VERIFIED
+   - packages/tests/src/script-store.test.ts:886-947 contains boundary tests
+   - Tests exact 7-day threshold with +1 second (included) and -1 hour (excluded)
+
+5. **Boolean conversion tests** - VERIFIED
+   - packages/tests/src/script-store.test.ts:644-755 contains 11 tests
+   - Covers round-trip, integer interpretation, default values, persistence methods
+
+6. **Special character tests** - VERIFIED
+   - packages/tests/src/utility-tools.test.ts:210-394 contains 11 tests
+   - Covers quotes, newlines, tabs, unicode, emojis, backslashes, null chars, etc.
+
+## Issues
+
+None identified. This is a straightforward documentation/organization commit that accurately reflects the state of the codebase.
+
+## Proposals
+
+None needed.

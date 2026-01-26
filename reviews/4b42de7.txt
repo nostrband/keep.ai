@@ -1,0 +1,64 @@
+Commit: 4b42de7
+Title: docs: Update IMPLEMENTATION_PLAN.md with verified completed features
+Date: Fri Jan 23 17:31:47 2026 +0100
+
+## Summary
+
+This commit significantly updates IMPLEMENTATION_PLAN.md by marking three major features as completed:
+
+1. **EventSource implementation** - Node.js EventSource polyfill using eventsource npm package v4.1.0
+2. **Workflow Dry-Run Testing (3.1)** - Complete test run feature for workflows
+3. **Event Timeline Improvements (3.2a, 3.2b)** - Significance styling and collapse functionality
+
+The commit removes the detailed "Action Items" checklists and replaces them with "Status: Completed" sections documenting what was implemented. This represents a substantial cleanup of 105 lines removed, 35 added (net -70 lines).
+
+## Verification Results
+
+All 9 claims were verified by searching the codebase:
+
+### EventSource Implementation
+1. **eventsource npm package v4.1.0** - VERIFIED
+   - packages/sync/package.json declares "eventsource": "^4.1.0"
+
+### Workflow Dry-Run Testing (3.1)
+2. **"Test run" button in WorkflowDetailPage** - VERIFIED
+   - apps/web/src/components/WorkflowDetailPage.tsx:346-356
+   - Amber styling, disabled states, "Testing..." loading text
+
+3. **POST /api/workflow/test-run endpoint** - VERIFIED
+   - apps/server/src/server.ts:1775-1861
+   - Returns HTTP 202, tracks in-progress tests, background execution
+
+4. **Test badge in ScriptRunDetailPage** - VERIFIED
+   - apps/web/src/components/ScriptRunDetailPage.tsx:48-53
+   - Badge with amber styling for test runs (run.type === 'test')
+
+### Event Timeline Improvements (3.2a - Significance)
+5. **EventSignificance type with 6 levels** - VERIFIED
+   - apps/web/src/types/events.ts:262-268
+   - Levels: normal, write, error, success, user, state
+
+6. **significanceStyles in EventItem.tsx** - VERIFIED
+   - apps/web/src/components/EventItem.tsx:12-19
+   - Tailwind classes for all 6 significance levels
+
+### Event Timeline Improvements (3.2b - Collapse)
+7. **getEventSignalLevel() in eventSignal.ts** - VERIFIED
+   - apps/web/src/lib/eventSignal.ts:46-69
+   - Classifies events as 'high' or 'low' signal
+
+8. **CollapsedEventSummary.tsx** - VERIFIED
+   - apps/web/src/components/CollapsedEventSummary.tsx (73 lines)
+   - Shows summary row for collapsed low-signal events
+
+9. **EventListWithCollapse.tsx** - VERIFIED
+   - apps/web/src/components/EventListWithCollapse.tsx (106 lines)
+   - Partitions events by signal, handles expand/collapse state
+
+## Issues
+
+None identified. The documentation accurately reflects the fully implemented features.
+
+## Proposals
+
+None needed.

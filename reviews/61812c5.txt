@@ -1,0 +1,1598 @@
+# Security Review: OAuth Connectors Framework (Commit 61812c5)
+
+**Commit:** 61812c5 - feat: Implement connectors framework (specs 00-02)
+**Date:** 2026-01-25
+**Scope:** Build-time secrets, OAuth flow implementation, credential storage, database integration
+**Files Changed:** 21 files, +1637 lines
+**Security Classification:** CRITICAL - Handles OAuth flows and credential storage
+
+---
+
+## Executive Summary
+
+This commit implements a foundational OAuth connectors framework for multi-account service connections. The implementation follows the specifications closely and demonstrates good security practices overall. However, several **critical security issues** were identified that must be addressed:
+
+### Critical Issues (MUST FIX)
+1. **Path Traversal Vulnerability** in credential storage filename encoding
+2. **CSRF State Storage** lacks proper validation and cleanup boundaries
+3. **Token Refresh Race Condition** potential with concurrent requests
+4. **Missing Error Information Leakage** prevention in OAuth error responses
+
+### High Priority Issues
+5. **File Permissions** not validated after write operations
+6. **Metadata Injection** vulnerability in database operations
+7. **State Validation Timing Attack** vulnerability
+
+### Medium Priority Issues
+8. Missing token revocation on disconnect
+9. No rate limiting on OAuth flows
+10. Credential file atomic write not guaranteed
+
+---
+
+## Critical Security Issues
+
+### 1. Path Traversal Vulnerability ⚠️ CRITICAL
+
+**Location:** `packages/connectors/src/store.ts:1318-1320`
+
+**Issue:**
+```typescript
+private getFilePath(id: ConnectionId): string {
+  // Sanitize accountId to be safe for file names
+  const safeAccountId = encodeURIComponent(id.accountId).replace(/%/g, "_");
+  return path.join(this.connectorsDir, id.service, `${safeAccountId}.json`);
+}
+```
+
+The sanitization is insufficient and reversible encoding creates collisions:
+
+**Attack Vector:**
+```javascript
+// Attacker provides malicious accountId:
+accountId: "../../../etc/passwd"
+// After encodeURIComponent: "..%2F..%2F..%2Fetc%2Fpasswd"
+// After replace(/%/g, "_"): ".._2F.._2F.._2Fetc_2Fpasswd"
+// Still contains ".." which path.join doesn't protect against!
+
+// Or collision attack:
+accountId1: "user@example.com"  // Encodes to "user_40example.com"
+accountId2: "user%40example.com" // Also encodes to "user_40example.com"
+// Two different accounts, same file!
+```
+
+**Impact:**
+- Path traversal: Write credentials to arbitrary filesystem locations
+- Collision: Overwrite credentials of different accounts
+- Data corruption: Multiple accounts sharing same credential file
+
+**Fix Required:**
+```typescript
+private getFilePath(id: ConnectionId): string {
+  // Validate service is alphanumeric
+  if (!/^[a-z0-9_-]+$/i.test(id.service)) {
+    throw new Error(`Invalid service name: ${id.service}`);
+  }
+
+  // Use crypto hash for accountId to prevent traversal and collisions
+  const crypto = require('crypto');
+  const hash = crypto.createHash('sha256').update(id.accountId).digest('hex');
+
+  // Store original accountId in metadata file for debugging
+  return path.join(this.connectorsDir, id.service, `${hash}.json`);
+}
+
+// Alternative: Strict whitelist validation
+private sanitizeAccountId(accountId: string): string {
+  // Only allow alphanumeric, @, ., -, _
+  const sanitized = accountId.replace(/[^a-zA-Z0-9@._-]/g, '_');
+  // Prevent path components
+  if (sanitized.includes('..') || sanitized.includes('/') || sanitized.includes('\\')) {
+    throw new Error('Invalid account ID format');
+  }
+  return sanitized;
+}
+```
+
+**Testing Required:**
+```typescript
+// Test cases:
+assert.throws(() => getFilePath({ service: '../evil', accountId: 'user' }));
+assert.throws(() => getFilePath({ service: 'gmail', accountId: '../../../etc/passwd' }));
+assert.throws(() => getFilePath({ service: 'gmail', accountId: 'user/../admin' }));
+
+// Collision test:
+const path1 = getFilePath({ service: 'gmail', accountId: 'user@test.com' });
+const path2 = getFilePath({ service: 'gmail', accountId: 'user%40test.com' });
+assert.notEqual(path1, path2, 'Paths must not collide');
+```
+
+---
+
+### 2. CSRF State Storage Vulnerabilities ⚠️ CRITICAL
+
+**Location:** `packages/connectors/src/manager.ts:626-641, 724-749`
+
+**Issue 1: Unbounded State Map Growth**
+```typescript
+private pendingStates = new Map<string, PendingState>();
+
+startOAuthFlow(serviceId: string, redirectUri: string) {
+  this.cleanupExpiredStates(); // Lazy cleanup
+  const state = randomUUID();
+  this.pendingStates.set(state, {
+    service: serviceId,
+    redirectUri,
+    timestamp: Date.now(),
+  });
+  // ...
+}
+```
+
+**Attack Vector:**
+- Attacker repeatedly calls `startOAuthFlow()` but never completes
+- `cleanupExpiredStates()` only runs on new flow starts
+- If attacker stops after creating 10,000 pending states, they remain in memory
+- Memory exhaustion DoS
+
+**Issue 2: State Validation Lacks Service Binding**
+```typescript
+completeOAuthFlow(serviceId: string, code: string, state: string) {
+  const pending = this.pendingStates.get(state);
+  if (pending.service !== serviceId) {
+    return { success: false, error: "State mismatch" };
+  }
+  // Service is checked but redirectUri is trusted from pending state
+}
+```
+
+**Attack Vector:**
+- Attacker initiates OAuth for `evil.com/callback`
+- Captures `state` parameter
+- Somehow triggers callback with modified code but same state
+- System trusts the stored `redirectUri` without re-validation
+
+**Fix Required:**
+```typescript
+// 1. Add hard limit on pending states
+private readonly MAX_PENDING_STATES = 100;
+private pendingStates = new Map<string, PendingState>();
+
+startOAuthFlow(serviceId: string, redirectUri: string) {
+  this.cleanupExpiredStates();
+
+  // Hard limit protection
+  if (this.pendingStates.size >= this.MAX_PENDING_STATES) {
+    // Remove oldest entry
+    const oldest = Array.from(this.pendingStates.entries())
+      .sort((a, b) => a[1].timestamp - b[1].timestamp)[0];
+    this.pendingStates.delete(oldest[0]);
+    debug('Pending states limit reached, removed oldest');
+  }
+
+  // Validate redirectUri against whitelist
+  const allowedRedirects = this.getAllowedRedirectUris(serviceId);
+  if (!allowedRedirects.some(uri => redirectUri.startsWith(uri))) {
+    throw new Error(`Invalid redirect URI for ${serviceId}`);
+  }
+
+  const state = randomUUID();
+  this.pendingStates.set(state, {
+    service: serviceId,
+    redirectUri,
+    timestamp: Date.now(),
+  });
+
+  return { authUrl, state };
+}
+
+// 2. Add periodic cleanup timer as backup
+private setupStateCleanup() {
+  setInterval(() => {
+    this.cleanupExpiredStates();
+  }, 60 * 1000); // Every minute
+}
+
+// 3. Validate redirectUri in completeOAuthFlow
+completeOAuthFlow(serviceId: string, code: string, state: string) {
+  const pending = this.pendingStates.get(state);
+  if (!pending) {
+    return { success: false, error: 'Invalid or expired state' };
+  }
+
+  // Re-validate redirectUri
+  const allowedRedirects = this.getAllowedRedirectUris(serviceId);
+  if (!allowedRedirects.some(uri => pending.redirectUri.startsWith(uri))) {
+    this.pendingStates.delete(state);
+    return { success: false, error: 'Invalid redirect URI' };
+  }
+
+  // Rest of validation...
+}
+```
+
+**Issue 3: State TTL Too Long**
+- 10 minutes is excessive for OAuth flow
+- Standard practice: 5 minutes or less
+- Longer window = more attack opportunity
+
+**Fix:**
+```typescript
+const STATE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+```
+
+---
+
+### 3. Token Refresh Race Condition ⚠️ CRITICAL
+
+**Location:** `packages/connectors/src/manager.ts:882-921`
+
+**Issue:**
+```typescript
+async getCredentials(id: ConnectionId): Promise<OAuthCredentials> {
+  const connectionId = `${id.service}:${id.accountId}`;
+  const creds = await this.store.load(id);
+
+  if (creds.expiresAt && supportsRefresh) {
+    const needsRefresh = creds.expiresAt < Date.now() + REFRESH_BUFFER_MS;
+
+    if (needsRefresh) {
+      // RACE CONDITION: Multiple concurrent calls can all see needsRefresh=true
+      // All will attempt to refresh simultaneously
+      const refreshed = await this.refreshToken(id, creds);
+      return refreshed;
+    }
+  }
+
+  return creds;
+}
+```
+
+**Attack Vector:**
+- Tool makes 10 concurrent API calls requiring credentials
+- All 10 calls invoke `getCredentials()` simultaneously
+- All see `needsRefresh=true`
+- All call `refreshToken()` in parallel
+- 10 token refresh requests hit OAuth provider
+- Provider may rate-limit or invalidate tokens
+- Potential for token invalidation cascade
+
+**Fix Required:**
+```typescript
+private refreshLocks = new Map<string, Promise<OAuthCredentials>>();
+
+async getCredentials(id: ConnectionId): Promise<OAuthCredentials> {
+  const connectionId = `${id.service}:${id.accountId}`;
+  const creds = await this.store.load(id);
+
+  if (creds?.expiresAt && supportsRefresh) {
+    const needsRefresh = creds.expiresAt < Date.now() + REFRESH_BUFFER_MS;
+
+    if (needsRefresh) {
+      // Check if refresh is already in progress
+      const existingRefresh = this.refreshLocks.get(connectionId);
+      if (existingRefresh) {
+        debug('Token refresh already in progress for %s', connectionId);
+        return existingRefresh;
+      }
+
+      // Start refresh and store promise
+      const refreshPromise = this.refreshToken(id, creds)
+        .finally(() => {
+          // Clean up lock after completion
+          this.refreshLocks.delete(connectionId);
+        });
+
+      this.refreshLocks.set(connectionId, refreshPromise);
+      return refreshPromise;
+    }
+  }
+
+  await this.db.updateLastUsed(connectionId, Date.now());
+  return creds;
+}
+```
+
+**Additional Protection:**
+```typescript
+// In refreshToken, add jitter to prevent thundering herd
+private async refreshToken(id: ConnectionId, currentCreds: OAuthCredentials) {
+  // Random delay 0-1000ms to spread out concurrent refreshes
+  await new Promise(resolve => setTimeout(resolve, Math.random() * 1000));
+
+  // Re-check if token was refreshed by another process
+  const latestCreds = await this.store.load(id);
+  if (latestCreds.expiresAt !== currentCreds.expiresAt) {
+    // Token was already refreshed by another caller
+    debug('Token already refreshed by another process');
+    return latestCreds;
+  }
+
+  // Proceed with refresh...
+}
+```
+
+---
+
+### 4. OAuth Error Information Leakage ⚠️ CRITICAL
+
+**Location:** `packages/connectors/src/manager.ts:818-828`, `oauth.ts:1145-1151`
+
+**Issue:**
+```typescript
+// In completeOAuthFlow:
+catch (err) {
+  const message =
+    err instanceof OAuthError
+      ? err.getErrorDetails().errorDescription || err.message
+      : err instanceof Error
+        ? err.message
+        : "Unknown error";
+
+  debug("OAuth flow failed for %s: %s", serviceId, message);
+  return { success: false, error: message }; // ERROR LEAKED TO CLIENT
+}
+
+// In OAuthHandler:
+if (!response.ok) {
+  const errorText = await response.text();
+  debug("Token exchange failed: %s %s", response.status, errorText);
+  throw new OAuthError(
+    `Token exchange failed: ${response.status}`,
+    errorText  // FULL RESPONSE BODY STORED
+  );
+}
+```
+
+**Attack Vector:**
+- Attacker provides malicious `code` parameter
+- OAuth provider returns detailed error with internal info
+- Full error message propagated to client
+- Attacker learns about internal configuration, endpoints, etc.
+
+**Examples of Leaked Info:**
+```
+"invalid_client: The OAuth client was not found. Client ID: 12345-abcdef..."
+"redirect_uri_mismatch: http://localhost:4681 vs http://127.0.0.1:4681"
+"Error fetching profile from https://internal-api.company.com/userinfo"
+```
+
+**Fix Required:**
+```typescript
+// Create error sanitization
+function sanitizeOAuthError(err: unknown): string {
+  if (err instanceof OAuthError) {
+    const details = err.getErrorDetails();
+
+    // Map to generic user-friendly messages
+    const errorMap: Record<string, string> = {
+      'invalid_grant': 'Authorization expired or invalid. Please try again.',
+      'invalid_client': 'OAuth configuration error. Please contact support.',
+      'access_denied': 'Access was denied. Please try again and approve all permissions.',
+      'redirect_uri_mismatch': 'OAuth configuration error. Please contact support.',
+      'invalid_token': 'Token is invalid. Please reconnect your account.',
+    };
+
+    return errorMap[details.error || ''] || 'OAuth authentication failed. Please try again.';
+  }
+
+  // Never leak internal errors
+  return 'An unexpected error occurred. Please try again.';
+}
+
+// Use in completeOAuthFlow:
+catch (err) {
+  const internalMessage = err instanceof Error ? err.message : String(err);
+  debug("OAuth flow failed for %s: %s", serviceId, internalMessage);
+
+  const userMessage = sanitizeOAuthError(err);
+  return { success: false, error: userMessage };
+}
+
+// Update OAuthError to not expose response body
+export class OAuthError extends Error {
+  constructor(
+    message: string,
+    public readonly errorCode?: string  // Changed from responseBody
+  ) {
+    super(message);
+    this.name = "OAuthError";
+  }
+
+  getErrorDetails(): { error?: string; errorDescription?: string } {
+    return { error: this.errorCode };
+  }
+}
+
+// In OAuthHandler, parse but don't store full response:
+if (!response.ok) {
+  const errorText = await response.text();
+  debug("Token exchange failed: %s %s", response.status, errorText);
+
+  let errorCode: string | undefined;
+  try {
+    const data = JSON.parse(errorText);
+    errorCode = data.error;
+  } catch {
+    errorCode = 'unknown_error';
+  }
+
+  throw new OAuthError(
+    `Token exchange failed: ${response.status}`,
+    errorCode  // Only store error code
+  );
+}
+```
+
+---
+
+## High Priority Security Issues
+
+### 5. File Permission Validation Missing
+
+**Location:** `packages/connectors/src/store.ts:1343-1355`
+
+**Issue:**
+```typescript
+async save(id: ConnectionId, credentials: OAuthCredentials): Promise<void> {
+  await this.ensureServiceDir(id.service);
+  const filePath = this.getFilePath(id);
+
+  await fs.writeFile(filePath, JSON.stringify(credentials, null, 2), {
+    mode: 0o600,
+    encoding: "utf-8",
+  });
+}
+```
+
+**Problem:**
+- `mode: 0o600` only sets permissions on file creation
+- If file already exists, permissions may not be updated
+- If file existed with 0o644, credentials become world-readable
+- umask settings can affect actual permissions
+
+**Fix Required:**
+```typescript
+async save(id: ConnectionId, credentials: OAuthCredentials): Promise<void> {
+  await this.ensureServiceDir(id.service);
+  const filePath = this.getFilePath(id);
+
+  // Write to temp file first for atomicity
+  const tempPath = `${filePath}.tmp.${Date.now()}`;
+
+  try {
+    await fs.writeFile(tempPath, JSON.stringify(credentials, null, 2), {
+      mode: 0o600,
+      encoding: "utf-8",
+    });
+
+    // Verify permissions were set correctly
+    const stats = await fs.stat(tempPath);
+    const actualMode = stats.mode & 0o777;
+    if (actualMode !== 0o600) {
+      debug('WARNING: File permissions not 0o600, forcing chmod');
+      await fs.chmod(tempPath, 0o600);
+    }
+
+    // Atomic rename
+    await fs.rename(tempPath, filePath);
+
+    // Verify final permissions
+    const finalStats = await fs.stat(filePath);
+    if ((finalStats.mode & 0o777) !== 0o600) {
+      throw new Error(`Failed to set secure permissions on ${filePath}`);
+    }
+
+    debug("Credentials saved securely to %s", filePath);
+  } catch (error) {
+    // Clean up temp file on error
+    try {
+      await fs.unlink(tempPath);
+    } catch {}
+    throw error;
+  }
+}
+```
+
+**Additional Check:**
+```typescript
+// Add permission audit on startup
+async auditCredentialPermissions(): Promise<void> {
+  const connections = await this.listAll();
+
+  for (const conn of connections) {
+    const filePath = this.getFilePath(conn);
+    try {
+      const stats = await fs.stat(filePath);
+      const mode = stats.mode & 0o777;
+
+      if (mode !== 0o600) {
+        debug('SECURITY: Fixing permissions on %s (was %o)', filePath, mode);
+        await fs.chmod(filePath, 0o600);
+      }
+    } catch (err) {
+      debug('Failed to audit %s: %s', filePath, err);
+    }
+  }
+}
+```
+
+---
+
+### 6. Metadata Injection Vulnerability
+
+**Location:** `packages/db/src/connection-store.ts:1825-1851`
+
+**Issue:**
+```typescript
+async upsertConnection(
+  conn: Omit<Connection, "metadata"> & { metadata?: Record<string, unknown> }
+): Promise<void> {
+  const metadataJson = conn.metadata ? JSON.stringify(conn.metadata) : null;
+  await this.db.db.exec(
+    `
+    INSERT INTO connections (id, service, account_id, status, label, error, created_at, last_used_at, metadata)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      status = excluded.status,
+      label = COALESCE(excluded.label, connections.label),
+      error = excluded.error,
+      last_used_at = excluded.last_used_at,
+      metadata = COALESCE(excluded.metadata, connections.metadata)
+  `,
+    [
+      conn.id,
+      conn.service,
+      conn.account_id,
+      conn.status,
+      conn.label,
+      conn.error,
+      conn.created_at,
+      conn.last_used_at,
+      metadataJson,
+    ]
+  );
+}
+```
+
+**Problem:**
+- `metadata` is user-controlled (comes from OAuth provider responses)
+- No validation on metadata content or size
+- No sanitization of special characters
+- Could contain malicious JSON that breaks parsing elsewhere
+- Could be extremely large (DoS)
+
+**Attack Vectors:**
+```javascript
+// Size DoS
+metadata: { huge: 'x'.repeat(10_000_000) }
+
+// JSON bomb
+metadata: {
+  deeply: { nested: { object: { ... } } } // 1000 levels deep
+}
+
+// Special characters that break parsing
+metadata: {
+  evil: '</script><script>alert(1)</script>',
+  unicode: '\u0000\u0001\u0002',
+  control: '\x00\x01\x02'
+}
+
+// Prototype pollution attempt (if parsed unsafely elsewhere)
+metadata: {
+  '__proto__': { admin: true },
+  'constructor': { prototype: { admin: true } }
+}
+```
+
+**Fix Required:**
+```typescript
+// Add metadata validation
+function validateMetadata(metadata: Record<string, unknown> | undefined): void {
+  if (!metadata) return;
+
+  // Size limit: 10KB
+  const json = JSON.stringify(metadata);
+  if (json.length > 10_000) {
+    throw new Error('Metadata too large (max 10KB)');
+  }
+
+  // Depth limit: prevent deeply nested objects
+  function getDepth(obj: any, depth = 0): number {
+    if (depth > 10) throw new Error('Metadata too deeply nested (max 10 levels)');
+    if (typeof obj !== 'object' || obj === null) return depth;
+    return Math.max(...Object.values(obj).map(v => getDepth(v, depth + 1)));
+  }
+  getDepth(metadata);
+
+  // Sanitize keys: no __proto__, constructor, prototype
+  function sanitizeKeys(obj: any): any {
+    if (typeof obj !== 'object' || obj === null) return obj;
+
+    const dangerous = ['__proto__', 'constructor', 'prototype'];
+    for (const key of Object.keys(obj)) {
+      if (dangerous.includes(key)) {
+        throw new Error(`Dangerous metadata key: ${key}`);
+      }
+      obj[key] = sanitizeKeys(obj[key]);
+    }
+    return obj;
+  }
+  sanitizeKeys(metadata);
+}
+
+// Use in upsertConnection:
+async upsertConnection(
+  conn: Omit<Connection, "metadata"> & { metadata?: Record<string, unknown> }
+): Promise<void> {
+  // Validate metadata
+  validateMetadata(conn.metadata);
+
+  const metadataJson = conn.metadata ? JSON.stringify(conn.metadata) : null;
+
+  // Rest of implementation...
+}
+```
+
+**Additional Protection:**
+```typescript
+// When reading metadata, use safe parsing
+function parseMetadataSafe(metadataStr: string | null): Record<string, unknown> | null {
+  if (!metadataStr) return null;
+
+  try {
+    const parsed = JSON.parse(metadataStr);
+
+    // Ensure it's a plain object
+    if (typeof parsed !== 'object' || Array.isArray(parsed)) {
+      debug('Invalid metadata format, expected object');
+      return null;
+    }
+
+    // Strip dangerous keys
+    const { __proto__, constructor, prototype, ...safe } = parsed;
+    return safe;
+  } catch (err) {
+    debug('Failed to parse metadata: %s', err);
+    return null;
+  }
+}
+```
+
+---
+
+### 7. Timing Attack on State Validation
+
+**Location:** `packages/connectors/src/manager.ts:724-749`
+
+**Issue:**
+```typescript
+completeOAuthFlow(serviceId: string, code: string, state: string) {
+  const pending = this.pendingStates.get(state);
+  if (!pending) {
+    return { success: false, error: "Invalid or expired state" };
+  }
+
+  // String comparison is vulnerable to timing attacks
+  if (pending.service !== serviceId) {
+    return { success: false, error: "State mismatch" };
+  }
+}
+```
+
+**Problem:**
+- String comparison using `!==` is not constant-time
+- Attacker can measure response time to deduce correct characters
+- Can potentially forge valid state parameter through timing attack
+
+**Fix Required:**
+```typescript
+import { timingSafeEqual } from 'crypto';
+
+function constantTimeStringEquals(a: string, b: string): boolean {
+  if (a.length !== b.length) {
+    // Compare with dummy string of same length as 'a'
+    // to prevent length-based timing leak
+    const dummy = 'x'.repeat(a.length);
+    const bufA = Buffer.from(a);
+    const bufDummy = Buffer.from(dummy);
+    timingSafeEqual(bufA, bufDummy); // Always runs
+    return false;
+  }
+
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  return timingSafeEqual(bufA, bufB);
+}
+
+async completeOAuthFlow(
+  serviceId: string,
+  code: string,
+  state: string
+): Promise<OAuthCallbackResult> {
+  const pending = this.pendingStates.get(state);
+  if (!pending) {
+    // Constant time response even when state not found
+    await new Promise(resolve => setTimeout(resolve, Math.random() * 100));
+    return { success: false, error: "Invalid or expired state" };
+  }
+
+  // Constant-time comparison
+  if (!constantTimeStringEquals(pending.service, serviceId)) {
+    await new Promise(resolve => setTimeout(resolve, Math.random() * 100));
+    return { success: false, error: "State mismatch" };
+  }
+
+  // Rest of validation...
+}
+```
+
+---
+
+## Medium Priority Issues
+
+### 8. Missing Token Revocation
+
+**Location:** `packages/connectors/src/manager.ts:855-864`
+
+**Issue:**
+```typescript
+async disconnect(id: ConnectionId): Promise<void> {
+  const connectionId = `${id.service}:${id.accountId}`;
+  debug("Disconnecting %s", connectionId);
+
+  // Delete credentials file
+  await this.store.delete(id);
+
+  // Delete from database
+  await this.db.deleteConnection(connectionId);
+  // NO TOKEN REVOCATION!
+}
+```
+
+**Problem:**
+- Credentials are deleted locally but token remains valid at provider
+- User has no way to revoke access
+- If credentials were compromised, they remain valid until expiry
+
+**Fix Required:**
+```typescript
+async disconnect(id: ConnectionId, revoke = true): Promise<void> {
+  const connectionId = `${id.service}:${id.accountId}`;
+  debug("Disconnecting %s (revoke=%s)", connectionId, revoke);
+
+  // Optionally revoke token at provider
+  if (revoke) {
+    try {
+      const creds = await this.store.load(id);
+      if (creds) {
+        await this.revokeToken(id, creds);
+      }
+    } catch (err) {
+      debug('Failed to revoke token for %s: %s', connectionId, err);
+      // Continue with local cleanup even if revoke fails
+    }
+  }
+
+  // Delete credentials file
+  await this.store.delete(id);
+
+  // Delete from database
+  await this.db.deleteConnection(connectionId);
+}
+
+private async revokeToken(id: ConnectionId, creds: OAuthCredentials): Promise<void> {
+  const service = this.services.get(id.service);
+  if (!service?.oauthConfig.revokeUrl) {
+    debug('Service %s does not support token revocation', id.service);
+    return;
+  }
+
+  // Google revocation endpoint
+  if (id.service === 'gmail' || id.service.startsWith('g')) {
+    await fetch(`https://oauth2.googleapis.com/revoke?token=${creds.accessToken}`, {
+      method: 'POST',
+    });
+  }
+
+  // Notion doesn't have public revocation endpoint
+  // Users must revoke manually in Notion settings
+}
+```
+
+---
+
+### 9. No Rate Limiting on OAuth Flows
+
+**Location:** `packages/connectors/src/manager.ts:673-714`
+
+**Issue:**
+- `startOAuthFlow()` can be called unlimited times
+- No per-IP or per-user rate limiting
+- Attacker can exhaust OAuth provider's rate limits
+- Attacker can fill `pendingStates` map (despite max size)
+
+**Fix Required:**
+```typescript
+private oauthAttempts = new Map<string, { count: number; resetAt: number }>();
+
+startOAuthFlow(serviceId: string, redirectUri: string): { authUrl: string; state: string } {
+  // Rate limiting: 5 attempts per service per 15 minutes
+  const key = serviceId;
+  const now = Date.now();
+  const limit = this.oauthAttempts.get(key);
+
+  if (limit) {
+    if (now < limit.resetAt) {
+      if (limit.count >= 5) {
+        throw new Error('Too many OAuth attempts. Please try again later.');
+      }
+      limit.count++;
+    } else {
+      // Reset window
+      this.oauthAttempts.set(key, { count: 1, resetAt: now + 15 * 60 * 1000 });
+    }
+  } else {
+    this.oauthAttempts.set(key, { count: 1, resetAt: now + 15 * 60 * 1000 });
+  }
+
+  // Rest of implementation...
+}
+```
+
+---
+
+### 10. Credential File Write Not Atomic
+
+**Location:** `packages/connectors/src/store.ts:1343-1355`
+
+**Issue:**
+```typescript
+await fs.writeFile(filePath, JSON.stringify(credentials, null, 2), {
+  mode: 0o600,
+  encoding: "utf-8",
+});
+```
+
+**Problem:**
+- Direct write to final file path
+- If process crashes during write, file is corrupted
+- No way to recover from partial write
+- Critical for credentials - corruption = account lockout
+
+**Fix Required:**
+```typescript
+async save(id: ConnectionId, credentials: OAuthCredentials): Promise<void> {
+  await this.ensureServiceDir(id.service);
+  const filePath = this.getFilePath(id);
+
+  // Write to temp file first
+  const tempPath = `${filePath}.tmp.${process.pid}.${Date.now()}`;
+
+  try {
+    // Write temp file
+    await fs.writeFile(tempPath, JSON.stringify(credentials, null, 2), {
+      mode: 0o600,
+      encoding: "utf-8",
+    });
+
+    // Sync to disk to ensure data is persisted
+    const fd = await fs.open(tempPath, 'r+');
+    await fd.sync();
+    await fd.close();
+
+    // Atomic rename (atomic on POSIX systems)
+    await fs.rename(tempPath, filePath);
+
+    debug("Credentials saved to %s", filePath);
+  } catch (error) {
+    // Clean up temp file on error
+    try {
+      await fs.unlink(tempPath);
+    } catch {}
+    throw error;
+  }
+}
+```
+
+---
+
+## Architectural Review
+
+### Positive Patterns ✓
+
+1. **Separation of Concerns**
+   - Credentials in files, metadata in database - good design
+   - Database interface injection - excellent for testing
+   - No circular dependencies between packages
+
+2. **Security by Design**
+   - File permissions set to 0o600 (owner-only)
+   - CSRF protection with state parameter
+   - On-demand token refresh with buffer time
+
+3. **Error Handling Structure**
+   - Custom error types (OAuthError, AuthError)
+   - Error classification system
+   - Debug logging throughout
+
+4. **Code Organization**
+   - Clean package structure
+   - Type-safe interfaces
+   - Good separation of OAuth mechanics from business logic
+
+### Architectural Concerns
+
+1. **In-Memory State Management**
+   - `pendingStates` Map doesn't survive server restarts
+   - If server restarts during OAuth flow, user gets "invalid state" error
+   - Consider: Store pending states in database or Redis for production
+
+2. **No Distributed System Support**
+   - `pendingStates` and `refreshLocks` are per-instance
+   - Won't work in multi-server deployment
+   - Consider: Use Redis or similar for shared state
+
+3. **File-Based Credentials**
+   - Good for single-user desktop app
+   - Won't scale to multi-user server deployment
+   - Consider: OS keychain integration (Keytar) for better security
+
+4. **Reconciliation on Startup Only**
+   - File-DB sync only happens once at startup
+   - If files deleted while server running, DB becomes stale
+   - Consider: Periodic reconciliation or file system watchers
+
+5. **No Audit Trail**
+   - No logging of OAuth events for security auditing
+   - Can't track: who connected when, from what IP, etc.
+   - Consider: Add audit log table for compliance
+
+---
+
+## Code Quality Issues
+
+### 1. Inconsistent Error Handling
+
+Some methods throw, others return error objects:
+```typescript
+// Throws
+async getCredentials(id: ConnectionId): Promise<OAuthCredentials> {
+  if (!creds) {
+    throw new AuthError(`No credentials for ${connectionId}`);
+  }
+}
+
+// Returns error object
+async completeOAuthFlow(...): Promise<OAuthCallbackResult> {
+  return { success: false, error: message };
+}
+```
+
+**Recommendation:** Document when each pattern is appropriate, or standardize.
+
+### 2. Encoding/Decoding Logic Issues
+
+**Location:** `packages/connectors/src/store.ts:1318-1320, 1420-1423`
+
+```typescript
+// Encoding
+const safeAccountId = encodeURIComponent(id.accountId).replace(/%/g, "_");
+
+// Decoding
+accountId: decodeURIComponent(
+  file.slice(0, -5).replace(/_/g, "%")
+),
+```
+
+**Problems:**
+- Not symmetric: `encode(decode(x)) !== x` in many cases
+- `%2F` (/) becomes `_2F`, which when decoded becomes `%2F` again (not `/`)
+- Original accountId cannot be reliably recovered
+- Already flagged as Critical Issue #1, but worth noting as code quality issue
+
+### 3. Missing Input Validation
+
+**Location:** Multiple places
+
+No validation on:
+- `service` parameter (could be any string)
+- `accountId` parameter (could be empty string, very long, etc.)
+- `label` parameter (could be SQL injection if not parameterized)
+- `redirectUri` parameter (could be malicious URL)
+
+**Fix Required:**
+```typescript
+function validateConnectionId(id: ConnectionId): void {
+  if (!id.service || typeof id.service !== 'string') {
+    throw new Error('Invalid service');
+  }
+  if (!/^[a-z0-9_-]+$/i.test(id.service)) {
+    throw new Error('Invalid service format');
+  }
+  if (!id.accountId || typeof id.accountId !== 'string') {
+    throw new Error('Invalid accountId');
+  }
+  if (id.accountId.length > 255) {
+    throw new Error('AccountId too long');
+  }
+}
+
+// Use in all public methods
+async getCredentials(id: ConnectionId): Promise<OAuthCredentials> {
+  validateConnectionId(id);
+  // ...
+}
+```
+
+### 4. Potential Memory Leaks
+
+**Location:** `packages/connectors/src/manager.ts`
+
+Three Maps are never cleaned up:
+```typescript
+private services = new Map<string, ServiceDefinition>();
+private pendingStates = new Map<string, PendingState>();
+private refreshLocks = new Map<string, Promise<OAuthCredentials>>();
+```
+
+- `services`: Intentional, should remain
+- `pendingStates`: Has lazy cleanup, but no hard limit (flagged as Critical #2)
+- `refreshLocks`: No cleanup! Locks remain forever after refresh completes
+
+**Fix for refreshLocks:**
+Already included in Critical Issue #3 fix (`.finally()` cleanup)
+
+### 5. Magic Numbers
+
+Throughout the code:
+```typescript
+const REFRESH_BUFFER_MS = 5 * 60 * 1000;
+const STATE_TTL_MS = 10 * 60 * 1000;
+0o600 // File permissions
+```
+
+**Recommendation:**
+- Move to configuration file or constants section
+- Document why these specific values were chosen
+
+---
+
+## Migration Safety
+
+### Database Migration v33
+
+**Location:** `packages/db/src/migrations/v33.ts`
+
+**Review:**
+```sql
+CREATE TABLE IF NOT EXISTS connections (
+  id TEXT PRIMARY KEY NOT NULL DEFAULT '',
+  service TEXT NOT NULL DEFAULT '',
+  account_id TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'connected',
+  label TEXT,
+  error TEXT,
+  created_at INTEGER NOT NULL DEFAULT 0,
+  last_used_at INTEGER,
+  metadata TEXT
+)
+```
+
+**Issues:**
+
+1. **Missing UNIQUE Constraint**
+   - Should have `UNIQUE(service, account_id)` to prevent duplicates
+   - Currently only `PRIMARY KEY(id)` which is manually constructed
+   - What if two connections have same service+accountId but different IDs?
+
+**Fix:**
+```sql
+CREATE TABLE IF NOT EXISTS connections (
+  id TEXT PRIMARY KEY NOT NULL DEFAULT '',
+  service TEXT NOT NULL DEFAULT '',
+  account_id TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'connected',
+  label TEXT,
+  error TEXT,
+  created_at INTEGER NOT NULL DEFAULT 0,
+  last_used_at INTEGER,
+  metadata TEXT,
+  UNIQUE(service, account_id)  -- Prevent duplicate connections
+);
+```
+
+2. **Status Not Constrained**
+   - `status TEXT` allows any value
+   - Should use `CHECK` constraint to enforce valid values
+
+**Fix:**
+```sql
+status TEXT NOT NULL DEFAULT 'connected'
+  CHECK(status IN ('connected', 'expired', 'error')),
+```
+
+3. **No NOT NULL on account_id**
+   - `account_id` can be NULL despite NOT NULL in table definition
+   - CRSQLite requires DEFAULT but NULL can still be inserted
+
+### Reconciliation Logic
+
+**Location:** `packages/connectors/src/manager.ts:982-1029`
+
+**Concerns:**
+
+1. **Overwrites User Labels**
+```typescript
+// File exists but no db row -> add to db (migration)
+const connection: Connection = {
+  id,
+  service: fileConn.service,
+  accountId: fileConn.accountId,
+  status: "connected",
+  label: undefined,  // OVERWRITES any existing label!
+  // ...
+};
+await this.db.upsertConnection(connection);
+```
+
+**Fix:**
+```typescript
+// Check if row exists first
+const existing = await this.db.getConnection(id);
+const connection: Connection = {
+  id,
+  service: fileConn.service,
+  accountId: fileConn.accountId,
+  status: "connected",
+  label: existing?.label, // Preserve existing label
+  // ...
+};
+```
+
+2. **No Reconciliation of Corrupted Files**
+```typescript
+const creds = await this.store.load(fileConn);
+// What if this throws because JSON is corrupted?
+// Error will propagate and stop reconciliation
+```
+
+**Fix:**
+```typescript
+try {
+  const creds = await this.store.load(fileConn);
+  // ...
+} catch (err) {
+  debug('Failed to load credentials for %s, marking as error', id);
+  await this.db.upsertConnection({
+    id,
+    service: fileConn.service,
+    accountId: fileConn.accountId,
+    status: 'error',
+    error: 'Credential file corrupted',
+    createdAt: Date.now(),
+  });
+}
+```
+
+---
+
+## Testing Gaps
+
+### Critical Paths Missing Tests
+
+According to the spec, unit tests should have 95%+ coverage for security-critical code, but the commit doesn't include any test files.
+
+**Required Tests:**
+
+1. **Path Traversal Tests**
+```typescript
+describe('CredentialStore.getFilePath', () => {
+  it('should reject path traversal in service', () => {
+    expect(() => store.getFilePath({ service: '../etc', accountId: 'user' }))
+      .toThrow();
+  });
+
+  it('should reject path traversal in accountId', () => {
+    expect(() => store.getFilePath({ service: 'gmail', accountId: '../../../passwd' }))
+      .toThrow();
+  });
+
+  it('should not create collisions', () => {
+    const path1 = store.getFilePath({ service: 'gmail', accountId: 'user@test.com' });
+    const path2 = store.getFilePath({ service: 'gmail', accountId: 'user%40test.com' });
+    expect(path1).not.toBe(path2);
+  });
+});
+```
+
+2. **CSRF Tests**
+```typescript
+describe('ConnectionManager CSRF protection', () => {
+  it('should reject reused state parameter', async () => {
+    const { state } = manager.startOAuthFlow('gmail', 'http://localhost/callback');
+
+    const result1 = await manager.completeOAuthFlow('gmail', 'code1', state);
+    const result2 = await manager.completeOAuthFlow('gmail', 'code2', state);
+
+    expect(result1.success).toBe(true);
+    expect(result2.success).toBe(false);
+    expect(result2.error).toContain('Invalid or expired state');
+  });
+
+  it('should reject expired state', async () => {
+    const { state } = manager.startOAuthFlow('gmail', 'http://localhost/callback');
+
+    // Fast-forward time
+    jest.advanceTimersByTime(11 * 60 * 1000);
+
+    const result = await manager.completeOAuthFlow('gmail', 'code', state);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('expired');
+  });
+
+  it('should enforce max pending states', async () => {
+    // Create 100 pending states
+    for (let i = 0; i < 100; i++) {
+      manager.startOAuthFlow('gmail', 'http://localhost/callback');
+    }
+
+    // This should remove oldest and add new
+    const { state } = manager.startOAuthFlow('gmail', 'http://localhost/callback');
+    expect(state).toBeDefined();
+  });
+});
+```
+
+3. **Token Refresh Race Condition Tests**
+```typescript
+describe('ConnectionManager token refresh', () => {
+  it('should not refresh token multiple times concurrently', async () => {
+    const refreshSpy = jest.spyOn(manager as any, 'refreshToken');
+
+    // Simulate 10 concurrent requests
+    const promises = Array(10).fill(null).map(() =>
+      manager.getCredentials({ service: 'gmail', accountId: 'user@test.com' })
+    );
+
+    await Promise.all(promises);
+
+    // Should only refresh once
+    expect(refreshSpy).toHaveBeenCalledTimes(1);
+  });
+});
+```
+
+4. **File Permission Tests**
+```typescript
+describe('CredentialStore file security', () => {
+  it('should create files with 0o600 permissions', async () => {
+    await store.save(connectionId, credentials);
+
+    const stats = await fs.stat(store.getFilePath(connectionId));
+    const mode = stats.mode & 0o777;
+    expect(mode).toBe(0o600);
+  });
+
+  it('should maintain 0o600 permissions on update', async () => {
+    // Create with wrong permissions
+    await fs.writeFile(filePath, '{}', { mode: 0o644 });
+
+    // Update via store
+    await store.save(connectionId, credentials);
+
+    // Should be fixed
+    const stats = await fs.stat(filePath);
+    expect(stats.mode & 0o777).toBe(0o600);
+  });
+});
+```
+
+---
+
+## Build-Time Security Review
+
+### tsup.config.ts Changes
+
+**Location:** `apps/server/tsup.config.ts:243-320`
+
+**Review:**
+
+1. **Secrets File Loading**
+```typescript
+function loadBuildSecrets(): Record<string, string> {
+  const secretsPath = path.join(process.cwd(), '../../secrets.build.json');
+
+  if (fs.existsSync(secretsPath)) {
+    try {
+      return JSON.parse(fs.readFileSync(secretsPath, 'utf-8'));
+    } catch (error) {
+      console.warn('Warning: Failed to parse secrets.build.json:', error);
+    }
+  }
+
+  return {};
+}
+```
+
+**Issues:**
+
+a) **Path Traversal via process.cwd()**
+- `process.cwd()` can be manipulated if build runs in unexpected directory
+- Relative path `../../` is fragile
+
+**Fix:**
+```typescript
+const secretsPath = path.resolve(__dirname, '../../secrets.build.json');
+```
+
+b) **Silent Failure**
+- If `secrets.build.json` exists but is corrupted, returns `{}`
+- Build continues with empty secrets
+- Better to fail fast
+
+**Fix:**
+```typescript
+if (fs.existsSync(secretsPath)) {
+  try {
+    const content = fs.readFileSync(secretsPath, 'utf-8');
+    if (!content.trim()) {
+      throw new Error('secrets.build.json is empty');
+    }
+    return JSON.parse(content);
+  } catch (error) {
+    // Fail build on parse error
+    throw new Error(`Failed to parse secrets.build.json: ${error}`);
+  }
+}
+```
+
+2. **Weak Validation**
+```typescript
+if (!GOOGLE_CLIENT_SECRET) {
+  console.warn('Warning: GOOGLE_CLIENT_SECRET not found...');
+}
+```
+
+**Issue:** Only warns, doesn't fail build
+**Fix:** Make it an error if building for production
+
+```typescript
+const isProduction = process.env.NODE_ENV === 'production';
+if (!GOOGLE_CLIENT_SECRET && isProduction) {
+  throw new Error(
+    'GOOGLE_CLIENT_SECRET is required for production builds.\n' +
+    'Set BUILD_GMAIL_SECRET env var or create secrets.build.json'
+  );
+}
+```
+
+3. **Legacy Alias**
+```typescript
+// Legacy alias for backwards compatibility during migration
+'process.env.BUILD_GMAIL_SECRET': JSON.stringify(GOOGLE_CLIENT_SECRET),
+```
+
+**Concern:**
+- Creates confusion about which variable to use
+- Should have migration deadline documented
+- Consider removing to force migration
+
+---
+
+## Recommendations Summary
+
+### Immediate Actions Required (Before Merge)
+
+1. **Fix Path Traversal Vulnerability** (Critical #1)
+   - Change accountId encoding to use crypto hash
+   - Add validation for service parameter
+
+2. **Fix CSRF State Management** (Critical #2)
+   - Add hard limit on pending states
+   - Add periodic cleanup timer
+   - Re-validate redirectUri in completeOAuthFlow
+
+3. **Fix Token Refresh Race** (Critical #3)
+   - Add refresh lock mechanism
+   - Implement jitter for concurrent refreshes
+
+4. **Fix Error Information Leakage** (Critical #4)
+   - Sanitize OAuth errors before returning to client
+   - Remove detailed error information from OAuthError
+
+5. **Fix File Permissions** (High #5)
+   - Add permission validation after write
+   - Implement atomic write with temp files
+
+### Short-Term Improvements (Within 1 Week)
+
+6. **Add Metadata Validation** (High #6)
+7. **Fix Timing Attack** (High #7)
+8. **Add Token Revocation** (Medium #8)
+9. **Add Rate Limiting** (Medium #9)
+10. **Implement Atomic Writes** (Medium #10)
+
+### Medium-Term Enhancements (Within 1 Month)
+
+11. **Add Comprehensive Tests**
+    - Path traversal tests
+    - CSRF protection tests
+    - Token refresh race tests
+    - File permission tests
+
+12. **Add Audit Logging**
+    - Log OAuth events (start, complete, error)
+    - Log credential access
+    - Log disconnections
+
+13. **Improve Reconciliation**
+    - Run periodically, not just on startup
+    - Handle corrupted files gracefully
+    - Preserve user labels
+
+14. **Add Database Constraints**
+    - `UNIQUE(service, account_id)`
+    - `CHECK` constraint on status
+    - Indices on commonly queried fields
+
+### Long-Term Considerations
+
+15. **Distributed System Support**
+    - Move pending states to Redis
+    - Implement distributed locking for token refresh
+    - Consider session affinity for OAuth callbacks
+
+16. **Enhanced Security**
+    - OS keychain integration (Keytar)
+    - Encrypted credential storage
+    - Hardware security module (HSM) support
+
+17. **Monitoring & Alerting**
+    - OAuth failure rate monitoring
+    - Token refresh failure alerts
+    - Suspicious activity detection
+
+---
+
+## Compliance & Standards
+
+### OAuth 2.0 RFC 6749 Compliance
+
+✓ **Compliant:**
+- Authorization Code Grant flow
+- State parameter for CSRF protection
+- Refresh token support
+- Proper redirect URI validation
+
+⚠️ **Partially Compliant:**
+- Token revocation (RFC 7009) - not implemented
+- Token introspection (RFC 7662) - not applicable (desktop app)
+
+❌ **Non-Compliant:**
+- Proof Key for Code Exchange (PKCE, RFC 7636) - should be implemented
+  - PKCE adds extra security layer for public clients (desktop apps)
+  - Prevents authorization code interception attacks
+  - Recommended even for desktop apps with client secrets
+
+### OWASP Top 10 (2021)
+
+1. **A01:2021 – Broken Access Control** - Partially addressed
+   - File permissions set correctly (0o600)
+   - But: No validation after write
+
+2. **A02:2021 – Cryptographic Failures** - Addressed
+   - Using UUID for state (crypto.randomUUID())
+   - But: No encryption for stored credentials
+
+3. **A03:2021 – Injection** - Needs attention
+   - SQL injection prevented by parameterized queries ✓
+   - Path traversal vulnerability identified ❌
+
+4. **A04:2021 – Insecure Design** - Good overall
+   - Proper separation of concerns
+   - State management needs improvement
+
+5. **A05:2021 – Security Misconfiguration** - Addressed
+   - Secrets properly externalized
+   - File permissions configured
+
+6. **A07:2021 – Identification and Authentication Failures** - Needs attention
+   - OAuth flow implemented correctly
+   - But: No rate limiting, timing attacks possible
+
+7. **A09:2021 – Security Logging and Monitoring** - Needs improvement
+   - Debug logging present
+   - But: No audit trail for security events
+
+---
+
+## Final Verdict
+
+### Overall Assessment: **NEEDS WORK BEFORE PRODUCTION**
+
+**Strengths:**
+- Well-structured architecture
+- Good separation of concerns
+- Follows specs closely
+- Type-safe implementation
+
+**Critical Weaknesses:**
+- Path traversal vulnerability
+- CSRF state management issues
+- Token refresh race conditions
+- Error information leakage
+
+**Recommendation:**
+✅ **Approve for development/staging** - Code is well-structured and demonstrates good understanding of OAuth flows
+
+⚠️ **Block production deployment** until critical security issues are resolved
+
+🔒 **Security Score: 6.5/10**
+- Architecture: 8/10
+- Implementation: 6/10
+- Security: 5/10
+- Testing: 2/10 (no tests included)
+
+---
+
+## Detailed Fix Checklist
+
+```markdown
+### Critical Fixes (MUST DO)
+- [ ] #1: Fix path traversal - use crypto hash for filenames
+- [ ] #2: Add hard limit + periodic cleanup for pending states
+- [ ] #3: Implement refresh locks to prevent race conditions
+- [ ] #4: Sanitize OAuth error messages before client exposure
+
+### High Priority Fixes (SHOULD DO)
+- [ ] #5: Validate file permissions after write + implement atomic writes
+- [ ] #6: Add metadata size/depth validation
+- [ ] #7: Use constant-time comparison for state validation
+
+### Medium Priority Fixes (NICE TO HAVE)
+- [ ] #8: Implement token revocation on disconnect
+- [ ] #9: Add rate limiting to startOAuthFlow
+- [ ] #10: Use temp files for atomic credential writes
+
+### Testing Requirements
+- [ ] Add path traversal test cases
+- [ ] Add CSRF protection test cases
+- [ ] Add token refresh race condition tests
+- [ ] Add file permission validation tests
+- [ ] Add metadata validation tests
+
+### Documentation
+- [ ] Document security model in README
+- [ ] Add OAuth flow diagram
+- [ ] Document rate limits and constraints
+- [ ] Add troubleshooting guide
+
+### Code Quality
+- [ ] Fix encoding/decoding symmetry issues
+- [ ] Add input validation on all public methods
+- [ ] Standardize error handling patterns
+- [ ] Remove magic numbers to constants
+```
+
+---
+
+**Review Completed By:** Claude (Anthropic)
+**Review Date:** 2026-01-25
+**Commit:** 61812c5
+**Status:** CONDITIONAL APPROVAL - Fix critical issues before production deployment
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Path traversal vulnerability) - created specs/new/fix-credential-store-path-traversal.md
+- Issue #2 (CSRF state storage vulnerabilities) - created specs/new/fix-oauth-state-management.md
+- Issue #3 (Token refresh race condition) - covered by specs/new/fix-token-refresh-race-condition.md
+- Issue #4 (OAuth error information leakage) - created specs/new/fix-oauth-error-information-leakage.md
+- Issue #5 (File permission validation) - created specs/new/fix-credential-file-permissions.md
+- Issue #6 (Metadata injection) - skipped
+- Issue #7 (Timing attack on state validation) - skipped
+- Issue #8 (Missing token revocation) - created specs/new/add-token-revocation-on-disconnect.md
+- Issue #9 (No rate limiting on OAuth) - skipped (partially covered by fix-oauth-state-management.md)
+- Issue #10 (Non-atomic file write) - covered by specs/new/fix-credential-file-permissions.md

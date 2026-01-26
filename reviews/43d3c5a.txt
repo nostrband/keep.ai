@@ -1,0 +1,133 @@
+COMMIT: 43d3c5a1ca399570a48d7a72715193ae78c4361a
+DATE: Fri Jan 23 17:37:32 2026 +0100
+TITLE: feat: Add in-app bug reporting feature (Priority 3.4)
+
+================================================================================
+CHANGES SUMMARY
+================================================================================
+
+This commit adds an in-app bug reporting feature that allows users to report
+issues directly to GitHub by clicking a "Report Issue" button on error
+notifications.
+
+FILES CHANGED:
+- apps/web/src/lib/bugReport.ts (NEW) - Bug report URL generator utility
+- apps/web/src/components/NotificationCard.tsx - Added "Report Issue" buttons
+- IMPLEMENTATION_PLAN.md - Documentation updates
+
+DETAILED CHANGES:
+
+1. bugReport.ts (125 lines)
+   - New utility module for generating GitHub issue URLs with pre-filled context
+   - Exports BugReportContext interface with errorType, service, message,
+     workflowId, workflowTitle, timestamp fields
+   - generateBugReportUrl() creates URL with title, body, and labels
+   - formatIssueTitle() creates "[Bug] Auth Error in Gmail" style titles
+   - formatIssueBody() creates structured markdown with sections for
+     Description, Error Details, Steps to Reproduce, Expected/Actual Behavior
+   - openBugReport() opens URL in new tab with security attributes
+
+2. NotificationCard.tsx
+   - ErrorCard: Added handleReportIssue() that passes error context to openBugReport
+   - ErrorCard: Added "Report Issue" outline button alongside action buttons
+   - EscalatedCard: Added handleReportIssue() with "escalated" error type
+   - EscalatedCard: Added "Report Issue" button for escalation notifications
+   - Both buttons only show when notification is not resolved
+
+================================================================================
+POTENTIAL ISSUES
+================================================================================
+
+ISSUE 1: HARDCODED GITHUB REPOSITORY URL IS INCORRECT
+Severity: HIGH
+
+In bugReport.ts line 10:
+  const GITHUB_REPO = "anthropics/keep-ai";
+
+But package.json line 52 shows the actual repository:
+  "homepage": "https://github.com/nostrband/keep.ai"
+
+Bug reports will be submitted to the wrong repository (anthropics/keep-ai
+instead of nostrband/keep.ai).
+
+PROPOSAL: Change GITHUB_REPO to "nostrband/keep.ai" or make it configurable
+via environment variable (e.g., VITE_GITHUB_REPO) for multi-deployment support.
+
+
+ISSUE 2: GITHUB_REPO IS NOT CONFIGURABLE
+Severity: MEDIUM
+
+The GitHub repository URL is hardcoded with no configuration option. This is
+problematic for:
+- Self-hosted deployments
+- Forks of the project
+- Organizations deploying their own instances
+
+PROPOSAL: Make the repository configurable via environment variable:
+  const GITHUB_REPO = import.meta.env.VITE_GITHUB_REPO || "nostrband/keep.ai";
+
+
+ISSUE 3: NO URL ENCODING VALIDATION FOR SPECIAL CHARACTERS
+Severity: LOW
+
+The message field is truncated but not sanitized for special characters that
+could break the URL or GitHub's markdown rendering (e.g., backticks, brackets).
+
+Lines 86-89:
+  const message = context.message.length > 500
+    ? context.message.slice(0, 500) + "..."
+    : context.message;
+
+PROPOSAL: Consider escaping or sanitizing the message content to prevent
+URL encoding issues or markdown injection in the GitHub issue body.
+
+
+ISSUE 4: NO TEST COVERAGE
+Severity: LOW
+
+The bugReport.ts module has no unit tests. URL generation logic should be
+tested to ensure proper encoding and formatting.
+
+PROPOSAL: Add tests in packages/tests for:
+- URL generation with various error types
+- Message truncation behavior
+- Special character handling
+- Edge cases (missing fields, empty context)
+
+
+ISSUE 5: FEATURE ONLY AVAILABLE FOR NOTIFICATION ERRORS
+Severity: LOW (design consideration)
+
+The bug reporting feature is only integrated with NotificationCard. Other
+error scenarios in the app (e.g., WorkflowErrorAlert, general API errors)
+cannot leverage this feature.
+
+PROPOSAL: Consider abstracting the bug report trigger into a reusable hook
+or context so other components can offer bug reporting when appropriate.
+
+================================================================================
+POSITIVE OBSERVATIONS
+================================================================================
+
++ Clean separation of concerns - utility module separate from UI component
++ Proper TypeScript interfaces for type safety
++ Security-conscious: noopener,noreferrer on window.open
++ User-friendly: Pre-filled issue template saves user time
++ Only shows "Report Issue" when notification is unresolved (appropriate UX)
++ Well-documented with JSDoc comments
++ Message truncation prevents overly long URLs
++ Consistent pattern between ErrorCard and EscalatedCard
+
+================================================================================
+VERDICT
+================================================================================
+
+APPROVE WITH CHANGES REQUIRED
+
+The feature is well-implemented but the incorrect GitHub repository URL is a
+blocking issue that must be fixed before this is useful to users. Bug reports
+would go to the wrong repository.
+
+Priority fixes:
+1. Change GITHUB_REPO to correct repository (nostrband/keep.ai)
+2. Consider making it configurable for deployment flexibility

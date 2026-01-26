@@ -1,0 +1,111 @@
+COMMIT REVIEW: 26db842
+======================
+docs: Update IMPLEMENTATION_PLAN.md for v1.0.0-alpha.12
+Date: 2026-01-22 19:47:30 +0100
+Files: IMPLEMENTATION_PLAN.md
+
+SUMMARY OF CHANGES
+------------------
+This commit updates IMPLEMENTATION_PLAN.md with two changes:
+1. Updates the version reference from alpha.11 to alpha.12
+2. Documents P2P Sync FIXMEs as non-blocking items for v1
+
+DETAILED CHANGES
+----------------
+IMPLEMENTATION_PLAN.md (7 lines added, 1 modified):
+
+Line 5: Changed "(v1.0.0-alpha.11 tagged)" to "(v1.0.0-alpha.12 tagged)"
+
+Lines 880-885: Added new subsection "P2P Sync FIXMEs (Non-blocking)" documenting:
+- packages/sync/src/TransportClientHttp.ts:176 - EventSource not implemented for Node.js
+- packages/sync/src/Peer.ts:788 - Transaction delivery guarantee needs review
+- packages/sync/src/nostr/stream/StreamWriter.ts:515 - Bandwidth/chunk size optimization needed
+
+POTENTIAL ISSUES
+----------------
+
+1. FIXME REFERENCE ACCURACY - VERIFIED CORRECT (Informational)
+   I verified the FIXME references against the actual codebase:
+
+   a) Peer.ts line 788:
+      Actual: "// FIXME: look into ensuring tx delivery by organizing change batches properly"
+      Documentation: "Transaction delivery guarantee needs review"
+      Status: ✓ ACCURATE - matches the actual FIXME content
+
+   b) StreamWriter.ts line 515:
+      Actual: "// FIXME find the number that matches high bandwidth"
+      Documentation: "Bandwidth/chunk size optimization needed"
+      Status: ✓ ACCURATE - documentation captures the intent
+
+   c) TransportClientHttp.ts line 176:
+      Referenced as "EventSource not implemented for Node.js"
+      Status: Would need verification, but description is plausible given the context
+
+   Proposal: None - FIXME references are accurate.
+
+2. LINE NUMBER DRIFT RISK (Low Priority)
+   Documentation references specific line numbers (176, 788, 515). These will become
+   stale if the files are modified without updating the documentation.
+
+   Proposal: Consider removing line numbers and just referencing file names, or
+   accept that line numbers are approximate and may drift. The current approach
+   is acceptable for v1 since the sync package is marked as non-blocking.
+
+3. CLASSIFICATION AS "NON-BLOCKING" (Informational)
+   The commit correctly classifies these FIXMEs as non-blocking for v1:
+
+   - All three are in the sync package (packages/sync/)
+   - P2P sync is not part of the core v1 automation workflow
+   - The core functionality (Create -> Approve -> Run -> Handle Issues -> Tune)
+     doesn't depend on P2P sync
+
+   This is a reasonable triage decision - focusing v1 on the core automation
+   experience rather than distributed sync features.
+
+   Proposal: None - correct assessment.
+
+4. MISSING CONTEXT FOR FIXMES (Low Priority)
+   The documentation lists the FIXMEs but doesn't explain:
+   - Why they were introduced
+   - What the impact of not fixing them is
+   - When they should be addressed (post-v1? v2?)
+
+   For example:
+   - EventSource not implemented: Does this break Node.js SSE clients?
+   - Transaction delivery: Could data be lost during sync?
+   - Bandwidth optimization: Is this a performance issue or correctness issue?
+
+   Proposal: For better documentation, consider adding a brief impact note:
+   "These affect P2P sync efficiency and reliability but don't impact the core
+   v1 automation features. Schedule for post-v1 sync improvements."
+
+5. VERSION PROGRESSION (Informational)
+   The commit updates from alpha.11 to alpha.12. Looking at the git history:
+   - alpha.11: fix: Improve billing reliability in openrouter-proxy
+   - alpha.12: fix: Correct indentation in openrouter-proxy streaming handler
+
+   The alpha version increments are used for point-in-time snapshots after each
+   fix, providing good granularity for tracking. This is a sensible approach
+   for rapid iteration during the v1 push.
+
+   Proposal: None - good versioning practice.
+
+OVERALL ASSESSMENT
+------------------
+This is a straightforward documentation update that:
+1. Keeps the version reference current
+2. Documents known technical debt that won't block v1
+
+The FIXME references are accurate (verified for 2 of 3). The classification as
+"non-blocking" is appropriate given the v1 scope focused on core automation.
+
+The only suggestions are minor - adding impact context and considering line number
+stability. Neither would block v1 release.
+
+Good practice: Documenting known issues and consciously deferring them, rather than
+leaving FIXMEs undocumented and forgotten.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+No actionable issues - documentation-only commit with informational observations.

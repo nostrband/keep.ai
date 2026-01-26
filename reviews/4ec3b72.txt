@@ -1,0 +1,81 @@
+COMMIT: 4ec3b72
+TITLE: docs: Clean up IMPLEMENTATION_PLAN.md for v1.0.0 completion
+AUTHOR: Artur Briugeman (Co-Authored-By: Claude Opus 4.5)
+DATE: 2026-01-23
+
+## Summary
+
+This commit significantly reorganizes IMPLEMENTATION_PLAN.md to reflect the completion of v1.0.0. The changes:
+
+1. **Added clear status summary** - Added a prominent "Status Summary" section at the top declaring v1.0.0 implementation complete.
+
+2. **Moved completed items to collapsible section** - Consolidated all completed work into an expandable "Completed Features (v1.0.0)" section using `<details>` HTML tags.
+
+3. **Elevated remaining work** - Kept only the remaining tasks (manual OAuth configuration, post-v1 items) prominently at the top of the document.
+
+4. **Preserved historical details** - All implementation details are preserved within collapsible sections for reference.
+
+5. **Simplified invariants section** - Renamed to "Architecture Constraints and Invariants" and condensed key principles.
+
+The commit removes 677 lines and adds 191 lines, resulting in a much cleaner document that's easier to navigate.
+
+## Files Changed
+
+- `IMPLEMENTATION_PLAN.md` (-677, +191 lines)
+
+## Analysis
+
+This is a documentation restructuring that transforms a detailed implementation tracking document into a cleaner v1.0.0 release document.
+
+### What's Good
+
+1. **Improved readability** - The document now leads with the most important information (status and remaining work) rather than detailed completed items.
+
+2. **Collapsible sections** - Using `<details>` tags allows readers to expand completed sections only when needed, reducing visual clutter.
+
+3. **Clear v1.0.0 milestone** - The prominent "v1.0.0 Implementation COMPLETE" message makes the project status immediately clear.
+
+4. **Historical preservation** - All implementation details remain accessible, just organized into expandable sections.
+
+5. **Focused remaining work** - The document clearly shows what's left (manual OAuth configuration and post-v1 items).
+
+## Potential Issues
+
+### Issue 1: Manual OAuth Configuration Section May Confuse Users
+
+**Severity:** Low
+
+**Description:** The "Manual OAuth Configuration" section lists redirect URIs that users must configure in Google Cloud Console and Notion Developer Portal. However, the document doesn't clearly explain:
+- That these are per-user/per-deployment configurations
+- How to find the client ID/secret (from secrets.build.json)
+- What error users will see if these aren't configured
+
+**Proposal:** Consider adding a brief note explaining this is a per-deployment setup step, or link to setup documentation. Not critical for v1.0.0 since this is likely for technical users who understand OAuth setup.
+
+### Issue 2: Missing Navigation Link to ArchivedPage
+
+**Severity:** Very Low (Documentation completeness)
+
+**Description:** Under "4.2 Archive Old Drafts", the completed item mentions ArchivedPage but doesn't document how users navigate to it (the `/archived` route or the link from MainPage).
+
+**Proposal:** This is implementation plan documentation, not user-facing docs. The navigation path is clear in the code. No action needed.
+
+### Issue 3: Post-v1 Section Could Use Prioritization
+
+**Severity:** Very Low (Style)
+
+**Description:** The "Priority 5: Post-v1 Features" section lists several items (Monetization, Support Infrastructure, Script Management, Additional Features) without clear prioritization or grouping by effort/impact.
+
+**Proposal:** Consider adding a brief priority indicator (high/medium/low) or estimated effort to help plan future work. Not blocking for v1.0.0.
+
+### Issue 4: Redundant "Priority 2" Header Left Incomplete
+
+**Severity:** Very Low
+
+**Description:** The "Priority 2: Core Automation Reliability" section only contains "Nice-to-have (post-v1)" items, which seems misaligned with its "Priority 2" label. The original Priority 2 work was completed but the section header remains with only deferred items.
+
+**Proposal:** Consider renaming to "Post-v1 Technical Debt" or merging with Priority 5 section. This is a minor naming inconsistency that doesn't affect functionality.
+
+## Verdict
+
+✅ **APPROVED** - This is a well-executed documentation reorganization that significantly improves the readability of IMPLEMENTATION_PLAN.md. The collapsible sections pattern is appropriate for completed work, and the document now clearly communicates v1.0.0 completion status. All issues noted are minor documentation style suggestions that don't affect the project or codebase.

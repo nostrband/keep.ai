@@ -1,0 +1,166 @@
+COMMIT: 63c1fe5
+TITLE: feat: Implement archive workflow feature
+DATE: Fri Jan 23 14:06:01 2026 +0100
+
+=== SUMMARY ===
+
+This commit implements the ability to archive draft workflows to hide them from
+the main list. Changes include:
+
+1. StatusBadge.tsx - Add 'archived' status badge rendering
+2. MainPage.tsx - Filter archived workflows from display, show "View X archived" link
+3. ArchivedPage.tsx (NEW) - Component for viewing/restoring archived workflows
+4. WorkflowDetailPage.tsx - Add archive button for drafts, restore banner for archived
+5. App.tsx - Add /archived route
+6. IMPLEMENTATION_PLAN.md - Mark feature as complete
+
+This completes the "Archive Old Drafts" feature from ideas/archive-old-drafts.md.
+
+=== ANALYSIS ===
+
+Positive findings:
+- Workflow scheduler properly excludes archived (filters for status === 'active')
+- Route correctly added to App.tsx
+- StatusBadge properly handles new status in switch statement
+- MainPage filtering is correct (status !== 'archived')
+- Archive/restore UX is reversible (no data loss)
+
+Code patterns:
+- WorkflowDetailPage uses useAutoHidingMessage for success/error feedback
+- ArchivedPage uses different pattern (console.error only)
+- handleArchive navigates to /archived after success
+- handleRestore in WorkflowDetailPage shows success toast
+
+=== ISSUES ===
+
+1. HIGH - Archived workflows can still trigger notifications
+   Location: apps/web/src/lib/WorkflowNotifications.ts
+   The notification system fetches ALL workflows and doesn't filter archived ones.
+   If an archived workflow had an error, users would still get notifications about
+   a workflow they've intentionally hidden.
+
+   Impact: Defeats the purpose of archiving - users get notified about hidden items.
+
+2. MEDIUM - No user feedback on error in ArchivedPage.handleRestore
+   Location: apps/web/src/components/ArchivedPage.tsx:19-29
+   The function catches errors and only logs to console. No user-facing message.
+   Compare with WorkflowDetailPage which uses success.show() for feedback.
+
+   Impact: If restore fails, user won't know and may think it succeeded.
+
+3. MEDIUM - No success feedback in ArchivedPage.handleRestore
+   Location: apps/web/src/components/ArchivedPage.tsx:19-29
+   Unlike WorkflowDetailPage.handleRestore which shows "Workflow restored",
+   ArchivedPage shows no confirmation message on success.
+
+   Impact: Inconsistent UX between the two restore locations.
+
+4. MEDIUM - No backend validation for archive operation
+   Location: apps/web/src/components/WorkflowDetailPage.tsx:185-196
+   UI only shows archive button for draft workflows, but no backend validation.
+   A direct API call could archive active/ready/paused workflows.
+
+   Impact: Could accidentally archive running workflows via API manipulation.
+
+5. MINOR - Unused import: Trash2
+   Location: apps/web/src/components/ArchivedPage.tsx:8
+   The Trash2 icon is imported but never used in the component.
+
+   Impact: Dead code, adds to bundle size.
+
+6. MINOR - Unused hook: useNavigate
+   Location: apps/web/src/components/ArchivedPage.tsx:12
+   useNavigate() is instantiated but never used (navigation via <Link> instead).
+
+   Impact: Unnecessary hook instantiation.
+
+7. LOW - No confirmation dialog for archiving
+   Location: apps/web/src/components/WorkflowDetailPage.tsx:185-196
+   Archiving immediately navigates away with no "Are you sure?" prompt.
+   While reversible, user could accidentally archive with a single click.
+
+8. LOW - Restoration always sets status to 'draft'
+   Location: Multiple (WorkflowDetailPage.tsx:204, ArchivedPage.tsx:24)
+   Restoring always sets status to "draft" regardless of previous state.
+   If a "ready" workflow was archived, it would restore as "draft".
+
+   Note: This may be intentional design - archived drafts return as drafts.
+
+=== PROPOSALS ===
+
+1. For issue #1 (notifications for archived):
+   In apps/web/src/lib/WorkflowNotifications.ts, add filter in the workflow loop:
+   ```typescript
+   for (const workflow of workflows) {
+     // Skip archived workflows - user doesn't want notifications for these
+     if (workflow.status === "archived") continue;
+     // ... rest of notification logic
+   }
+   ```
+
+2. For issue #2 and #3 (missing feedback in ArchivedPage):
+   Add useAutoHidingMessage hook and provide user feedback:
+   ```typescript
+   const success = useAutoHidingMessage(3000);
+   const error = useAutoHidingMessage(5000);
+
+   const handleRestore = async (workflowId: string) => {
+     try {
+       await updateWorkflowMutation.mutateAsync({
+         workflowId,
+         status: "draft"
+       });
+       success.show("Workflow restored");
+     } catch (err) {
+       console.error("Failed to restore workflow:", err);
+       error.show("Failed to restore workflow");
+     }
+   };
+   ```
+
+3. For issue #4 (backend validation):
+   Add validation in the workflow update endpoint or useUpdateWorkflow hook to
+   reject archive operations on non-draft workflows:
+   ```typescript
+   if (status === "archived" && currentWorkflow.status !== "draft") {
+     throw new Error("Only draft workflows can be archived");
+   }
+   ```
+
+4. For issues #5 and #6 (unused imports):
+   Remove unused imports from ArchivedPage.tsx:
+   - Remove `Trash2` from lucide-react import
+   - Remove `useNavigate` from react-router-dom import and the const
+
+5. For issue #7 (confirmation dialog):
+   Consider adding a simple confirmation before archiving:
+   ```typescript
+   const handleArchive = async () => {
+     if (!confirm("Archive this workflow? You can restore it later.")) return;
+     // ... existing logic
+   };
+   ```
+   Note: This is optional UX improvement, not required.
+
+=== VERDICT ===
+
+NEEDS ATTENTION - The core feature works correctly, but issue #1 (notifications
+for archived workflows) is a significant oversight that undermines the purpose
+of the archive feature. Issues #2-3 (missing user feedback) affect UX consistency.
+
+Recommended priority:
+- HIGH: Fix notification filtering for archived workflows
+- MEDIUM: Add error/success feedback in ArchivedPage
+- LOW: Remove unused imports, consider confirmation dialog
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Archived workflows notifications) - created specs/new/fix-archived-workflow-notifications.md
+- Issue #2 (No error feedback in ArchivedPage) - created specs/new/fix-archived-page-restore-feedback.md
+- Issue #3 (No success feedback in ArchivedPage) - covered by specs/new/fix-archived-page-restore-feedback.md
+- Issue #4 (No backend validation for archive) - created specs/new/expand-archive-to-paused-workflows.md
+- Issue #5 (Unused import Trash2) - skipped
+- Issue #6 (Unused hook useNavigate) - skipped
+- Issue #7 (No confirmation dialog) - created specs/new/add-archive-confirmation-dialog.md
+- Issue #8 (Restore always sets draft) - created specs/new/smart-workflow-restore-status.md

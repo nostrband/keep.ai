@@ -1,0 +1,163 @@
+COMMIT REVIEW: ba8e12a
+=======================
+refactor: Code quality improvements and centralization
+
+CHANGES OVERVIEW
+----------------
+This commit consolidates duplicated code and improves maintainability:
+
+1. **Extract formatCronSchedule to lib/formatCronSchedule.ts**
+   - Moved from WorkflowInfoBox.tsx to dedicated utility file
+   - Added try-catch error handling (returns raw cron on any failure)
+   - Used by 3 components: MainPage, WorkflowDetailPage, WorkflowInfoBox
+
+2. **Create lib/workflowUtils.ts with shared utilities**
+   - `getWorkflowTitle(workflow)`: Returns title or "New workflow" fallback
+   - `isScriptRunRunning(run)`: Checks if run has no end_timestamp
+   - Replaces 7+ inline implementations across codebase
+
+3. **Add --header-height CSS variable (index.css)**
+   - Defines `--header-height: 49px` in :root
+   - ChatDetailPage sticky element updated to use `top-[var(--header-height)]`
+   - Replaces hardcoded `top-[49px]` for maintainability
+
+4. **Simplify disabled button logic**
+   - Old: `disabled={(!input && !uploadState.isUploading) || uploadState.isUploading}`
+   - New: `disabled={!input || uploadState.isUploading}`
+   - Applied to ChatPage, ChatDetailPage, MainPage, NewPage
+
+FILES CHANGED
+-------------
+- apps/web/src/lib/formatCronSchedule.ts: New file (61 lines)
+- apps/web/src/lib/workflowUtils.ts: New file (19 lines)
+- apps/web/src/index.css: +4 lines (CSS variable)
+- apps/web/src/components/WorkflowInfoBox.tsx: -47 lines (removed function)
+- apps/web/src/components/MainPage.tsx: Updated imports and usage
+- apps/web/src/components/WorkflowDetailPage.tsx: Updated imports
+- apps/web/src/components/ArchivedPage.tsx: Uses getWorkflowTitle
+- apps/web/src/components/ChatPage.tsx: Simplified disabled logic
+- apps/web/src/components/ChatDetailPage.tsx: Both changes applied
+- apps/web/src/components/NewPage.tsx: Simplified disabled logic
+- apps/web/src/components/TaskDetailPage.tsx: Uses getWorkflowTitle
+- apps/web/src/components/WorkflowsPage.tsx: Uses getWorkflowTitle
+- specs/done/*: 6 spec files
+
+POTENTIAL ISSUES
+----------------
+
+### Issue 1: formatCronSchedule Missing Localization
+**Severity:** Low
+**Location:** lib/formatCronSchedule.ts
+
+The function hardcodes English day names and 12-hour AM/PM format. This is fine
+for current requirements but won't internationalize.
+
+**Proposal:** Acceptable for v1. If i18n is needed later, consider using
+cronstrue library which has built-in localization support.
+
+### Issue 2: formatCronSchedule Limited Pattern Support
+**Severity:** Low
+**Location:** lib/formatCronSchedule.ts
+
+Only handles 4 patterns:
+- Every minute: `* * * * *`
+- Hourly: `MM * * * *`
+- Daily: `MM HH * * *`
+- Weekly: `MM HH * * D`
+
+Complex patterns like "every 15 minutes" or "first Monday of month" return raw cron.
+
+**Proposal:** This is intentional - falls back to raw cron for complex patterns.
+The 80/20 approach is appropriate for v1. Document that complex crons show raw
+format.
+
+### Issue 3: CSS Variable Not Used Everywhere
+**Severity:** Low
+**Location:** index.css, various components
+
+Only ChatDetailPage was updated to use --header-height. Other sticky elements:
+- SharedHeader: Uses `top-0` (correct - it IS the header)
+- ConsolePage table header: Uses `top-0` (correct - sticks to container top)
+
+**Status:** Not an issue - other elements correctly use top-0 for their contexts.
+
+### Issue 4: getWorkflowTitle Could Return Empty String
+**Severity:** Very Low
+**Location:** lib/workflowUtils.ts line 11
+
+```typescript
+export function getWorkflowTitle(workflow: { title?: string | null }): string {
+  return workflow.title || DEFAULT_WORKFLOW_TITLE;
+}
+```
+
+The `||` operator handles empty strings correctly (treats "" as falsy, returns
+default). This is the desired behavior.
+
+**Status:** Not an issue - behavior is correct.
+
+### Issue 5: isScriptRunRunning Truthy Check
+**Severity:** Very Low
+**Location:** lib/workflowUtils.ts line 18
+
+```typescript
+export function isScriptRunRunning(run: { end_timestamp?: string | null } | null | undefined): boolean {
+  return run != null && !run.end_timestamp;
+}
+```
+
+Uses `!run.end_timestamp` which treats empty string as falsy. If end_timestamp
+could ever be "", this would incorrectly report the run as running.
+
+**Proposal:** The database schema uses NULL for in-progress runs, never empty
+string. No action needed.
+
+### Issue 6: Disabled Button Logic Simplification Correctness
+**Severity:** None - Verified Correct
+**Location:** ChatPage, ChatDetailPage, MainPage, NewPage
+
+The simplification from:
+  `(!input && !uploadState.isUploading) || uploadState.isUploading`
+to:
+  `!input || uploadState.isUploading`
+
+Let's verify equivalence:
+| input | isUploading | Old Result | New Result |
+|-------|-------------|------------|------------|
+| ""    | false       | true       | true       |
+| ""    | true        | true       | true       |
+| "x"   | false       | false      | false      |
+| "x"   | true        | true       | true       |
+
+**Status:** Verified - behavior is identical. The simplification is correct.
+
+ARCHITECTURAL NOTES
+-------------------
+
+1. **Zero-Dependency Approach:**
+   formatCronSchedule is a custom implementation rather than using cronstrue
+   library. This reduces bundle size and dependency risk while covering 80%
+   of use cases. Complex crons fall back to raw display.
+
+2. **Utility File Organization:**
+   Good separation: formatCronSchedule.ts for cron-specific logic,
+   workflowUtils.ts for workflow-related utilities. Follows single
+   responsibility principle.
+
+3. **CSS Variable Strategy:**
+   The --header-height variable enables future header height changes without
+   searching for magic numbers. Good maintainability improvement.
+
+4. **Consistent Fallback Pattern:**
+   getWorkflowTitle establishes "New workflow" as the canonical default title.
+   Previously, some components used "New workflow", others "Untitled workflow".
+   Now consistent.
+
+VERDICT
+-------
+Clean refactoring commit. Successfully eliminates code duplication across 7+
+components. The formatCronSchedule error handling prevents UI crashes from
+malformed cron data. The disabled button simplification is mathematically
+verified to be equivalent.
+
+No bugs found. Good code quality improvements.

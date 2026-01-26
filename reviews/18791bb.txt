@@ -1,0 +1,152 @@
+COMMIT: 18791bb - refactor: Remove TaskState struct and deprecate Tasks.* tools (Spec 10 completion)
+DATE: 2026-01-23 17:02:55 +0100
+REVIEWER: Claude Opus 4.5
+
+================================================================================
+SUMMARY OF CHANGES
+================================================================================
+
+This commit completes Spec 10 by fully removing the TaskState abstraction and
+deprecating the Tasks.* tools from the agent sandbox API. The changes span
+multiple packages and consolidate task state management to use the simpler
+`asks` field directly on the Task entity.
+
+Key changes:
+1. Removed TaskState type from packages/agent/src/agent-types.ts
+2. Removed useTaskState hook from apps/web/src/hooks/dbTaskReads.ts
+3. Removed taskState query key from queryKeys.ts
+4. Introduced TaskPatch type (containing only `asks` field) for step output patches
+5. Updated AgentTask to use `asks?: string` instead of `state?: TaskState`
+6. Removed Tasks.* tool registrations from sandbox API (Tasks.get, Tasks.list,
+   Tasks.sendToTaskInbox, Tasks.update)
+7. Moved 6 task tool files to packages/agent/src/tools/deprecated/
+8. Updated agent-env.ts system prompts to remove task management references
+9. Removed deprecated TaskState interface and methods (saveState, getState,
+   getStates) from TaskStore
+10. Updated task-worker.ts to track `currentAsks` locally instead of TaskState
+11. Removed deprecated tests for task_states table operations
+
+Files changed: 21 files, +511/-256 lines
+
+================================================================================
+DETAILED ANALYSIS
+================================================================================
+
+AGENT-TYPES.TS:
+- Removed TaskState type (goal, notes, plan, asks fields)
+- Added TaskPatch type with only `asks` field - properly minimal
+- Updated StepOutput to use TaskPatch instead of TaskState
+- Updated AgentTask to use `asks?: string` directly with good JSDoc comment
+
+AGENT.TS:
+- Changed private `state?: TaskState` to `asks?: string`
+- Constructor now initializes `this.asks` from `task.asks`
+- `buildUser` call now passes `this.asks` directly instead of `this.state`
+
+AGENT-ENV.TS:
+- Updated buildUser signature: `(taskId, input, asks?: string)` instead of
+  `(taskId, input, state?: TaskState)`
+- Updated TASK_ASKS handling to use asks directly
+- Removed "Other tasks" section from worker prompt
+- Removed "Workflow Title" section from planner prompt
+- Fixed minor whitespace issue (line 399)
+
+TASK-WORKER.TS:
+- Changed from using `getTaskState()` helper to `currentAsks` local variable
+- AgentTask now constructed with `asks: currentAsks` directly
+- Updated handleReply signature to accept `currentAsks: string` parameter
+- Updated saveTaskRun to accept `currentAsks` instead of `state`
+- Removed getTaskState() private method entirely
+- Fixed typo: "iteraction" -> "iteration" (line 474)
+
+SANDBOX/API.TS:
+- Removed imports for makeGetTaskTool, makeListTasksTool,
+  makeSendToTaskInboxTool, makeTaskUpdateTool
+- Removed all Tasks.* tool registrations (about 20 lines)
+- Added comment explaining removal
+
+TASK-STORE.TS:
+- Removed deprecated TaskState interface
+- Removed saveState(), getState(), getStates() methods (about 70 lines)
+- Task interface retains `asks` field with Spec 10 comment
+
+TESTS/TASK-STORE.TEST.TS:
+- Removed task_states table creation from helper
+- Removed "Deprecated TaskState operations" test describe block (~50 lines)
+
+WEB HOOKS:
+- Removed useTaskState hook entirely from dbTaskReads.ts
+- Removed taskState query key from queryKeys.ts
+
+DEPRECATED TOOLS:
+- Moved to packages/agent/src/tools/deprecated/:
+  - add-task.ts (72 lines)
+  - add-task-recurring.ts (63 lines)
+  - get-task.ts (35 lines)
+  - list-tasks.ts (61 lines)
+  - send-to-task-inbox.ts (73 lines)
+  - task-update.ts (85 lines)
+- All have @deprecated JSDoc comments
+
+================================================================================
+ISSUES FOUND
+================================================================================
+
+ISSUE #1: Outdated README.md documentation
+Severity: LOW
+Location: packages/agent/README.md
+
+The README contains outdated references to deprecated tools and TaskState:
+- Lines 87-88: References makeAddTaskTool which is deprecated
+- Lines 142-146: Lists deprecated task management tools
+- Line 150: References makeSendToTaskInboxTool
+- Line 278: References TaskState in buildUser signature
+- Lines 284-288: Shows AgentTask with state?: TaskState (should be asks?: string)
+
+PROPOSAL: Update README.md to:
+1. Remove or mark deprecated tool examples
+2. Update type signatures to use asks?: string instead of state?: TaskState
+3. Add deprecation notice for moved task tools
+4. Update AgentTask interface example
+
+--------------------------------------------------------------------------------
+
+ISSUE #2: Minor - Possible stale comment in agent-env.ts
+Severity: TRIVIAL
+Location: packages/agent/src/agent-env.ts:399
+
+There's a minor inconsistency where a line ending changed from tab+newline to
+just newline (whitespace-only change visible in diff). Not a bug, just cosmetic.
+
+================================================================================
+ARCHITECTURE ASSESSMENT
+================================================================================
+
+The refactoring is well-designed:
+
+POSITIVES:
+1. Proper separation - deprecated tools moved to deprecated/ folder rather than deleted
+2. Clean type evolution - TaskState -> TaskPatch is a good simplification
+3. Single source of truth - asks now lives only on tasks table, not task_states
+4. Good migration path - existing data was migrated in earlier migration v32
+5. Comprehensive - all usages across packages updated consistently
+6. Tests cleaned up - removed tests for deprecated functionality
+7. System prompts updated - agent no longer instructed about removed features
+
+CONSISTENCY CHECK:
+- All active code paths use task.asks or AgentTask.asks
+- No orphan references to TaskState, useTaskState, or task_states
+- Tools properly moved to deprecated/ with @deprecated JSDoc
+- Index.ts files properly updated
+
+================================================================================
+CONCLUSION
+================================================================================
+
+This is a well-executed cleanup commit. The refactoring successfully removes
+the TaskState abstraction without breaking any functionality. The only issue
+is outdated README documentation (low priority since README is developer docs,
+not user-facing). No bugs or logic issues found.
+
+RATING: GOOD
+ACTION REQUIRED: None (README update optional)

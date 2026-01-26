@@ -1,0 +1,163 @@
+COMMIT: e8926f6 - fix: Update internal navigation to use / instead of /new
+DATE: 2026-01-23 17:19:11 +0100
+REVIEWER: Claude Opus 4.5
+
+================================================================================
+SUMMARY OF CHANGES
+================================================================================
+
+This commit updates internal navigation links to use the root path (/) instead
+of /new or /chat/new. The goal is to remove unnecessary redirects and clean up
+browser history.
+
+Key changes:
+1. ChatSidebar.tsx: Changed "New Chat" link from /chat/new to /
+2. WorkflowsPage.tsx: Changed "Create Workflow" button from /new to /
+3. Moved 4 completed specs to specs/done/
+4. Marked Node.js EventSource item as completed in IMPLEMENTATION_PLAN.md
+
+Files changed: 7 files, +3/-3 lines (mostly file renames)
+
+================================================================================
+DETAILED ANALYSIS
+================================================================================
+
+1. CHATSIDEBAR.TSX (apps/web/src/components/ChatSidebar.tsx)
+
+   Location: Line 59
+   Before: <Link to="/chat/new">
+   After:  <Link to="/">
+
+   This is the "New Chat" button in the chat sidebar.
+
+   ASSESSMENT: Correct change. The root route (/) serves the MainPage which
+   provides the same workflow creation functionality.
+
+--------------------------------------------------------------------------------
+
+2. WORKFLOWSPAGE.TSX (apps/web/src/components/WorkflowsPage.tsx)
+
+   Location: Line 22
+   Before: onClick={() => navigate("/new")}
+   After:  onClick={() => navigate("/")}
+
+   This is the "Create Workflow" button on the workflows list page.
+
+   ASSESSMENT: Correct change. Navigates to MainPage for workflow creation.
+
+--------------------------------------------------------------------------------
+
+3. REDIRECT ROUTE - BACKWARDS COMPATIBILITY
+
+   From App.tsx (line 345):
+   <Route path="/new" element={<Navigate to="/" replace />} />
+
+   The /new redirect is properly in place for backwards compatibility.
+
+   ASSESSMENT: Correct - external links or bookmarks to /new will redirect.
+
+--------------------------------------------------------------------------------
+
+4. SPEC FILES MOVED
+
+   - cleanup-unused-imports.md -> specs/done/
+   - delete-newpage-component.md -> specs/done/
+   - fix-navigation-to-home.md -> specs/done/
+   - fix-script-store-jsdoc.md -> specs/done/
+
+   ASSESSMENT: Proper cleanup of completed specs.
+
+--------------------------------------------------------------------------------
+
+5. IMPLEMENTATION_PLAN.MD UPDATE
+
+   Marked Node.js EventSource item as completed (line 527):
+   - [x] packages/sync/src/TransportClientHttp.ts:176 - Node.js EventSource
+
+   ASSESSMENT: Documentation update, appears accurate.
+
+================================================================================
+ISSUES FOUND
+================================================================================
+
+ISSUE #1: Missing /chat/new redirect route
+Severity: MEDIUM
+Location: apps/web/src/App.tsx
+
+The commit message states "The /new redirect route remains for backwards
+compatibility" but only /new has a redirect, not /chat/new.
+
+Current route configuration (App.tsx lines 340-346):
+  <Route path="/" element={<MainPage />} />
+  <Route path="/chat" element={<ChatPage />} />
+  <Route path="/chat/main" element={<Navigate to="/" replace />} />
+  <Route path="/new" element={<Navigate to="/" replace />} />
+  <Route path="/chats/:id" element={<ChatDetailPage />} />
+
+If a user has a bookmark or deep link to /chat/new:
+1. Route "/chat/new" does not match "/chat/main" (different suffix)
+2. Route "/chat/new" does not match "/new" (different path)
+3. Route "/chat/new" WILL match "/chats/:id" with :id="new"
+4. ChatDetailPage will try to load chat with ID "new" and fail
+
+IMPACT: Users with bookmarks to /chat/new will see an error or empty state
+instead of being redirected to the home page.
+
+PROPOSAL: Add a redirect for /chat/new in App.tsx:
+  <Route path="/chat/new" element={<Navigate to="/" replace />} />
+
+Note: Due to React Router's matching order, this route should be placed
+BEFORE the /chats/:id route to ensure it takes precedence.
+
+================================================================================
+VERIFICATION CHECKS
+================================================================================
+
+REMAINING NAVIGATION TO /new OR /chat/new:
+- Searched entire codebase for navigate("/new") - None found
+- Searched entire codebase for navigate("/chat/new") - None found
+- Searched entire codebase for to="/new" - Only the redirect itself
+- Searched entire codebase for to="/chat/new" - None found
+
+ROOT ROUTE (/) FUNCTIONALITY:
+- MainPage.tsx provides full workflow creation functionality
+- handleSubmit() creates tasks/workflows and navigates to chat
+- File upload support present
+- Feature parity with old /new route confirmed
+
+OTHER ROUTES WITH "new" IN PATH:
+- /chat/new - NOT redirected (Issue #1)
+- /new - Redirected to / (correct)
+- /chat/main - Redirected to / (legacy, correct)
+
+================================================================================
+ARCHITECTURE ASSESSMENT
+================================================================================
+
+POSITIVES:
+1. Clean consolidation of entry points to single / route
+2. Proper backwards compatibility redirect for /new
+3. MainPage provides equivalent functionality
+4. Internal navigation properly updated
+
+NEGATIVES:
+1. Incomplete backwards compatibility - /chat/new not redirected
+2. Users with /chat/new bookmarks will experience breakage
+
+================================================================================
+CONCLUSION
+================================================================================
+
+The commit successfully updates internal navigation to use / instead of /new,
+but has an incomplete backwards compatibility story. The /chat/new path was
+changed but no redirect was added, meaning external links or bookmarks to
+/chat/new will fail to work correctly.
+
+RATING: NEEDS ATTENTION
+ACTION REQUIRED: Add redirect for /chat/new route
+
+Recommended fix in apps/web/src/App.tsx, around line 344:
+  {/* Legacy routes - redirect to home */}
+  <Route path="/chat/main" element={<Navigate to="/" replace />} />
+  <Route path="/chat/new" element={<Navigate to="/" replace />} />  {/* ADD THIS */}
+  <Route path="/new" element={<Navigate to="/" replace />} />

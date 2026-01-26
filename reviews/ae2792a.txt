@@ -1,0 +1,90 @@
+COMMIT: ae2792a
+TITLE: feat: Add EventSource polyfill for Node.js SSE support
+DATE: Fri Jan 23 13:26:32 2026 +0100
+
+=== SUMMARY ===
+
+This commit adds Server-Sent Events (SSE) support for Node.js environments by introducing
+the `eventsource` npm package (v4.1.0) as a polyfill. The implementation:
+
+1. Adds `eventsource` package to packages/sync/package.json
+2. Updates TransportClientHttp.ts with a getEventSource() helper function
+3. Uses browser native EventSource when available, falls back to polyfill in Node.js
+4. Resolves FIXME #20 in IMPLEMENTATION_PLAN.md
+
+Files changed:
+- IMPLEMENTATION_PLAN.md (marks FIXME as resolved)
+- package-lock.json (new dependency)
+- packages/sync/package.json (adds eventsource dependency)
+- packages/sync/src/TransportClientHttp.ts (implements polyfill usage)
+
+=== ANALYSIS ===
+
+The getEventSource() function (lines 16-23) cleanly detects the environment:
+- Checks if native EventSource is available (browser)
+- Falls back to EventSourcePolyfill for Node.js
+- Returns type `typeof EventSource` for proper typing
+
+The implementation correctly:
+- Gives priority to browser native EventSource
+- Uses a defensive pattern that won't break if Node.js gains native EventSource
+- Properly types the return value despite the polyfill's slightly different type signature
+
+Usage in connectSSE() (lines 187-192):
+- Constructor call works identically with polyfill and native
+- URL encoding of peerId prevents injection issues
+- Clean integration with reconnection logic
+
+Resource cleanup is proper:
+- close() called on EventSource instance
+- Reference set to null (prevents memory leaks)
+- Called in both stop() and handleConnectionError() paths
+
+=== ISSUES ===
+
+None critical. Minor observations:
+
+1. MINOR - Type cast workaround
+   Location: packages/sync/src/TransportClientHttp.ts:22
+   The cast `as unknown as typeof EventSource` is necessary because the eventsource
+   package's type signature doesn't perfectly match DOM's EventSource. This is
+   acceptable and properly isolated to one function.
+
+2. MINOR - No dedicated tests for TransportClientHttp
+   There are no transport-specific tests in packages/tests/. While the Transport
+   interface is simple, SSE-specific integration tests would add confidence.
+   Impact: Low - the implementation follows standard patterns.
+
+3. MINOR - Documentation opportunity
+   Could add a brief comment about eventsource polyfill's behavioral differences
+   (e.g., automatic reconnection is handled by the app's own logic, not the polyfill).
+
+=== PROPOSALS ===
+
+1. For issue #2 (no tests):
+   Consider adding integration tests for:
+   - EventSource connection lifecycle
+   - Error recovery and reconnection logic
+   - Message parsing and callback serialization
+
+   This is non-blocking and can be a follow-up task.
+
+2. For issue #3 (documentation):
+   Add a comment near the import explaining why the polyfill is needed:
+   ```typescript
+   // Node.js doesn't have native EventSource; this polyfill provides W3C-compliant SSE
+   // Note: Automatic reconnection is handled by our own logic in handleConnectionError()
+   ```
+
+=== VERDICT ===
+
+APPROVED - Clean, production-ready implementation with proper error handling,
+resource cleanup, and type safety. The eventsource package is well-maintained
+and W3C compliant. No blocking issues found.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Type cast workaround) - skipped
+- Issue #2 (No TransportClientHttp tests) - created specs/new/add-transport-client-http-tests.md
+- Issue #3 (Documentation opportunity) - skipped

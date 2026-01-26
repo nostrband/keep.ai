@@ -1,0 +1,157 @@
+# Code Review: Commit 6777a8e
+
+## Summary
+
+**Commit:** 6777a8e - feat: Implement Connections UI for Settings page (spec 05)
+**Date:** Fri Jan 23 15:58:41 2026 +0100
+**Files Changed:** 5 (IMPLEMENTATION_PLAN.md, ConnectionsSection.tsx, SettingsPage.tsx, dbConnectionReads.ts, queryKeys.ts)
+**Lines:** +570, -224
+
+This commit implements the Connections UI in the Settings page, allowing users to connect, disconnect, and manage OAuth service accounts (Gmail, Google Drive, Sheets, Docs). It removes the old Gmail-specific integration code and replaces it with a unified service connections management UI.
+
+## Changes Description
+
+### apps/web/src/components/ConnectionsSection.tsx (new file, 481 lines)
+- Full connections management UI component
+- Service groups with cards showing connection status
+- Dropdown menu with Rename, Check, Reconnect, Disconnect actions
+- OAuth popup flow with pending state indicator
+- Status badges (green/yellow/red) for connected/expired/error states
+- Inline rename UI with input field
+
+### apps/web/src/components/SettingsPage.tsx
+- Removed Gmail-specific state variables and handlers
+- Removed Gmail polling/checking logic
+- Added ConnectionsSection below the main settings form
+- Cleaner separation of concerns
+
+### apps/web/src/hooks/dbConnectionReads.ts (new file, 53 lines)
+- `useConnections()` - Fetches all connections with auto-invalidation
+- `useConnection()` - Fetches single connection by ID
+- `useConnectionsByService()` - Fetches connections filtered by service
+- Uses TanStack Query with `meta: { tables: ["connections"] }`
+
+### apps/web/src/hooks/queryKeys.ts
+- Added `allConnections`, `connection`, `connectionsByService` query keys
+- Follows established pattern with scope objects
+
+### IMPLEMENTATION_PLAN.md
+- Updated section 1.6 to mark Connections UI as fully implemented
+
+## Potential Issues
+
+### CRITICAL
+
+1. **Memory Leak - setTimeout Not Cleaned Up** (ConnectionsSection.tsx:355-357)
+   ```typescript
+   setTimeout(() => {
+     setPendingService((prev) => (prev === serviceId ? null : prev));
+   }, 120000); // 2 minutes
+   ```
+   - Timeout never cleared on component unmount
+   - Can call setState on unmounted component
+   - **Proposal:** Store timeout ID in ref, clear in useEffect cleanup:
+     ```typescript
+     const timeoutRef = useRef<NodeJS.Timeout>();
+
+     // In handleConnect:
+     timeoutRef.current = setTimeout(...);
+
+     // In useEffect cleanup:
+     useEffect(() => {
+       return () => {
+         if (timeoutRef.current) clearTimeout(timeoutRef.current);
+       };
+     }, []);
+     ```
+
+### HIGH SEVERITY
+
+2. **Disconnect Operation Doesn't Trigger Query Invalidation** (ConnectionsSection.tsx:364-383)
+   - After DELETE to `/api/connectors/:service/:accountId`, UI relies on database sync
+   - Server endpoint (routes/connectors.ts:129-148) doesn't call `notifyTablesChanged`
+   - Disconnected connection may remain visible until next sync cycle
+   - **Proposal:** Either:
+     - Server: Call `notifyTablesChanged(["connections"], true, api)` after disconnect
+     - Client: Manually invalidate queries after successful disconnect
+
+3. **Missing Notion in SERVICES Array** (ConnectionsSection.tsx:41-72)
+   - SERVICES array only includes gmail, gdrive, gsheets, gdocs
+   - Notion connector exists (commit d82152b) but won't appear in UI
+   - **Proposal:** Add Notion to SERVICES array with appropriate icon
+
+### MEDIUM SEVERITY
+
+4. **handleCheck Doesn't Validate response.ok** (ConnectionsSection.tsx:389-417)
+   - Attempts to parse JSON even if response is 500 error
+   - Could fail with "unexpected token" error
+   - **Proposal:** Add `if (!response.ok)` check before parsing JSON
+
+5. **useEffect Dependency Includes Entire success Object** (ConnectionsSection.tsx:330-335)
+   ```typescript
+   useEffect(() => {
+     if (pendingService && connections.some(...)) {
+       setPendingService(null);
+       success.show("Account connected successfully!");
+     }
+   }, [connections, pendingService, success]);
+   ```
+   - `success` object recreated on every render
+   - Effect may fire unnecessarily
+   - **Proposal:** Only depend on `success.show` or extract to callback
+
+6. **Rename State Not Reset on Connection Change** (ConnectionsSection.tsx:144-152)
+   - `newLabel` state initialized once from `connection.label`
+   - If connection updates via sync, newLabel won't reflect new value
+   - **Proposal:** Add useEffect to sync newLabel when connection.label changes
+
+### LOW SEVERITY
+
+7. **Unused Hooks Exported** (dbConnectionReads.ts)
+   - `useConnection()` and `useConnectionsByService()` defined but not used
+   - Not a bug, but suggests incomplete implementation or future feature
+   - Consider removing if not planned for use
+
+8. **Server Notification Gap for Connect/Callback**
+   - OAuth callback completes in ConnectionManager but may not trigger client notification
+   - Relies on cr-sqlite sync mechanism which may have delay
+   - **Note:** The useEffect at line 330-335 handles this by watching connections array
+
+## Architecture Notes
+
+Good patterns observed:
+- Unified service connection management instead of per-service UI
+- Proper use of TanStack Query with table-based invalidation
+- Clean removal of old Gmail-specific code
+- Inline rename UI avoids modal complexity
+- Status badges provide clear visual feedback
+
+The removal of old Gmail code is safe - verified no other components imported those functions, and old endpoints are marked DEPRECATED.
+
+## Recommendations Priority
+
+**Immediate:**
+1. Fix setTimeout memory leak - add cleanup in useEffect
+2. Add query invalidation after disconnect operation
+3. Add Notion to SERVICES array
+
+**High Priority:**
+1. Add response.ok check in handleCheck
+2. Fix useEffect dependency to avoid unnecessary re-runs
+
+**Medium Priority:**
+1. Sync newLabel state when connection.label changes
+2. Consider adding debounce to label save
+3. Add loading states for rename operation
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (setTimeout memory leak) - created specs/new/fix-connections-section-timeout-leak.md
+- Issue #2 (Disconnect query invalidation) - created specs/new/fix-disconnect-query-invalidation.md
+- Issue #3 (Missing Notion in SERVICES) - not an issue (already fixed)
+- Issue #4 (handleCheck response.ok validation) - created specs/new/fix-handle-check-response-validation.md
+- Issue #5 (useEffect success dependency) - created specs/new/fix-connections-useeffect-dependency.md
+- Issue #6 (Rename state not synced) - created specs/new/fix-connections-rename-state-sync.md
+- Issue #7 (Unused hooks exported) - skipped
+- Issue #8 (Server notification gap) - skipped

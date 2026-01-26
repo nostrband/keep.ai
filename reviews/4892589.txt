@@ -132,3 +132,16 @@ LOW PRIORITY:
 
 Verified via type-check and test commands mentioned in AGENTS.md.
 Tests pass: 216 in packages/tests, 37 in user-server.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (formatCronSchedule NaN validation) - created specs/new/fix-cron-schedule-nan-validation.md
+- Issue #2 (Title field not saved) - covered by specs/new/fix-workflow-title-update.md
+- Issue #3 (Overly broad CSS selector) - skipped
+- Issue #4 (Hardcoded header height) - created specs/new/centralize-header-height-variable.md
+- Issue #5 (formatCronSchedule wrong module) - created specs/new/move-format-cron-to-lib.md
+- Issue #6 (Inconsistent isRunning) - created specs/new/extract-is-running-hook.md
+- Issue #7 (Fallback text hardcoded) - created specs/new/centralize-workflow-title-fallback.md
+- Issue #8 (Missing error boundary) - created specs/new/add-error-handling-cron-display.md
+- Issue #9 (Boolean logic complex) - created specs/new/simplify-chatpage-disabled-logic.md

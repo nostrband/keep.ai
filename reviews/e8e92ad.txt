@@ -118,3 +118,8 @@ database layer support. The title field is added to the schema and the logic
 appears correct, but the data never reaches the database.
 
 RISK: HIGH for spec #19 - feature is completely non-functional.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Title field not saved) - created specs/new/fix-workflow-title-update.md

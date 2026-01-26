@@ -181,3 +181,13 @@ Recommended actions:
 1. Fix COALESCE to use MAX across all timestamps (HIGH PRIORITY)
 2. Clarify chat_events vs chat_messages usage (MEDIUM)
 3. Either implement or remove ARCHIVE_DAYS feature (LOW)
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (COALESCE SQL bug) - created specs/new/fix-draft-activity-coalesce-bug.md
+- Issue #2 (chat_events vs chat_messages) - skipped (methods are unused/legacy)
+- Issue #3 (ARCHIVE_DAYS unused) - skipped (manual archive exists, constant for future use)
+- Issue #4 (Missing index on status) - not an issue (idx_workflows_status exists in v16)
+- Issue #5 (Subquery inefficiency) - created specs/new/optimize-has-script-subquery.md
+- Issue #6 (Component edge cases) - not an issue (positive observation)

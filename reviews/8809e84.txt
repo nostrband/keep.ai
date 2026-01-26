@@ -1,0 +1,134 @@
+COMMIT: 8809e84e53053077cf2bfbfbe2d0dd12c3a4b351
+DATE: Fri Jan 23 17:51:53 2026 +0100
+TITLE: chore: Remove original task tool files (moved to deprecated/)
+
+================================================================================
+CHANGES SUMMARY
+================================================================================
+
+This commit completes the Spec 10 (Tasks Table Cleanup) migration by:
+1. Deleting the original task tool files that were already copied to deprecated/
+2. Removing completed spec files from specs/new/
+
+This is a cleanup commit following commit 18791bb which moved the files but
+didn't delete the originals.
+
+FILES DELETED:
+- packages/agent/src/tools/add-task-recurring.ts (59 lines)
+- packages/agent/src/tools/add-task.ts (68 lines)
+- packages/agent/src/tools/get-task.ts (31 lines)
+- packages/agent/src/tools/list-tasks.ts (57 lines)
+- packages/agent/src/tools/send-to-task-inbox.ts (69 lines)
+- packages/agent/src/tools/task-update.ts (81 lines)
+- specs/new/deprecate-tasks-api-tools.md (32 lines)
+- specs/new/remove-taskstate-struct.md (27 lines)
+
+Total: 424 lines deleted (pure cleanup, no new code)
+
+================================================================================
+VERIFICATION RESULTS
+================================================================================
+
+VERIFIED: Files were copied to deprecated/ before deletion
+
+All 6 task tool files exist in packages/agent/src/tools/deprecated/:
+- add-task.ts
+- add-task-recurring.ts
+- get-task.ts
+- list-tasks.ts
+- send-to-task-inbox.ts
+- task-update.ts
+
+Each file has @deprecated JSDoc comment:
+  /**
+   * @deprecated Task tools are no longer part of the agent workflow.
+   * This file is preserved for reference only.
+   */
+
+VERIFIED: No remaining imports or usages of deleted tools
+
+Search for tool factory function names across packages/agent/src returned:
+- No imports from the deleted file paths
+- Only references are comments in tools/index.ts and sandbox/api.ts explaining
+  the deprecation
+
+VERIFIED: tools/index.ts properly updated
+
+Line 13 contains explanatory comment:
+  // Note: Task tools (makeAddTaskTool, makeGetTaskTool, etc.) moved to
+  // deprecated/ - no longer part of agent workflow
+
+No exports of task tools from main index.
+
+VERIFIED: sandbox/api.ts properly updated
+
+Line 274 contains explanatory comment:
+  // Note: Tasks.* tools removed (deprecated, no longer part of agent workflow)
+
+No task tools are registered in createGlobal() method.
+
+VERIFIED: System prompts updated (in earlier commit 18791bb)
+
+agent-env.ts changes:
+- Removed "to create background tasks" from worker system prompt
+- Removed "Other tasks" section mentioning Tasks.* APIs
+- Removed "Workflow Title" section referencing Tasks.update
+- Removed task inbox operations from planner prompt
+
+VERIFIED: Spec files were completed before deletion
+
+Both deleted spec files were properly implemented:
+
+1. deprecate-tasks-api-tools.md
+   - All Tasks.* tool registrations removed from sandbox API
+   - All task tool files moved to deprecated/ folder
+   - @deprecated JSDoc comments added
+   - System prompts updated
+   - Exports updated
+
+2. remove-taskstate-struct.md
+   - TaskState type removed from agent-types.ts
+   - TaskState interface removed from task-store.ts
+   - Deprecated methods (saveState, getState, getStates) removed
+   - All references updated to use Task.asks directly
+
+================================================================================
+POTENTIAL ISSUES
+================================================================================
+
+No issues identified.
+
+This is a clean deletion of files that were:
+1. Already copied to deprecated/ folder
+2. Already removed from exports and API registrations
+3. Part of completed specifications
+
+The two-step approach (copy to deprecated, then delete originals) is a clean
+pattern that preserves history while removing dead code from the active codebase.
+
+================================================================================
+POSITIVE OBSERVATIONS
+================================================================================
+
++ Clean deprecation workflow: copy -> update references -> delete originals
++ Files preserved in deprecated/ for historical reference
++ Clear inline comments explaining the removal reason
++ Spec files removed after verified completion
++ No orphaned imports or type errors introduced
++ System prompts thoroughly cleaned (no orphaned references to task APIs)
++ Git history preserves the original file contents
+
+================================================================================
+VERDICT
+================================================================================
+
+APPROVE
+
+This is a straightforward cleanup commit with no issues. All verification
+checks pass:
+- Files properly migrated to deprecated/ before deletion
+- No dangling imports or references
+- Proper documentation of the deprecation
+- Spec files completed before removal
+
+No changes required.

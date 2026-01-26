@@ -1,0 +1,389 @@
+# Code Review: dd877a0 (feat: Implement specs #25-29 - code quality & migrations)
+
+**Commit:** dd877a0e86532b2808e344b2fa8d378bd0189309
+**Author:** Artur Briugeman
+**Date:** 2026-01-23
+**Files Changed:** 6 files, 168 insertions(+), 60 deletions(-)
+
+## Summary
+
+This commit implements 5 code quality and migration specs (#25-29) as part of completing the Spec 12 migration from `chat_events` to `chat_messages` table. The changes focus on completing the migration in server/CLI, eliminating code duplication, fixing documentation, and optimizing database queries.
+
+## Spec-by-Spec Analysis
+
+### ✅ Spec #25: Complete Chat Messages Migration
+
+**Files:** `apps/server/src/server.ts`, `apps/cli/src/commands/chat.ts`
+
+**Changes:**
+1. **Server push notifications (line 367):** Replaced `getChatMessages()` with `getNewChatMessages()`, correctly filtering for assistant messages only
+2. **Server config endpoint (line 1022):** Replaced `getChatMessages()` with `getNewChatMessages()` for first-launch detection
+3. **CLI chat command (line 73):** Updated to use `getNewChatMessages()` and added parsing logic
+
+**Implementation Quality:** ✅ CORRECT
+- All deprecated `getChatMessages()` calls successfully replaced
+- Proper parsing of ChatMessage to AssistantUIMessage format
+- Timestamp handling correctly updated from `metadata.createdAt` to raw `timestamp` field
+- Comments added referencing Spec 12
+
+**Observations:**
+- The old `getChatMessages()` method is now only defined, never called (verified via grep)
+- Migration is complete and ready for deprecation of the old method
+
+---
+
+### ✅ Spec #26: Extract Message Parsing Utility
+
+**File:** `apps/web/src/hooks/dbChatReads.ts`
+
+**Changes:**
+1. Extracted `parseMessageContent()` utility function (lines 18-33)
+2. Updated `useChatMessages` to use the utility (line 44)
+3. Updated `useChatEvents` to use the utility (line 118)
+
+**Implementation Quality:** ✅ CORRECT
+- Successfully eliminated duplicate try/catch JSON parsing logic
+- Single source of truth for message content parsing
+- Consistent fallback behavior across both hooks
+- Proper JSDoc documentation added
+
+**Code Before (duplicated in 2 places):**
+```typescript
+try {
+  return JSON.parse(msg.content);
+} catch {
+  return {
+    id: msg.id,
+    role: msg.role,
+    parts: [{ type: "text", text: msg.content }],
+    metadata: {
+      threadId: msg.chat_id,
+      createdAt: msg.timestamp,
+    },
+  };
+}
+```
+
+**Code After (single utility):**
+```typescript
+function parseMessageContent(msg: ChatMessage) { ... }
+messages.map(parseMessageContent)
+```
+
+---
+
+### ✅ Spec #27: Fix Script Store JSDoc
+
+**File:** `packages/db/src/script-store.ts`
+
+**Changes:**
+- Line 840: Updated JSDoc from "Chat event timestamp (from chat_events table where chat_id = workflow.task_id)"
+- To: "Chat message timestamp (from chat_messages table where chat_id = workflow.chat_id)"
+
+**Implementation Quality:** ✅ CORRECT
+- Documentation now matches the actual Spec 12 implementation
+- Fixed incorrect join key reference from `workflow.task_id` to `workflow.chat_id`
+- Maintains accuracy for future developers
+
+---
+
+### ✅ Spec #28: Cleanup Unused Imports
+
+**File:** `apps/web/src/hooks/dbWrites.ts`
+
+**Changes:**
+- Removed `ChatEvent` type import (line 3)
+- Removed `UseChatEventsResult` type import (line 4)
+
+**Implementation Quality:** ✅ CORRECT
+- Dead code removal after chat_messages migration
+- No other references to these types in the file
+- Clean codebase, no linter warnings
+
+---
+
+### ✅ Spec #29: Optimize has_script Subquery
+
+**File:** `packages/db/src/script-store.ts`
+
+**Changes:**
+- Line 863: Replaced correlated subquery `(SELECT COUNT(*) FROM scripts WHERE workflow_id = w.id) > 0`
+- With: `COUNT(DISTINCT s.id) > 0 as has_script`
+- Leverages existing `LEFT JOIN scripts s` at line 872
+
+**Implementation Quality:** ✅ CORRECT
+- Eliminates N+1 query pattern (one subquery per row)
+- Uses existing LEFT JOIN instead of separate correlated subquery
+- Proper use of `COUNT(DISTINCT s.id)` to handle multiple scripts per workflow
+- `GROUP BY w.id` (line 875) ensures correct aggregation
+- Same functional behavior, better performance
+
+**Performance Impact:**
+- **Before:** N+1 queries (1 main query + N subqueries for each workflow)
+- **After:** Single query with GROUP BY
+- **Benefit:** Significant performance improvement for large result sets
+
+---
+
+## Issues Found
+
+### 🔴 CRITICAL: Code Duplication - parseMessageContent
+
+**Problem:** The `parseMessageContent` function is duplicated in 3 different locations:
+
+1. `apps/web/src/hooks/dbChatReads.ts` (lines 18-33) - **Spec #26 implementation**
+2. `apps/cli/src/commands/chat.ts` (lines 24-39) - **Added in Spec #25**
+3. `apps/server/src/server.ts` (lines 375-390) - **Inline in Spec #25**
+
+**Impact:** HIGH
+- Violates DRY principle that Spec #26 was meant to enforce
+- Three identical implementations of the same parsing logic
+- Future changes to parsing logic require updates in 3 places
+- Increases maintenance burden and risk of inconsistency
+
+**Root Cause:** Spec #26 only extracted the utility within the web hooks file, but Spec #25 added the same logic in CLI and server without reusing the utility.
+
+**Recommendation:**
+Create a shared utility function in a common package:
+- Location: `packages/db/src/chat-store.ts` or `packages/proto/src/message-utils.ts`
+- Export the function for reuse across web/server/CLI
+- All three locations should import and use the shared function
+
+**Example Fix:**
+```typescript
+// packages/db/src/chat-store.ts or packages/proto/src/utils.ts
+export function parseMessageContent(msg: ChatMessage): AssistantUIMessage {
+  try {
+    return JSON.parse(msg.content);
+  } catch {
+    return {
+      id: msg.id,
+      role: msg.role,
+      parts: [{ type: "text", text: msg.content }],
+      metadata: {
+        threadId: msg.chat_id,
+        createdAt: msg.timestamp,
+      },
+    };
+  }
+}
+
+// Then use in all 3 locations:
+import { parseMessageContent } from '@app/db';
+// or
+import { parseMessageContent } from '@app/proto';
+```
+
+---
+
+### 🟡 MINOR: Incomplete Stray Import Removal
+
+**File:** `apps/cli/src/commands/chat.ts`
+
+**Problem:** Line 5 has a stray empty import statement:
+```typescript
+import { AssistantUIMessage } from '@app/proto';
+-;
+import * as readline from 'readline';
+```
+
+**Impact:** LOW
+- The semicolon on its own line was removed (good)
+- But this appears to be an artifact from a previous refactoring
+- No functional impact, but slightly odd looking
+
+**Status:** This was actually FIXED in the commit (the `-;` shows the semicolon was removed). Not an issue.
+
+---
+
+### 🟡 MINOR: Missing Type Annotation Consistency
+
+**File:** `apps/web/src/hooks/dbChatReads.ts`
+
+**Problem:** The extracted `parseMessageContent` function (line 18) doesn't have an explicit return type annotation:
+```typescript
+function parseMessageContent(msg: ChatMessage) {  // Missing return type
+```
+
+**Impact:** LOW
+- TypeScript can infer the return type successfully
+- However, the function is used in multiple places and acts as a utility
+- Explicit return type would improve documentation and catch errors
+
+**Recommendation:**
+```typescript
+function parseMessageContent(msg: ChatMessage): AssistantUIMessage {
+```
+
+This matches the CLI version which does have the return type annotation (line 24 in `chat.ts`).
+
+---
+
+## Architectural Review
+
+### ✅ Strengths
+
+1. **Complete Migration:** All remaining `getChatMessages()` calls successfully migrated to `getNewChatMessages()`
+2. **Performance Optimization:** N+1 query pattern eliminated in script store
+3. **Code Quality:** Duplicate parsing logic consolidated (within web hooks)
+4. **Documentation:** JSDoc updated to reflect current implementation
+5. **Clean Code:** Unused imports removed
+6. **Testing:** Changes align with existing test suite in `packages/tests/src/chat-store.test.ts`
+7. **Type Safety:** All changes pass TypeScript type checking
+
+### ⚠️ Weaknesses
+
+1. **Incomplete DRY:** While Spec #26 extracted parsing logic in web hooks, the server and CLI added duplicate implementations
+2. **Missing Shared Utility:** No common package location for shared parsing logic used across all apps
+3. **Documentation:** IMPLEMENTATION_PLAN.md updated but individual specs don't mention the duplication issue
+
+---
+
+## Testing Verification
+
+### ✅ Type Check
+- Ran `npm run type-check`: **PASSED** (all 23 tasks successful)
+- No TypeScript errors introduced
+
+### ✅ Test Coverage
+Existing tests in `packages/tests/src/chat-store.test.ts`:
+- `saveChatMessage` and `getNewChatMessages` tested (lines 85-100)
+- Spec 12 migration coverage exists
+- No new tests needed for this refactoring
+
+### ⚠️ Manual Testing Recommended
+Should verify:
+1. CLI `chat` command works with new parsing
+2. Server push notifications work correctly
+3. Server first-launch onboarding triggers properly
+4. Web chat messages display correctly
+5. Chat events pagination still works
+
+---
+
+## Code Quality Metrics
+
+| Metric | Before | After | Change |
+|--------|--------|-------|--------|
+| `getChatMessages()` calls | 3 | 0 | -3 ✅ |
+| Duplicate parsing logic (web) | 2 | 1 | -1 ✅ |
+| Duplicate parsing logic (overall) | 2 | 3 | +1 ❌ |
+| Unused imports | 2 | 0 | -2 ✅ |
+| N+1 queries | 1 | 0 | -1 ✅ |
+| Lines of code | - | - | +168/-60 |
+
+---
+
+## Spec Compliance
+
+| Spec | Status | Notes |
+|------|--------|-------|
+| #25 | ✅ COMPLETE | All deprecated calls migrated |
+| #26 | ⚠️ PARTIAL | Extracted in web hooks, but duplicated in server/CLI |
+| #27 | ✅ COMPLETE | JSDoc updated correctly |
+| #28 | ✅ COMPLETE | Unused imports removed |
+| #29 | ✅ COMPLETE | N+1 query optimized correctly |
+
+**Overall:** 4/5 complete, 1/5 partial
+
+---
+
+## Security Review
+
+### ✅ No Security Issues Found
+
+- No SQL injection risks (uses parameterized queries)
+- No authentication/authorization changes
+- No sensitive data exposure
+- No changes to encryption/decryption logic
+- Parsing fallback doesn't expose errors to users
+
+---
+
+## Performance Impact
+
+### ✅ Positive Impact
+
+1. **Query Optimization (Spec #29):**
+   - Eliminated N+1 pattern in `getAbandonedDrafts()`
+   - Single GROUP BY query vs. N correlated subqueries
+   - Significant improvement for workflows with many drafts
+
+2. **No Negative Impact:**
+   - Migration from `getChatMessages` to `getNewChatMessages` maintains same query patterns
+   - Parsing logic identical (just relocated)
+   - No additional database calls introduced
+
+---
+
+## Recommendations
+
+### Priority: HIGH
+1. **Consolidate parseMessageContent:**
+   - Create shared utility in `packages/db/src/chat-store.ts` or `packages/proto/src/utils.ts`
+   - Remove duplicates from server and CLI
+   - Import shared function in all 3 locations (web/server/CLI)
+
+### Priority: MEDIUM
+2. **Add Return Type Annotation:**
+   - Add `: AssistantUIMessage` to `parseMessageContent` in `dbChatReads.ts`
+   - Improves type safety and documentation
+
+### Priority: LOW
+3. **Consider Deprecation:**
+   - Add `@deprecated` JSDoc to old `getChatMessages()` method
+   - Helps prevent future usage
+
+4. **Update Spec #26:**
+   - Document that the utility should be shared across all apps
+   - Note that current implementation is incomplete
+
+---
+
+## Conclusion
+
+### Overall Assessment: ✅ GOOD (with reservations)
+
+This commit successfully implements the core objectives of specs #25-29:
+- ✅ Completes the critical chat_messages migration
+- ✅ Optimizes database performance
+- ✅ Updates documentation
+- ✅ Removes dead code
+- ⚠️ Partially reduces code duplication (but introduces new duplication elsewhere)
+
+### Key Strengths:
+1. Migration completeness - no more deprecated `getChatMessages()` calls
+2. Performance optimization - N+1 query eliminated
+3. Code quality improvements - unused imports removed, JSDoc fixed
+4. Type safety - all changes pass type checking
+
+### Key Concerns:
+1. **Code duplication introduced** - `parseMessageContent` now exists in 3 places (web, server, CLI) instead of being truly DRY
+2. **Spec #26 incomplete** - Only consolidated within web hooks, not across the entire codebase
+
+### Recommendation:
+**MERGE with follow-up task** - The commit is functionally correct and improves the codebase significantly. However, a follow-up task should be created to consolidate the `parseMessageContent` function into a truly shared utility to complete the DRY principle objective of Spec #26.
+
+---
+
+## Verification Checklist
+
+- [x] All specs (#25-29) addressed in code
+- [x] No TypeScript errors
+- [x] No breaking changes to existing APIs
+- [x] Migration path complete
+- [x] Documentation updated (IMPLEMENTATION_PLAN.md)
+- [x] No security vulnerabilities
+- [x] Performance improved (N+1 eliminated)
+- [ ] Code fully DRY (partial - duplication remains across apps)
+- [x] Backwards compatible
+- [x] Test coverage exists
+
+**Final Grade: B+** (Good implementation with room for improvement on DRY principle)
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (parseMessageContent duplication) - created specs/new/consolidate-parse-message-content.md
+- Issue #2 (Stray import removal) - not an issue (already fixed in commit)
+- Issue #3 (Missing type annotation) - skipped (will be fixed when consolidating)

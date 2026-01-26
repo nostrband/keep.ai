@@ -1,0 +1,70 @@
+COMMIT: 420502e
+TITLE: docs: Mark 4.2 Archive Old Drafts as complete in IMPLEMENTATION_PLAN
+DATE: Fri Jan 23 18:01:28 2026 +0100
+
+=== CHANGES DESCRIPTION ===
+
+This commit updates IMPLEMENTATION_PLAN.md to mark the "Archive Old Drafts" feature (Priority 4.2) as completed. The commit message includes detailed verification notes documenting what was found in the codebase:
+
+- Archive button in WorkflowDetailPage for draft workflows
+- ArchivedPage component for viewing archived workflows
+- Route /archived defined in App.tsx
+- MainPage filters out archived and shows link to view them
+- Restore functionality returns workflow to draft status
+
+The documentation update provides specific file paths and line number references.
+
+=== VERIFICATION ===
+
+All claims have been verified against the actual codebase:
+
+1. Archive button in WorkflowDetailPage: VERIFIED
+   - File: apps/web/src/components/WorkflowDetailPage.tsx:367-379 (exact match)
+   - Renders Archive icon button only for workflow.status === "draft"
+   - handleArchive() (lines 185-197) updates status to "archived" and navigates to /archived
+
+2. Archived status badge: VERIFIED
+   - File: apps/web/src/components/StatusBadge.tsx:16 (exact match)
+   - Returns gray "Archived" badge for archived status
+
+3. ArchivedPage component: VERIFIED
+   - File: apps/web/src/components/ArchivedPage.tsx (122 lines)
+   - Filters workflows to archived status only (line 17)
+   - Empty state handling (lines 64-71)
+   - Restore button with handleRestore() (lines 93-102)
+   - View button for navigation (lines 103-111)
+
+4. Route /archived: VERIFIED
+   - File: apps/web/src/App.tsx:353 (exact match)
+   - ArchivedPage imported at line 24
+
+5. MainPage filtering: VERIFIED
+   - File: apps/web/src/components/MainPage.tsx:216-217 (off by one from claimed 215-217)
+   - Correctly filters archived from main list
+   - Archive link at lines 564-571 (extends one line beyond claimed 564-570)
+   - Shows pluralized link only when archived count > 0
+
+6. Restore functionality: VERIFIED
+   - WorkflowDetailPage:199-210 - restores to "draft" status
+   - ArchivedPage:19-29 - restores to "draft" status
+   - Both show success notification
+
+=== ISSUES ===
+
+MINOR: Line number references slightly inaccurate
+- Claimed MainPage filter at 215-217, actual at 216-217 (off by one)
+- Claimed archive link at 564-570, actual at 564-571 (one extra line)
+
+This is a very minor discrepancy that doesn't affect the validity of the documentation.
+
+=== PROPOSALS ===
+
+None needed. The feature is fully implemented and the documentation is substantially accurate.
+Line numbers in documentation could be updated to be exact, but this is low priority
+as line numbers drift over time with other changes anyway.
+
+=== SUMMARY ===
+
+Documentation accurately reflects a fully implemented Archive Old Drafts feature.
+Very minor line number discrepancies (off by 1-2 lines) do not affect validity.
+No functional issues found.

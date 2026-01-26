@@ -92,3 +92,12 @@ verification. The code quality is good for a v1 SLC release.
 
 Risk: LOW
 Blocking: NO
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Missing isSubmitting reset) - skipped (navigation resets state)
+- Issue #2 (No user feedback on failure) - created specs/new/add-task-creation-error-toast.md
+- Issue #3 (Silent file upload failure) - created specs/new/add-file-upload-failure-warning.md
+- Issue #4 (TOCTOU in rollback) - created specs/new/wrap-activate-script-in-transaction.md
+- Issue #5 (Missing debounce on submit) - created specs/new/prevent-double-submit-mainpage.md

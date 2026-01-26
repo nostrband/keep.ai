@@ -1,0 +1,185 @@
+# Code Review: Commit b9b6009
+
+## Summary
+
+**Commit:** b9b6009 - feat: Implement Google Services tools and fix bugs
+**Date:** Fri Jan 23 16:09:36 2026 +0100
+**Files Changed:** 13
+**Lines:** +605 across new Google tools, bug fixes, and specs
+
+This commit adds Google Drive, Google Sheets, and Google Docs tools for the AI agent, creates shared Google utilities, and fixes three bugs: cron schedule NaN validation, workflow title persistence, and double-submit prevention on MainPage.
+
+## Changes Description
+
+### New Google Tools
+
+**packages/agent/src/tools/gdrive.ts** (133 lines)
+- Methods: files.list, files.get, files.create, files.update, files.delete, files.copy, files.export
+- Required `account` parameter for multi-account support
+- Error classification with `classifyGoogleApiError()`
+- Connection error marking via `connectionManager.markError()`
+
+**packages/agent/src/tools/gsheets.ts** (141 lines)
+- Methods: spreadsheets.get, spreadsheets.create, spreadsheets.values.*, spreadsheets.batchUpdate
+- Same patterns as gdrive for error handling and account management
+
+**packages/agent/src/tools/gdocs.ts** (117 lines)
+- Methods: documents.get, documents.create, documents.batchUpdate
+- Minimal but appropriate surface area for Google Docs API
+
+**packages/agent/src/tools/google-common.ts** (69 lines)
+- `getGoogleCredentials()` - Validates account parameter, fetches credentials
+- `createGoogleOAuthClient()` - Creates configured OAuth2 client
+- `getServiceDisplayName()` - Human-readable service names
+- Proper error classification: AuthError (requires user action) vs LogicError (agent can fix)
+
+### Bug Fixes
+
+**apps/web/src/components/MainPage.tsx**
+- Added `isSubmittingRef` for synchronous double-submit prevention
+- Ref checked before async state update to block rapid clicks
+
+**apps/web/src/components/WorkflowInfoBox.tsx**
+- Added `isNaN()` validation after `parseInt()` for hourNum and minuteNum
+- Returns raw cron string for invalid formats instead of "NaN:NaN AM"
+
+**packages/db/src/script-store.ts**
+- Added `title` to `updateWorkflowFields` Pick type and handler
+- Fixes Spec #19 where agent save tool title updates were silently ignored
+
+### packages/agent/src/sandbox/api.ts
+- Registered GoogleDrive, GoogleSheets, GoogleDocs tools
+- Changed from `gmailOAuth2Client` conditional to `connectionManager` conditional
+- Tools always registered when connectionManager exists
+
+### packages/agent/src/tools/index.ts
+- Exported `makeGDriveTool`, `makeGSheetsTool`, `makeGDocsTool`
+
+### Spec Files (3 new files in specs/done/)
+- fix-cron-schedule-nan-validation.md
+- fix-workflow-title-update.md
+- prevent-double-submit-mainpage.md
+
+## Potential Issues
+
+### CRITICAL
+
+1. **formatCronSchedule Missing NaN Validation for Hourly Pattern** (apps/web/src/lib/formatCronSchedule.ts:21-23)
+   - The bug fix only added validation for daily and weekly patterns
+   - Hourly pattern "every hour at specific minute" still vulnerable:
+     ```typescript
+     return `Every hour at :${minute.toString().padStart(2, "0")}`;
+     ```
+   - If minute is non-numeric, output is "Every hour at :NaN"
+   - **Proposal:** Add validation before the hourly format return:
+     ```typescript
+     const minuteNum = parseInt(minute, 10);
+     if (isNaN(minuteNum)) return cron;
+     return `Every hour at :${minuteNum.toString().padStart(2, "0")}`;
+     ```
+
+### HIGH SEVERITY
+
+2. **CLI Worker Missing connectionManager** (apps/cli/src/commands/worker.ts:71-81)
+   - CLI worker command doesn't create or pass ConnectionManager
+   - OAuth-based tools (Gmail, Drive, Sheets, Docs, Notion) won't work from CLI
+   - Only affects `keep worker` CLI usage; server works correctly
+   - **Proposal:** Add connectionManager creation to CLI worker:
+     ```typescript
+     import { createConnectionManager } from "@app/connectors";
+
+     const connectionManager = await createConnectionManager(keepDB, userPath);
+     const scheduler = new TaskScheduler({
+       api,
+       stepLimit: 20,
+       userPath,
+       connectionManager  // Add this
+     });
+     ```
+
+### MEDIUM SEVERITY
+
+3. **Event Tracking Inconsistency in gdrive.ts** (packages/agent/src/tools/gdrive.ts:104)
+   ```typescript
+   if (method.includes("list") || method.includes("create") || method.includes("delete"))
+   ```
+   - Missing events for `update` and `copy` which are significant write operations
+   - **Proposal:** Add `method.includes("update") || method.includes("copy")`
+
+4. **Event Tracking Uses Fragile includes() Pattern** (gsheets.ts:112, gdocs.ts:88)
+   - `method.includes("create")` would match hypothetical `precreate` method
+   - **Proposal:** Use exact string matching or check against defined method list:
+     ```typescript
+     const WRITE_METHODS = ["create", "update", "append", "clear", "batchUpdate"];
+     if (WRITE_METHODS.some(m => method.endsWith(m)))
+     ```
+
+5. **No Input Validation Beyond Zod Schema**
+   - `params` passed directly to Google APIs as `z.any()`
+   - Relies entirely on Google's validation
+   - Acceptable for v1 but consider stricter validation for sensitive operations
+
+### LOW SEVERITY
+
+6. **Gmail Tool Uses Inline Credential Fetching** (packages/agent/src/tools/gmail.ts:85-94)
+   - New tools use shared `getGoogleCredentials()` from google-common.ts
+   - Gmail still has inline credential logic
+   - Not a bug, but inconsistent pattern
+   - **Proposal:** Refactor Gmail to use google-common.ts for consistency
+
+7. **No Rate Limiting for Google API Calls**
+   - Could cause quota exhaustion under heavy usage
+   - Consider adding request throttling in future
+
+## Architecture Notes
+
+Excellent patterns observed:
+- Clean code reuse via google-common.ts shared utilities
+- Consistent error handling with `classifyGoogleApiError()`
+- Proper error classification (AuthError vs LogicError) guides agent behavior
+- Type-safe tool definitions with Zod schemas
+- Using `z.any()` for params is pragmatic given dynamic Google API responses
+- Tools registered conditionally on connectionManager existence
+
+The bug fixes are well-implemented:
+- Double-submit prevention uses standard React ref pattern
+- Workflow title update correctly extends the Pick type and adds handler
+- NaN validation falls back to raw cron display (though incomplete for hourly)
+
+## Consistency Analysis
+
+| Aspect | Gmail | GDrive | GSheets | GDocs |
+|--------|-------|--------|---------|-------|
+| Tool structure | OK | OK | OK | OK |
+| Input schema | OK | OK | OK | OK |
+| Account required | OK | OK | OK | OK |
+| Error classification | OK | OK | OK | OK |
+| Connection marking | OK | OK | OK | OK |
+| Debug logging | OK | OK | OK | OK |
+| Credential fetching | Inline | Shared | Shared | Shared |
+
+## Recommendations Priority
+
+**Immediate:**
+1. Fix formatCronSchedule hourly pattern NaN validation
+2. Fix CLI worker to pass connectionManager
+
+**High Priority:**
+1. Add missing event tracking for update/copy operations in gdrive.ts
+2. Refactor event tracking to use exact method matching
+
+**Medium Priority:**
+1. Refactor Gmail to use google-common.ts utilities
+2. Add tests for new Google tools
+3. Consider rate limiting for Google API calls
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Hourly cron NaN validation) - created specs/new/fix-cron-hourly-nan-validation.md
+- Issue #2 (CLI worker missing connectionManager) - skipped (legacy command, no need to support)
+- Issue #3 (GDrive event tracking missing update/copy) - created specs/new/fix-gdrive-event-tracking.md
+- Issue #4 (Fragile includes() pattern) - created specs/new/fix-google-tools-event-tracking-pattern.md
+- Issue #5 (No input validation beyond Zod) - skipped
+- Issue #6 (Gmail inline credential fetching) - created specs/new/refactor-gmail-use-google-common.md
+- Issue #7 (No rate limiting) - skipped
