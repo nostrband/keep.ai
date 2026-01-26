@@ -33,17 +33,43 @@ interface PendingState {
 /** Token refresh buffer: refresh 5 minutes before expiry */
 const REFRESH_BUFFER_MS = 5 * 60 * 1000;
 
-/** OAuth state TTL: 10 minutes */
-const STATE_TTL_MS = 10 * 60 * 1000;
+/** OAuth state TTL: 5 minutes (reduced from 10 for security) */
+const STATE_TTL_MS = 5 * 60 * 1000;
+
+/** Maximum pending OAuth states to prevent memory exhaustion DoS */
+const MAX_PENDING_STATES = 100;
+
+/** Cleanup interval for expired states (60 seconds) */
+const STATE_CLEANUP_INTERVAL_MS = 60 * 1000;
+
+/** Allowed redirect URI hosts for OAuth callbacks */
+const ALLOWED_REDIRECT_HOSTS = ["127.0.0.1", "localhost"];
 
 export class ConnectionManager {
   private services = new Map<string, ServiceDefinition>();
   private pendingStates = new Map<string, PendingState>();
+  private refreshPromises = new Map<string, Promise<OAuthCredentials>>();
+  private cleanupTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(
     private store: CredentialStore,
     private db: ConnectionDb
-  ) {}
+  ) {
+    // Start periodic cleanup of expired OAuth states
+    this.cleanupTimer = setInterval(() => {
+      this.cleanupExpiredStates();
+    }, STATE_CLEANUP_INTERVAL_MS);
+  }
+
+  /**
+   * Shutdown the manager, cleaning up resources.
+   */
+  shutdown(): void {
+    if (this.cleanupTimer) {
+      clearInterval(this.cleanupTimer);
+      this.cleanupTimer = null;
+    }
+  }
 
   /**
    * Register a service definition.
@@ -68,6 +94,18 @@ export class ConnectionManager {
   }
 
   /**
+   * Validate that a redirect URI is allowed.
+   */
+  private isAllowedRedirectUri(redirectUri: string): boolean {
+    try {
+      const url = new URL(redirectUri);
+      return ALLOWED_REDIRECT_HOSTS.includes(url.hostname);
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Start OAuth flow for a service.
    * Returns the authorization URL and state parameter.
    */
@@ -80,8 +118,33 @@ export class ConnectionManager {
       throw new Error(`Unknown service: ${serviceId}`);
     }
 
+    // Validate redirect URI
+    if (!this.isAllowedRedirectUri(redirectUri)) {
+      throw new Error(`Invalid redirect URI: ${redirectUri}`);
+    }
+
     // Lazy cleanup of expired states
     this.cleanupExpiredStates();
+
+    // Enforce maximum pending states to prevent memory exhaustion DoS
+    if (this.pendingStates.size >= MAX_PENDING_STATES) {
+      // Remove oldest state
+      let oldestState: string | null = null;
+      let oldestTimestamp = Infinity;
+      for (const [state, data] of this.pendingStates) {
+        if (data.timestamp < oldestTimestamp) {
+          oldestTimestamp = data.timestamp;
+          oldestState = state;
+        }
+      }
+      if (oldestState) {
+        this.pendingStates.delete(oldestState);
+        debug(
+          "Pending states limit reached (%d), removed oldest state",
+          MAX_PENDING_STATES
+        );
+      }
+    }
 
     // Generate CSRF state
     const state = randomUUID();
@@ -122,16 +185,17 @@ export class ConnectionManager {
     code: string,
     state: string
   ): Promise<OAuthCallbackResult> {
-    // Validate state
+    // Atomically retrieve and delete state to prevent replay attacks
     const pending = this.pendingStates.get(state);
+    this.pendingStates.delete(state); // Delete immediately after retrieval
+
     if (!pending) {
       debug("Invalid or expired state: %s", state);
       return { success: false, error: "Invalid or expired state" };
     }
 
-    // Check expiry
+    // Check expiry (state already deleted, so no re-use possible)
     if (Date.now() - pending.timestamp > STATE_TTL_MS) {
-      this.pendingStates.delete(state);
       debug("OAuth flow expired: %s", state);
       return { success: false, error: "OAuth flow expired, please try again" };
     }
@@ -146,8 +210,11 @@ export class ConnectionManager {
       return { success: false, error: "State mismatch" };
     }
 
-    // Consume the state
-    this.pendingStates.delete(state);
+    // Re-validate redirect URI at completion
+    if (!this.isAllowedRedirectUri(pending.redirectUri)) {
+      debug("Invalid redirect URI in state: %s", pending.redirectUri);
+      return { success: false, error: "Invalid redirect URI" };
+    }
 
     const service = this.services.get(serviceId);
     if (!service) {
@@ -217,15 +284,27 @@ export class ConnectionManager {
       debug("OAuth flow completed for %s:%s", serviceId, accountId);
       return { success: true, connection };
     } catch (err) {
-      const message =
-        err instanceof OAuthError
-          ? err.getErrorDetails().errorDescription || err.message
-          : err instanceof Error
-            ? err.message
-            : "Unknown error";
+      // Log full error details server-side for debugging
+      if (err instanceof OAuthError) {
+        const details = err.getErrorDetails();
+        debug(
+          "OAuth flow failed for %s: code=%s desc=%s body=%s",
+          serviceId,
+          details.error,
+          details.errorDescription,
+          err.responseBody
+        );
+      } else {
+        debug("OAuth flow failed for %s: %s", serviceId, err);
+      }
 
-      debug("OAuth flow failed for %s: %s", serviceId, message);
-      return { success: false, error: message };
+      // Return sanitized error message to client (no sensitive info)
+      const userMessage =
+        err instanceof OAuthError
+          ? err.getUserFriendlyMessage()
+          : "An authentication error occurred. Please try connecting again.";
+
+      return { success: false, error: userMessage };
     }
   }
 
@@ -302,10 +381,29 @@ export class ConnectionManager {
           throw new AuthError(`Token expired for ${connectionId}`);
         }
 
+        // Check if a refresh is already in progress for this connection
+        const existingRefresh = this.refreshPromises.get(connectionId);
+        if (existingRefresh) {
+          debug("Waiting for existing refresh for %s", connectionId);
+          return existingRefresh;
+        }
+
+        // Start new refresh and store the promise
+        const refreshPromise = this.refreshToken(id, creds)
+          .then((refreshed) => {
+            this.refreshPromises.delete(connectionId);
+            return refreshed;
+          })
+          .catch((err) => {
+            this.refreshPromises.delete(connectionId);
+            throw err;
+          });
+
+        this.refreshPromises.set(connectionId, refreshPromise);
+
         try {
           debug("Refreshing token for %s", connectionId);
-          const refreshed = await this.refreshToken(id, creds);
-          return refreshed;
+          return await refreshPromise;
         } catch (err) {
           const message =
             err instanceof Error ? err.message : "Token refresh failed";

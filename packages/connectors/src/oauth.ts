@@ -193,20 +193,60 @@ export function tokenResponseToCredentials(
   return credentials;
 }
 
+/** Map of OAuth error codes to user-friendly messages */
+const OAUTH_ERROR_MESSAGES: Record<string, string> = {
+  invalid_grant:
+    "Authorization expired or invalid. Please try connecting again.",
+  invalid_client: "OAuth configuration error. Please contact support.",
+  access_denied:
+    "Access was denied. Please try again and approve all permissions.",
+  invalid_request: "Invalid request. Please try connecting again.",
+  unauthorized_client:
+    "This app is not authorized. Please contact support.",
+  unsupported_grant_type: "OAuth configuration error. Please contact support.",
+  invalid_scope:
+    "The requested permissions are not available. Please contact support.",
+  server_error:
+    "The service is temporarily unavailable. Please try again later.",
+  temporarily_unavailable:
+    "The service is temporarily unavailable. Please try again later.",
+  interaction_required: "Please complete the sign-in process in the browser.",
+  login_required: "Please sign in to continue.",
+  consent_required: "Please approve the requested permissions to continue.",
+};
+
+/** Default message for unknown OAuth errors */
+const DEFAULT_OAUTH_ERROR_MESSAGE =
+  "An authentication error occurred. Please try connecting again.";
+
 /**
  * OAuth-specific error with response details.
+ * Stores error code for logging but provides sanitized messages for users.
  */
 export class OAuthError extends Error {
+  public readonly errorCode?: string;
+
   constructor(
     message: string,
     public readonly responseBody?: string
   ) {
     super(message);
     this.name = "OAuthError";
+
+    // Extract error code from response body
+    if (responseBody) {
+      try {
+        const data = JSON.parse(responseBody);
+        this.errorCode = data.error;
+      } catch {
+        // Ignore parse errors
+      }
+    }
   }
 
   /**
    * Parse error details from response body.
+   * Used for internal logging only - contains sensitive info.
    */
   getErrorDetails(): { error?: string; errorDescription?: string } {
     if (!this.responseBody) {
@@ -221,5 +261,15 @@ export class OAuthError extends Error {
     } catch {
       return {};
     }
+  }
+
+  /**
+   * Get a user-friendly error message that doesn't leak internal details.
+   */
+  getUserFriendlyMessage(): string {
+    if (this.errorCode && OAUTH_ERROR_MESSAGES[this.errorCode]) {
+      return OAUTH_ERROR_MESSAGES[this.errorCode];
+    }
+    return DEFAULT_OAUTH_ERROR_MESSAGE;
   }
 }
