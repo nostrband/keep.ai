@@ -532,7 +532,7 @@ These are external configuration steps that users must complete in their OAuth p
 ## Code Quality Issues Found
 
 ### apps/web
-- `ConsolePage.tsx:66` - SQL validation intentionally disabled (`if (false &&`)
+- ~~`ConsolePage.tsx:66` - SQL validation intentionally disabled (`if (false &&`)~~ ✅ Fixed
 - Multiple `any` type usages in WorkflowDetailPage, TaskEventGroup
 - Empty catch blocks in worker-event-router.ts, service-worker.ts
 
@@ -542,6 +542,6 @@ These are external configuration steps that users must complete in their OAuth p
 - Fire-and-forget async operations without tracking
 
 ### apps/electron
-- `index.html` references undefined `electronAPI.sendMessage()`
+- ~~`index.html` references undefined `electronAPI.sendMessage()`~~ ✅ Fixed
 - Extensive `any` type usage in main.ts
 - ~~Path traversal vulnerability in file handler (line 470-471)~~ ✅ Fixed - Added path validation to restrict file serving to public directory only

@@ -62,8 +62,8 @@ export default function ConsolePage() {
     const startTime = performance.now();
 
     try {
-      // Validate SQL
-      if (false && !validateSelectOnly(sqlQuery)) {
+      // Validate SQL - only allow SELECT statements for safety
+      if (!validateSelectOnly(sqlQuery)) {
         throw new Error("Only SELECT statements are allowed");
       }
 

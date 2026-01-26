@@ -123,8 +123,8 @@
             <p>App Version: <span id="version">Loading...</span></p>
         </div>
 
-        <button onclick="testAPI()">Test Electron API</button>
-        <button onclick="sendTestMessage()">Send Test Message</button>
+        <button onclick="testNotification()">Test Notification</button>
+        <button onclick="testTrayBadge()">Test Tray Badge</button>
 
         <div class="info">
             <p>This is a hello-world Electron application for the Keep AI project.</p>
@@ -137,7 +137,7 @@
         if (window.electronAPI) {
             // Get platform information
             document.getElementById('platform').textContent = window.electronAPI.getPlatform();
-            
+
             // Get app version (this will need to be implemented in main process)
             window.electronAPI.getVersion().then(version => {
                 document.getElementById('version').textContent = version || 'Unknown';
@@ -148,38 +148,32 @@
             console.error('Electron API not available');
         }
 
-        function testAPI() {
+        function testNotification() {
             if (window.electronAPI) {
-                window.electronAPI.sendMessage('Hello from renderer process!').then(response => {
-                    alert('Message sent successfully: ' + response);
+                window.electronAPI.showNotification({
+                    title: 'Test Notification',
+                    body: 'Hello from Keep AI!'
+                }).then(() => {
+                    console.log('Notification shown');
                 }).catch(error => {
-                    alert('Error sending message: ' + error.message);
+                    alert('Error showing notification: ' + error.message);
                 });
             } else {
                 alert('Electron API not available');
             }
         }
 
-        function sendTestMessage() {
+        function testTrayBadge() {
             if (window.electronAPI) {
-                const message = prompt('Enter a message to send to the main process:');
-                if (message) {
-                    window.electronAPI.sendMessage(message).then(response => {
-                        alert('Response from main process: ' + response);
-                    }).catch(error => {
-                        console.error('Error:', error);
-                        alert('Error sending message');
-                    });
-                }
+                const count = parseInt(prompt('Enter badge count (0-99):', '1') || '0', 10);
+                window.electronAPI.updateTrayBadge(count).then(() => {
+                    alert('Tray badge updated to: ' + count);
+                }).catch(error => {
+                    alert('Error updating tray badge: ' + error.message);
+                });
+            } else {
+                alert('Electron API not available');
             }
-        }
-
-        // Listen for messages from main process
-        if (window.electronAPI) {
-            window.electronAPI.onMessage((message) => {
-                console.log('Received message from main process:', message);
-                // You could show a notification or update the UI here
-            });
         }
 
         console.log('Renderer script loaded successfully');
