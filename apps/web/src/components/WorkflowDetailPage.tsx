@@ -185,6 +185,11 @@ export default function WorkflowDetailPage() {
   const handleArchive = async () => {
     if (!workflow) return;
 
+    // Confirm before archiving (spec: add-archive-confirmation-dialog)
+    if (!window.confirm("Archive this workflow? You can restore it later from the Archived page.")) {
+      return;
+    }
+
     updateWorkflowMutation.mutate({
       workflowId: workflow.id,
       status: "archived",
@@ -199,12 +204,15 @@ export default function WorkflowDetailPage() {
   const handleRestore = async () => {
     if (!workflow) return;
 
+    // Smart restore: "paused" if has scripts, "draft" if not (spec: smart-workflow-restore-status)
+    const restoreStatus = workflow.active_script_id ? "paused" : "draft";
+
     updateWorkflowMutation.mutate({
       workflowId: workflow.id,
-      status: "draft",
+      status: restoreStatus,
     }, {
       onSuccess: () => {
-        success.show("Workflow restored");
+        success.show(`Workflow restored to ${restoreStatus}`);
       },
     });
   };
@@ -364,15 +372,15 @@ export default function WorkflowDetailPage() {
                         Edit
                       </Button>
                     )}
-                    {/* Archive button for drafts */}
-                    {workflow.status === "draft" && (
+                    {/* Archive button for drafts and paused workflows (spec: expand-archive-to-paused-workflows) */}
+                    {(workflow.status === "draft" || workflow.status === "paused") && (
                       <Button
                         onClick={handleArchive}
                         disabled={updateWorkflowMutation.isPending}
                         size="sm"
                         variant="ghost"
                         className="cursor-pointer text-gray-400 hover:text-gray-600"
-                        title="Archive this draft"
+                        title="Archive this workflow"
                       >
                         <Archive className="w-4 h-4" />
                       </Button>

@@ -331,10 +331,43 @@ export class ConnectionManager {
 
   /**
    * Disconnect (remove) a connection.
+   * Attempts to revoke the token at the provider before deleting locally.
+   * @param id Connection to disconnect
+   * @param revokeToken Whether to attempt token revocation (default: true)
    */
-  async disconnect(id: ConnectionId): Promise<void> {
+  async disconnect(id: ConnectionId, revokeToken = true): Promise<void> {
     const connectionId = `${id.service}:${id.accountId}`;
-    debug("Disconnecting %s", connectionId);
+    debug("Disconnecting %s (revoke=%s)", connectionId, revokeToken);
+
+    // Attempt token revocation before deleting credentials (spec: add-token-revocation-on-disconnect)
+    if (revokeToken) {
+      const service = this.services.get(id.service);
+      if (service?.oauthConfig.revokeUrl) {
+        try {
+          const creds = await this.store.load(id);
+          if (creds?.accessToken) {
+            const { clientId, clientSecret } = getCredentialsForService(id.service);
+            const handler = new OAuthHandler(
+              service.oauthConfig,
+              clientId,
+              clientSecret,
+              "" // redirectUri not needed for revocation
+            );
+            const revoked = await handler.revokeToken(creds.accessToken);
+            if (revoked) {
+              debug("Token revoked at provider for %s", connectionId);
+            } else {
+              debug("Token revocation failed for %s (continuing with local cleanup)", connectionId);
+            }
+          }
+        } catch (error) {
+          // Log but don't fail - local cleanup is more important
+          debug("Token revocation error for %s: %s (continuing with local cleanup)", connectionId, error);
+        }
+      } else {
+        debug("No revoke URL for %s, skipping token revocation", id.service);
+      }
+    }
 
     // Delete credentials file
     await this.store.delete(id);

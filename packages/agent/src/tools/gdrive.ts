@@ -26,6 +26,16 @@ const SUPPORTED_METHODS = [
   "files.export",
 ] as const;
 
+// Methods that should trigger event tracking (write operations + list for auditing)
+// Uses explicit Set membership instead of includes() to avoid false positives
+const TRACKED_METHODS = new Set<string>([
+  "files.list",
+  "files.create",
+  "files.update",
+  "files.delete",
+  "files.copy",
+]);
+
 /**
  * Create Google Drive tool that uses ConnectionManager for credentials.
  *
@@ -100,8 +110,9 @@ export function makeGDriveTool(
             throw new Error(`Method ${method} not implemented`);
         }
 
-        // Don't spam events with 'get' methods which usually happen in batches
-        if (method.includes("list") || method.includes("create") || method.includes("delete"))
+        // Track significant operations for auditing (spec: fix-gdrive-event-tracking, fix-google-tools-event-tracking-pattern)
+        // Don't spam events with 'get'/'export' which usually happen in batches
+        if (TRACKED_METHODS.has(method))
           await getContext().createEvent("gdrive_api_call", {
             method,
             account,

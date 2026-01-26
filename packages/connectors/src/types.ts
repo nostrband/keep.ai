@@ -47,6 +47,8 @@ export interface OAuthConfig {
   extraAuthParams?: Record<string, string>;
   /** If true, use Basic auth for token exchange (Notion uses this) */
   useBasicAuth?: boolean;
+  /** Token revocation URL (optional, for services that support it like Google) */
+  revokeUrl?: string;
 }
 
 /**

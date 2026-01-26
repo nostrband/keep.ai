@@ -20,12 +20,15 @@ export default function ArchivedPage() {
 
   const handleRestore = async (workflowId: string) => {
     try {
-      // Restore to draft status
+      // Smart restore: "paused" if has scripts, "draft" if not (spec: smart-workflow-restore-status)
+      const workflow = workflows.find(w => w.id === workflowId);
+      const restoreStatus = workflow?.active_script_id ? "paused" : "draft";
+
       await updateWorkflowMutation.mutateAsync({
         workflowId,
-        status: "draft"
+        status: restoreStatus
       });
-      success.show("Workflow restored");
+      success.show(`Workflow restored to ${restoreStatus}`);
     } catch (err) {
       console.error("Failed to restore workflow:", err);
       error.show(err instanceof Error ? err.message : "Failed to restore workflow");
@@ -82,7 +85,7 @@ export default function ArchivedPage() {
             <Archive className="w-12 h-12 text-gray-300 mb-4" />
             <div className="text-gray-500 mb-2">No archived workflows</div>
             <div className="text-gray-400 text-sm">
-              Archived drafts will appear here
+              Archived workflows will appear here
             </div>
           </div>
         ) : (

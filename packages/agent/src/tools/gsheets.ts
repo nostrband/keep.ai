@@ -28,6 +28,17 @@ const SUPPORTED_METHODS = [
   "spreadsheets.batchUpdate",
 ] as const;
 
+// Methods that should trigger event tracking (write operations)
+// Uses explicit Set membership instead of includes() to avoid false positives (spec: fix-google-tools-event-tracking-pattern)
+const TRACKED_METHODS = new Set<string>([
+  "spreadsheets.create",
+  "spreadsheets.values.update",
+  "spreadsheets.values.append",
+  "spreadsheets.values.clear",
+  "spreadsheets.values.batchUpdate",
+  "spreadsheets.batchUpdate",
+]);
+
 /**
  * Create Google Sheets tool that uses ConnectionManager for credentials.
  *
@@ -108,8 +119,9 @@ export function makeGSheetsTool(
             throw new Error(`Method ${method} not implemented`);
         }
 
-        // Log events for significant operations
-        if (method.includes("create") || method.includes("update") || method.includes("append") || method.includes("clear"))
+        // Track significant operations for auditing (spec: fix-google-tools-event-tracking-pattern)
+        // Don't spam events with 'get' which usually happen in batches
+        if (TRACKED_METHODS.has(method))
           await getContext().createEvent("gsheets_api_call", {
             method,
             account,

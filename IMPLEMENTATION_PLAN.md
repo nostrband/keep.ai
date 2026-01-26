@@ -8,7 +8,7 @@
 
 **Remaining Work:**
 - Bug fixes (Priority 2) - 0 items ✅ ALL COMPLETE
-- Code quality improvements (Priority 3) - 7 items (3 completed)
+- Code quality improvements (Priority 3) - 0 items ✅ ALL COMPLETE (7 completed)
 - Nice-to-have optimizations (Priority 4) - 6 items
 - Post-v1 features (Priority 5)
 - Manual OAuth configuration (external, user-facing)
@@ -168,31 +168,42 @@ All security issues have been addressed for v1.0.0 release.
   - **Location:** `packages/agent/src/tools/gmail.ts`
 
 ### 3.2 Feature Enhancements
-- [ ] `specs/new/expand-archive-to-paused-workflows.md` - Expand archive scope
+- [x] `specs/new/expand-archive-to-paused-workflows.md` - Expand archive scope
   - Allow archiving paused workflows (not just drafts)
-  - Add server-side validation
+  - Archive button now shows for both "draft" and "paused" workflows
+  - **Location:** `apps/web/src/components/WorkflowDetailPage.tsx:376`
 
-- [ ] `specs/new/add-archive-confirmation-dialog.md` - Prevent accidental archive
-  - Add simple confirm() dialog before archiving
+- [x] `specs/new/add-archive-confirmation-dialog.md` - Prevent accidental archive
+  - Added window.confirm() dialog before archiving
+  - **Location:** `apps/web/src/components/WorkflowDetailPage.tsx:188-191`
 
-- [ ] `specs/new/smart-workflow-restore-status.md` - Smarter restore
-  - Restore to "paused" if has scripts, "draft" if not
+- [x] `specs/new/smart-workflow-restore-status.md` - Smarter restore
+  - Restore to "paused" if workflow has active_script_id, "draft" if not
+  - Applied to both WorkflowDetailPage and ArchivedPage
+  - **Location:** `apps/web/src/components/WorkflowDetailPage.tsx:206`, `apps/web/src/components/ArchivedPage.tsx:23`
 
 ### 3.3 Event Tracking
-- [ ] `specs/new/fix-gdrive-event-tracking.md` - Incomplete audit trail
-  - Missing update/copy tracking in GDrive tool
-  - Add update/copy to tracked methods
+- [x] `specs/new/fix-gdrive-event-tracking.md` - Incomplete audit trail
+  - Added update/copy methods to tracked methods
+  - Changed from includes() to explicit Set membership
+  - **Location:** `packages/agent/src/tools/gdrive.ts:28-34,112`
 
-- [ ] `specs/new/fix-google-tools-event-tracking-pattern.md` - Fragile matching
-  - Uses includes() for method matching which is fragile
-  - Replace includes() with explicit method list
+- [x] `specs/new/fix-google-tools-event-tracking-pattern.md` - Fragile matching
+  - Replaced includes() with explicit TRACKED_METHODS Set for all Google tools
+  - **Location:** `packages/agent/src/tools/gdrive.ts`, `packages/agent/src/tools/gsheets.ts`, `packages/agent/src/tools/gdocs.ts`
 
 ### 3.4 Security Hardening
-- [ ] `specs/new/add-service-path-sanitization.md` - Defense in depth
-  - Sanitize service IDs to alphanumeric only
+- [x] `specs/new/add-service-path-sanitization.md` - Defense in depth ✅ (Already implemented)
+  - validateServiceId() already validates alphanumeric, dash, underscore only
+  - getFilePath() has path traversal detection
+  - **Location:** `packages/connectors/src/store.ts:61-66,81-86`
 
-- [ ] `specs/new/add-token-revocation-on-disconnect.md` - Token cleanup
-  - Revoke OAuth token at provider on disconnect
+- [x] `specs/new/add-token-revocation-on-disconnect.md` - Token cleanup
+  - Added revokeUrl to OAuthConfig type
+  - Added revokeToken() method to OAuthHandler
+  - disconnect() now attempts token revocation before local cleanup
+  - Google services configured with revoke endpoint
+  - **Location:** `packages/connectors/src/oauth.ts:151-186`, `packages/connectors/src/manager.ts:335-377`, `packages/connectors/src/services/google.ts:28`
 
 ---
 

@@ -25,6 +25,7 @@ export interface GoogleProfile {
 export const googleOAuthBase = {
   authUrl: "https://accounts.google.com/o/oauth2/v2/auth",
   tokenUrl: "https://oauth2.googleapis.com/token",
+  revokeUrl: "https://oauth2.googleapis.com/revoke", // Token revocation endpoint (spec: add-token-revocation-on-disconnect)
   extraAuthParams: {
     access_type: "offline",
     prompt: "consent", // Force refresh token on every auth

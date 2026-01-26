@@ -143,6 +143,52 @@ export class OAuthHandler {
     debug("Token refresh successful");
     return data;
   }
+
+  /**
+   * Revoke an access token at the OAuth provider.
+   * Returns true if revocation succeeded or was not needed.
+   * Returns false if revocation failed (token will remain valid at provider).
+   * Best-effort: failures don't throw, just return false.
+   */
+  async revokeToken(accessToken: string): Promise<boolean> {
+    if (!this.config.revokeUrl) {
+      debug("No revoke URL configured, skipping token revocation");
+      return true; // Not an error, just not supported
+    }
+
+    debug("Revoking access token");
+
+    try {
+      const body = new URLSearchParams({
+        token: accessToken,
+      });
+
+      const headers: Record<string, string> = {
+        "Content-Type": "application/x-www-form-urlencoded",
+      };
+
+      const response = await fetch(this.config.revokeUrl, {
+        method: "POST",
+        headers,
+        body: body.toString(),
+      });
+
+      // Google returns 200 on success, even for already-revoked tokens
+      if (response.ok) {
+        debug("Token revocation successful");
+        return true;
+      }
+
+      // Non-2xx response - revocation failed but we should continue with disconnect
+      const errorText = await response.text();
+      debug("Token revocation failed: %s %s", response.status, errorText);
+      return false;
+    } catch (error) {
+      // Network error - log and continue with disconnect
+      debug("Token revocation error: %s", error);
+      return false;
+    }
+  }
 }
 
 /**

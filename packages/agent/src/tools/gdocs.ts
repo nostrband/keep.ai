@@ -22,6 +22,13 @@ const SUPPORTED_METHODS = [
   "documents.batchUpdate",
 ] as const;
 
+// Methods that should trigger event tracking (write operations)
+// Uses explicit Set membership instead of includes() to avoid false positives (spec: fix-google-tools-event-tracking-pattern)
+const TRACKED_METHODS = new Set<string>([
+  "documents.create",
+  "documents.batchUpdate",
+]);
+
 /**
  * Create Google Docs tool that uses ConnectionManager for credentials.
  *
@@ -84,8 +91,9 @@ export function makeGDocsTool(
             throw new Error(`Method ${method} not implemented`);
         }
 
-        // Log events for significant operations
-        if (method.includes("create") || method.includes("batchUpdate"))
+        // Track significant operations for auditing (spec: fix-google-tools-event-tracking-pattern)
+        // Don't spam events with 'get' which usually happens in batches
+        if (TRACKED_METHODS.has(method))
           await getContext().createEvent("gdocs_api_call", {
             method,
             account,
