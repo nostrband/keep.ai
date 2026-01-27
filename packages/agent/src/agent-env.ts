@@ -4,6 +4,7 @@ import debug from "debug";
 import { getEnv } from "./env";
 import { AssistantUIMessage, AutonomyMode } from "@app/proto";
 import { generateId, isFileUIPart } from "ai";
+import type { Connection } from "@app/connectors";
 
 export class AgentEnv {
   #api: KeepDbApi;
@@ -11,6 +12,7 @@ export class AgentEnv {
   private task: Task;
   #tools: Map<string, string>;
   private autonomyMode: AutonomyMode;
+  private connections: Connection[];
   private debug = debug("AgentEnv");
 
   constructor(
@@ -20,12 +22,14 @@ export class AgentEnv {
     tools: Map<string, string>,
     private userPath?: string,
     autonomyMode?: AutonomyMode,
+    connections?: Connection[],
   ) {
     this.#api = api;
     this.type = type;
     this.task = task;
     this.#tools = tools;
     this.autonomyMode = autonomyMode || 'ai_decides';
+    this.connections = connections || [];
   }
 
   get tools() {
@@ -304,6 +308,58 @@ The user prefers you to make decisions autonomously. Follow these guidelines:
       .replace(/\\\\/g, "\\"); // Unescape backslashes (must be last)
   }
 
+  /**
+   * Generate connected accounts context for the agent.
+   * Lists all active service-account pairs so the agent knows what's available.
+   */
+  private connectedAccountsPrompt(): string {
+    if (this.connections.length === 0) {
+      return `## Connected Accounts
+No external services connected. If the task requires Gmail, Google Drive, Google Sheets, Google Docs, or Notion, ask the user to connect the service in Settings.
+`;
+    }
+
+    // Group by service, only include active connections
+    const byService = new Map<string, Connection[]>();
+    for (const conn of this.connections) {
+      if (conn.status !== 'connected') continue;
+      const list = byService.get(conn.service) || [];
+      list.push(conn);
+      byService.set(conn.service, list);
+    }
+
+    if (byService.size === 0) {
+      return `## Connected Accounts
+No active connections. Some services may need re-authentication. Ask user to check Settings.
+`;
+    }
+
+    const lines = ['## Connected Accounts', ''];
+
+    const serviceNames: Record<string, string> = {
+      gmail: 'Gmail',
+      gdrive: 'Google Drive',
+      gsheets: 'Google Sheets',
+      gdocs: 'Google Docs',
+      notion: 'Notion',
+    };
+
+    for (const [service, conns] of byService) {
+      const displayName = serviceNames[service] || service;
+      lines.push(`### ${displayName}`);
+      for (const conn of conns) {
+        const label = conn.label ? ` (${conn.label})` : '';
+        const displayId = (conn.metadata?.displayName as string) || conn.accountId;
+        lines.push(`- ${displayId}${label}`);
+      }
+      lines.push('');
+    }
+
+    lines.push('Use the account identifier (email or workspace ID) as the `account` parameter when calling connector tools.');
+
+    return lines.join('\n');
+  }
+
   private workerSystemPrompt() {
     return `
 You are a diligent personal AI assistant. You are working on a single, clearly defined background task created by user. Your responsibility is to move this task toward the goal.
@@ -401,6 +457,8 @@ that input format will stay consistent.
 
 ## Input format
 - You'll be given script goal and other input from the user
+
+${this.connectedAccountsPrompt()}
 
 ${this.toolsPrompt()}
 

@@ -12,7 +12,7 @@ import { Mail, HardDrive, Sheet, FileText, BookOpen, MoreVertical, Plus, Refresh
 import { useConnections } from "../hooks/dbConnectionReads";
 import { useUpdateConnectionLabel } from "../hooks/dbWrites";
 import { useAutoHidingMessage } from "../hooks/useAutoHidingMessage";
-import { useQueryProvider } from "../QueryProvider";
+import { useQueryProvider } from "../QueryProviderEmbedded";
 import { notifyTablesChanged } from "../queryClient";
 import { API_ENDPOINT } from "../const";
 import { openUrl } from "../lib/url-utils";

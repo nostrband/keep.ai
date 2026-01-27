@@ -52,6 +52,12 @@ export interface SandboxAPIConfig {
   connectionManager?: ConnectionManager;
   /** Workflow ID for pause checking. When set, tool calls will check if workflow is still active. */
   workflowId?: string;
+  /**
+   * Abort controller for terminating script on fatal errors (workflow mode only).
+   * When set along with workflowId, invalid input errors will abort execution immediately
+   * to prevent the script from catching and ignoring the error.
+   */
+  abortController?: AbortController;
 }
 
 /**
@@ -66,6 +72,7 @@ export class SandboxAPI {
   private userPath?: string;
   private connectionManager?: ConnectionManager;
   private workflowId?: string;
+  private abortController?: AbortController;
   private debug = debug("SandboxAPI");
   private toolDocs = new Map<string, string>();
 
@@ -76,6 +83,7 @@ export class SandboxAPI {
     this.userPath = config.userPath;
     this.connectionManager = config.connectionManager;
     this.workflowId = config.workflowId;
+    this.abortController = config.abortController;
   }
 
   /**
@@ -148,7 +156,16 @@ Example: await ${ns}.${name}(<input>)
             // NOTE: do not print zod error codes as those are too verbose, we're
             // already printing Usage which is more useful.
             const message = `Invalid input for ${ns}.${name}.\nUsage: ${desc}`;
-            throw new Error(message);
+            const logicError = new LogicError(message, { source: `${ns}.${name}` });
+
+            // In workflow mode, invalid input is a fatal error that must terminate execution.
+            // Store the error before abort so it survives the QuickJS boundary.
+            if (this.workflowId && this.abortController) {
+              this.getContext().classifiedError = logicError;
+              this.abortController.abort(message);
+            }
+
+            throw logicError;
           }
         }
 

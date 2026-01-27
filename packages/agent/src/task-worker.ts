@@ -606,6 +606,12 @@ export class TaskWorker {
       this.debug('Failed to get autonomy mode, using default ai_decides:', error);
     }
 
+    // Fetch connected accounts for agent context
+    // Allows agent to know available service-account pairs upfront
+    const connections = this.connectionManager
+      ? await this.connectionManager.listConnections()
+      : [];
+
     // Still create AgentEnv for system prompts, context building, etc.
     const env = new AgentEnv(
       this.api,
@@ -614,6 +620,7 @@ export class TaskWorker {
       sandboxAPI.tools,
       this.userPath,
       autonomyMode,
+      connections,
     );
 
     return env;

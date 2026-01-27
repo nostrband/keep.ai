@@ -7,6 +7,7 @@ import {
   shouldInterruptAfterDeadline,
 } from "quickjs-emscripten";
 import { DBInterface, TaskType } from "packages/db/dist";
+import type { ClassifiedError } from "../errors";
 
 export interface EvalGlobal {
   memory?: any,
@@ -53,6 +54,11 @@ export interface EvalContext {
   cost: number;  // Accumulated cost from tool calls (in dollars, will be converted to microdollars when saving)
   createEvent(type: string, content: any, tx?: DBInterface): Promise<void>;
   onLog(line: string): Promise<void>;
+  /**
+   * Classified error that caused script abort (workflow mode only).
+   * Stored here before abort so the error class survives QuickJS boundary.
+   */
+  classifiedError?: ClassifiedError;
 }
 
 export class Sandbox {

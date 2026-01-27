@@ -147,6 +147,8 @@ export class WorkflowWorker {
 
     // Declare sandbox outside try block so we can access cost in both success and error paths
     let sandbox: Sandbox | undefined;
+    // AbortController for terminating script on fatal errors (invalid input)
+    const abortController = new AbortController();
 
     try {
       // JS sandbox with proper 'context' object
@@ -158,17 +160,23 @@ export class WorkflowWorker {
       );
 
       // Inits JS API in the sandbox
-      await this.createEnv(workflow, sandbox);
+      await this.createEnv(workflow, sandbox, abortController);
 
       // Run the code
       const result = await sandbox.eval(script.code, {
         timeoutMs: 300000,
+        signal: abortController.signal,
       });
 
       if (result.ok) {
         this.debug("Script result", result.result);
       } else {
         this.debug("Script error", result.error);
+        // Check for classified error stored before abort (survives QuickJS boundary)
+        const classifiedError = sandbox.context?.classifiedError;
+        if (classifiedError) {
+          throw classifiedError;
+        }
         throw new Error(result.error);
       }
 
@@ -733,7 +741,7 @@ If you'd like me to try fixing it again, just ask and I'll give it another go wi
     });
   }
 
-  private async createEnv(workflow: Workflow, sandbox: Sandbox) {
+  private async createEnv(workflow: Workflow, sandbox: Sandbox, abortController?: AbortController) {
     // Create SandboxAPI directly without needing AgentEnv or dummy task
     const sandboxAPI = new SandboxAPI({
       api: this.api,
@@ -742,6 +750,7 @@ If you'd like me to try fixing it again, just ask and I'll give it another go wi
       userPath: this.userPath,
       connectionManager: this.connectionManager,
       workflowId: workflow.id, // Enable pause checking during tool calls
+      abortController, // Enable fatal error abort for invalid input
     });
 
     sandbox.setGlobal(await sandboxAPI.createGlobal());

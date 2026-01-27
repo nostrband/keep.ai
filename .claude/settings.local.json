@@ -41,7 +41,8 @@
       "Bash(do echo \"=== $f.txt ===\" if grep -q \"ISSUE REVIEW\" /home/artur/keep.ai/reviews/$f.txt)",
       "Bash(then grep -A 20 \"ISSUE REVIEW\" /home/artur/keep.ai/reviews/$f.txt)",
       "Bash(else)",
-      "Bash(if grep -q \"ISSUE REVIEW\" /home/artur/keep.ai/reviews/$f.txt)"
+      "Bash(if grep -q \"ISSUE REVIEW\" /home/artur/keep.ai/reviews/$f.txt)",
+      "Bash(npx tsc:*)"
     ]
   }
 }

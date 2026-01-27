@@ -62,7 +62,10 @@ export const gmailService: ServiceDefinition = {
   icon: "mail",
   oauthConfig: {
     ...googleOAuthBase,
-    scopes: ["https://www.googleapis.com/auth/gmail.modify"],
+    scopes: [
+      "https://www.googleapis.com/auth/gmail.modify",
+      "https://www.googleapis.com/auth/userinfo.email",
+    ],
   },
   supportsRefresh: true,
   fetchProfile: fetchGoogleProfile,
@@ -95,7 +98,10 @@ export const gdriveService: ServiceDefinition = {
   icon: "folder",
   oauthConfig: {
     ...googleOAuthBase,
-    scopes: ["https://www.googleapis.com/auth/drive"],
+    scopes: [
+      "https://www.googleapis.com/auth/drive",
+      "https://www.googleapis.com/auth/userinfo.email",
+    ],
   },
   supportsRefresh: true,
   fetchProfile: fetchGoogleProfile,
@@ -128,7 +134,10 @@ export const gsheetsService: ServiceDefinition = {
   icon: "table",
   oauthConfig: {
     ...googleOAuthBase,
-    scopes: ["https://www.googleapis.com/auth/spreadsheets"],
+    scopes: [
+      "https://www.googleapis.com/auth/spreadsheets",
+      "https://www.googleapis.com/auth/userinfo.email",
+    ],
   },
   supportsRefresh: true,
   fetchProfile: fetchGoogleProfile,
@@ -161,7 +170,10 @@ export const gdocsService: ServiceDefinition = {
   icon: "file-text",
   oauthConfig: {
     ...googleOAuthBase,
-    scopes: ["https://www.googleapis.com/auth/documents"],
+    scopes: [
+      "https://www.googleapis.com/auth/documents",
+      "https://www.googleapis.com/auth/userinfo.email",
+    ],
   },
   supportsRefresh: true,
   fetchProfile: fetchGoogleProfile,
