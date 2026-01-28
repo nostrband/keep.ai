@@ -42,10 +42,21 @@ export type StepOutput = { steps: number; reasoning?: string } & (
   | { kind: "wait"; reply?: string; patch?: TaskPatch }
 );
 
+/**
+ * Context for maintainer tasks, provided when task.type === "maintainer".
+ * Contains information needed for the fix tool's race condition check.
+ */
+export interface MaintainerContext {
+  workflowId: string;
+  expectedMajorVersion: number;
+}
+
 export type AgentTask = {
   id: string;
   type: TaskType;
   /** Task state containing only the asks field (Spec 10) */
   asks?: string;
   chat_id: string;
+  /** Maintainer-specific context (only present when type === "maintainer") */
+  maintainerContext?: MaintainerContext;
 };

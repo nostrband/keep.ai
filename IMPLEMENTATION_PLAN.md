@@ -44,10 +44,11 @@ Introduces a new `maintainer` task type for bounded, autonomous script repair. T
 #### Task Worker
 
 - [x] **Support maintainer task type** - Added `"maintainer"` to type check in `task-worker.ts` executeTask method
-- [ ] **MaintainerContext interface** - Define interface with `scriptRunId`, `error`, `logs`, `result`, `scriptCode`, `scriptVersion`, `workflowId`, `currentMajorVersion`, `changelog`
-- [ ] **loadMaintainerContext** - Implement method to load context from `script_run_id` (get scriptRun, script, workflow, prior minor versions for changelog)
-- [ ] **getMaintainerTools** - Implement tool filter: exclude `save`, `ask`, `schedule` from maintainer tools
+- [x] **MaintainerContext interface** - Basic interface with `workflowId` and `expectedMajorVersion` for fix tool race condition check (in agent-types.ts)
+- [x] **loadMaintainerContext** - Basic loading in task-worker.ts before creating agentTask (loads workflow and script to get major version)
+- [x] **getMaintainerTools** - Tool filtering in agent.ts: maintainer gets `fix` tool, others get `save`/`ask`/`schedule`
 - [ ] **Maintainer completion handling** - Implement `handleMaintainerCompletion`: check if `fix` tool was called, handle race condition (fix not applied), escalate with explanation if no fix called
+- [ ] **Rich MaintainerContext** - Extend context with `scriptRunId`, `error`, `logs`, `result`, `scriptCode`, `scriptVersion`, `changelog` for system prompt injection
 
 #### Task Scheduler
 
@@ -56,13 +57,15 @@ Introduces a new `maintainer` task type for bounded, autonomous script repair. T
 
 #### AI Tools
 
-- [ ] **Create fix.ts tool** - New tool at `ai-tools/fix.ts` for maintainer to propose fixes:
+- [x] **Create fix.ts tool** - Created `ai-tools/fix.ts` for maintainer to propose fixes:
   - Parameters: `code` (string), `comment` (string)
   - Race condition check: compare `currentScript.major_version` with `expectedMajorVersion`
-  - If stale, return `{ applied: false }`
+  - If stale, return `{ applied: false }` and clear maintenance flag
   - If valid, create new script with same `major_version`, incremented `minor_version`
   - Update workflow `active_script_id`, clear `maintenance`, set `next_run_timestamp` to now
   - Return `{ script, applied: true }`
+- [x] **Wire up fix tool in agent.ts** - Added conditional tool registration (fix for maintainer, save/ask/schedule for others)
+- [x] **MaintainerContext in AgentTask** - Added interface and optional field for passing workflow/version info
 - [x] **Update save.ts tool** - Updated to increment `major_version` and reset `minor_version` to 0
 
 #### Agent Environment

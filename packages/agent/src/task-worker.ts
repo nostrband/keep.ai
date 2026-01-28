@@ -15,7 +15,7 @@ import {
   Task,
   TaskType,
 } from "@app/db";
-import { AgentTask, StepOutput, StepReason } from "./agent-types";
+import { AgentTask, MaintainerContext, StepOutput, StepReason } from "./agent-types";
 import { AgentEnv } from "./agent-env";
 import { SandboxAPI } from "./sandbox/api";
 import { fileUtils } from "@app/node";
@@ -162,12 +162,32 @@ export class TaskWorker {
       // Track asks locally (Spec 10: asks moved from task_states to tasks table)
       let currentAsks = task.asks || "";
 
+      // Build maintainer context if needed
+      let maintainerContext: MaintainerContext | undefined;
+      if (taskType === "maintainer" && task.workflow_id) {
+        const workflow = await this.api.scriptStore.getWorkflow(task.workflow_id);
+        if (workflow && workflow.active_script_id) {
+          const script = await this.api.scriptStore.getScript(workflow.active_script_id);
+          if (script) {
+            maintainerContext = {
+              workflowId: workflow.id,
+              expectedMajorVersion: script.major_version,
+            };
+          }
+        }
+        if (!maintainerContext) {
+          this.debug("Cannot create maintainer context - missing workflow or script");
+          return this.finishTask(task, "Error", "Cannot load maintainer context");
+        }
+      }
+
       // Agent task (Spec 10: asks moved directly to AgentTask)
       const agentTask: AgentTask = {
         id: task.id,
         type: taskType,
         chat_id: task.chat_id,
         asks: currentAsks,
+        maintainerContext,
       };
 
       // Model for agent
