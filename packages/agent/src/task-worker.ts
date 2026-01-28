@@ -109,7 +109,7 @@ export class TaskWorker {
 
     try {
       // Type check to cast to TaskType safely
-      if (task.type !== "worker" && task.type !== "planner") {
+      if (task.type !== "worker" && task.type !== "planner" && task.type !== "maintainer") {
         this.debug("Unsupported task type", task.type);
         return this.finishTask(task, "Wrong type", "Unsupported task type");
       }
@@ -138,7 +138,7 @@ export class TaskWorker {
       // bcs that generally means user is supplying
       // a followup message/question to latest worker reply
       let history: AssistantUIMessage[] = [];
-      if ((taskType === "worker" || taskType === "planner") && task.thread_id) {
+      if ((taskType === "worker" || taskType === "planner" || taskType === "maintainer") && task.thread_id) {
         // Load existing history
         // NOTE: we start a new thread but copy history from
         // old thread, to make sure our observability traces
@@ -729,7 +729,7 @@ export class TaskWorker {
       title = generateTitleFromInbox(inbox);
     }
     if (!title) {
-      title = taskType === "worker" ? "Worker" : "Planner";
+      title = taskType === "worker" ? "Worker" : taskType === "planner" ? "Planner" : "Maintainer";
     }
 
     const now = new Date();

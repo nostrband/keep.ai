@@ -43,7 +43,7 @@ Introduces a new `maintainer` task type for bounded, autonomous script repair. T
 
 #### Task Worker
 
-- [ ] **Support maintainer task type** - Add `"maintainer"` to type check in `task-worker.ts` executeTask method (currently REJECTS maintainer type at line 112)
+- [x] **Support maintainer task type** - Added `"maintainer"` to type check in `task-worker.ts` executeTask method
 - [ ] **MaintainerContext interface** - Define interface with `scriptRunId`, `error`, `logs`, `result`, `scriptCode`, `scriptVersion`, `workflowId`, `currentMajorVersion`, `changelog`
 - [ ] **loadMaintainerContext** - Implement method to load context from `script_run_id` (get scriptRun, script, workflow, prior minor versions for changelog)
 - [ ] **getMaintainerTools** - Implement tool filter: exclude `save`, `ask`, `schedule` from maintainer tools
@@ -67,9 +67,9 @@ Introduces a new `maintainer` task type for bounded, autonomous script repair. T
 
 #### Agent Environment
 
-- [ ] **Add maintainer temperature** - Add `case "maintainer": return 0.1;` in `agent-env.ts` temperature getter
-- [ ] **Add maintainer to buildSystem switch** - Add `case "maintainer": systemPrompt = this.maintainerSystemPrompt(); break;`
-- [ ] **maintainerSystemPrompt method** - Implement the bounded repair agent system prompt (per spec):
+- [x] **Add maintainer temperature** - Added `case "maintainer": return 0.1;` in `agent-env.ts` temperature getter
+- [x] **Add maintainer to buildSystem switch** - Added `case "maintainer": systemPrompt = this.maintainerSystemPrompt(); break;`
+- [x] **maintainerSystemPrompt method** - Implemented bounded repair agent system prompt with:
   - Role: autonomous repair, no user interaction
   - Input: scriptCode, scriptVersion, error, logs, result
   - Output: `fix` tool only (plus `eval` for testing)
