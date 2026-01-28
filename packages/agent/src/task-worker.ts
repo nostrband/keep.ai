@@ -767,15 +767,14 @@ If you cannot fix this issue autonomously, explain why without calling the \`fix
       maintenance_fix_count: 0, // Reset so user gets fresh attempts
     });
 
-    // Create notification with explanation
+    // Create notification with explanation and Re-plan action
     try {
       await this.api.notificationStore.saveNotification({
         id: generateId(),
         workflow_id: workflowId,
-        type: "escalated",
+        type: "maintenance_failed",
         payload: JSON.stringify({
           script_run_id: scriptRunId,
-          reason: "maintenance_failed",
           explanation: explanation,
         }),
         timestamp: new Date().toISOString(),

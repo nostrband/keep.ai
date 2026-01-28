@@ -5,10 +5,11 @@ import { DBInterface } from "./interfaces";
  * Notification types for workflow events requiring user attention.
  * - error: Auth/permission/network error during run
  * - escalated: Auto-fix failed after 3 attempts
+ * - maintenance_failed: Maintainer task could not fix the issue
  * - script_message: Script calls user.send() tool
  * - script_ask: Script calls user.ask() tool (v2)
  */
-export type NotificationType = "error" | "escalated" | "script_message" | "script_ask";
+export type NotificationType = "error" | "escalated" | "maintenance_failed" | "script_message" | "script_ask";
 
 export interface Notification {
   id: string;

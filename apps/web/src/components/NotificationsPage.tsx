@@ -37,6 +37,10 @@ export default function NotificationsPage() {
         // Navigate to workflow for details
         navigate(`/workflows/${notification.workflow_id}`);
         break;
+      case "replan":
+        // Navigate to workflow to re-plan (user can click Edit to discuss with planner)
+        navigate(`/workflows/${notification.workflow_id}`);
+        break;
       default:
         // For script_ask answers
         if (action.startsWith("answer_")) {

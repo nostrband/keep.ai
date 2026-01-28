@@ -8,6 +8,7 @@ import {
   useScriptVersionsByWorkflowId
 } from "../hooks/dbScriptReads";
 import { useChat } from "../hooks/dbChatReads";
+import { useMaintainerTasks } from "../hooks/dbTaskReads";
 import { useUpdateWorkflow, useActivateScriptVersion } from "../hooks/dbWrites";
 import SharedHeader from "./SharedHeader";
 import { Response } from "../ui";
@@ -15,7 +16,7 @@ import ScriptDiff from "./ScriptDiff";
 import { Badge, Button } from "../ui";
 import { Archive, RotateCcw } from "lucide-react";
 import { workflowNotifications } from "../lib/WorkflowNotifications";
-import { WorkflowStatusBadge, ScriptRunStatusBadge } from "./StatusBadge";
+import { WorkflowStatusBadge, ScriptRunStatusBadge, TaskStatusBadge } from "./StatusBadge";
 import { formatCronSchedule } from "../lib/formatCronSchedule";
 import { useAutoHidingMessage } from "../hooks/useAutoHidingMessage";
 import { API_ENDPOINT } from "../const";
@@ -34,6 +35,7 @@ export default function WorkflowDetailPage() {
   const { data: scriptRuns = [], isLoading: isLoadingRuns } = useScriptRunsByWorkflowId(id!);
   const { data: scriptVersions = [], isLoading: isLoadingVersions } = useScriptVersionsByWorkflowId(id!);
   const { data: unresolvedError } = useUnresolvedWorkflowError(id!);
+  const { data: maintainerTasks = [] } = useMaintainerTasks(id!);
   const success = useAutoHidingMessage({ duration: 3000 });
   const warning = useAutoHidingMessage({ duration: 5000 });
   const [isTestRunning, setIsTestRunning] = useState(false);
@@ -487,6 +489,38 @@ export default function WorkflowDetailPage() {
               </div>
             )}
 
+            {/* Auto-Fix History Section - shows maintainer tasks for this workflow */}
+            {maintainerTasks.length > 0 && (
+              <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
+                <h2 className="text-lg font-semibold text-gray-900 mb-4">Auto-Fix History</h2>
+                <div className="space-y-3">
+                  {maintainerTasks.map((task: any) => (
+                    <Link
+                      key={task.id}
+                      to={`/tasks/${task.id}`}
+                      className="block p-4 border border-gray-200 rounded-lg hover:border-gray-300 hover:shadow-sm transition-all"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="font-medium text-gray-900">{task.title || `Auto-fix ${task.id.slice(0, 8)}`}</span>
+                            <TaskStatusBadge state={task.state} defaultLabel="Pending" />
+                          </div>
+                          {task.error && (
+                            <p className="text-sm text-red-600 mb-1 line-clamp-2">
+                              {task.error}
+                            </p>
+                          )}
+                          <div className="text-xs text-gray-500">
+                            {new Date(task.timestamp).toLocaleString()}
+                          </div>
+                        </div>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Script Section */}
             {activeScript && (

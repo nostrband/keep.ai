@@ -24,6 +24,11 @@ interface ScriptAskPayload {
   options?: string[];
 }
 
+interface MaintenanceFailedPayload {
+  script_run_id?: string;
+  explanation?: string;
+}
+
 function parsePayload<T>(payload: string): T | null {
   if (!payload) return null;
   try {
@@ -69,6 +74,8 @@ export function NotificationCard({
         return <ErrorCard notification={notification} onAction={onAction} />;
       case "escalated":
         return <EscalatedCard notification={notification} />;
+      case "maintenance_failed":
+        return <MaintenanceFailedCard notification={notification} onAction={onAction} />;
       case "script_message":
         return <ScriptMessageCard notification={notification} />;
       case "script_ask":
@@ -226,6 +233,63 @@ function EscalatedCard({ notification }: { notification: Notification }) {
       </div>
       {!notification.resolved_at && (
         <div className="mt-3">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleReportIssue}
+            className="text-gray-600"
+          >
+            Report Issue
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MaintenanceFailedCard({
+  notification,
+  onAction,
+}: {
+  notification: Notification;
+  onAction?: (notification: Notification, action: string) => void;
+}) {
+  const payload = parsePayload<MaintenanceFailedPayload>(notification.payload);
+  const explanation = payload?.explanation || "The auto-fix attempt was unsuccessful.";
+
+  const handleReportIssue = () => {
+    openBugReport({
+      errorType: "maintenance_failed",
+      message: explanation,
+      workflowId: notification.workflow_id,
+      workflowTitle: notification.workflow_title,
+      timestamp: notification.timestamp,
+    });
+  };
+
+  return (
+    <div>
+      <div className="flex items-start gap-3">
+        <span className="text-xl">🔧</span>
+        <div className="flex-1">
+          <h3 className="font-medium text-gray-900">
+            Auto-fix failed - Re-plan needed
+          </h3>
+          <p className="text-sm text-gray-600 mt-1 line-clamp-3">
+            {explanation}
+          </p>
+        </div>
+      </div>
+      {!notification.resolved_at && (
+        <div className="mt-3 flex gap-2">
+          {onAction && (
+            <Button
+              size="sm"
+              onClick={() => onAction(notification, "replan")}
+            >
+              Re-plan
+            </Button>
+          )}
           <Button
             size="sm"
             variant="outline"

@@ -91,10 +91,8 @@ Introduces a new `maintainer` task type for bounded, autonomous script repair. T
 #### Completed
 - [x] **Version display format** - Updated WorkflowDetailPage.tsx and ScriptDetailPage.tsx to use major_version.minor_version format
 - [x] **getMaintainerTasksForWorkflow query hook** - Added useMaintainerTasks hook in dbTaskReads.ts and maintainerTasks query key in queryKeys.ts
-
-#### Not Started
-- [ ] **Auto-fix thread display** - Show maintainer tasks as separate auto-fix threads in WorkflowDetailPage (query via `getMaintainerTasksForWorkflow`)
-- [ ] **Maintenance failed notification** - Add `maintenance_failed` notification type with explanation and "Re-plan" action
+- [x] **Auto-fix thread display** - Show maintainer tasks as separate auto-fix threads in WorkflowDetailPage (implemented using useMaintainerTasks hook, displays task title, status badge, timestamp, and error if present)
+- [x] **Maintenance failed notification** - Add `maintenance_failed` notification type with explanation and "Re-plan" action (added MaintenanceFailedCard component with Re-plan button)
 
 ### Testing
 
