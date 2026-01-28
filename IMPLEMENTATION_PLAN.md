@@ -283,10 +283,10 @@ Areas identified as lacking test coverage:
 
 ### packages/db
 
-- [ ] Tests for `connection-store.ts`
+- [x] Tests for `connection-store.ts` - 25 tests covering CRUD, upsert, status/label/lastUsed updates, service filtering, metadata handling
 - [x] Tests for `inbox-store.ts` - 23 tests covering CRUD, filtering, pagination, transaction support
-- [ ] Tests for `memory-store.ts`
-- [ ] Tests for `file-store.ts`
+- [x] Tests for `memory-store.ts` - 34 tests covering threads, messages, filtering, sorting, content parsing
+- [x] Tests for `file-store.ts` - 46 tests covering CRUD, search, pagination, media type filtering, pattern matching
 
 ### packages/node
 
