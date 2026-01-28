@@ -26,9 +26,7 @@ Introduces a new `maintainer` task type for bounded, autonomous script repair. T
 - [x] **InboxItemTarget type** - Added `"maintainer"` to `InboxItemTarget = "worker" | "planner" | "maintainer"` in `inbox-store.ts`
 - [x] **getMaintainerTasksForWorkflow** - Added query method to get all maintainer tasks for a workflow (for UI display)
 - [x] **EnterMaintenanceModeParams/Result interfaces** - Added interfaces for enterMaintenanceMode transaction parameters and result
-
-#### Not Started
-- [ ] **enterMaintenanceMode transaction** - Add transactional method in `task-store.ts` that atomically: increments `maintenance_fix_count`, sets `maintenance = true`, creates maintainer task (with empty `chat_id`, own `thread_id`), creates inbox item targeting the task
+- [x] **enterMaintenanceMode transaction** - Transactional method in `KeepDbApi` (api.ts) that atomically: increments `maintenance_fix_count`, sets `maintenance = true`, creates maintainer task (with empty `chat_id`, own `thread_id`), creates inbox item targeting the task. Exported from index.ts.
 
 ### Agent Layer (`packages/agent`)
 
@@ -95,7 +93,7 @@ Introduces a new `maintainer` task type for bounded, autonomous script repair. T
 
 ### Testing
 
-- [ ] **Unit tests for enterMaintenanceMode** - Test transaction atomicity, fix count increment, task/inbox creation
+- [x] **Unit tests for enterMaintenanceMode** - Test transaction atomicity, fix count increment, task/inbox creation (packages/tests/src/api.test.ts)
 - [ ] **Unit tests for fix tool** - Test race condition handling, version incrementing, workflow updates
 - [ ] **Unit tests for save tool** - Test major version increment and minor version reset
 - [ ] **Unit tests for maintainer context loading** - Test changelog construction from prior minor versions
