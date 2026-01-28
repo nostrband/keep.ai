@@ -44,11 +44,29 @@ export type StepOutput = { steps: number; reasoning?: string } & (
 
 /**
  * Context for maintainer tasks, provided when task.type === "maintainer".
- * Contains information needed for the fix tool's race condition check.
+ * Contains information needed for the fix tool's race condition check
+ * and the maintainer agent's diagnostic context.
  */
 export interface MaintainerContext {
+  /** Workflow being maintained */
   workflowId: string;
+  /** Major version when maintainer started - used for race condition detection */
   expectedMajorVersion: number;
+  /** The failed script run ID for tracking */
+  scriptRunId: string;
+  /** Error details from the failed run */
+  error: {
+    type: string;
+    message: string;
+  };
+  /** Console output from the failed run (last 50 lines) */
+  logs: string;
+  /** The script code that failed */
+  scriptCode: string;
+  /** Formatted version string (e.g., "2.1") */
+  scriptVersion: string;
+  /** Changelog of prior minor versions for this major version */
+  changelog: Array<{ version: string; comment: string }>;
 }
 
 export type AgentTask = {

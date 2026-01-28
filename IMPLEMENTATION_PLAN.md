@@ -47,13 +47,13 @@ Introduces a new `maintainer` task type for bounded, autonomous script repair. T
 - [x] **MaintainerContext interface** - Basic interface with `workflowId` and `expectedMajorVersion` for fix tool race condition check (in agent-types.ts)
 - [x] **loadMaintainerContext** - Basic loading in task-worker.ts before creating agentTask (loads workflow and script to get major version)
 - [x] **getMaintainerTools** - Tool filtering in agent.ts: maintainer gets `fix` tool, others get `save`/`ask`/`schedule`
-- [ ] **Maintainer completion handling** - Implement `handleMaintainerCompletion`: check if `fix` tool was called, handle race condition (fix not applied), escalate with explanation if no fix called
-- [ ] **Rich MaintainerContext** - Extend context with `scriptRunId`, `error`, `logs`, `result`, `scriptCode`, `scriptVersion`, `changelog` for system prompt injection
+- [x] **Maintainer completion handling** - Implement `handleMaintainerCompletion`: check if `fix` tool was called, handle race condition (fix not applied), escalate with explanation if no fix called
+- [x] **Rich MaintainerContext** - Extend context with `scriptRunId`, `error`, `logs`, `result`, `scriptCode`, `scriptVersion`, `changelog` for system prompt injection
 
 #### Task Scheduler
 
-- [ ] **Planner priority over maintainer** - Update `task-scheduler.ts` to prioritize planner tasks over maintainer tasks for the same workflow (group by workflow, filter out maintainer if planner exists). Basic planner-first exists but no per-workflow conflict resolution.
-- [ ] **getWorkflowIdForInboxItem helper** - Add method to extract workflow_id from inbox item metadata or target task
+- [x] **Planner priority over maintainer** - Update `task-scheduler.ts` to prioritize planner tasks over maintainer tasks for the same workflow (group by workflow, filter out maintainer if planner exists). Basic planner-first exists but no per-workflow conflict resolution.
+- [x] **getWorkflowIdForInboxItem helper** - Not needed, used workflow_id directly from Task
 
 #### AI Tools
 
@@ -342,6 +342,28 @@ Maintainer tasks:
 - Have empty `chat_id` (do not write to user-facing chat)
 - Messages stored for debugging but not shown in chat
 - Only visible in UI as "auto-fix threads" on workflow detail page
+
+### Context Injection for Maintainer
+
+The maintainer agent receives its context through the enriched inbox message which includes:
+- Script code that failed
+- Error details (type, message)
+- Last 50 lines of logs
+- Formatted version string (e.g., "2.1")
+- Changelog of prior minor versions
+
+### Maintainer Completion Handling
+
+When the maintainer task finishes, `handleMaintainerCompletion` checks:
+1. If `fix` tool was called (by looking for `tool-fix` part type in agent history)
+2. If fix was applied (maintenance flag cleared by fix tool)
+3. If fix was not called, escalates to user with maintainer's explanation
+
+### Task Scheduler Priority
+
+The scheduler now handles maintainer tasks with per-workflow conflict resolution:
+- If both planner and maintainer tasks exist for the same workflow, maintainer is skipped
+- Priority order: planner > worker > maintainer
 
 ### Dependency Order for Maintainer Task Type
 

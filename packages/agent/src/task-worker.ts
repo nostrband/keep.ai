@@ -14,6 +14,7 @@ import {
   KeepDbApi,
   Task,
   TaskType,
+  formatVersion,
 } from "@app/db";
 import { AgentTask, MaintainerContext, StepOutput, StepReason } from "./agent-types";
 import { AgentEnv } from "./agent-env";
@@ -115,7 +116,8 @@ export class TaskWorker {
       }
       const taskType: TaskType = task.type;
 
-      const { inboxItems, inbox } = await this.getInboxItems(taskType, task.id);
+      const { inboxItems, inbox: rawInbox } = await this.getInboxItems(taskType, task.id);
+      let inbox = rawInbox;
       
       // All tasks now require non-empty inbox (agentic loop only)
       if (!inbox.length) {
@@ -165,20 +167,16 @@ export class TaskWorker {
       // Build maintainer context if needed
       let maintainerContext: MaintainerContext | undefined;
       if (taskType === "maintainer" && task.workflow_id) {
-        const workflow = await this.api.scriptStore.getWorkflow(task.workflow_id);
-        if (workflow && workflow.active_script_id) {
-          const script = await this.api.scriptStore.getScript(workflow.active_script_id);
-          if (script) {
-            maintainerContext = {
-              workflowId: workflow.id,
-              expectedMajorVersion: script.major_version,
-            };
-          }
-        }
+        maintainerContext = await this.loadMaintainerContext(
+          task.workflow_id,
+          inbox
+        );
         if (!maintainerContext) {
           this.debug("Cannot create maintainer context - missing workflow or script");
           return this.finishTask(task, "Error", "Cannot load maintainer context");
         }
+        // Enrich the inbox with the full maintainer context for the agent
+        inbox = this.enrichMaintainerInbox(inbox, maintainerContext);
       }
 
       // Agent task (Spec 10: asks moved directly to AgentTask)
@@ -326,7 +324,12 @@ export class TaskWorker {
         }
 
         // Send reply/asks to recipient (replier inbox or user)
-        await this.handleReply(taskType, task, currentAsks, result);
+        // Maintainer tasks don't write to user chat - handle separately
+        if (taskType === "maintainer" && maintainerContext) {
+          await this.handleMaintainerCompletion(task, result, maintainerContext, agent);
+        } else {
+          await this.handleReply(taskType, task, currentAsks, result);
+        }
 
         // Signal success to scheduler
         this.emitSignal({
@@ -496,6 +499,330 @@ export class TaskWorker {
     if (result.kind === "wait" && currentAsks) {
       await this.sendToUser(task.chat_id, currentAsks);
     }
+  }
+
+  /**
+   * Load rich context for maintainer task from the failed script run.
+   * Extracts scriptRunId from inbox, loads the failed run, script, and builds changelog.
+   */
+  private async loadMaintainerContext(
+    workflowId: string,
+    inbox: string[]
+  ): Promise<MaintainerContext | undefined> {
+    // 1. Get the workflow and active script for version info
+    const workflow = await this.api.scriptStore.getWorkflow(workflowId);
+    if (!workflow || !workflow.active_script_id) {
+      this.debug("loadMaintainerContext: No workflow or active script");
+      return undefined;
+    }
+
+    const activeScript = await this.api.scriptStore.getScript(workflow.active_script_id);
+    if (!activeScript) {
+      this.debug("loadMaintainerContext: Active script not found");
+      return undefined;
+    }
+
+    // 2. Extract scriptRunId from first inbox item metadata
+    let scriptRunId: string | undefined;
+    for (const item of inbox) {
+      try {
+        const parsed = JSON.parse(item);
+        if (parsed.metadata?.scriptRunId) {
+          scriptRunId = parsed.metadata.scriptRunId;
+          break;
+        }
+      } catch (e) {
+        this.debug("loadMaintainerContext: Failed to parse inbox item", e);
+      }
+    }
+
+    if (!scriptRunId) {
+      this.debug("loadMaintainerContext: No scriptRunId found in inbox");
+      // Fall back to basic context if no scriptRunId
+      return {
+        workflowId,
+        expectedMajorVersion: activeScript.major_version,
+        scriptRunId: "",
+        error: { type: "unknown", message: "Script run ID not found in inbox" },
+        logs: "",
+        scriptCode: activeScript.code,
+        scriptVersion: formatVersion(activeScript.major_version, activeScript.minor_version),
+        changelog: [],
+      };
+    }
+
+    // 3. Load the failed script run
+    const scriptRun = await this.api.scriptStore.getScriptRun(scriptRunId);
+    if (!scriptRun) {
+      this.debug("loadMaintainerContext: Script run not found", scriptRunId);
+      return {
+        workflowId,
+        expectedMajorVersion: activeScript.major_version,
+        scriptRunId,
+        error: { type: "unknown", message: "Script run not found" },
+        logs: "",
+        scriptCode: activeScript.code,
+        scriptVersion: formatVersion(activeScript.major_version, activeScript.minor_version),
+        changelog: [],
+      };
+    }
+
+    // 4. Load the script that was run (might be different from current active script)
+    const failedScript = await this.api.scriptStore.getScript(scriptRun.script_id);
+    const scriptToUse = failedScript || activeScript;
+
+    // 5. Build changelog from prior minor versions for the same major version
+    const priorScripts = await this.api.scriptStore.getScriptsByWorkflowAndMajorVersion(
+      workflowId,
+      scriptToUse.major_version
+    );
+    const changelog = priorScripts
+      .filter(s => s.minor_version < scriptToUse.minor_version)
+      .sort((a, b) => b.minor_version - a.minor_version) // newest first
+      .slice(0, 5) // limit to last 5 changes
+      .map(s => ({
+        version: formatVersion(s.major_version, s.minor_version),
+        comment: s.change_comment || "",
+      }));
+
+    // 6. Trim logs to last 50 lines to avoid context bloat
+    const allLogs = scriptRun.logs || "";
+    const logLines = allLogs.split("\n");
+    const trimmedLogs = logLines.length > 50
+      ? logLines.slice(-50).join("\n")
+      : allLogs;
+
+    return {
+      workflowId,
+      expectedMajorVersion: scriptToUse.major_version,
+      scriptRunId,
+      error: {
+        type: scriptRun.error_type || "unknown",
+        message: scriptRun.error || "Unknown error",
+      },
+      logs: trimmedLogs,
+      scriptCode: scriptToUse.code,
+      scriptVersion: formatVersion(scriptToUse.major_version, scriptToUse.minor_version),
+      changelog,
+    };
+  }
+
+  /**
+   * Enrich the inbox with full maintainer context for the agent.
+   * Replaces the original "A logic error occurred" message with detailed context.
+   */
+  private enrichMaintainerInbox(
+    inbox: string[],
+    context: MaintainerContext
+  ): string[] {
+    // Build the rich context message for the maintainer agent
+    const changelogText = context.changelog.length > 0
+      ? context.changelog.map(c => `- v${c.version}: ${c.comment}`).join("\n")
+      : "(no prior minor versions)";
+
+    const contextMessage = `# Script Fix Request
+
+A logic error occurred during script execution. Please analyze and fix the issue.
+
+## Error Details
+- **Type:** ${context.error.type}
+- **Message:** ${context.error.message}
+
+## Script Information
+- **Version:** ${context.scriptVersion}
+- **Workflow ID:** ${context.workflowId}
+
+## Console Logs (last 50 lines)
+\`\`\`
+${context.logs || "(no logs)"}
+\`\`\`
+
+## Prior Fix Attempts (same major version)
+${changelogText}
+
+## Script Code
+\`\`\`javascript
+${context.scriptCode}
+\`\`\`
+
+---
+
+Analyze the error, use \`eval\` to test hypotheses, and call \`fix\` with the corrected code.
+If you cannot fix this issue autonomously, explain why without calling the \`fix\` tool.`;
+
+    // Create a new inbox message with the rich context
+    const enrichedMessage = JSON.stringify({
+      role: "user",
+      parts: [{ type: "text", text: contextMessage }],
+      metadata: {
+        scriptRunId: context.scriptRunId,
+        maintainerContext: true,
+      },
+    });
+
+    return [enrichedMessage];
+  }
+
+  /**
+   * Handle completion of a maintainer task.
+   * Checks if the fix tool was called and handles various outcomes:
+   * - Fix applied: workflow will re-run automatically (set by fix tool)
+   * - Fix not applied (race condition): planner updated script, maintainer fix is stale
+   * - Fix not called: maintainer couldn't fix, escalate to user with explanation
+   */
+  private async handleMaintainerCompletion(
+    task: Task,
+    result: StepOutput,
+    context: MaintainerContext,
+    agent: ReplAgent
+  ): Promise<void> {
+    // Check if fix tool was called by looking at agent history
+    const fixCalled = this.checkIfFixToolCalled(agent);
+    this.debug("Maintainer completion - fix called:", fixCalled);
+
+    if (fixCalled) {
+      // Fix was attempted - the fix tool handles updating workflow
+      // Check if it was actually applied by checking workflow state
+      const workflow = await this.api.scriptStore.getWorkflow(context.workflowId);
+      if (workflow && !workflow.maintenance) {
+        // Maintenance flag was cleared - either fix applied or race condition handled
+        this.debug("Maintainer fix processed, maintenance flag cleared");
+        return;
+      }
+      // If maintenance is still set, something went wrong - clear it
+      if (workflow?.maintenance) {
+        await this.api.scriptStore.updateWorkflowFields(context.workflowId, {
+          maintenance: false,
+        });
+      }
+      return;
+    }
+
+    // Fix was NOT called - maintainer couldn't fix the issue
+    // Escalate to user with maintainer's explanation
+    this.debug("Maintainer did not call fix tool - escalating to user");
+
+    const explanation = this.getLastAssistantMessage(agent);
+    await this.escalateMaintainerFailure(
+      context.workflowId,
+      context.scriptRunId,
+      explanation || "The maintainer was unable to automatically fix this issue."
+    );
+  }
+
+  /**
+   * Check if the fix tool was called during the agent loop.
+   * Looks through agent history for tool parts with type 'tool-fix'.
+   */
+  private checkIfFixToolCalled(agent: ReplAgent): boolean {
+    for (const message of agent.history) {
+      if (message.role !== "assistant" || !message.parts) continue;
+      for (const part of message.parts) {
+        // The AI SDK uses `tool-${toolName}` format for tool parts
+        if (part.type === "tool-fix") {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Extract the last assistant text message from agent history.
+   * Used to get maintainer's explanation when it cannot fix an issue.
+   */
+  private getLastAssistantMessage(agent: ReplAgent): string | undefined {
+    for (let i = agent.history.length - 1; i >= 0; i--) {
+      const message = agent.history[i];
+      if (message.role !== "assistant" || !message.parts) continue;
+      for (const part of message.parts) {
+        if (part.type === "text" && part.text) {
+          return part.text;
+        }
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Escalate a maintainer failure to the user.
+   * Sets workflow to error status and creates a notification with the explanation.
+   */
+  private async escalateMaintainerFailure(
+    workflowId: string,
+    scriptRunId: string,
+    explanation: string
+  ): Promise<void> {
+    // Get workflow info
+    const workflow = await this.api.scriptStore.getWorkflow(workflowId);
+    if (!workflow) {
+      this.debug("escalateMaintainerFailure: workflow not found", workflowId);
+      return;
+    }
+
+    // Set workflow to error status and clear maintenance
+    await this.api.scriptStore.updateWorkflowFields(workflowId, {
+      status: "error",
+      maintenance: false,
+      maintenance_fix_count: 0, // Reset so user gets fresh attempts
+    });
+
+    // Create notification with explanation
+    try {
+      await this.api.notificationStore.saveNotification({
+        id: generateId(),
+        workflow_id: workflowId,
+        type: "escalated",
+        payload: JSON.stringify({
+          script_run_id: scriptRunId,
+          reason: "maintenance_failed",
+          explanation: explanation,
+        }),
+        timestamp: new Date().toISOString(),
+        acknowledged_at: "",
+        resolved_at: "",
+        workflow_title: workflow.title,
+      });
+    } catch (e) {
+      this.debug("Failed to save maintenance_failed notification:", e);
+    }
+
+    // If workflow has an associated task with chat, send explanation to user
+    if (workflow.task_id) {
+      try {
+        const task = await this.api.taskStore.getTask(workflow.task_id);
+        if (task.chat_id) {
+          const message = `**Auto-fix Failed**
+
+I attempted to automatically fix this workflow but couldn't resolve the issue.
+
+**My analysis:**
+${explanation}
+
+**What you can do:**
+1. Review the error details in the workflow history
+2. Make changes to the script or workflow configuration
+3. Re-enable the automation when ready
+
+If you'd like me to try a different approach, just let me know!`;
+
+          await this.api.addMessage({
+            chatId: task.chat_id,
+            content: message,
+            role: "assistant",
+          });
+        }
+      } catch (e) {
+        this.debug("Failed to send escalation message to chat:", e);
+      }
+    }
+
+    // Emit signal for scheduler
+    this.emitSignal({
+      type: "done",
+      taskId: workflow.task_id || workflowId,
+      timestamp: Date.now(),
+    });
   }
 
   private async createTaskRun(opts: {

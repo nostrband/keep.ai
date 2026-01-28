@@ -212,11 +212,32 @@ export class TaskScheduler {
       const tasks = availableTasks.sort((a, b) => a.timestamp - b.timestamp);
       this.debug("Pending tasks", tasks);
 
-      // Find highest-priority task:
-      // - planner first
-      let task = tasks.find((t) => t.type === "planner");
-      // - worker next
-      if (!task) task = tasks.find((t) => t.type === "worker");
+      // Find highest-priority task with workflow conflict resolution:
+      // Priority order: planner > worker > maintainer
+      // Special rule: if both planner and maintainer exist for the SAME workflow,
+      // skip the maintainer task (planner takes precedence to avoid stale fixes)
+
+      // 1. Find workflows that have planner tasks pending
+      const workflowsWithPlanner = new Set<string>();
+      for (const t of tasks) {
+        if (t.type === "planner" && t.workflow_id) {
+          workflowsWithPlanner.add(t.workflow_id);
+        }
+      }
+
+      // 2. Filter out maintainer tasks that conflict with planner tasks
+      const filteredTasks = tasks.filter((t) => {
+        if (t.type === "maintainer" && t.workflow_id && workflowsWithPlanner.has(t.workflow_id)) {
+          this.debug(`Skipping maintainer task ${t.id} - planner exists for workflow ${t.workflow_id}`);
+          return false;
+        }
+        return true;
+      });
+
+      // 3. Apply priority order: planner > worker > maintainer
+      let task = filteredTasks.find((t) => t.type === "planner");
+      if (!task) task = filteredTasks.find((t) => t.type === "worker");
+      if (!task) task = filteredTasks.find((t) => t.type === "maintainer");
 
       // Found anything?
       if (task) {
