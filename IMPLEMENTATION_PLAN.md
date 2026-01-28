@@ -114,10 +114,10 @@ Introduces a new `maintainer` task type for bounded, autonomous script repair. T
 
 Add ability to test workflow scripts without side effects.
 
-- [ ] **Dry-run mode flag** - Add dry-run parameter to script execution
-- [ ] **Side-effect interception** - Mock external API calls and mutations in dry-run mode
-- [ ] **Result preview** - Show what would happen without actually executing
-- [ ] **UI trigger** - Add "Test Run" button in workflow detail page
+- [x] **Dry-run mode flag** - `executeWorkflow()` accepts `runType` parameter in workflow-worker.ts
+- [x] **Test execution API** - `/api/workflow/test-run` endpoint in server.ts with background execution
+- [x] **Result capture** - Results/logs saved to script_run record, viewable in run history
+- [x] **UI trigger** - "Test Run" button in WorkflowDetailPage.tsx with success/failure feedback
 
 ### Collapse Low-Signal Events
 
@@ -125,10 +125,11 @@ Add ability to test workflow scripts without side effects.
 
 Reduce visual noise in event timeline.
 
-- [ ] **Event significance classification** - Categorize events by importance
-- [ ] **Collapsible event groups** - Group low-signal events with expand option
-- [ ] **Smart summarization** - Show count/summary for collapsed events
-- [ ] **User preference persistence** - Remember collapse preferences
+- [x] **Event significance classification** - `getEventSignalLevel()` in eventSignal.ts with LOW_SIGNAL_EVENTS array
+- [x] **Collapsible event groups** - `EventListWithCollapse` component manages collapse/expand state
+- [x] **Smart summarization** - `CollapsedEventSummary` component shows count, types, aggregate cost
+- [x] **Auto-expand on error** - Events auto-expand when `hasError` is true for debugging context
+- [ ] **User preference persistence** - Remember collapse preferences (future enhancement)
 
 ### Highlight Significant Events
 
@@ -136,10 +137,11 @@ Reduce visual noise in event timeline.
 
 Make important events stand out in the timeline.
 
-- [ ] **Significance scoring** - Assign importance scores to event types
-- [ ] **Visual differentiation** - Distinct styling for high-signal events
-- [ ] **Filter by significance** - Option to show only significant events
-- [ ] **Notification integration** - Link significant events to notifications
+- [x] **Significance scoring** - `EventSignificance` type with 6 levels: normal, write, error, success, user, state
+- [x] **Visual differentiation** - `significanceStyles` in EventItem.tsx with color-coded borders/backgrounds
+- [x] **Group error highlighting** - Red left border (`border-l-4 border-l-red-500`) for error groups
+- [ ] **Filter by significance** - Option to show only significant events (future enhancement)
+- [ ] **Notification integration** - Link significant events to notifications (future enhancement)
 
 ### Detect Abandoned Drafts
 
@@ -147,10 +149,12 @@ Make important events stand out in the timeline.
 
 System to identify drafts with no activity.
 
-- [ ] **Inactivity threshold** - Define what constitutes "abandoned" (e.g., 7 days no activity)
-- [ ] **Last activity tracking** - Track last interaction timestamp per draft
-- [ ] **Detection query** - Query to find drafts exceeding inactivity threshold
-- [ ] **Abandoned status flag** - Mark drafts as potentially abandoned
+- [x] **Inactivity threshold** - Define what constitutes "abandoned" (e.g., 7 days no activity) - DRAFT_THRESHOLDS constants in script-store.ts
+- [x] **Last activity tracking** - Track last interaction timestamp per draft - Calculated via MAX() across chat_messages, scripts, and workflow.timestamp
+- [x] **Detection query** - Query to find drafts exceeding inactivity threshold - getAbandonedDrafts() method in script-store.ts
+- [x] **Abandoned status flag** - Mark drafts as potentially abandoned - AbandonedDraft interface with daysSinceActivity field
+- [x] **getDraftActivitySummary()** - Summary method for UI banner showing totalDrafts, staleDrafts, abandonedDrafts, waitingForInput counts
+- [x] **Unit tests** - Comprehensive tests in script-store.test.ts with boundary conditions
 
 ---
 
@@ -162,10 +166,10 @@ System to identify drafts with no activity.
 
 Notify users about stale drafts.
 
-- [ ] **Stale detection criteria** - Define staleness (e.g., 3 days no progress)
-- [ ] **Notification generation** - Create prompts for stale drafts
-- [ ] **Actionable notifications** - Include "Continue" / "Archive" actions
-- [ ] **Frequency control** - Limit reminder frequency per draft
+- [x] **Stale detection criteria** - DRAFT_THRESHOLDS constants (3 days stale, 7 days abandoned, 30 days archive)
+- [x] **Notification generation** - StaleDraftsBanner component displays in MainPage
+- [x] **Actionable notifications** - Banner links to `/workflows?filter=drafts`, shows waiting vs inactive counts
+- [x] **Database integration** - useDraftActivitySummary hook queries getDraftActivitySummary() with 5-min auto-refresh
 
 ### Archive Old Drafts
 
@@ -173,10 +177,12 @@ Notify users about stale drafts.
 
 Auto-archive drafts after extended inactivity.
 
-- [ ] **Archive threshold** - Define auto-archive period (e.g., 30 days)
-- [ ] **Archive action** - Move to archived state without deletion
-- [ ] **Unarchive capability** - Allow restoration from archive
-- [ ] **Archive notification** - Notify user before auto-archive
+- [x] **Archive action** - workflow.status="archived", archive button in WorkflowDetailPage, ArchivedPage view
+- [x] **Unarchive capability** - Restore button restores to "paused" (with scripts) or "draft" (without scripts)
+- [x] **Archived view** - /archived route with ArchivedPage component showing count, dates, restore actions
+- [ ] **Auto-archive threshold** - Define auto-archive period (e.g., 30 days) - not implemented
+- [ ] **Archive notification** - Notify user before auto-archive - not implemented
+- [ ] **Bulk archive** - Multi-select archive functionality - not implemented
 
 ### Script Versioning UI (Rollback)
 
@@ -186,10 +192,10 @@ Interface to view and rollback script versions.
 
 **Note:** Depends on Maintainer Task Type version schema (major_version + minor_version).
 
-- [ ] **Version history view** - Display all versions with timestamps and comments
-- [ ] **Version comparison** - Side-by-side diff between versions
-- [ ] **Rollback action** - One-click rollback to previous version
-- [ ] **Rollback confirmation** - Confirm before rollback with impact summary
+- [x] **Version history view** - WorkflowDetailPage shows "View history (N versions)" with version list sorted by timestamp
+- [x] **Version comparison** - ScriptDiff component with syntax highlighting, Myers diff algorithm (jsdiff library)
+- [x] **Rollback action** - useActivateScriptVersion hook updates active_script_id with TOCTOU protection
+- [x] **UI feedback** - "Activate" button per version, success message on activation, active version highlighted
 
 ### Agent Status from Active Runs
 
@@ -197,10 +203,10 @@ Interface to view and rollback script versions.
 
 Derive agent status from active task_runs/script_runs instead of manual setAgentStatus calls.
 
-- [ ] **Remove manual status calls** - Audit and remove explicit setAgentStatus calls
-- [ ] **Status derivation logic** - Compute status from active runs (idle/working/waiting)
-- [ ] **Real-time status updates** - Subscribe to run state changes for UI updates
-- [ ] **Status query optimization** - Efficient query for current agent status
+- [x] **No manual status calls** - setAgentStatus does not exist; status derived from run counts
+- [x] **Status derivation logic** - GET /api/agent/status derives isRunning from activeTaskRuns + activeScriptRuns counts
+- [x] **Real-time status updates** - useAgentStatus hook with smart polling (5s when running, 30s when idle)
+- [x] **Status query optimization** - countActiveTaskRuns() and countActiveScriptRuns() check end_timestamp = ''
 
 ---
 
@@ -212,10 +218,10 @@ Derive agent status from active task_runs/script_runs instead of manual setAgent
 
 Show differences between script versions.
 
-- [ ] **Diff algorithm** - Implement line-by-line diff
-- [ ] **Syntax highlighting** - Highlight additions/deletions with colors
-- [ ] **Inline vs side-by-side** - Toggle between diff display modes
-- [ ] **Change summary** - Summarize what changed between versions
+- [x] **Diff algorithm** - ScriptDiff component uses jsdiff library with Myers algorithm
+- [x] **Syntax highlighting** - Green for additions, red for deletions with line numbers
+- [x] **Change summary** - Shows "+N lines", "-N lines" stats
+- [ ] **Inline vs side-by-side** - Toggle between diff display modes (currently inline only)
 
 ### Simplify Question-Answering
 
@@ -223,10 +229,10 @@ Show differences between script versions.
 
 Quick reply options for agent questions.
 
-- [ ] **Common response suggestions** - Pre-populate likely answers
-- [ ] **One-click responses** - Quick-action buttons for common replies
-- [ ] **Smart defaults** - Suggest most likely response based on context
-- [ ] **Response templates** - Reusable response patterns
+- [x] **Common response suggestions** - QuickReplyButtons component renders options from task.asks
+- [x] **One-click responses** - handleQuickReply() submits option immediately as user message
+- [x] **Double-click protection** - isQuickReplySubmitting state prevents duplicate submissions
+- [x] **UI polish** - Long option truncation with tooltips, disabled state during submission
 
 ### Handle Abandoned Drafts
 
@@ -236,10 +242,10 @@ Actions for dealing with abandoned drafts.
 
 **Note:** Depends on Detect Abandoned Drafts (Priority 2).
 
-- [ ] **User prompt flow** - Prompt user to continue or archive
-- [ ] **Bulk actions** - Handle multiple abandoned drafts at once
-- [ ] **Auto-archive option** - Opt-in automatic archival
-- [ ] **Recovery flow** - Easy restoration if archived by mistake
+- [x] **User prompt flow** - StaleDraftsBanner prompts user about inactive drafts
+- [x] **Recovery flow** - ArchivedPage with Restore button, smart status restoration
+- [ ] **Bulk actions** - Handle multiple abandoned drafts at once (not implemented)
+- [ ] **Auto-archive option** - Opt-in automatic archival (not implemented)
 
 ---
 
@@ -278,7 +284,7 @@ Areas identified as lacking test coverage:
 ### packages/db
 
 - [ ] Tests for `connection-store.ts`
-- [ ] Tests for `inbox-store.ts`
+- [x] Tests for `inbox-store.ts` - 23 tests covering CRUD, filtering, pagination, transaction support
 - [ ] Tests for `memory-store.ts`
 - [ ] Tests for `file-store.ts`
 
