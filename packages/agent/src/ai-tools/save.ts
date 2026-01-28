@@ -38,7 +38,21 @@ export function makeSaveTool(opts: {
       const script = await opts.scriptStore.getLatestScriptByTaskId(
         opts.taskId
       );
-      const version = script ? script.version + 1 : 1;
+
+      // Planner always increments major_version and resets minor_version to 0
+      // This is the key distinction from maintainer's fix tool which only increments minor_version
+      let majorVersion: number;
+      let minorVersion: number;
+
+      if (script) {
+        // Increment major version, reset minor version
+        majorVersion = script.major_version + 1;
+        minorVersion = 0;
+      } else {
+        // First script starts at version 1.0
+        majorVersion = 1;
+        minorVersion = 0;
+      }
 
       // Get workflow by task_id to link the script
       const workflow = await opts.scriptStore.getWorkflowByTaskId(opts.taskId);
@@ -55,7 +69,8 @@ export function makeSaveTool(opts: {
         change_comment: info.comments || "",
         task_id: opts.taskId,
         timestamp: new Date().toISOString(),
-        version,
+        major_version: majorVersion,
+        minor_version: minorVersion,
         workflow_id: workflow.id,
         type: "",
         summary: info.summary || "",

@@ -571,7 +571,7 @@ export class WorkflowWorker {
       workflow_title: workflow.title,
       script_run_id: scriptRunId,
       script_id: script.id,
-      script_version: script.version,
+      script_version: `${script.major_version}.${script.minor_version}`,
       error: {
         type: error.type,
         message: error.message,

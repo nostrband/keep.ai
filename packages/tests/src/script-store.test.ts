@@ -7,12 +7,14 @@ import { createDBNode } from "@app/node";
  * This allows testing the store in isolation without CR-SQLite dependencies.
  */
 async function createScriptTables(db: DBInterface): Promise<void> {
-  // Create scripts table (matches production v11 + v16 + later migrations)
+  // Create scripts table (matches production v11 + v16 + v34 migrations)
+  // v34 renamed 'version' to 'major_version' and added 'minor_version'
   await db.exec(`
     CREATE TABLE IF NOT EXISTS scripts (
       id TEXT PRIMARY KEY NOT NULL,
       task_id TEXT NOT NULL DEFAULT '',
-      version INTEGER NOT NULL DEFAULT 0,
+      major_version INTEGER NOT NULL DEFAULT 0,
+      minor_version INTEGER NOT NULL DEFAULT 0,
       timestamp TEXT NOT NULL DEFAULT '',
       code TEXT NOT NULL DEFAULT '',
       change_comment TEXT NOT NULL DEFAULT '',
@@ -24,6 +26,7 @@ async function createScriptTables(db: DBInterface): Promise<void> {
   `);
   await db.exec(`CREATE INDEX IF NOT EXISTS idx_scripts_task_id ON scripts(task_id)`);
   await db.exec(`CREATE INDEX IF NOT EXISTS idx_scripts_workflow_id ON scripts(workflow_id)`);
+  await db.exec(`CREATE INDEX IF NOT EXISTS idx_scripts_major_minor_version ON scripts(major_version DESC, minor_version DESC)`);
 
   // Create script_runs table (matches production v11 + v12 + v16 + later migrations)
   await db.exec(`
@@ -124,7 +127,8 @@ describe("ScriptStore", () => {
       const script: Script = {
         id: "script-1",
         task_id: "task-1",
-        version: 1,
+        major_version: 1,
+        minor_version: 0,
         timestamp: new Date().toISOString(),
         code: "console.log('hello');",
         change_comment: "Initial version",
@@ -151,7 +155,8 @@ describe("ScriptStore", () => {
         await scriptStore.addScript({
           id: `script-${i}`,
           task_id: "task-1",
-          version: i + 1,
+          major_version: i + 1,
+        minor_version: 0,
           timestamp: new Date(now + i * 1000).toISOString(),
           code: `code ${i}`,
           change_comment: `version ${i + 1}`,
@@ -179,7 +184,8 @@ describe("ScriptStore", () => {
       await scriptStore.addScript({
         id: "script-1",
         task_id: "task-1",
-        version: 1,
+        major_version: 1,
+        minor_version: 0,
         timestamp: new Date().toISOString(),
         code: "code 1",
         change_comment: "",
@@ -191,7 +197,8 @@ describe("ScriptStore", () => {
       await scriptStore.addScript({
         id: "script-2",
         task_id: "task-2",
-        version: 1,
+        major_version: 1,
+        minor_version: 0,
         timestamp: new Date().toISOString(),
         code: "code 2",
         change_comment: "",
@@ -210,7 +217,8 @@ describe("ScriptStore", () => {
       await scriptStore.addScript({
         id: "script-v1",
         task_id: "task-1",
-        version: 1,
+        major_version: 1,
+        minor_version: 0,
         timestamp: new Date().toISOString(),
         code: "v1",
         change_comment: "",
@@ -222,7 +230,8 @@ describe("ScriptStore", () => {
       await scriptStore.addScript({
         id: "script-v3",
         task_id: "task-1",
-        version: 3,
+        major_version: 3,
+        minor_version: 0,
         timestamp: new Date().toISOString(),
         code: "v3",
         change_comment: "",
@@ -234,7 +243,8 @@ describe("ScriptStore", () => {
       await scriptStore.addScript({
         id: "script-v2",
         task_id: "task-1",
-        version: 2,
+        major_version: 2,
+        minor_version: 0,
         timestamp: new Date().toISOString(),
         code: "v2",
         change_comment: "",
@@ -246,17 +256,18 @@ describe("ScriptStore", () => {
 
       const scripts = await scriptStore.getScriptsByTaskId("task-1");
       expect(scripts).toHaveLength(3);
-      // Should be ordered by version ASC
-      expect(scripts[0].version).toBe(1);
-      expect(scripts[1].version).toBe(2);
-      expect(scripts[2].version).toBe(3);
+      // Should be ordered by major_version ASC, minor_version ASC
+      expect(scripts[0].major_version).toBe(1);
+      expect(scripts[1].major_version).toBe(2);
+      expect(scripts[2].major_version).toBe(3);
     });
 
     it("should get latest script by task_id", async () => {
       await scriptStore.addScript({
         id: "script-v1",
         task_id: "task-1",
-        version: 1,
+        major_version: 1,
+        minor_version: 0,
         timestamp: new Date().toISOString(),
         code: "v1",
         change_comment: "",
@@ -268,7 +279,8 @@ describe("ScriptStore", () => {
       await scriptStore.addScript({
         id: "script-v2",
         task_id: "task-1",
-        version: 2,
+        major_version: 2,
+        minor_version: 0,
         timestamp: new Date().toISOString(),
         code: "v2",
         change_comment: "",
@@ -279,7 +291,7 @@ describe("ScriptStore", () => {
       });
 
       const latest = await scriptStore.getLatestScriptByTaskId("task-1");
-      expect(latest?.version).toBe(2);
+      expect(latest?.major_version).toBe(2);
       expect(latest?.id).toBe("script-v2");
     });
 
@@ -287,7 +299,8 @@ describe("ScriptStore", () => {
       await scriptStore.addScript({
         id: "script-1",
         task_id: "task-1",
-        version: 1,
+        major_version: 1,
+        minor_version: 0,
         timestamp: new Date().toISOString(),
         code: "code 1",
         change_comment: "",
@@ -299,7 +312,8 @@ describe("ScriptStore", () => {
       await scriptStore.addScript({
         id: "script-2",
         task_id: "task-2",
-        version: 1,
+        major_version: 1,
+        minor_version: 0,
         timestamp: new Date().toISOString(),
         code: "code 2",
         change_comment: "",
@@ -318,7 +332,8 @@ describe("ScriptStore", () => {
       await scriptStore.addScript({
         id: "script-v1",
         task_id: "task-1",
-        version: 1,
+        major_version: 1,
+        minor_version: 0,
         timestamp: new Date().toISOString(),
         code: "v1",
         change_comment: "",
@@ -330,7 +345,8 @@ describe("ScriptStore", () => {
       await scriptStore.addScript({
         id: "script-v2",
         task_id: "task-1",
-        version: 2,
+        major_version: 2,
+        minor_version: 0,
         timestamp: new Date().toISOString(),
         code: "v2",
         change_comment: "",
@@ -341,7 +357,7 @@ describe("ScriptStore", () => {
       });
 
       const latest = await scriptStore.getLatestScriptByWorkflowId("workflow-1");
-      expect(latest?.version).toBe(2);
+      expect(latest?.major_version).toBe(2);
     });
 
     it("should list latest scripts for each task", async () => {
@@ -349,7 +365,8 @@ describe("ScriptStore", () => {
       await scriptStore.addScript({
         id: "t1-v1",
         task_id: "task-1",
-        version: 1,
+        major_version: 1,
+        minor_version: 0,
         timestamp: new Date(Date.now() - 3000).toISOString(),
         code: "t1v1",
         change_comment: "",
@@ -361,7 +378,8 @@ describe("ScriptStore", () => {
       await scriptStore.addScript({
         id: "t1-v2",
         task_id: "task-1",
-        version: 2,
+        major_version: 2,
+        minor_version: 0,
         timestamp: new Date(Date.now() - 2000).toISOString(),
         code: "t1v2",
         change_comment: "",
@@ -373,7 +391,8 @@ describe("ScriptStore", () => {
       await scriptStore.addScript({
         id: "t2-v1",
         task_id: "task-2",
-        version: 1,
+        major_version: 1,
+        minor_version: 0,
         timestamp: new Date(Date.now() - 1000).toISOString(),
         code: "t2v1",
         change_comment: "",
@@ -386,8 +405,8 @@ describe("ScriptStore", () => {
       const latest = await scriptStore.listLatestScripts();
       expect(latest).toHaveLength(2);
       // Should only include the highest version for each task
-      expect(latest.find(s => s.task_id === "task-1")?.version).toBe(2);
-      expect(latest.find(s => s.task_id === "task-2")?.version).toBe(1);
+      expect(latest.find(s => s.task_id === "task-1")?.major_version).toBe(2);
+      expect(latest.find(s => s.task_id === "task-2")?.major_version).toBe(1);
     });
   });
 
@@ -977,7 +996,8 @@ describe("ScriptStore", () => {
       await scriptStore.addScript({
         id: "script-recent",
         task_id: "task-no-chat",
-        version: 1,
+        major_version: 1,
+        minor_version: 0,
         timestamp: recentScriptDate.toISOString(),
         code: "console.log('test');",
         change_comment: "Initial",
@@ -1062,7 +1082,8 @@ describe("ScriptStore", () => {
       await scriptStore.addScript({
         id: "script-medium",
         task_id: "task-coalesce",
-        version: 1,
+        major_version: 1,
+        minor_version: 0,
         timestamp: mediumOldDate.toISOString(),
         code: "console.log('medium');",
         change_comment: "",
@@ -1132,7 +1153,8 @@ describe("ScriptStore", () => {
       await scriptStore.addScript({
         id: "script-newer-order",
         task_id: "task-coalesce-order",
-        version: 1,
+        major_version: 1,
+        minor_version: 0,
         timestamp: recentScriptDate.toISOString(),
         code: "console.log('newer');",
         change_comment: "",

@@ -514,7 +514,7 @@ export default function WorkflowDetailPage() {
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-2">
                         <span className="font-medium text-gray-900">Script {activeScript.id.slice(0, 8)}</span>
-                        <Badge variant="outline">v{activeScript.version}</Badge>
+                        <Badge variant="outline">v{activeScript.major_version}.{activeScript.minor_version}</Badge>
                         <Badge className="bg-blue-100 text-blue-800">Active</Badge>
                       </div>
                       {activeScript.change_comment && (
@@ -607,8 +607,8 @@ export default function WorkflowDetailPage() {
                                   <ScriptDiff
                                     oldCode={diffScripts.old.code}
                                     newCode={diffScripts.new.code}
-                                    oldVersion={diffScripts.old.version}
-                                    newVersion={diffScripts.new.version}
+                                    oldVersion={`${diffScripts.old.major_version}.${diffScripts.old.minor_version}`}
+                                    newVersion={`${diffScripts.new.major_version}.${diffScripts.new.minor_version}`}
                                   />
                                 </div>
                               )}

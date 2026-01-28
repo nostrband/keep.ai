@@ -135,7 +135,7 @@ ${systemPrompt}
         if (scripts.length > 0) {
           taskInfo.push("===SCRIPT_CHANGELOG===");
           const changelog = scripts.map(s => ({
-            version: s.version,
+            version: `${s.major_version}.${s.minor_version}`,
             timestamp: s.timestamp,
             change_comment: s.change_comment,
           }));

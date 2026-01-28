@@ -32,7 +32,8 @@ export interface DraftActivitySummary {
 export interface Script {
   id: string;
   task_id: string;
-  version: number;
+  major_version: number;  // Incremented by planner's save tool
+  minor_version: number;  // Incremented by maintainer's fix tool (default 0)
   timestamp: string;
   code: string;
   change_comment: string;
@@ -40,6 +41,14 @@ export interface Script {
   type: string;
   summary: string;
   diagram: string;
+}
+
+/**
+ * Format a script version for display.
+ * @example formatVersion(2, 1) returns "2.1"
+ */
+export function formatVersion(major: number, minor: number): string {
+  return `${major}.${minor}`;
 }
 
 export interface ScriptRun {
@@ -84,9 +93,9 @@ export class ScriptStore {
   async addScript(script: Script, tx?: DBInterface): Promise<void> {
     const db = tx || this.db.db;
     await db.exec(
-      `INSERT INTO scripts (id, task_id, version, timestamp, code, change_comment, workflow_id, type, summary, diagram)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [script.id, script.task_id, script.version, script.timestamp, script.code, script.change_comment, script.workflow_id, script.type, script.summary, script.diagram]
+      `INSERT INTO scripts (id, task_id, major_version, minor_version, timestamp, code, change_comment, workflow_id, type, summary, diagram)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [script.id, script.task_id, script.major_version, script.minor_version, script.timestamp, script.code, script.change_comment, script.workflow_id, script.type, script.summary, script.diagram]
     );
   }
 
@@ -94,7 +103,7 @@ export class ScriptStore {
   async getScript(id: string, tx?: DBInterface): Promise<Script | null> {
     const db = tx || this.db.db;
     const results = await db.execO<Record<string, unknown>>(
-      `SELECT id, task_id, version, timestamp, code, change_comment, workflow_id, type, summary, diagram
+      `SELECT id, task_id, major_version, minor_version, timestamp, code, change_comment, workflow_id, type, summary, diagram
        FROM scripts
        WHERE id = ?`,
       [id]
@@ -108,7 +117,8 @@ export class ScriptStore {
     return {
       id: row.id as string,
       task_id: row.task_id as string,
-      version: row.version as number,
+      major_version: row.major_version as number,
+      minor_version: (row.minor_version as number) || 0,
       timestamp: row.timestamp as string,
       code: row.code as string,
       change_comment: row.change_comment as string,
@@ -125,7 +135,7 @@ export class ScriptStore {
     limit: number = 100,
     offset: number = 0
   ): Promise<Script[]> {
-    let sql = `SELECT id, task_id, version, timestamp, code, change_comment, workflow_id, type, summary, diagram
+    let sql = `SELECT id, task_id, major_version, minor_version, timestamp, code, change_comment, workflow_id, type, summary, diagram
                FROM scripts`;
     const args: (string | number)[] = [];
 
@@ -146,7 +156,8 @@ export class ScriptStore {
     return results.map((row) => ({
       id: row.id as string,
       task_id: row.task_id as string,
-      version: row.version as number,
+      major_version: row.major_version as number,
+      minor_version: (row.minor_version as number) || 0,
       timestamp: row.timestamp as string,
       code: row.code as string,
       change_comment: row.change_comment as string,
@@ -158,18 +169,21 @@ export class ScriptStore {
   }
 
   // Get the latest script version for each distinct task_id
+  // Latest = highest major_version, then highest minor_version
   async listLatestScripts(
     limit: number = 100,
     offset: number = 0
   ): Promise<Script[]> {
+    // Use a subquery to find the max (major_version, minor_version) tuple for each task_id
+    // SQLite doesn't have tuple comparison, so we use a composite key approach
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT s.id, s.task_id, s.version, s.timestamp, s.code, s.change_comment, s.workflow_id, s.type, s.summary, s.diagram
+      `SELECT s.id, s.task_id, s.major_version, s.minor_version, s.timestamp, s.code, s.change_comment, s.workflow_id, s.type, s.summary, s.diagram
        FROM scripts s
        INNER JOIN (
-         SELECT task_id, MAX(version) as max_version
+         SELECT task_id, MAX(major_version * 1000000 + minor_version) as max_composite
          FROM scripts
          GROUP BY task_id
-       ) latest ON s.task_id = latest.task_id AND s.version = latest.max_version
+       ) latest ON s.task_id = latest.task_id AND (s.major_version * 1000000 + s.minor_version) = latest.max_composite
        ORDER BY s.timestamp DESC
        LIMIT ? OFFSET ?`,
       [limit, offset]
@@ -180,7 +194,8 @@ export class ScriptStore {
     return results.map((row) => ({
       id: row.id as string,
       task_id: row.task_id as string,
-      version: row.version as number,
+      major_version: row.major_version as number,
+      minor_version: (row.minor_version as number) || 0,
       timestamp: row.timestamp as string,
       code: row.code as string,
       change_comment: row.change_comment as string,
@@ -191,13 +206,13 @@ export class ScriptStore {
     }));
   }
 
-  // Get scripts by task_id ordered by version
+  // Get scripts by task_id ordered by version (ascending)
   async getScriptsByTaskId(task_id: string): Promise<Script[]> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, task_id, version, timestamp, code, change_comment, workflow_id, type, summary, diagram
+      `SELECT id, task_id, major_version, minor_version, timestamp, code, change_comment, workflow_id, type, summary, diagram
        FROM scripts
        WHERE task_id = ?
-       ORDER BY version ASC`,
+       ORDER BY major_version ASC, minor_version ASC`,
       [task_id]
     );
 
@@ -206,7 +221,8 @@ export class ScriptStore {
     return results.map((row) => ({
       id: row.id as string,
       task_id: row.task_id as string,
-      version: row.version as number,
+      major_version: row.major_version as number,
+      minor_version: (row.minor_version as number) || 0,
       timestamp: row.timestamp as string,
       code: row.code as string,
       change_comment: row.change_comment as string,
@@ -220,10 +236,10 @@ export class ScriptStore {
   // Get the latest script version for a task
   async getLatestScriptByTaskId(task_id: string): Promise<Script | null> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, task_id, version, timestamp, code, change_comment, workflow_id, type, summary, diagram
+      `SELECT id, task_id, major_version, minor_version, timestamp, code, change_comment, workflow_id, type, summary, diagram
        FROM scripts
        WHERE task_id = ?
-       ORDER BY version DESC
+       ORDER BY major_version DESC, minor_version DESC
        LIMIT 1`,
       [task_id]
     );
@@ -236,7 +252,8 @@ export class ScriptStore {
     return {
       id: row.id as string,
       task_id: row.task_id as string,
-      version: row.version as number,
+      major_version: row.major_version as number,
+      minor_version: (row.minor_version as number) || 0,
       timestamp: row.timestamp as string,
       code: row.code as string,
       change_comment: row.change_comment as string,
@@ -250,10 +267,10 @@ export class ScriptStore {
   // Get scripts by workflow_id
   async getScriptsByWorkflowId(workflow_id: string): Promise<Script[]> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, task_id, version, timestamp, code, change_comment, workflow_id, type, summary, diagram
+      `SELECT id, task_id, major_version, minor_version, timestamp, code, change_comment, workflow_id, type, summary, diagram
        FROM scripts
        WHERE workflow_id = ?
-       ORDER BY version DESC`,
+       ORDER BY major_version DESC, minor_version DESC`,
       [workflow_id]
     );
 
@@ -262,7 +279,8 @@ export class ScriptStore {
     return results.map((row) => ({
       id: row.id as string,
       task_id: row.task_id as string,
-      version: row.version as number,
+      major_version: row.major_version as number,
+      minor_version: (row.minor_version as number) || 0,
       timestamp: row.timestamp as string,
       code: row.code as string,
       change_comment: row.change_comment as string,
@@ -547,10 +565,10 @@ export class ScriptStore {
   // Get the latest script version for a workflow
   async getLatestScriptByWorkflowId(workflow_id: string): Promise<Script | null> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, task_id, version, timestamp, code, change_comment, workflow_id, type, summary, diagram
+      `SELECT id, task_id, major_version, minor_version, timestamp, code, change_comment, workflow_id, type, summary, diagram
        FROM scripts
        WHERE workflow_id = ?
-       ORDER BY version DESC
+       ORDER BY major_version DESC, minor_version DESC
        LIMIT 1`,
       [workflow_id]
     );
@@ -563,7 +581,8 @@ export class ScriptStore {
     return {
       id: row.id as string,
       task_id: row.task_id as string,
-      version: row.version as number,
+      major_version: row.major_version as number,
+      minor_version: (row.minor_version as number) || 0,
       timestamp: row.timestamp as string,
       code: row.code as string,
       change_comment: row.change_comment as string,
@@ -1068,5 +1087,77 @@ export class ScriptStore {
     // Return count of affected rows - unfortunately cr-sqlite doesn't return this
     // We'll just return 0 and log separately if needed
     return 0;
+  }
+
+  /**
+   * Get the latest script for a major version (for maintainer context loading).
+   * Used to find the most recent minor version within a major version.
+   * @example getLatestScriptForMajor("workflow-1", 2) returns script version 2.3 (if 2.3 is highest)
+   */
+  async getLatestScriptForMajor(
+    workflow_id: string,
+    major_version: number
+  ): Promise<Script | null> {
+    const results = await this.db.db.execO<Record<string, unknown>>(
+      `SELECT id, task_id, major_version, minor_version, timestamp, code, change_comment, workflow_id, type, summary, diagram
+       FROM scripts
+       WHERE workflow_id = ? AND major_version = ?
+       ORDER BY minor_version DESC
+       LIMIT 1`,
+      [workflow_id, major_version]
+    );
+
+    if (!results || results.length === 0) {
+      return null;
+    }
+
+    const row = results[0];
+    return {
+      id: row.id as string,
+      task_id: row.task_id as string,
+      major_version: row.major_version as number,
+      minor_version: (row.minor_version as number) || 0,
+      timestamp: row.timestamp as string,
+      code: row.code as string,
+      change_comment: row.change_comment as string,
+      workflow_id: row.workflow_id as string,
+      type: row.type as string,
+      summary: row.summary as string,
+      diagram: row.diagram as string,
+    };
+  }
+
+  /**
+   * Get all scripts for a workflow within a specific major version.
+   * Used by maintainer to build changelog of prior minor versions.
+   * Returns scripts ordered by minor_version descending (newest first).
+   */
+  async getScriptsByWorkflowAndMajorVersion(
+    workflow_id: string,
+    major_version: number
+  ): Promise<Script[]> {
+    const results = await this.db.db.execO<Record<string, unknown>>(
+      `SELECT id, task_id, major_version, minor_version, timestamp, code, change_comment, workflow_id, type, summary, diagram
+       FROM scripts
+       WHERE workflow_id = ? AND major_version = ?
+       ORDER BY minor_version DESC`,
+      [workflow_id, major_version]
+    );
+
+    if (!results) return [];
+
+    return results.map((row) => ({
+      id: row.id as string,
+      task_id: row.task_id as string,
+      major_version: row.major_version as number,
+      minor_version: (row.minor_version as number) || 0,
+      timestamp: row.timestamp as string,
+      code: row.code as string,
+      change_comment: row.change_comment as string,
+      workflow_id: row.workflow_id as string,
+      type: row.type as string,
+      summary: row.summary as string,
+      diagram: row.diagram as string,
+    }));
   }
 }

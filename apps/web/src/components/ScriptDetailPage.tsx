@@ -89,7 +89,7 @@ export default function ScriptDetailPage() {
                   <h2 className="text-xl font-semibold text-gray-900 mb-2">
                     Script {script.id.slice(0, 8)}
                   </h2>
-                  <Badge variant="outline">Version {script.version}</Badge>
+                  <Badge variant="outline">Version {script.major_version}.{script.minor_version}</Badge>
                 </div>
                 <div className="flex flex-col items-end gap-2">
                   <Button
