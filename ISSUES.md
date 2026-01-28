@@ -1,6 +1,3 @@
-1. http://localhost:3001/workflows?filter=drafts doesn't filter Drafts - all are shown
-
-
 TODOs:
 2. Intent Contract - somehow extracted from user input messages using separate LLM prompt, written instead of 'summary' (title should be chosen there too), only changes if new planner messages are posted, displayed in workflow page instead of summary.
 3. Remove 'ai' package's streamText() method - just call openrouter one step at a time, and convert resulting messages to UIMessage format.
