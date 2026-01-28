@@ -33,7 +33,7 @@ Introduces a new `maintainer` task type for bounded, autonomous script repair. T
 #### Logic Error Routing (Partially Complete)
 
 ##### Completed
-- [x] **enterMaintenanceMode() method** - Logic error routing via enterMaintenanceMode() in `workflow-worker.ts` (NOTE: currently routes to planner inbox, not maintainer)
+- [x] **enterMaintenanceMode() method** - Logic error routing via enterMaintenanceMode() in `workflow-worker.ts`
 - [x] **Budget check before maintenance** - Check `maintenance_fix_count >= MAX_FIX_ATTEMPTS` before entering maintenance
 - [x] **Escalation to user** - escalateToUser() exists with proper notification creation
 - [x] **Save tool maintenance detection** - Save tool detects maintenance mode and clears flag
