@@ -101,8 +101,8 @@ Introduces a new `maintainer` task type for bounded, autonomous script repair. T
 - [x] **Unit tests for save tool** - Test major version increment and minor version reset (packages/tests/src/save-tool.test.ts)
 - [x] **Unit tests for maintainer context loading** - Test changelog construction from prior minor versions added to script-store.test.ts
 - [x] **Unit tests for task scheduler priority** - Test planner-over-maintainer prioritization
-- [ ] **Integration test: logic error to fix** - End-to-end test of logic error -> maintainer task -> fix applied -> re-run
-- [ ] **Integration test: fix escalation** - Test max fix attempts -> user escalation flow
+- [x] **Integration test: logic error to fix** - End-to-end test of logic error -> maintainer task -> fix applied -> re-run
+- [x] **Integration test: fix escalation** - Test max fix attempts -> user escalation flow
 
 ---
 
