@@ -14,6 +14,23 @@ export {
   makeConsoleLogTool,
 } from "./tools";
 
+// AI tools (planner/maintainer specific)
+export {
+  makeAskTool,
+  makeEvalTool,
+  makeFinishTool,
+  makeFixTool,
+  makeSaveTool,
+  makeScheduleTool,
+  type AskInfo,
+  type FinishInfo,
+  type FixInfo,
+  type FixResult,
+  type SaveInfo,
+  type SaveResult,
+  type ScheduleInfo,
+} from "./ai-tools";
+
 // Environment configuration
 export { setEnv, getEnv, setEnvFromProcess, type Env } from "./env";
 

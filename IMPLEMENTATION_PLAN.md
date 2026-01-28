@@ -97,8 +97,8 @@ Introduces a new `maintainer` task type for bounded, autonomous script repair. T
 ### Testing
 
 - [x] **Unit tests for enterMaintenanceMode** - Test transaction atomicity, fix count increment, task/inbox creation (packages/tests/src/api.test.ts)
-- [ ] **Unit tests for fix tool** - Test race condition handling, version incrementing, workflow updates
-- [ ] **Unit tests for save tool** - Test major version increment and minor version reset
+- [x] **Unit tests for fix tool** - Test race condition handling, version incrementing, workflow updates (packages/tests/src/fix-tool.test.ts)
+- [x] **Unit tests for save tool** - Test major version increment and minor version reset (packages/tests/src/save-tool.test.ts)
 - [ ] **Unit tests for maintainer context loading** - Test changelog construction from prior minor versions
 - [ ] **Unit tests for task scheduler priority** - Test planner-over-maintainer prioritization
 - [ ] **Integration test: logic error to fix** - End-to-end test of logic error -> maintainer task -> fix applied -> re-run
