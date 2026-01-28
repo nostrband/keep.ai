@@ -217,7 +217,7 @@ export default function WorkflowDetailPage() {
     });
   };
 
-  const handleActivateVersion = (scriptId: string, version: number) => {
+  const handleActivateVersion = (scriptId: string, majorVersion: number, minorVersion: number) => {
     if (!workflow) return;
 
     activateMutation.mutate({
@@ -225,7 +225,7 @@ export default function WorkflowDetailPage() {
       scriptId: scriptId,
     }, {
       onSuccess: () => {
-        success.show(`Activated v${version}`);
+        success.show(`Activated v${majorVersion}.${minorVersion}`);
         setShowVersionHistory(false);
         setDiffVersions(null);
       },
@@ -537,10 +537,10 @@ export default function WorkflowDetailPage() {
                       <div className="text-sm text-gray-500">Loading versions...</div>
                     ) : (
                       <div className="space-y-2">
-                        {scriptVersions.map((version: any) => {
+                        {scriptVersions.map((version: any, index: number) => {
                           const isActive = version.id === activeScript.id;
-                          // Find previous version by version number, not array index (more robust)
-                          const previousVersion = scriptVersions.find((v: any) => v.version === version.version - 1);
+                          // Find previous version: same major with lower minor, or previous major
+                          const previousVersion = scriptVersions[index + 1]; // Already sorted DESC
                           const canShowDiff = previousVersion !== undefined;
                           const isShowingDiff = diffVersions?.oldId === previousVersion?.id && diffVersions?.newId === version.id;
 
@@ -560,7 +560,7 @@ export default function WorkflowDetailPage() {
                                         to={`/scripts/${version.id}`}
                                         className="font-medium text-gray-900 hover:text-blue-600"
                                       >
-                                        v{version.version}
+                                        v{version.major_version}.{version.minor_version}
                                       </Link>
                                       {isActive && (
                                         <Badge className="bg-blue-100 text-blue-800 text-xs">Active</Badge>
@@ -590,7 +590,7 @@ export default function WorkflowDetailPage() {
                                       <Button
                                         variant="outline"
                                         size="sm"
-                                        onClick={() => handleActivateVersion(version.id, version.version)}
+                                        onClick={() => handleActivateVersion(version.id, version.major_version, version.minor_version)}
                                         disabled={activateMutation.isPending}
                                         className="cursor-pointer text-xs"
                                       >

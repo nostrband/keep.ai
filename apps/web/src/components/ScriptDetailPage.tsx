@@ -182,7 +182,7 @@ export default function ScriptDetailPage() {
                       <div className="flex items-center justify-between">
                         <div className="flex-1">
                           <div className="flex items-center gap-2 mb-1">
-                            <span className="font-medium text-gray-900">Version {version.version}</span>
+                            <span className="font-medium text-gray-900">Version {version.major_version}.{version.minor_version}</span>
                             {version.id === script.id && (
                               <Badge variant="default">Current</Badge>
                             )}

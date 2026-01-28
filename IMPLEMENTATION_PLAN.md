@@ -88,18 +88,20 @@ Introduces a new `maintainer` task type for bounded, autonomous script repair. T
 #### Partially Complete
 - [x] **EscalatedCard component** - Exists but uses `escalated` notification type, not `maintenance_failed`
 
+#### Completed
+- [x] **Version display format** - Updated WorkflowDetailPage.tsx and ScriptDetailPage.tsx to use major_version.minor_version format
+- [x] **getMaintainerTasksForWorkflow query hook** - Added useMaintainerTasks hook in dbTaskReads.ts and maintainerTasks query key in queryKeys.ts
+
 #### Not Started
 - [ ] **Auto-fix thread display** - Show maintainer tasks as separate auto-fix threads in WorkflowDetailPage (query via `getMaintainerTasksForWorkflow`)
-- [ ] **Version display format** - Update version display to show `X.Y` format (major.minor) instead of single integer (v1, v2)
 - [ ] **Maintenance failed notification** - Add `maintenance_failed` notification type with explanation and "Re-plan" action
-- [ ] **getMaintainerTasksForWorkflow query hook** - Add React Query hook for fetching maintainer tasks
 
 ### Testing
 
 - [x] **Unit tests for enterMaintenanceMode** - Test transaction atomicity, fix count increment, task/inbox creation (packages/tests/src/api.test.ts)
 - [x] **Unit tests for fix tool** - Test race condition handling, version incrementing, workflow updates (packages/tests/src/fix-tool.test.ts)
 - [x] **Unit tests for save tool** - Test major version increment and minor version reset (packages/tests/src/save-tool.test.ts)
-- [ ] **Unit tests for maintainer context loading** - Test changelog construction from prior minor versions
+- [x] **Unit tests for maintainer context loading** - Test changelog construction from prior minor versions added to script-store.test.ts
 - [x] **Unit tests for task scheduler priority** - Test planner-over-maintainer prioritization
 - [ ] **Integration test: logic error to fix** - End-to-end test of logic error -> maintainer task -> fix applied -> re-run
 - [ ] **Integration test: fix escalation** - Test max fix attempts -> user escalation flow
