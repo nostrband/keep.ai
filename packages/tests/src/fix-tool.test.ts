@@ -125,7 +125,7 @@ describe("Fix Tool", () => {
       const result = await fixTool.execute!(
         { code: "console.log('fixed');", comment: "Fixed the bug" },
         createToolCallOptions()
-      );
+      ) as FixResult;
 
       expect(result.applied).toBe(true);
       expect(result.script.major_version).toBe(2);
@@ -150,7 +150,7 @@ describe("Fix Tool", () => {
       const result = await fixTool.execute!(
         { code: "console.log('fixed');", comment: "Fixed" },
         createToolCallOptions()
-      );
+      ) as FixResult;
 
       expect(result.applied).toBe(true);
       expect(result.script.major_version).toBe(5); // Same major version
@@ -177,7 +177,7 @@ describe("Fix Tool", () => {
       const result = await fixTool.execute!(
         { code: "console.log('fixed');", comment: "Bug fix" },
         createToolCallOptions()
-      );
+      ) as FixResult;
 
       expect(result.applied).toBe(true);
       expect(result.script.type).toBe("event");
@@ -201,7 +201,7 @@ describe("Fix Tool", () => {
       const result = await fixTool.execute!(
         { code: "fixed code", comment: "Fix" },
         createToolCallOptions()
-      );
+      ) as FixResult;
 
       expect(result.script.task_id).toBe("maintainer-task-123");
     });
@@ -222,7 +222,7 @@ describe("Fix Tool", () => {
       const result = await fixTool.execute!(
         { code: "fixed code", comment: "Fix" },
         createToolCallOptions()
-      );
+      ) as FixResult;
 
       const updatedWorkflow = await scriptStore.getWorkflow("workflow-1");
       expect(updatedWorkflow?.active_script_id).toBe(result.script.id);
@@ -296,7 +296,7 @@ describe("Fix Tool", () => {
       const result = await fixTool.execute!(
         { code: "console.log('persisted');", comment: "Persisted fix" },
         createToolCallOptions()
-      );
+      ) as FixResult;
 
       // Verify script was actually saved to database
       const savedScript = await scriptStore.getScript(result.script.id);
@@ -324,7 +324,7 @@ describe("Fix Tool", () => {
       const result = await fixTool.execute!(
         { code: "console.log('stale fix');", comment: "This fix is stale" },
         createToolCallOptions()
-      );
+      ) as FixResult;
 
       expect(result.applied).toBe(false);
       // Should return the current script (not the stale fix)
@@ -474,7 +474,7 @@ describe("Fix Tool", () => {
       const result1 = await fixTool1.execute!(
         { code: "fix 1", comment: "First fix" },
         createToolCallOptions()
-      );
+      ) as FixResult;
 
       expect(result1.script.major_version).toBe(2);
       expect(result1.script.minor_version).toBe(1);
@@ -492,7 +492,7 @@ describe("Fix Tool", () => {
       const result2 = await fixTool2.execute!(
         { code: "fix 2", comment: "Second fix" },
         createToolCallOptions()
-      );
+      ) as FixResult;
 
       expect(result2.script.major_version).toBe(2);
       expect(result2.script.minor_version).toBe(2);
@@ -516,7 +516,7 @@ describe("Fix Tool", () => {
       const result = await fixTool.execute!(
         { code: "fixed", comment: "Fix" },
         createToolCallOptions()
-      );
+      ) as FixResult;
 
       expect(result.script.workflow_id).toBe("my-workflow-123");
     });

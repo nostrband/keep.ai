@@ -141,7 +141,7 @@ describe("Save Tool", () => {
       const result = await saveTool.execute!(
         { code: "console.log('first');", title: "My Workflow" },
         createToolCallOptions()
-      );
+      ) as SaveResult;
 
       expect(result.script.major_version).toBe(1);
       expect(result.script.minor_version).toBe(0);
@@ -166,7 +166,7 @@ describe("Save Tool", () => {
       const result = await saveTool.execute!(
         { code: "console.log('new major');", title: "Updated Workflow" },
         createToolCallOptions()
-      );
+      ) as SaveResult;
 
       expect(result.script.major_version).toBe(3); // Incremented from 2
       expect(result.script.minor_version).toBe(0); // Reset from 3
@@ -191,7 +191,7 @@ describe("Save Tool", () => {
       const result = await saveTool.execute!(
         { code: "major update", title: "Title" },
         createToolCallOptions()
-      );
+      ) as SaveResult;
 
       expect(result.script.major_version).toBe(2);
       expect(result.script.minor_version).toBe(0);
@@ -213,7 +213,7 @@ describe("Save Tool", () => {
       const result = await saveTool.execute!(
         { code: "code", title: "Title" },
         createToolCallOptions()
-      );
+      ) as SaveResult;
 
       expect(result.wasMaintenanceFix).toBe(true);
     });
