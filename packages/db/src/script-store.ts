@@ -26,6 +26,7 @@ export interface DraftActivitySummary {
   totalDrafts: number;        // All drafts (status='draft')
   staleDrafts: number;        // 3-7 days inactive
   abandonedDrafts: number;    // 7+ days inactive
+  archivableDrafts: number;   // 30+ days inactive (suggest archiving)
   waitingForInput: number;    // Drafts where agent asked a question
 }
 
@@ -949,6 +950,9 @@ export class ScriptStore {
     const abandonedThreshold = new Date(now);
     abandonedThreshold.setDate(abandonedThreshold.getDate() - DRAFT_THRESHOLDS.ABANDONED_DAYS);
 
+    const archiveThreshold = new Date(now);
+    archiveThreshold.setDate(archiveThreshold.getDate() - DRAFT_THRESHOLDS.ARCHIVE_DAYS);
+
     // Get all drafts with their last activity in one query
     // Uses MAX() across all activity sources to find true most recent activity
     // Note: COALESCE picks first non-null which is wrong - we need the max across all
@@ -975,16 +979,19 @@ export class ScriptStore {
         totalDrafts: 0,
         staleDrafts: 0,
         abandonedDrafts: 0,
+        archivableDrafts: 0,
         waitingForInput: 0,
       };
     }
 
     let staleDrafts = 0;
     let abandonedDrafts = 0;
+    let archivableDrafts = 0;
     let waitingForInput = 0;
 
     const staleTimestamp = staleThreshold.toISOString();
     const abandonedTimestamp = abandonedThreshold.toISOString();
+    const archiveTimestamp = archiveThreshold.toISOString();
 
     for (const row of results) {
       const lastActivity = row.last_activity as string;
@@ -995,8 +1002,12 @@ export class ScriptStore {
         waitingForInput++;
       }
 
-      // Count stale (3-7 days) and abandoned (7+ days)
-      if (lastActivity < abandonedTimestamp) {
+      // Count archivable (30+ days), abandoned (7-30 days), and stale (3-7 days)
+      // Note: archivable is a subset of abandoned in terms of age, but we count separately
+      if (lastActivity < archiveTimestamp) {
+        archivableDrafts++;
+        abandonedDrafts++; // Also counts as abandoned for backward compatibility
+      } else if (lastActivity < abandonedTimestamp) {
         abandonedDrafts++;
       } else if (lastActivity < staleTimestamp) {
         staleDrafts++;
@@ -1007,6 +1018,7 @@ export class ScriptStore {
       totalDrafts: results.length,
       staleDrafts,
       abandonedDrafts,
+      archivableDrafts,
       waitingForInput,
     };
   }

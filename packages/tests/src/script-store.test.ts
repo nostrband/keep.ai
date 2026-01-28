@@ -1286,8 +1286,9 @@ describe("ScriptStore", () => {
 
       const summary = await scriptStore.getDraftActivitySummary();
       expect(summary.totalDrafts).toBe(3);
-      expect(summary.staleDrafts).toBe(1);      // 5 days is stale (3-7)
+      expect(summary.staleDrafts).toBe(1);       // 5 days is stale (3-7)
       expect(summary.abandonedDrafts).toBe(1);   // 10 days is abandoned (7+)
+      expect(summary.archivableDrafts).toBe(0);  // None are 30+ days
       expect(summary.waitingForInput).toBe(1);   // task-1 is in 'wait' state
     });
 
@@ -1590,6 +1591,134 @@ describe("ScriptStore", () => {
       expect(abandoned).toHaveLength(1);
       expect(abandoned[0].workflow.id).toBe("workflow-fallback");
       expect(abandoned[0].hasScript).toBe(false);
+    });
+
+    it("should count archivable drafts (30+ days) separately from abandoned drafts", async () => {
+      const now = new Date();
+
+      // Create tasks for each workflow
+      await db.exec(
+        `INSERT INTO tasks (id, timestamp, state, chat_id) VALUES (?, ?, ?, ?)`,
+        ["task-archive-1", Date.now(), "done", "chat-archive-1"]
+      );
+      await db.exec(
+        `INSERT INTO tasks (id, timestamp, state, chat_id) VALUES (?, ?, ?, ?)`,
+        ["task-archive-2", Date.now(), "done", "chat-archive-2"]
+      );
+      await db.exec(
+        `INSERT INTO tasks (id, timestamp, state, chat_id) VALUES (?, ?, ?, ?)`,
+        ["task-archive-3", Date.now(), "done", "chat-archive-3"]
+      );
+
+      // Archivable draft (35 days old - should be in archivableDrafts AND abandonedDrafts)
+      const archivableDateStr = new Date(now.getTime() - 35 * 24 * 60 * 60 * 1000).toISOString();
+      await scriptStore.addWorkflow({
+        id: "archivable-workflow",
+        title: "Archivable",
+        task_id: "task-archive-1",
+        chat_id: "chat-archive-1",
+        timestamp: archivableDateStr,
+        cron: "",
+        events: "",
+        status: "draft",
+        next_run_timestamp: "",
+        maintenance: false,
+        maintenance_fix_count: 0,
+        active_script_id: "",
+      });
+
+      // Abandoned draft (10 days old - should only be in abandonedDrafts)
+      const abandonedDateStr = new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000).toISOString();
+      await scriptStore.addWorkflow({
+        id: "abandoned-only-workflow",
+        title: "Abandoned Only",
+        task_id: "task-archive-2",
+        chat_id: "chat-archive-2",
+        timestamp: abandonedDateStr,
+        cron: "",
+        events: "",
+        status: "draft",
+        next_run_timestamp: "",
+        maintenance: false,
+        maintenance_fix_count: 0,
+        active_script_id: "",
+      });
+
+      // Recent draft (5 days old - should only be in staleDrafts)
+      const staleDateStr = new Date(now.getTime() - 5 * 24 * 60 * 60 * 1000).toISOString();
+      await scriptStore.addWorkflow({
+        id: "stale-only-workflow",
+        title: "Stale Only",
+        task_id: "task-archive-3",
+        chat_id: "chat-archive-3",
+        timestamp: staleDateStr,
+        cron: "",
+        events: "",
+        status: "draft",
+        next_run_timestamp: "",
+        maintenance: false,
+        maintenance_fix_count: 0,
+        active_script_id: "",
+      });
+
+      const summary = await scriptStore.getDraftActivitySummary();
+      expect(summary.totalDrafts).toBe(3);
+      expect(summary.archivableDrafts).toBe(1);   // Only 35-day old draft
+      expect(summary.abandonedDrafts).toBe(2);    // 35-day and 10-day (archivable counts as abandoned too)
+      expect(summary.staleDrafts).toBe(1);        // Only 5-day old draft
+    });
+
+    it("should handle 30-day threshold boundary for archivable drafts", async () => {
+      const now = new Date();
+
+      // Create tasks
+      await db.exec(
+        `INSERT INTO tasks (id, timestamp, state, chat_id) VALUES (?, ?, ?, ?)`,
+        ["task-boundary-30", Date.now(), "done", "chat-boundary-30"]
+      );
+      await db.exec(
+        `INSERT INTO tasks (id, timestamp, state, chat_id) VALUES (?, ?, ?, ?)`,
+        ["task-boundary-30-under", Date.now(), "done", "chat-boundary-30-under"]
+      );
+
+      // Workflow exactly 30 days + 1 second ago (should be included as archivable)
+      const justOverThreshold = new Date(now.getTime() - (30 * 24 * 60 * 60 * 1000 + 1000));
+      await scriptStore.addWorkflow({
+        id: "workflow-archive-over",
+        title: "Just Over Archive Threshold",
+        task_id: "task-boundary-30",
+        chat_id: "chat-boundary-30",
+        timestamp: justOverThreshold.toISOString(),
+        cron: "",
+        events: "",
+        status: "draft",
+        next_run_timestamp: "",
+        maintenance: false,
+        maintenance_fix_count: 0,
+        active_script_id: "",
+      });
+
+      // Workflow exactly 30 days - 1 second ago (should NOT be archivable)
+      const justUnderThreshold = new Date(now.getTime() - (30 * 24 * 60 * 60 * 1000 - 1000));
+      await scriptStore.addWorkflow({
+        id: "workflow-archive-under",
+        title: "Just Under Archive Threshold",
+        task_id: "task-boundary-30-under",
+        chat_id: "chat-boundary-30-under",
+        timestamp: justUnderThreshold.toISOString(),
+        cron: "",
+        events: "",
+        status: "draft",
+        next_run_timestamp: "",
+        maintenance: false,
+        maintenance_fix_count: 0,
+        active_script_id: "",
+      });
+
+      const summary = await scriptStore.getDraftActivitySummary();
+      expect(summary.totalDrafts).toBe(2);
+      expect(summary.archivableDrafts).toBe(1);   // Only the one just over
+      expect(summary.abandonedDrafts).toBe(2);    // Both are > 7 days
     });
   });
 });

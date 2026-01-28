@@ -8,8 +8,9 @@ import { DBInterface } from "./interfaces";
  * - maintenance_failed: Maintainer task could not fix the issue
  * - script_message: Script calls user.send() tool
  * - script_ask: Script calls user.ask() tool (v2)
+ * - draft_archived: Draft workflow was archived due to inactivity
  */
-export type NotificationType = "error" | "escalated" | "maintenance_failed" | "script_message" | "script_ask";
+export type NotificationType = "error" | "escalated" | "maintenance_failed" | "script_message" | "script_ask" | "draft_archived";
 
 export interface Notification {
   id: string;

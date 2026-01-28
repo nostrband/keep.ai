@@ -180,8 +180,8 @@ Auto-archive drafts after extended inactivity.
 - [x] **Archive action** - workflow.status="archived", archive button in WorkflowDetailPage, ArchivedPage view
 - [x] **Unarchive capability** - Restore button restores to "paused" (with scripts) or "draft" (without scripts)
 - [x] **Archived view** - /archived route with ArchivedPage component showing count, dates, restore actions
-- [ ] **Auto-archive threshold** - Define auto-archive period (e.g., 30 days) - not implemented
-- [ ] **Archive notification** - Notify user before auto-archive - not implemented
+- [x] **Auto-archive threshold** - DRAFT_THRESHOLDS.ARCHIVE_DAYS (30 days) defined, archivableDrafts count in DraftActivitySummary, StaleDraftsBanner prompts user to archive drafts 30+ days inactive
+- [x] **Archive notification** - StaleDraftsBanner on MainPage prompts user about archivable drafts, draft_archived notification type available for future silent auto-archive
 - [ ] **Bulk archive** - Multi-select archive functionality - not implemented
 
 ### Script Versioning UI (Rollback)
@@ -315,13 +315,13 @@ Areas identified as lacking test coverage:
 - **Overall:** Clean codebase, no critical issues
 
 ### Current Notification Types
-The system supports 4 notification types:
+The system supports 6 notification types:
 - `error` - General errors
 - `escalated` - User escalation needed
+- `maintenance_failed` - Maintainer task could not fix the issue
 - `script_message` - Script output messages
 - `script_ask` - Script questions to user
-
-**Note:** `maintenance_failed` notification type needs to be added for maintainer escalations.
+- `draft_archived` - Draft workflow was archived due to inactivity
 
 ---
 

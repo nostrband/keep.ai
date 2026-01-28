@@ -294,6 +294,7 @@ export function useDraftActivitySummary() {
         totalDrafts: 0,
         staleDrafts: 0,
         abandonedDrafts: 0,
+        archivableDrafts: 0,
         waitingForInput: 0,
       };
       try {
@@ -304,6 +305,7 @@ export function useDraftActivitySummary() {
           totalDrafts: 0,
           staleDrafts: 0,
           abandonedDrafts: 0,
+          archivableDrafts: 0,
           waitingForInput: 0,
         };
       }
