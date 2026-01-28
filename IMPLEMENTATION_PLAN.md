@@ -38,8 +38,8 @@ Introduces a new `maintainer` task type for bounded, autonomous script repair. T
 - [x] **Escalation to user** - escalateToUser() exists with proper notification creation
 - [x] **Save tool maintenance detection** - Save tool detects maintenance mode and clears flag
 
-##### Not Started
-- [ ] **Update workflow-worker.ts enterMaintenanceMode** - Replace current implementation to call `taskStore.enterMaintenanceMode()` and route to maintainer (currently routes to planner inbox)
+##### Completed
+- [x] **Update workflow-worker.ts enterMaintenanceMode** - Refactored to call `api.enterMaintenanceMode()` which atomically creates maintainer task (routes to maintainer instead of planner)
 
 #### Task Worker
 
