@@ -22,7 +22,14 @@ export default function ArchivedPage() {
     try {
       // Smart restore: "paused" if has scripts, "draft" if not (spec: smart-workflow-restore-status)
       const workflow = workflows.find(w => w.id === workflowId);
-      const restoreStatus = workflow?.active_script_id ? "paused" : "draft";
+
+      // Guard against workflow not found (race condition, stale cache, sync issue)
+      if (!workflow) {
+        error.show("Workflow not found. Try refreshing the page.");
+        return;
+      }
+
+      const restoreStatus = workflow.active_script_id ? "paused" : "draft";
 
       await updateWorkflowMutation.mutateAsync({
         workflowId,

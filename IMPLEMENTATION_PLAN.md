@@ -108,17 +108,17 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
   - Fix: Add early validation after type check; fail fast with clear error message
   - Status: **FIXED** - early validation added at line 118, fails with clear "Maintainer task missing workflow_id" error
 
-- [ ] **Add null check in ArchivedPage restore logic** - [specs/new/archived-page-null-check.md](specs/new/archived-page-null-check.md)
+- [x] **Add null check in ArchivedPage restore logic** - [specs/new/archived-page-null-check.md](specs/new/archived-page-null-check.md)
   - File: `apps/web/src/components/ArchivedPage.tsx`
   - Issue: `workflows.find()` may return undefined; optional chaining silently defaults to "draft" with no error
   - Fix: Add explicit null check; show error to user and abort restore if workflow not found
-  - Status: **NOT FIXED** - restore proceeds silently with potentially wrong state
+  - Status: **FIXED** - added explicit null check in handleRestore for workflow.find() result; user sees error message "Workflow not found. Try refreshing the page." and operation aborts; WorkflowDetailPage already had a null guard so no changes needed there
 
-- [ ] **Replace window.confirm() with modal dialog** - [specs/new/replace-window-confirm-modal.md](specs/new/replace-window-confirm-modal.md)
+- [x] **Replace window.confirm() with modal dialog** - [specs/new/replace-window-confirm-modal.md](specs/new/replace-window-confirm-modal.md)
   - File: `apps/web/src/components/WorkflowDetailPage.tsx`
   - Issue: Native `window.confirm()` blocks event loop, can't match design system, has accessibility issues
   - Fix: Replace with purpose-built confirmation modal using app's existing UI components
-  - Status: **NOT FIXED** - still uses native `window.confirm()`
+  - Status: **FIXED** - Replaced window.confirm() with a custom modal dialog matching the app's design system; modal is non-blocking, accessible, and consistent with app UX; uses state management (showArchiveConfirm) instead of blocking confirm(); added backdrop click to dismiss
 
 ### P2 - Medium (Code Quality & Tests)
 
@@ -220,10 +220,10 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
 | Priority | Count | Status |
 |----------|-------|--------|
 | P0 Critical | 6 | 6 complete |
-| P1 High | 10 | 7 complete |
+| P1 High | 10 | 9 complete |
 | P2 Medium | 13 | 8 complete (1 documented) |
 | P3 Low | 2 | 0 complete |
-| **Total** | **31** | **21 complete** |
+| **Total** | **31** | **23 complete** |
 
 ---
 
