@@ -9,6 +9,15 @@ import type { OAuthConfig, OAuthCredentials, TokenResponse } from "./types";
 
 const debug = createDebug("keep:connectors:oauth");
 
+/**
+ * Result of a token revocation attempt.
+ * Provides clear distinction between actual revocation and other outcomes.
+ */
+export type RevokeResult = {
+  success: boolean;
+  reason: "revoked" | "not_supported" | "failed";
+};
+
 export class OAuthHandler {
   constructor(
     private config: OAuthConfig,
@@ -146,14 +155,13 @@ export class OAuthHandler {
 
   /**
    * Revoke an access token at the OAuth provider.
-   * Returns true if revocation succeeded or was not needed.
-   * Returns false if revocation failed (token will remain valid at provider).
-   * Best-effort: failures don't throw, just return false.
+   * Returns result indicating what happened (revoked, not_supported, or failed).
+   * Best-effort: failures don't throw, just return { success: false, reason: "failed" }.
    */
-  async revokeToken(accessToken: string): Promise<boolean> {
+  async revokeToken(accessToken: string): Promise<RevokeResult> {
     if (!this.config.revokeUrl) {
       debug("No revoke URL configured, skipping token revocation");
-      return true; // Not an error, just not supported
+      return { success: true, reason: "not_supported" };
     }
 
     debug("Revoking access token");
@@ -163,9 +171,22 @@ export class OAuthHandler {
         token: accessToken,
       });
 
+      // Include client credentials matching the pattern used in exchangeCode
+      // For Basic auth (Notion), credentials go in header
+      // For standard OAuth2 (Google), credentials go in body
       const headers: Record<string, string> = {
         "Content-Type": "application/x-www-form-urlencoded",
       };
+
+      if (this.config.useBasicAuth) {
+        const basicAuth = Buffer.from(
+          `${this.clientId}:${this.clientSecret}`
+        ).toString("base64");
+        headers["Authorization"] = `Basic ${basicAuth}`;
+      } else {
+        body.set("client_id", this.clientId);
+        body.set("client_secret", this.clientSecret);
+      }
 
       const response = await fetch(this.config.revokeUrl, {
         method: "POST",
@@ -176,17 +197,17 @@ export class OAuthHandler {
       // Google returns 200 on success, even for already-revoked tokens
       if (response.ok) {
         debug("Token revocation successful");
-        return true;
+        return { success: true, reason: "revoked" };
       }
 
       // Non-2xx response - revocation failed but we should continue with disconnect
       const errorText = await response.text();
       debug("Token revocation failed: %s %s", response.status, errorText);
-      return false;
+      return { success: false, reason: "failed" };
     } catch (error) {
       // Network error - log and continue with disconnect
       debug("Token revocation error: %s", error);
-      return false;
+      return { success: false, reason: "failed" };
     }
   }
 }

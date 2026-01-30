@@ -182,17 +182,17 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
   - Fix: Add tests with mock server returning error responses; verify graceful error handling
   - Status: **NOT FIXED** - no tests for /sync and /data POST endpoint failures
 
-- [ ] **Add client credentials to token revocation** - [specs/new/token-revocation-client-credentials.md](specs/new/token-revocation-client-credentials.md)
+- [x] **Add client credentials to token revocation** - [specs/new/token-revocation-client-credentials.md](specs/new/token-revocation-client-credentials.md)
   - File: `packages/auth/src/oauth.ts`
   - Issue: Token revocation request only includes access token, missing client_id and client_secret
   - Fix: Add client credentials to revocation request body, matching token exchange pattern
-  - Status: **NOT FIXED** - revocation request missing client credentials
+  - Status: **FIXED** - added client_id and client_secret to revocation request body; uses same pattern as exchangeCode (Basic auth header or body params); consistent authentication across all OAuth operations
 
-- [ ] **Clarify token revocation status return values** - [specs/new/revocation-status-clarity.md](specs/new/revocation-status-clarity.md)
+- [x] **Clarify token revocation status return values** - [specs/new/revocation-status-clarity.md](specs/new/revocation-status-clarity.md)
   - Files: `packages/auth/src/oauth.ts`, `packages/auth/src/manager.ts`
   - Issue: Returns `true` when revoke URL not configured; logs misleadingly say "Token revoked"
   - Fix: Change return type to include reason ('revoked', 'not_supported', 'failed'); update logging
-  - Status: **NOT FIXED** - boolean return makes logs misleading
+  - Status: **FIXED** - changed return type from boolean to RevokeResult with reason; reasons: 'revoked', 'not_supported', or 'failed'; updated manager.ts to log appropriately based on reason; exported RevokeResult type from @app/connectors
 
 ### P3 - Low (Technical Debt & Cleanup)
 
@@ -221,9 +221,9 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
 |----------|-------|--------|
 | P0 Critical | 6 | 6 complete |
 | P1 High | 10 | 9 complete |
-| P2 Medium | 13 | 8 complete (1 documented) |
+| P2 Medium | 13 | 10 complete (1 documented) |
 | P3 Low | 2 | 0 complete |
-| **Total** | **31** | **23 complete** |
+| **Total** | **31** | **25 complete** |
 
 ---
 

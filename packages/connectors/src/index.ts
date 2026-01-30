@@ -18,7 +18,7 @@
 export * from "./types";
 
 // OAuth handler
-export { OAuthHandler, OAuthError, tokenResponseToCredentials } from "./oauth";
+export { OAuthHandler, OAuthError, tokenResponseToCredentials, type RevokeResult } from "./oauth";
 
 // Credential storage
 export { CredentialStore } from "./store";

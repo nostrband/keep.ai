@@ -353,9 +353,11 @@ export class ConnectionManager {
               clientSecret,
               "" // redirectUri not needed for revocation
             );
-            const revoked = await handler.revokeToken(creds.accessToken);
-            if (revoked) {
+            const result = await handler.revokeToken(creds.accessToken);
+            if (result.reason === "revoked") {
               debug("Token revoked at provider for %s", connectionId);
+            } else if (result.reason === "not_supported") {
+              debug("Token revocation not supported for %s", connectionId);
             } else {
               debug("Token revocation failed for %s (continuing with local cleanup)", connectionId);
             }
