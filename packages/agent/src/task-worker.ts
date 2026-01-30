@@ -577,17 +577,16 @@ export class TaskWorker {
     const changelog = priorScripts
       .filter(s => s.minor_version < scriptToUse.minor_version)
       .sort((a, b) => b.minor_version - a.minor_version) // newest first
-      .slice(0, 5) // limit to last 5 changes
       .map(s => ({
         version: formatVersion(s.major_version, s.minor_version),
         comment: s.change_comment || "",
       }));
 
-    // 6. Trim logs to last 50 lines to avoid context bloat
+    // 6. Trim logs to last 5000 chars for predictable context size
     const allLogs = scriptRun.logs || "";
-    const logLines = allLogs.split("\n");
-    const trimmedLogs = logLines.length > 50
-      ? logLines.slice(-50).join("\n")
+    const MAX_LOG_CHARS = 5000;
+    const trimmedLogs = allLogs.length > MAX_LOG_CHARS
+      ? "[truncated]\n" + allLogs.slice(-MAX_LOG_CHARS)
       : allLogs;
 
     return {

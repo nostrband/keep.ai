@@ -78,11 +78,11 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
   - Fix: Make categories mutually exclusive (remove line 1009 `abandonedDrafts++`)
   - Status: **FIXED** - categories now mutually exclusive; tests updated to match
 
-- [ ] **Include full changelog in maintainer context** - [specs/include-full-changelog-in-maintainer-context.md](specs/include-full-changelog-in-maintainer-context.md)
+- [x] **Include full changelog in maintainer context** - [specs/include-full-changelog-in-maintainer-context.md](specs/include-full-changelog-in-maintainer-context.md)
   - File: `packages/agent/src/task-worker.ts:582`
   - Issue: Changelog limited to 5 entries, maintainer may repeat failed approaches
   - Fix: Remove `.slice(0, 5)` to include all entries for major version
-  - Status: **NOT FIXED** - `.slice(0, 5)` still present
+  - Status: **FIXED** - `.slice(0, 5)` removed; all entries for major version now included
 
 - [ ] **Add fix tool onCalled callback** - [specs/fix-tool-called-callback.md](specs/fix-tool-called-callback.md)
   - Files: `packages/agent/src/ai-tools/fix.ts`, `packages/agent/src/task-worker.ts:717-728`
@@ -90,17 +90,17 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
   - Fix: Add `onCalled` callback parameter like other tools (ask, finish)
   - Status: **NOT FIXED** - `checkIfFixToolCalled()` still inspects `part.type === "tool-fix"`
 
-- [ ] **Fix MIME detection fallback** - [specs/fix-mime-detection-fallback.md](specs/fix-mime-detection-fallback.md)
+- [x] **Fix MIME detection fallback** - [specs/fix-mime-detection-fallback.md](specs/fix-mime-detection-fallback.md)
   - File: `packages/node/src/fileUtils.ts:118`
   - Issue: Condition `!mediaType` never true; fallback unreachable
   - Fix: Change to `mediaType === 'application/octet-stream'`
-  - Status: **NOT FIXED** - `if (!mediaType && filename ...)` condition remains
+  - Status: **FIXED** - condition changed to check for generic fallback; filename detection now works
 
-- [ ] **Truncate maintainer logs by chars** - [specs/truncate-maintainer-logs-by-chars.md](specs/truncate-maintainer-logs-by-chars.md)
+- [x] **Truncate maintainer logs by chars** - [specs/truncate-maintainer-logs-by-chars.md](specs/truncate-maintainer-logs-by-chars.md)
   - File: `packages/agent/src/task-worker.ts:588-593`
   - Issue: Line-based truncation (50 lines) unpredictable for long lines
   - Fix: Use `.slice(-5000)` for last 5000 chars, add `[truncated]` prefix
-  - Status: **NOT FIXED** - still uses `.split('\n').slice(-50)`
+  - Status: **FIXED** - now uses `.slice(-5000)` with `[truncated]` prefix
 
 - [x] **Validate workflow_id early for maintainer tasks** - [specs/new/maintainer-workflow-id-validation.md](specs/new/maintainer-workflow-id-validation.md)
   - File: `packages/agent/src/task-worker.ts` (in `executeTask()`)
@@ -190,10 +190,10 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
 | Priority | Count | Status |
 |----------|-------|--------|
 | P0 Critical | 6 | 5 complete |
-| P1 High | 8 | 2 complete |
+| P1 High | 8 | 5 complete |
 | P2 Medium | 9 | 0 complete (1 documented) |
 | P3 Low | 2 | 0 complete |
-| **Total** | **25** | **7 complete** |
+| **Total** | **25** | **10 complete** |
 
 ---
 
