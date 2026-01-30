@@ -110,23 +110,23 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
 
 ### P2 - Medium (Code Quality & Tests)
 
-- [ ] **Fix compression error message** - [specs/fix-compression-error-message.md](specs/fix-compression-error-message.md)
+- [x] **Fix compression error message** - [specs/fix-compression-error-message.md](specs/fix-compression-error-message.md)
   - Files: `packages/node/src/compression.ts:274,436`, `packages/browser/src/compression.ts:337,503`
   - Issue: Message says "binary mode" when actually in string mode
   - Fix: Change to "expected string input in string mode, got Uint8Array"
-  - Status: **NOT FIXED** - all 4 locations still say "Uint8Array input in binary mode"
+  - Status: **FIXED** - all 4 locations now say "Uint8Array input in string mode"
 
-- [ ] **Fix maxResultSizeSafe return value** - [specs/fix-maxresultsizesafe-return-value.md](specs/fix-maxresultsizesafe-return-value.md)
+- [x] **Fix maxResultSizeSafe return value** - [specs/fix-maxresultsizesafe-return-value.md](specs/fix-maxresultsizesafe-return-value.md)
   - Files: 4 implementations in `packages/node/src/compression.ts` and `packages/browser/src/compression.ts`
   - Issue: Returns `this.maxResultSize` instead of `undefined` when no limit
   - Fix: Change to `return undefined` in all 4 implementations
-  - Status: **NOT FIXED** - all return `this.maxResultSize` (falsy value)
+  - Status: **FIXED** - all 4 implementations now return `undefined` with explicit type annotation
 
-- [ ] **Export MAX_FIX_ATTEMPTS constant** - [specs/export-max-fix-attempts-constant.md](specs/export-max-fix-attempts-constant.md)
+- [x] **Export MAX_FIX_ATTEMPTS constant** - [specs/export-max-fix-attempts-constant.md](specs/export-max-fix-attempts-constant.md)
   - Files: `packages/agent/src/workflow-worker.ts:25`, `packages/tests/src/maintainer-integration.test.ts`
   - Issue: Constant defined but not exported; tests hardcode "3"
   - Fix: Add `export` to constant; import in tests
-  - Status: **NOT FIXED** - `const MAX_FIX_ATTEMPTS = 3` not exported; tests redefine it
+  - Status: **FIXED** - constant exported from workflow-worker and imported in tests
 
 - [ ] **Fix maintainer tasks type safety** - [specs/fix-maintainer-tasks-type-safety.md](specs/fix-maintainer-tasks-type-safety.md)
   - File: `apps/web/src/components/WorkflowDetailPage.tsx:497`
@@ -191,9 +191,9 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
 |----------|-------|--------|
 | P0 Critical | 6 | 5 complete |
 | P1 High | 8 | 5 complete |
-| P2 Medium | 9 | 0 complete (1 documented) |
+| P2 Medium | 9 | 3 complete (1 documented) |
 | P3 Low | 2 | 0 complete |
-| **Total** | **25** | **10 complete** |
+| **Total** | **25** | **13 complete** |
 
 ---
 

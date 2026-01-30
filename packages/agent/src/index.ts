@@ -71,6 +71,7 @@ export {
 export {
   WorkflowWorker,
   type WorkflowWorkerConfig,
+  MAX_FIX_ATTEMPTS,
 } from "./workflow-worker";
 
 export {

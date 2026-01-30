@@ -230,7 +230,7 @@ describe("compression", () => {
         try {
           await expect(
             stringInstance.add(new Uint8Array([1, 2, 3]))
-          ).rejects.toThrow(/Uint8Array input in binary mode/);
+          ).rejects.toThrow(/Uint8Array input in string mode/);
         } finally {
           stringInstance.dispose();
         }

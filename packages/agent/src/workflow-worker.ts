@@ -22,7 +22,7 @@ import type { ConnectionManager } from "@app/connectors";
 
 // Maximum number of consecutive fix attempts before escalating to user (spec 09b)
 // After this many failed auto-fix attempts, the workflow is paused and user is notified.
-const MAX_FIX_ATTEMPTS = 3;
+export const MAX_FIX_ATTEMPTS = 3;
 
 export interface WorkflowWorkerConfig {
   api: KeepDbApi;

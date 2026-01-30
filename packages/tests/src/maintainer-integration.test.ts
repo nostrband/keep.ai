@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { DBInterface, KeepDb, KeepDbApi, ScriptStore, Script, Workflow, Task, InboxStore, NotificationStore } from "@app/db";
 import { createDBNode } from "@app/node";
-import { makeFixTool, FixResult } from "@app/agent";
+import { makeFixTool, FixResult, MAX_FIX_ATTEMPTS } from "@app/agent";
 
 /**
  * Integration tests for the Maintainer Task Type flow.
@@ -496,7 +496,7 @@ describe("Maintainer Integration Tests", () => {
       // Setup: Workflow that has already exceeded max fix attempts
       const workflow = createWorkflow({
         maintenance: false,
-        maintenance_fix_count: 3, // Already at max (MAX_FIX_ATTEMPTS = 3)
+        maintenance_fix_count: MAX_FIX_ATTEMPTS, // Already at max
         status: "active",
       });
       const script = createScript();
@@ -587,7 +587,6 @@ describe("Maintainer Integration Tests", () => {
       // correct behavior would be to escalate, not create maintainer task
 
       // Simulate the guard logic:
-      const MAX_FIX_ATTEMPTS = 3;
       const shouldEscalate = workflow.maintenance_fix_count >= MAX_FIX_ATTEMPTS;
       expect(shouldEscalate).toBe(true);
 
@@ -692,7 +691,6 @@ describe("Maintainer Integration Tests", () => {
       expect(dbWorkflow?.maintenance_fix_count).toBe(3);
 
       // Now if we check the condition (as workflow-worker does):
-      const MAX_FIX_ATTEMPTS = 3;
       const shouldEscalate = dbWorkflow!.maintenance_fix_count >= MAX_FIX_ATTEMPTS;
       expect(shouldEscalate).toBe(true);
     });
