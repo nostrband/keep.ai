@@ -749,15 +749,11 @@ export class ScriptStore {
   }
 
   // Increment the maintenance fix count for a workflow (when entering maintenance mode)
+  // Uses RETURNING for atomicity - prevents TOCTOU race between UPDATE and SELECT
   async incrementMaintenanceFixCount(workflowId: string, tx?: DBInterface): Promise<number> {
     const db = tx || this.db.db;
-    await db.exec(
-      `UPDATE workflows SET maintenance_fix_count = maintenance_fix_count + 1 WHERE id = ?`,
-      [workflowId]
-    );
-    // Return the new count
-    const result = await (tx || this.db.db).execO<{ maintenance_fix_count: number }>(
-      `SELECT maintenance_fix_count FROM workflows WHERE id = ?`,
+    const result = await db.execO<{ maintenance_fix_count: number }>(
+      `UPDATE workflows SET maintenance_fix_count = maintenance_fix_count + 1 WHERE id = ? RETURNING maintenance_fix_count`,
       [workflowId]
     );
     return result && result.length > 0 ? result[0].maintenance_fix_count : 0;

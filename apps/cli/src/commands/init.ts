@@ -39,11 +39,10 @@ async function runInitCommand(): Promise<void> {
     debugInit('Generated keys:', { publicKey: publicKeyHex });
     
     // Ensure ~/.keep.ai directory exists
+    // Use recursive: true to handle existing directories gracefully (no TOCTOU race)
     const keepAiDir = path.join(os.homedir(), '.keep.ai');
-    if (!fs.existsSync(keepAiDir)) {
-      fs.mkdirSync(keepAiDir, { recursive: true });
-      debugInit('Created directory:', keepAiDir);
-    }
+    fs.mkdirSync(keepAiDir, { recursive: true });
+    debugInit('Ensured directory exists:', keepAiDir);
     
     // Write public key to current_user.txt
     const currentUserFile = path.join(keepAiDir, 'current_user.txt');
@@ -51,11 +50,10 @@ async function runInitCommand(): Promise<void> {
     debugInit('Written current user to:', currentUserFile);
     
     // Create user directory
+    // Use recursive: true to handle existing directories gracefully (no TOCTOU race)
     const userDir = path.join(keepAiDir, publicKeyHex);
-    if (!fs.existsSync(userDir)) {
-      fs.mkdirSync(userDir, { recursive: true });
-      debugInit('Created user directory:', userDir);
-    }
+    fs.mkdirSync(userDir, { recursive: true });
+    debugInit('Ensured user directory exists:', userDir);
     
     // Handle users.json file
     const usersFile = path.join(keepAiDir, 'users.json');
@@ -89,8 +87,9 @@ async function runInitCommand(): Promise<void> {
     
     usersData.users.push(newUser);
     
-    // Write updated users.json
-    fs.writeFileSync(usersFile, JSON.stringify(usersData, null, 2), 'utf8');
+    // Write updated users.json with restrictive permissions (0600)
+    // Secret keys should only be readable by the owner
+    fs.writeFileSync(usersFile, JSON.stringify(usersData, null, 2), { encoding: 'utf8', mode: 0o600 });
     debugInit('Updated users.json with new user');
     
     console.log('✅ User initialization completed successfully!');

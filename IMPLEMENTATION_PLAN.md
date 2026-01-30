@@ -1,0 +1,209 @@
+# Keep.AI Implementation Plan
+
+Last updated: 2026-01-30 (verified against source code)
+
+This plan tracks items to be implemented for a simple, lovable, and complete v1 Keep.AI release.
+
+---
+
+## Priority Legend
+- **P0 (Critical)**: Security issues, data integrity bugs, race conditions
+- **P1 (High)**: Core feature gaps, significant UX issues
+- **P2 (Medium)**: Code quality, test coverage, maintainability
+- **P3 (Low)**: Minor improvements, cleanup
+
+---
+
+## Implementation Items
+
+### P0 - Critical (Security & Data Integrity)
+
+- [x] **Fix secret key file permissions** - [specs/fix-secret-key-file-permissions.md](specs/fix-secret-key-file-permissions.md)
+  - Files: `packages/node/src/getDBPath.ts:157`, `apps/cli/src/commands/init.ts:93`
+  - Issue: `users.json` created with 0644 (world-readable), contains secret keys
+  - Fix: Add `{ mode: 0o600 }` to `fs.writeFileSync()` calls
+  - Status: **FIXED** - both locations now use `writeFileSync(..., { mode: 0o600 })`
+
+- [x] **Fix incrementMaintenanceFixCount atomicity** - [specs/fix-increment-maintenance-fix-count-atomicity.md](specs/fix-increment-maintenance-fix-count-atomicity.md)
+  - File: `packages/db/src/script-store.ts:752-764`
+  - Issue: TOCTOU race between UPDATE and SELECT
+  - Fix: Use `UPDATE ... RETURNING maintenance_fix_count`
+  - Status: **FIXED** - now uses `UPDATE ... RETURNING` pattern
+
+- [x] **Fix getDBPath race condition** - [specs/fix-getdbpath-race-condition.md](specs/fix-getdbpath-race-condition.md)
+  - File: `packages/node/src/getDBPath.ts:63-65, 107-109, 126-128, 152-154` and `apps/cli/src/commands/init.ts:70-72`
+  - Issue: Redundant `existsSync` before `mkdirSync` creates TOCTOU race (5 locations)
+  - Fix: Remove checks, rely on `{ recursive: true }`
+  - Status: **FIXED** - removed redundant `if (!fs.existsSync(...))` checks at all 5 locations
+
+- [x] **Fail fast on missing scriptRunId** - [specs/fail-fast-missing-scriptrunid.md](specs/fail-fast-missing-scriptrunid.md)
+  - File: `packages/agent/src/task-worker.ts:539-551`
+  - Issue: Returns fallback context when scriptRunId missing, may fix wrong script
+  - Fix: Return `undefined` instead of fallback context
+  - Status: **FIXED** - now returns `undefined` instead of fallback context
+
+- [ ] **Fix Electron symlink vulnerability** - [specs/new/electron-symlink-vulnerability-fix.md](specs/new/electron-symlink-vulnerability-fix.md)
+  - File: Electron file protocol handler in `apps/electron`
+  - Issue: Uses `path.resolve()` which doesn't resolve symlinks, allowing bypass if attacker can create symlink in `public/`
+  - Fix: Replace `path.resolve()` with `fs.realpathSync()` to resolve symbolic links before validation
+  - Status: **NOT FIXED** - file protocol handler still uses `path.resolve()`
+
+### P1 - High (Core Features & Significant Fixes)
+
+- [ ] **Implement logical items infrastructure** - [specs/logical-items.md](specs/logical-items.md)
+  - Status: **NOT IMPLEMENTED** (major feature - no code exists)
+  - Components needed:
+    - [ ] `Items.withItem(id, title, handler)` API in sandbox
+    - [ ] Items database table with states (processing, done, failed, skipped)
+    - [ ] `Items.list()` tool for introspection
+    - [ ] Sandbox callback support (`wrapGuestCallback`, `awaitGuestPromise`)
+    - [ ] Tool wrapper refactor with `isReadOnly` metadata
+    - [ ] Mutation restrictions (writes only inside `withItem()`)
+
+- [ ] **Fix tool always saves, check active for race** - [specs/fix-tool-always-save-check-active.md](specs/fix-tool-always-save-check-active.md)
+  - File: `packages/agent/src/ai-tools/fix.ts:56-70`
+  - Issue: Fixes discarded on race instead of saved; uses majorVersion not scriptId
+  - Fix: Always save fixes; compare `active_script_id`; replace `expectedMajorVersion` with `expectedScriptId`
+  - Status: **NOT FIXED** - returns `applied: false` without saving; compares `major_version`
+
+- [ ] **Fix draft activity double-counting** - [specs/fix-draft-activity-double-counting.md](specs/fix-draft-activity-double-counting.md)
+  - File: `packages/db/src/script-store.ts:1005-1014`
+  - Issue: Drafts 30+ days counted in both archivable AND abandoned
+  - Fix: Make categories mutually exclusive (remove line 1009 `abandonedDrafts++`)
+  - Status: **NOT FIXED** - line 1009 still increments both counters
+
+- [ ] **Include full changelog in maintainer context** - [specs/include-full-changelog-in-maintainer-context.md](specs/include-full-changelog-in-maintainer-context.md)
+  - File: `packages/agent/src/task-worker.ts:582`
+  - Issue: Changelog limited to 5 entries, maintainer may repeat failed approaches
+  - Fix: Remove `.slice(0, 5)` to include all entries for major version
+  - Status: **NOT FIXED** - `.slice(0, 5)` still present
+
+- [ ] **Add fix tool onCalled callback** - [specs/fix-tool-called-callback.md](specs/fix-tool-called-callback.md)
+  - Files: `packages/agent/src/ai-tools/fix.ts`, `packages/agent/src/task-worker.ts:717-728`
+  - Issue: Uses fragile `part.type === "tool-fix"` SDK inspection
+  - Fix: Add `onCalled` callback parameter like other tools (ask, finish)
+  - Status: **NOT FIXED** - `checkIfFixToolCalled()` still inspects `part.type === "tool-fix"`
+
+- [ ] **Fix MIME detection fallback** - [specs/fix-mime-detection-fallback.md](specs/fix-mime-detection-fallback.md)
+  - File: `packages/node/src/fileUtils.ts:118`
+  - Issue: Condition `!mediaType` never true; fallback unreachable
+  - Fix: Change to `mediaType === 'application/octet-stream'`
+  - Status: **NOT FIXED** - `if (!mediaType && filename ...)` condition remains
+
+- [ ] **Truncate maintainer logs by chars** - [specs/truncate-maintainer-logs-by-chars.md](specs/truncate-maintainer-logs-by-chars.md)
+  - File: `packages/agent/src/task-worker.ts:588-593`
+  - Issue: Line-based truncation (50 lines) unpredictable for long lines
+  - Fix: Use `.slice(-5000)` for last 5000 chars, add `[truncated]` prefix
+  - Status: **NOT FIXED** - still uses `.split('\n').slice(-50)`
+
+- [ ] **Validate workflow_id early for maintainer tasks** - [specs/new/maintainer-workflow-id-validation.md](specs/new/maintainer-workflow-id-validation.md)
+  - File: `packages/agent/src/task-worker.ts` (in `executeTask()`)
+  - Issue: Missing `workflow_id` causes late failure with confusing "Maintainer task requires maintainerContext" error
+  - Fix: Add early validation after type check; fail fast with clear error message
+  - Status: **NOT FIXED** - no early validation exists
+
+### P2 - Medium (Code Quality & Tests)
+
+- [ ] **Fix compression error message** - [specs/fix-compression-error-message.md](specs/fix-compression-error-message.md)
+  - Files: `packages/node/src/compression.ts:274,436`, `packages/browser/src/compression.ts:337,503`
+  - Issue: Message says "binary mode" when actually in string mode
+  - Fix: Change to "expected string input in string mode, got Uint8Array"
+  - Status: **NOT FIXED** - all 4 locations still say "Uint8Array input in binary mode"
+
+- [ ] **Fix maxResultSizeSafe return value** - [specs/fix-maxresultsizesafe-return-value.md](specs/fix-maxresultsizesafe-return-value.md)
+  - Files: 4 implementations in `packages/node/src/compression.ts` and `packages/browser/src/compression.ts`
+  - Issue: Returns `this.maxResultSize` instead of `undefined` when no limit
+  - Fix: Change to `return undefined` in all 4 implementations
+  - Status: **NOT FIXED** - all return `this.maxResultSize` (falsy value)
+
+- [ ] **Export MAX_FIX_ATTEMPTS constant** - [specs/export-max-fix-attempts-constant.md](specs/export-max-fix-attempts-constant.md)
+  - Files: `packages/agent/src/workflow-worker.ts:25`, `packages/tests/src/maintainer-integration.test.ts`
+  - Issue: Constant defined but not exported; tests hardcode "3"
+  - Fix: Add `export` to constant; import in tests
+  - Status: **NOT FIXED** - `const MAX_FIX_ATTEMPTS = 3` not exported; tests redefine it
+
+- [ ] **Fix maintainer tasks type safety** - [specs/fix-maintainer-tasks-type-safety.md](specs/fix-maintainer-tasks-type-safety.md)
+  - File: `apps/web/src/components/WorkflowDetailPage.tsx:497`
+  - Issue: Uses `any` type in `maintainerTasks.map((task: any) => ...)`
+  - Fix: Import `Task` from `@app/db`, use proper type
+  - Status: **NOT FIXED** - `(task: any)` still used, `Task` type not imported
+
+- [ ] **Extract draft activity summary default** - [specs/extract-draft-activity-summary-default.md](specs/extract-draft-activity-summary-default.md)
+  - File: `apps/web/src/hooks/dbScriptReads.ts:293-299,304-310`
+  - Issue: Duplicated fallback object in two locations
+  - Fix: Extract to `DEFAULT_DRAFT_ACTIVITY_SUMMARY` constant
+  - Status: **NOT FIXED** - identical fallback object defined in two places
+
+- [ ] **Improve workflows filter param handling** - [specs/improve-workflows-filter-param-handling.md](specs/improve-workflows-filter-param-handling.md)
+  - File: `apps/web/src/components/WorkflowsPage.tsx:13-21`
+  - Issue: No case normalization, no validation, no feedback for invalid filters
+  - Fix: Add `.toLowerCase()`, whitelist validation, user feedback
+  - Status: **NOT FIXED** - direct `filterParam === "drafts"` comparison
+
+- [ ] **Add escalateToUser integration tests** - [specs/add-escalatetouser-integration-tests.md](specs/add-escalatetouser-integration-tests.md)
+  - File: `packages/tests/src/maintainer-integration.test.ts`
+  - Issue: Tests manually implement escalation logic instead of calling actual method
+  - Fix: Call actual `escalateToUser()`, test message sending, error handling, logging
+  - Status: **NOT FIXED** - tests directly call store methods, not `escalateToUser()`
+
+- [ ] **Fix skipped compression tests** - [specs/fix-skipped-compression-tests.md](specs/fix-skipped-compression-tests.md)
+  - File: `packages/tests/src/compression.test.ts:523,540`
+  - Issue: Two tests skipped due to zlib timing sensitivity
+  - Fix: Find alternative testing approach (sync validation, timeout, or mock)
+  - Status: **DOCUMENTED** - tests intentionally skipped with detailed comments explaining zlib stream timing issues
+
+- [ ] **Refactor task scheduler priority tests** - [specs/refactor-task-scheduler-priority-tests.md](specs/refactor-task-scheduler-priority-tests.md)
+  - Files: `packages/agent/src/task-scheduler.ts:216-241`, `packages/tests/src/task-scheduler-priority.test.ts:110-133`
+  - Issue: Test duplicates production logic instead of testing actual code
+  - Fix: Export priority selection as testable function; remove duplicate helper
+  - Status: **NOT FIXED** - test has `selectTaskByPriority()` helper duplicating production logic
+
+### P3 - Low (Technical Debt & Cleanup)
+
+- [ ] **Remove prototyping migration code**
+  - File: `packages/db/src/database.ts:163-165`
+  - Issue: Temporary prototyping code for migration should be removed before v1
+  - Fix: Remove the marked lines after confirming no longer needed
+  - Status: **NOT FIXED** - code still present
+
+- [ ] **Enable skipped test suites**
+  - Files:
+    - `packages/tests/src/exec-many-args-browser.test.ts` - entire suite skipped (requires IndexedDB)
+    - `packages/tests/src/nostr-transport.test.ts` - 2 tests skipped (requires WebSocket)
+    - `packages/tests/src/crsqlite-peer-new.test.ts` - entire sync suite skipped
+    - `packages/tests/src/file-transfer.test.ts` - real encryption test skipped
+    - `packages/tests/src/nostr-transport-sync.test.ts` - entire sync suite skipped
+  - Issue: Multiple test suites skipped due to environment requirements (IndexedDB, WebSocket)
+  - Fix: Add browser test runner support or mock implementations
+  - Status: **NOT FIXED** - suites remain skipped
+
+---
+
+## Summary
+
+| Priority | Count | Status |
+|----------|-------|--------|
+| P0 Critical | 5 | 4 complete |
+| P1 High | 8 | 0 complete |
+| P2 Medium | 9 | 0 complete (1 documented) |
+| P3 Low | 2 | 0 complete |
+| **Total** | **24** | **4 complete** |
+
+---
+
+## Notes
+
+- All items verified against source code on 2026-01-30
+- The `logical-items.md` spec is a major feature requiring multiple phases (no code exists)
+- P0 items should be addressed first as they involve security and data integrity
+- Many P2 items are quick fixes that improve code quality
+- `fix-skipped-compression-tests` has documented reasons for skipped tests (zlib timing sensitivity); remains as technical debt
+- P3 items are lower priority technical debt that can be addressed post-v1
+- FIXMEs exist in `packages/sync` (tx delivery reliability) and `StreamWriter` (bandwidth tuning) - not tracked in this plan
+- Various hardcoded values exist (retry timeouts, batch sizes, connection delays) - not tracked unless causing issues
+
+---
+
+## Verification Notes
+
+Each item above has been verified by reading the actual source code at the specified locations. The "Status" field reflects the current implementation state as of the verification date.

@@ -537,18 +537,10 @@ export class TaskWorker {
     }
 
     if (!scriptRunId) {
-      this.debug("loadMaintainerContext: No scriptRunId found in inbox");
-      // Fall back to basic context if no scriptRunId
-      return {
-        workflowId,
-        expectedMajorVersion: activeScript.major_version,
-        scriptRunId: "",
-        error: { type: "unknown", message: "Script run ID not found in inbox" },
-        logs: "",
-        scriptCode: activeScript.code,
-        scriptVersion: formatVersion(activeScript.major_version, activeScript.minor_version),
-        changelog: [],
-      };
+      // Fail fast: don't attempt blind fixes without knowing which script run failed
+      // The planner may have updated the active script since the failure occurred
+      this.debug("loadMaintainerContext: No scriptRunId found in inbox - cannot determine failed script");
+      return undefined;
     }
 
     // 3. Load the failed script run

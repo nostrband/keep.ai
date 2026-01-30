@@ -59,10 +59,9 @@ export function getUserPath(pubkey: string, homePath?: string): string {
   const keepAiDir = getKeepaiDir(homePath);
   
   // Create user directory if it doesn't exist
+  // Use recursive: true to handle existing directories gracefully (no TOCTOU race)
   const userDir = path.join(keepAiDir, pubkey);
-  if (!fs.existsSync(userDir)) {
-    fs.mkdirSync(userDir, { recursive: true });
-  }
+  fs.mkdirSync(userDir, { recursive: true });
 
   return userDir;
 }
@@ -104,9 +103,8 @@ export async function ensureEnv(homePath?: string): Promise<void> {
   const currentUserFile = path.join(keepAiDir, 'current_user.txt');
   
   // Ensure ~/.keep.ai directory exists
-  if (!fs.existsSync(keepAiDir)) {
-    fs.mkdirSync(keepAiDir, { recursive: true });
-  }
+  // Use recursive: true to handle existing directories gracefully (no TOCTOU race)
+  fs.mkdirSync(keepAiDir, { recursive: true });
   
   // Check if current_user.txt exists
   if (!fs.existsSync(currentUserFile)) {
@@ -122,10 +120,9 @@ export async function ensureEnv(homePath?: string): Promise<void> {
     fs.writeFileSync(currentUserFile, publicKeyHex, 'utf8');
     
     // Create user directory
+    // Use recursive: true to handle existing directories gracefully (no TOCTOU race)
     const userDir = path.join(keepAiDir, publicKeyHex);
-    if (!fs.existsSync(userDir)) {
-      fs.mkdirSync(userDir, { recursive: true });
-    }
+    fs.mkdirSync(userDir, { recursive: true });
     
     // Handle users.json file
     const usersFile = path.join(keepAiDir, 'users.json');
@@ -153,8 +150,9 @@ export async function ensureEnv(homePath?: string): Promise<void> {
       
       usersData.users.push(newUser);
       
-      // Write updated users.json
-      fs.writeFileSync(usersFile, JSON.stringify(usersData, null, 2), 'utf8');
+      // Write updated users.json with restrictive permissions (0600)
+      // Secret keys should only be readable by the owner
+      fs.writeFileSync(usersFile, JSON.stringify(usersData, null, 2), { encoding: 'utf8', mode: 0o600 });
     }
   }
 }
