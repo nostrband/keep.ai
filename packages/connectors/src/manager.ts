@@ -9,6 +9,7 @@
 
 import createDebug from "debug";
 import { randomUUID } from "crypto";
+import { AuthError, isClassifiedError } from "@app/proto";
 import { OAuthHandler, tokenResponseToCredentials, OAuthError } from "./oauth";
 import { CredentialStore } from "./store";
 import { getCredentialsForService } from "./credentials";
@@ -286,6 +287,7 @@ export class ConnectionManager {
     } catch (err) {
       // Log full error details server-side for debugging
       if (err instanceof OAuthError) {
+        // Legacy OAuthError (should no longer be thrown but kept for safety)
         const details = err.getErrorDetails();
         debug(
           "OAuth flow failed for %s: code=%s desc=%s body=%s",
@@ -294,15 +296,23 @@ export class ConnectionManager {
           details.errorDescription,
           err.responseBody
         );
+      } else if (isClassifiedError(err)) {
+        // ClassifiedError from proto - already has user-friendly message
+        debug("OAuth flow failed for %s: %s (type=%s)", serviceId, err.message, err.type);
       } else {
         debug("OAuth flow failed for %s: %s", serviceId, err);
       }
 
       // Return sanitized error message to client (no sensitive info)
-      const userMessage =
-        err instanceof OAuthError
-          ? err.getUserFriendlyMessage()
-          : "An authentication error occurred. Please try connecting again.";
+      let userMessage: string;
+      if (err instanceof OAuthError) {
+        userMessage = err.getUserFriendlyMessage();
+      } else if (isClassifiedError(err)) {
+        // ClassifiedError messages are already user-friendly
+        userMessage = err.message;
+      } else {
+        userMessage = "An authentication error occurred. Please try connecting again.";
+      }
 
       return { success: false, error: userMessage };
     }
@@ -400,7 +410,7 @@ export class ConnectionManager {
     // Load credentials from file
     const creds = await this.store.load(id);
     if (!creds) {
-      throw new AuthError(`No credentials for ${connectionId}`);
+      throw new AuthError(`No credentials for ${connectionId}`, { source: "ConnectionManager.getCredentials" });
     }
 
     // Check if token needs refresh
@@ -413,7 +423,7 @@ export class ConnectionManager {
       if (needsRefresh) {
         if (!creds.refreshToken) {
           await this.markError(id, "Token expired, no refresh token");
-          throw new AuthError(`Token expired for ${connectionId}`);
+          throw new AuthError(`Token expired for ${connectionId}`, { source: "ConnectionManager.getCredentials" });
         }
 
         // Check if a refresh is already in progress for this connection
@@ -443,7 +453,11 @@ export class ConnectionManager {
           const message =
             err instanceof Error ? err.message : "Token refresh failed";
           await this.markError(id, message);
-          throw new AuthError(message);
+          // Re-throw if already classified, otherwise wrap in AuthError
+          if (isClassifiedError(err)) {
+            throw err;
+          }
+          throw new AuthError(message, { source: "ConnectionManager.getCredentials", cause: err instanceof Error ? err : undefined });
         }
       }
     }
@@ -575,12 +589,5 @@ export class ConnectionManager {
   }
 }
 
-/**
- * Auth error for credential/token issues.
- */
-export class AuthError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "AuthError";
-  }
-}
+// Re-export AuthError from @app/proto for backward compatibility
+export { AuthError } from "@app/proto";

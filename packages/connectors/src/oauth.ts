@@ -5,6 +5,7 @@
  */
 
 import createDebug from "debug";
+import { AuthError, NetworkError, classifyHttpError } from "@app/proto";
 import type { OAuthConfig, OAuthCredentials, TokenResponse } from "./types";
 
 const debug = createDebug("keep:connectors:oauth");
@@ -96,10 +97,12 @@ export class OAuthHandler {
     if (!response.ok) {
       const errorText = await response.text();
       debug("Token exchange failed: %s %s", response.status, errorText);
-      throw new OAuthError(
-        `Token exchange failed: ${response.status}`,
-        errorText
-      );
+      const errorCode = parseOAuthErrorCode(errorText);
+      const userMessage = getOAuthUserMessage(errorCode);
+      throw classifyHttpError(response.status, userMessage, {
+        source: "oauth.exchangeCode",
+        cause: new Error(`Token exchange failed: ${response.status} - ${errorText}`),
+      });
     }
 
     const data = (await response.json()) as TokenResponse;
@@ -142,10 +145,12 @@ export class OAuthHandler {
     if (!response.ok) {
       const errorText = await response.text();
       debug("Token refresh failed: %s %s", response.status, errorText);
-      throw new OAuthError(
-        `Token refresh failed: ${response.status}`,
-        errorText
-      );
+      const errorCode = parseOAuthErrorCode(errorText);
+      const userMessage = getOAuthUserMessage(errorCode);
+      throw classifyHttpError(response.status, userMessage, {
+        source: "oauth.refreshToken",
+        cause: new Error(`Token refresh failed: ${response.status} - ${errorText}`),
+      });
     }
 
     const data = (await response.json()) as TokenResponse;
@@ -287,8 +292,33 @@ const DEFAULT_OAUTH_ERROR_MESSAGE =
   "An authentication error occurred. Please try connecting again.";
 
 /**
+ * Parse OAuth error code from response body.
+ * @internal
+ */
+function parseOAuthErrorCode(responseBody: string): string | undefined {
+  try {
+    const data = JSON.parse(responseBody);
+    return data.error;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Get user-friendly message for OAuth error code.
+ * @internal
+ */
+function getOAuthUserMessage(errorCode: string | undefined): string {
+  if (errorCode && OAUTH_ERROR_MESSAGES[errorCode]) {
+    return OAUTH_ERROR_MESSAGES[errorCode];
+  }
+  return DEFAULT_OAUTH_ERROR_MESSAGE;
+}
+
+/**
  * OAuth-specific error with response details.
- * Stores error code for logging but provides sanitized messages for users.
+ * @deprecated Use ClassifiedError from @app/proto instead.
+ * Kept for backward compatibility with code that catches OAuthError.
  */
 export class OAuthError extends Error {
   public readonly errorCode?: string;

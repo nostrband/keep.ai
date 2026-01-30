@@ -34,6 +34,18 @@ export {
 // Connection manager
 export { ConnectionManager, AuthError } from "./manager";
 
+// Re-export error classification utilities from @app/proto for convenience
+export {
+  isClassifiedError,
+  ClassifiedError,
+  PermissionError,
+  NetworkError,
+  LogicError,
+  InternalError,
+  classifyHttpError,
+  type ErrorType,
+} from "@app/proto";
+
 // Database adapter
 export {
   ConnectionDbAdapter,

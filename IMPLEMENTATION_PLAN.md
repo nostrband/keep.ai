@@ -313,11 +313,11 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
   - Fix: Verify all five fields are wildcards before returning "Every minute"
   - Status: **FIXED** - now checks all five cron fields before returning "Every minute"
 
-- [ ] **Move ClassifiedError to proto and use in connectors** - [specs/new/connectors-use-classified-errors.md](specs/new/connectors-use-classified-errors.md)
-  - Files: `packages/agent/src/errors.ts`, `packages/proto/src/`, `apps/server/src/routes/connectors.ts`, `packages/connectors/`
+- [x] **Move ClassifiedError to proto and use in connectors** - [specs/new/connectors-use-classified-errors.md](specs/new/connectors-use-classified-errors.md)
+  - Files: `packages/agent/src/errors.ts`, `packages/proto/src/errors.ts`, `apps/server/src/routes/connectors.ts`, `packages/connectors/`
   - Issue: Connectors use simple error types that don't integrate with agent's error classification; route handler uses fragile keyword matching
   - Fix: Move `errors.ts` to `@app/proto`, have connectors throw ClassifiedError subclasses, use type checking in route handler
-  - Status: **NOT STARTED**
+  - Status: **FIXED** - errors.ts moved to proto; connectors now import AuthError from proto; route handler uses isClassifiedError() type checking with fallback to keyword matching for legacy compatibility; agent re-exports from proto for backward compatibility
 
 - [ ] **Enable skipped test suites**
   - Files:
@@ -339,8 +339,8 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
 | P0 Critical | 6 | 6 complete |
 | P1 High | 12 | 12 complete |
 | P2 Medium | 21 | 19 complete (1 documented) |
-| P3 Low | 7 | 5 complete |
-| **Total** | **46** | **42 complete** |
+| P3 Low | 7 | 6 complete |
+| **Total** | **46** | **43 complete** |
 
 ---
 

@@ -8,7 +8,7 @@
  */
 
 import { FastifyInstance } from "fastify";
-import { ConnectionManager, parseConnectionId } from "@app/connectors";
+import { ConnectionManager, parseConnectionId, isClassifiedError } from "@app/connectors";
 import createDebug from "debug";
 
 const debug = createDebug("server:connectors");
@@ -200,34 +200,54 @@ export async function registerConnectorRoutes(
 
         // Determine appropriate HTTP status code based on error type
         const errorMessage = error instanceof Error ? error.message : "Connection check failed";
-        const errorMessageLower = errorMessage.toLowerCase();
 
+        // Use type-based classification for ClassifiedError, fall back to keyword matching
         let statusCode = 500; // Default to internal server error
-        if (
-          errorMessageLower.includes("unauthorized") ||
-          errorMessageLower.includes("invalid_grant") ||
-          // Specific token patterns to avoid false positives like "token bucket rate limit"
-          errorMessageLower.includes("token expired") ||
-          errorMessageLower.includes("invalid token") ||
-          errorMessageLower.includes("token revoked") ||
-          errorMessageLower.includes("access token") ||
-          errorMessageLower.includes("expired") ||
-          errorMessageLower.includes("revoked") ||
-          errorMessageLower.includes("invalid credentials")
-        ) {
-          statusCode = 401; // Auth error
-        } else if (
-          errorMessageLower.includes("unavailable") ||
-          errorMessageLower.includes("timeout") ||
-          errorMessageLower.includes("econnrefused") ||
-          // Specific service patterns to avoid false positives like "Unknown service"
-          errorMessageLower.includes("service unavailable") ||
-          errorMessageLower.includes("service error") ||
-          errorMessageLower.includes("service down") ||
-          errorMessageLower.includes("503") ||
-          errorMessageLower.includes("rate limit")
-        ) {
-          statusCode = 503; // Service unavailable
+        if (isClassifiedError(error)) {
+          // Type-based classification - reliable and maintainable
+          switch (error.type) {
+            case 'auth':
+              statusCode = 401;
+              break;
+            case 'permission':
+              statusCode = 403;
+              break;
+            case 'network':
+              statusCode = 503;
+              break;
+            case 'logic':
+            case 'internal':
+            default:
+              statusCode = 500;
+              break;
+          }
+        } else {
+          // Fallback to keyword matching for unclassified errors (legacy compatibility)
+          const errorMessageLower = errorMessage.toLowerCase();
+          if (
+            errorMessageLower.includes("unauthorized") ||
+            errorMessageLower.includes("invalid_grant") ||
+            errorMessageLower.includes("token expired") ||
+            errorMessageLower.includes("invalid token") ||
+            errorMessageLower.includes("token revoked") ||
+            errorMessageLower.includes("access token") ||
+            errorMessageLower.includes("expired") ||
+            errorMessageLower.includes("revoked") ||
+            errorMessageLower.includes("invalid credentials")
+          ) {
+            statusCode = 401; // Auth error
+          } else if (
+            errorMessageLower.includes("unavailable") ||
+            errorMessageLower.includes("timeout") ||
+            errorMessageLower.includes("econnrefused") ||
+            errorMessageLower.includes("service unavailable") ||
+            errorMessageLower.includes("service error") ||
+            errorMessageLower.includes("service down") ||
+            errorMessageLower.includes("503") ||
+            errorMessageLower.includes("rate limit")
+          ) {
+            statusCode = 503; // Service unavailable
+          }
         }
 
         return reply.status(statusCode).send({
