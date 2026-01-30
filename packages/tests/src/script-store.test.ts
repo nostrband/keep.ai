@@ -1610,7 +1610,7 @@ describe("ScriptStore", () => {
         ["task-archive-3", Date.now(), "done", "chat-archive-3"]
       );
 
-      // Archivable draft (35 days old - should be in archivableDrafts AND abandonedDrafts)
+      // Archivable draft (35 days old - should only be in archivableDrafts)
       const archivableDateStr = new Date(now.getTime() - 35 * 24 * 60 * 60 * 1000).toISOString();
       await scriptStore.addWorkflow({
         id: "archivable-workflow",
@@ -1664,7 +1664,7 @@ describe("ScriptStore", () => {
       const summary = await scriptStore.getDraftActivitySummary();
       expect(summary.totalDrafts).toBe(3);
       expect(summary.archivableDrafts).toBe(1);   // Only 35-day old draft
-      expect(summary.abandonedDrafts).toBe(2);    // 35-day and 10-day (archivable counts as abandoned too)
+      expect(summary.abandonedDrafts).toBe(1);    // Only 10-day old draft (categories are mutually exclusive)
       expect(summary.staleDrafts).toBe(1);        // Only 5-day old draft
     });
 
@@ -1717,8 +1717,8 @@ describe("ScriptStore", () => {
 
       const summary = await scriptStore.getDraftActivitySummary();
       expect(summary.totalDrafts).toBe(2);
-      expect(summary.archivableDrafts).toBe(1);   // Only the one just over
-      expect(summary.abandonedDrafts).toBe(2);    // Both are > 7 days
+      expect(summary.archivableDrafts).toBe(1);   // Only the one just over 30 days
+      expect(summary.abandonedDrafts).toBe(1);    // Only the one under 30 days (categories mutually exclusive)
     });
   });
 });

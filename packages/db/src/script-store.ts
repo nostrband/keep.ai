@@ -999,10 +999,9 @@ export class ScriptStore {
       }
 
       // Count archivable (30+ days), abandoned (7-30 days), and stale (3-7 days)
-      // Note: archivable is a subset of abandoned in terms of age, but we count separately
+      // Categories are mutually exclusive age brackets
       if (lastActivity < archiveTimestamp) {
         archivableDrafts++;
-        abandonedDrafts++; // Also counts as abandoned for backward compatibility
       } else if (lastActivity < abandonedTimestamp) {
         abandonedDrafts++;
       } else if (lastActivity < staleTimestamp) {

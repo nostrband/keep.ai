@@ -72,11 +72,11 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
   - Fix: Always save fixes; compare `active_script_id`; replace `expectedMajorVersion` with `expectedScriptId`
   - Status: **NOT FIXED** - returns `applied: false` without saving; compares `major_version`
 
-- [ ] **Fix draft activity double-counting** - [specs/fix-draft-activity-double-counting.md](specs/fix-draft-activity-double-counting.md)
+- [x] **Fix draft activity double-counting** - [specs/fix-draft-activity-double-counting.md](specs/fix-draft-activity-double-counting.md)
   - File: `packages/db/src/script-store.ts:1005-1014`
   - Issue: Drafts 30+ days counted in both archivable AND abandoned
   - Fix: Make categories mutually exclusive (remove line 1009 `abandonedDrafts++`)
-  - Status: **NOT FIXED** - line 1009 still increments both counters
+  - Status: **FIXED** - categories now mutually exclusive; tests updated to match
 
 - [ ] **Include full changelog in maintainer context** - [specs/include-full-changelog-in-maintainer-context.md](specs/include-full-changelog-in-maintainer-context.md)
   - File: `packages/agent/src/task-worker.ts:582`
@@ -190,10 +190,10 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
 | Priority | Count | Status |
 |----------|-------|--------|
 | P0 Critical | 6 | 5 complete |
-| P1 High | 8 | 1 complete |
+| P1 High | 8 | 2 complete |
 | P2 Medium | 9 | 0 complete (1 documented) |
 | P3 Low | 2 | 0 complete |
-| **Total** | **25** | **6 complete** |
+| **Total** | **25** | **7 complete** |
 
 ---
 
