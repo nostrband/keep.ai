@@ -1,0 +1,43 @@
+COMMIT: 4e57056 - Tweak plan prompt
+AUTHOR: Artur Briugeman <brugeman.artur@gmail.com>
+DATE: Mon Jan 26 11:41:07 2026 +0100
+
+=== CHANGES SUMMARY ===
+
+This commit modifies `PROMPT_plan.md`, which appears to be a prompt template used for AI-assisted planning tasks. The changes include:
+
+1. MERGED STEP 1 AND 2: Previously step 1 was about studying/comparing code against specs, and step 2 was about outlining sub-items for planned tasks. These have been combined into a single step 1.
+
+2. ADDED "linking to corresponding spec files": The updated prompt now instructs to link implementation plan items to their corresponding spec files.
+
+3. ADDED "add checkbox for each item": The prompt now instructs to add checkboxes to implementation plan items for tracking completion status.
+
+4. REMOVED step 2 entirely: The detailed instructions about "outline sub-items if needed with planned implementation steps" and "list constraints, invariants, gotchas" were removed.
+
+5. FIXED MISSING NEWLINE: Added a trailing newline at the end of the file (the previous version was missing it).
+
+=== POTENTIAL ISSUES ===
+
+1. LOSS OF DETAIL IN PLANNING INSTRUCTIONS (Minor)
+   - The removed step 2 contained valuable instructions: "outline sub-items if needed with planned implementation steps" and "list constraints, invariants, gotchas etc. that you discover"
+   - These instructions helped ensure implementation plans were detailed enough for executing agents
+   - The merged step 1 doesn't include these instructions
+
+   SEVERITY: Minor. The core planning workflow remains intact, but some helpful guidance for creating detailed action items was lost.
+
+=== PROPOSALS ===
+
+1. Consider re-adding the guidance about sub-items and constraints:
+   The instructions about "outline sub-items if needed" and "list constraints, invariants, gotchas" were useful for ensuring plans are actionable. These could be added back as a note or integrated into the merged step 1.
+
+   Example addition to step 1:
+   "For each planned item, include sub-items with implementation steps where needed, noting any constraints, invariants, or gotchas discovered during research."
+
+=== VERDICT ===
+
+MINOR IMPROVEMENT POSSIBLE - The commit simplifies the prompt and adds useful features (spec linking, checkboxes), but loses some helpful guidance about creating detailed sub-items. Consider whether the removed detail is captured elsewhere or if it should be restored.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Loss of planning detail) - skipped (prompt refinement, author's intent)

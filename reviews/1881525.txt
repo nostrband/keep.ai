@@ -1,0 +1,280 @@
+COMMIT REVIEW: 1881525
+=======================
+Subject: feat: Complete all Priority 3 improvements (7 items)
+Date: 2026-01-26 17:10:59 +0100
+Files Changed: 10 files, +170/-35 lines
+
+================================================================================
+SUMMARY OF CHANGES
+================================================================================
+
+This commit implements 7 Priority 3 improvements across archive functionality,
+event tracking, and security hardening.
+
+**Archive Improvements:**
+- Allow archiving paused workflows (not just drafts)
+- Add confirmation dialog before archiving
+- Smart restore: "paused" if has scripts, "draft" if not
+
+**Event Tracking Fixes:**
+- Add update/copy to GDrive tracked methods
+- Replace includes() with explicit Set for all Google tools
+
+**Security Hardening:**
+- Add token revocation on disconnect for Google services
+- Service path sanitization already implemented
+
+**Files Modified:**
+- apps/web/src/components/ArchivedPage.tsx
+- apps/web/src/components/WorkflowDetailPage.tsx
+- packages/agent/src/tools/gdocs.ts
+- packages/agent/src/tools/gdrive.ts
+- packages/agent/src/tools/gsheets.ts
+- packages/connectors/src/manager.ts
+- packages/connectors/src/oauth.ts
+- packages/connectors/src/services/google.ts
+- packages/connectors/src/types.ts
+- IMPLEMENTATION_PLAN.md
+
+================================================================================
+DETAILED ANALYSIS
+================================================================================
+
+**1. ArchivedPage.tsx Smart Restore**
+
+Changed from always restoring to "draft" to smart restore based on active_script_id:
+```typescript
+const workflow = workflows.find(w => w.id === workflowId);
+const restoreStatus = workflow?.active_script_id ? "paused" : "draft";
+```
+
+Also updated empty state message from "Archived drafts" to "Archived workflows".
+
+**2. WorkflowDetailPage.tsx Changes**
+
+- Added window.confirm() dialog before archiving
+- Extended archive button visibility to paused workflows (was draft only)
+- Added smart restore logic matching ArchivedPage
+
+**3. Google Tools Event Tracking (gdocs.ts, gdrive.ts, gsheets.ts)**
+
+Replaced fragile includes() pattern with explicit TRACKED_METHODS Set:
+
+gdrive.ts:
+```typescript
+const TRACKED_METHODS = new Set<string>([
+  "files.list",
+  "files.create",
+  "files.update",
+  "files.delete",
+  "files.copy",
+]);
+```
+
+**4. Token Revocation (manager.ts, oauth.ts)**
+
+Added revokeToken() method to OAuthHandler and integrated into disconnect flow:
+- Attempts revocation before local cleanup
+- Best-effort: failures logged but don't block disconnect
+- Uses Google's revocation endpoint
+
+================================================================================
+ISSUES FOUND
+================================================================================
+
+**ISSUE 1: Logic Bug - Potential Null Reference in ArchivedPage Restore**
+Severity: HIGH
+Location: apps/web/src/components/ArchivedPage.tsx:24
+
+```typescript
+const workflow = workflows.find(w => w.id === workflowId);
+const restoreStatus = workflow?.active_script_id ? "paused" : "draft";
+```
+
+If workflow is not found (race condition or data sync issue), workflow will be
+undefined. The optional chaining returns undefined (falsy), always defaulting
+to "draft" status. No error handling or user feedback for this case.
+
+Proposal:
+```typescript
+const workflow = workflows.find(w => w.id === workflowId);
+if (!workflow) {
+  error.show("Workflow not found in local cache");
+  return;
+}
+const restoreStatus = workflow.active_script_id ? "paused" : "draft";
+```
+
+**ISSUE 2: Missing Client Credentials in Token Revocation**
+Severity: MEDIUM
+Location: packages/connectors/src/oauth.ts:166-168
+
+The token revocation request doesn't include client_id and client_secret:
+```typescript
+const body = new URLSearchParams({
+  token: accessToken,
+  // Missing: client_id, client_secret
+});
+```
+
+Compare with token exchange (line 77-78) which correctly includes them.
+Google's revocation endpoint accepts client credentials for additional security.
+
+Proposal:
+```typescript
+const body = new URLSearchParams({
+  token: accessToken,
+  client_id: this.clientId,
+  client_secret: this.clientSecret,
+});
+```
+
+**ISSUE 3: Misleading Revocation Status Logs**
+Severity: MEDIUM
+Location: packages/connectors/src/oauth.ts:153, manager.ts:357
+
+revokeToken() returns true when no revoke URL is configured:
+```typescript
+if (!this.config.revokeUrl) {
+  return true; // Not an error, just not supported
+}
+```
+
+Downstream code logs "Token revoked at provider" even when no revocation occurred:
+```typescript
+if (revoked) {
+  debug("Token revoked at provider for %s", connectionId); // Misleading!
+}
+```
+
+Proposal: Change return type to include reason:
+```typescript
+type RevokeResult = { success: boolean; reason: 'revoked' | 'not_supported' | 'failed' };
+```
+
+**ISSUE 4: Token Revocation Error Handling - Silent Failures**
+Severity: MEDIUM
+Location: packages/connectors/src/manager.ts:346-369
+
+Issues with current implementation:
+1. No metrics/monitoring hook - failures only logged to debug
+2. Silent credential orphaning - tokens remain valid at provider if revocation fails
+3. No retry logic for transient network failures
+
+Proposal:
+- Add structured logging for revocation failures (not just debug)
+- Consider periodic retry for failed revocations
+- Log connection deletion with revocation status for audit trail
+
+**ISSUE 5: Race Condition in Smart Restore Logic**
+Severity: MEDIUM
+Location: apps/web/src/components/WorkflowDetailPage.tsx:209-210
+
+The workflow state could be stale when handler executes:
+```typescript
+const restoreStatus = workflow.active_script_id ? "paused" : "draft";
+```
+
+If another user modifies the script between render and click, the check uses
+stale client state.
+
+Proposal: Move smart restore logic to backend where active_script_id can be
+checked atomically with the status update.
+
+**ISSUE 6: Window.confirm() - Poor UX and Accessibility**
+Severity: MEDIUM
+Location: apps/web/src/components/WorkflowDetailPage.tsx:191
+
+```typescript
+if (!window.confirm("Archive this workflow?...")) {
+  return;
+}
+```
+
+Issues:
+1. Blocks event loop - freezes entire app
+2. Can't match app's design system
+3. Accessibility issues - screen readers don't handle native confirms well
+4. No undo option
+
+The codebase has Button and message components that should be used instead.
+
+Proposal: Replace with purpose-built modal dialog using existing UI components.
+
+**ISSUE 7: Inconsistent Error Handling Patterns**
+Severity: LOW
+Location: ArchivedPage.tsx vs WorkflowDetailPage.tsx
+
+ArchivedPage uses async/await with try/catch and mutateAsync.
+WorkflowDetailPage uses callback-based approach with mutate.
+
+Inconsistent patterns make maintenance harder.
+
+Proposal: Standardize on callback-based pattern (more idiomatic for React Query).
+
+**ISSUE 8: files.list in TRACKED_METHODS**
+Severity: LOW
+Location: packages/agent/src/tools/gdrive.ts:28
+
+The TRACKED_METHODS Set includes files.list which is a read operation:
+```typescript
+const TRACKED_METHODS = new Set<string>([
+  "files.list",  // Read operation - could generate excessive events
+  ...
+]);
+```
+
+Comment says "list for auditing" but doesn't explain the requirement.
+
+Proposal: Add documentation comment explaining auditing rationale, or remove
+if not needed.
+
+================================================================================
+POSITIVE OBSERVATIONS
+================================================================================
+
+1. **Clean Set-based pattern** - Using TRACKED_METHODS Set instead of includes()
+   is more robust and explicit
+
+2. **Good error handling in revocation** - Best-effort approach that doesn't
+   block disconnect on revocation failure is pragmatic
+
+3. **Consistent spec references** - Comments reference spec filenames for
+   traceability
+
+4. **Smart restore logic** - Good UX improvement restoring to appropriate state
+
+================================================================================
+VERDICT
+================================================================================
+
+**Status: APPROVED with Required Fixes**
+
+The implementation is generally solid but has several issues that should be
+addressed:
+
+Priority 1 (Required):
+- Fix null reference bug in ArchivedPage restore logic
+- Add client credentials to token revocation requests
+
+Priority 2 (Recommended):
+- Replace window.confirm() with proper modal
+- Add structured logging for revocation failures
+- Clarify revocation status semantics
+
+Priority 3 (Nice to Have):
+- Standardize error handling patterns
+- Add documentation for files.list tracking
+- Consider backend smart restore logic
+
+| Category            | Rating |
+|---------------------|--------|
+| Functionality       | Good   |
+| Security            | Good   |
+| Error Handling      | Fair   |
+| Code Quality        | Good   |
+| UX/Accessibility    | Fair   |
+| Documentation       | Good   |
+
+Overall: The commit delivers the stated improvements but has edge cases and
+security gaps that should be addressed before production use.

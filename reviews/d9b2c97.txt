@@ -1,0 +1,155 @@
+COMMIT REVIEW: d9b2c97
+=======================
+Author: Artur Briugeman <brugeman.artur@gmail.com>
+Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+Date: Wed Jan 28 11:36:34 2026 +0100
+Title: feat(db): Add script version schema and maintainer task type foundation
+
+CHANGES SUMMARY
+---------------
+This commit implements the database layer foundation for the maintainer task type:
+
+1. **Migration v34**: Renames `version` to `major_version` and adds `minor_version` column
+   - Uses CRSQLite alter mode correctly
+   - Creates composite index for version ordering
+
+2. **Script Interface Update**: Changed from single `version: number` to:
+   - `major_version: number` (incremented by planner)
+   - `minor_version: number` (will be incremented by maintainer)
+
+3. **Version Helper Functions**:
+   - `formatVersion(major, minor)` - returns "X.Y" format
+   - `getLatestScriptForMajor(workflowId, major)` - gets latest minor version
+   - `getScriptsByWorkflowAndMajorVersion(workflowId, major)` - gets all scripts for a major
+
+4. **Type Updates**:
+   - Added "maintainer" to TaskType enum
+   - Added "maintainer" to InboxItemTarget type
+   - Added EnterMaintenanceModeParams/Result interfaces
+
+5. **Save Tool Update**: Now increments major_version and resets minor_version to 0
+
+6. **UI Updates**: Changed version display from "v1" to "v1.0" format in:
+   - ScriptDetailPage.tsx
+   - ScriptDiff.tsx (changed props to string)
+   - TaskDetailPage.tsx
+   - WorkflowDetailPage.tsx
+
+7. **Query Updates**: All script queries updated to use major_version/minor_version ordering
+
+8. **Test Updates**: All tests updated for new schema
+
+9. **IMPLEMENTATION_PLAN.md**: Complete rewrite tracking maintainer task type progress
+
+ISSUE REVIEW
+------------
+
+### MEDIUM SEVERITY
+
+1. **Composite Key Calculation Has Theoretical Limits**
+   Location: packages/db/src/script-store.ts:184 (listLatestScripts)
+
+   The query uses `MAX(major_version * 1000000 + minor_version)` for composite ordering:
+   ```sql
+   SELECT task_id, MAX(major_version * 1000000 + minor_version) as max_composite
+   ```
+
+   This assumes:
+   - major_version < 1,000,000
+   - minor_version < 1,000,000
+
+   While practically unlikely to be exceeded (would require millions of versions), this is mathematically fragile.
+
+   Example failure case:
+   - major_version=1000, minor_version=1 -> composite=1,000,000,001
+   - major_version=1, minor_version=999999 -> composite=1,999,999
+   - These compare incorrectly (1B > 2M, but 1.999999 > 1000.1)
+
+   Proposal: Use explicit multi-column comparison in subquery or document the limitation:
+   ```sql
+   -- Alternative approach
+   WHERE (task_id, major_version, minor_version) IN (
+     SELECT task_id, MAX(major_version),
+       (SELECT MAX(minor_version) FROM scripts s2
+        WHERE s2.task_id = s1.task_id AND s2.major_version = MAX(s1.major_version))
+     FROM scripts s1 GROUP BY task_id
+   )
+   ```
+
+2. **Redundant Index After Migration**
+   Location: packages/db/src/migrations/v34.ts
+
+   The old `idx_scripts_version` index (on the renamed `major_version` column) becomes redundant after creating the new `idx_scripts_major_minor_version` composite index.
+
+   The migration comment notes the old index will automatically update, but doesn't drop it.
+
+   Proposal: Add index cleanup in a future migration:
+   ```sql
+   DROP INDEX IF EXISTS idx_scripts_version;
+   ```
+
+### LOW SEVERITY
+
+3. **Test Coverage Gap for Mixed Versions**
+   Location: packages/tests/src/script-store.test.ts:363-410
+
+   The `listLatestScripts()` test only checks with versions 1.0, 2.0, 1.0 (different tasks).
+   Missing test cases:
+   - Multiple minor versions for same major (e.g., 1.0, 1.1, 1.2)
+   - Mixed major/minor versions across tasks
+   - Edge case with high version numbers
+
+   Proposal: Add test case:
+   ```typescript
+   it("should get latest script with multiple minor versions", async () => {
+     await scriptStore.addScript({ id: "s1", task_id: "t1", major_version: 1, minor_version: 0, ... });
+     await scriptStore.addScript({ id: "s2", task_id: "t1", major_version: 1, minor_version: 1, ... });
+     await scriptStore.addScript({ id: "s3", task_id: "t1", major_version: 1, minor_version: 2, ... });
+
+     const latest = await scriptStore.listLatestScripts();
+     expect(latest.find(s => s.task_id === "t1")?.minor_version).toBe(2);
+   });
+   ```
+
+4. **ScriptDiff Props Type Change**
+   Location: apps/web/src/components/ScriptDiff.tsx:4-5
+
+   Changed from `number` to `string` for version props, but this change is purely cosmetic since the values are only used for display.
+
+   Minor concern: String type loses type safety for version comparisons if needed later.
+
+   Proposal: Consider keeping as structured type: `{ major: number, minor: number }` for type safety.
+
+POSITIVE OBSERVATIONS
+---------------------
+- Migration follows CRSQLite best practices (begin_alter/commit_alter)
+- All queries properly updated to use new version columns
+- Safe default handling: `(row.minor_version as number) || 0`
+- Comprehensive test updates
+- EnterMaintenanceModeParams/Result interfaces match spec
+- Version formatting is consistent across UI
+- IMPLEMENTATION_PLAN.md provides clear progress tracking
+
+CODE QUALITY
+------------
+- Clean separation of concerns
+- Consistent error handling patterns
+- Good use of TypeScript interfaces
+- Queries are efficient with proper indexing
+- Tests thoroughly updated
+
+ARCHITECTURE NOTES
+------------------
+The implementation correctly follows the spec design:
+- Planner increments major_version (new feature/approach)
+- Maintainer (future) will increment minor_version (bug fixes)
+- Version 1.0 -> 2.0 = planner update
+- Version 2.0 -> 2.1 = maintainer fix
+
+This provides clear audit trail of who made changes.
+
+SUMMARY
+-------
+This is a well-executed commit implementing the database foundation for maintainer task type. The migration is correct, queries are properly updated, and tests are comprehensive. The composite key calculation in listLatestScripts has theoretical limits but is practically safe. Minor improvements could include dropping the redundant index and adding more edge case tests. Overall, this is solid foundational work.
+
+Reviewed by: Claude Opus 4.5

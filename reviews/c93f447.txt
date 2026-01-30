@@ -1,0 +1,273 @@
+# Review: c93f447 - fix: Fix 4 database, notification, and UI bugs
+
+**Commit:** c93f447854b1243f1e0c16d79bd4aac586deb9b6
+**Date:** Mon Jan 26 16:41:11 2026 +0100
+**Author:** Artur Briugeman (Co-Authored-By: Claude Opus 4.5)
+
+## Summary of Changes
+
+This commit addresses 4 bug fixes:
+
+1. **Draft activity COALESCE bug** (packages/db/src/script-store.ts)
+   - Changed SQL query from COALESCE (first non-null) to MAX across all activity sources
+   - Drafts now correctly identify the most recent activity from chat messages, scripts, or workflow timestamp
+
+2. **Archived workflow notifications** (apps/web/src/lib/WorkflowNotifications.ts)
+   - Added check to skip archived workflows in notification loop
+   - Users no longer receive notifications for workflows they intentionally archived
+
+3. **Disconnect query invalidation** (apps/web/src/components/ConnectionsSection.tsx)
+   - Added notifyTablesChanged call after successful disconnect
+   - Connection list updates immediately after disconnect
+
+4. **Archived page restore feedback** (apps/web/src/components/ArchivedPage.tsx)
+   - Added useAutoHidingMessage for success/error feedback
+   - Consistent UX with WorkflowDetailPage
+
+---
+
+## Detailed Analysis
+
+### Fix 1: Draft Activity COALESCE Bug
+
+**Files Changed:**
+- packages/db/src/script-store.ts (lines 854-935)
+- packages/tests/src/script-store.test.ts
+
+**Changes Made:**
+The SQL query was changed from:
+```sql
+COALESCE(MAX(cm.timestamp), MAX(s.timestamp), w.timestamp)
+```
+To:
+```sql
+MAX(
+  COALESCE(MAX(cm.timestamp), w.timestamp),
+  COALESCE(MAX(s.timestamp), w.timestamp),
+  w.timestamp
+)
+```
+
+**Intent:** Find the true maximum timestamp across all activity sources instead of just the first non-null value.
+
+### Fix 2: Archived Workflow Notifications
+
+**Files Changed:**
+- apps/web/src/lib/WorkflowNotifications.ts (lines 72-75)
+
+**Changes Made:**
+Added check at the start of the workflow processing loop:
+```typescript
+if (workflow.status === 'archived') {
+  continue;  // Skip - users have intentionally hidden these
+}
+```
+
+**Assessment:** Clean implementation. Correctly placed early in the loop before any processing. Follows the established pattern of filtering workflows by status.
+
+### Fix 3: Disconnect Query Invalidation
+
+**Files Changed:**
+- apps/web/src/components/ConnectionsSection.tsx (lines 408-414)
+
+**Changes Made:**
+Added after successful disconnect:
+```typescript
+if (api) {
+  notifyTablesChanged(["connections"], true, api);
+}
+```
+
+**Assessment:** Functionally correct - invalidates the right queries immediately. Uses `isLocalChange=true` which triggers sync appropriately.
+
+### Fix 4: Archived Page Restore Feedback
+
+**Files Changed:**
+- apps/web/src/components/ArchivedPage.tsx
+
+**Changes Made:**
+- Added useAutoHidingMessage hooks for success (3s) and error (5s) messages
+- Added message display UI consistent with WorkflowDetailPage
+- Updated restore handler to show feedback messages
+
+**Assessment:** Good implementation. Consistent with WorkflowDetailPage patterns.
+
+---
+
+## Issues Identified
+
+### CRITICAL: SQL Syntax Error in Draft Activity Query
+
+**Severity:** High
+**Location:** packages/db/src/script-store.ts (lines 880-886, 960-966)
+
+The SQL query uses nested aggregate functions which is invalid in standard SQL:
+```sql
+MAX(
+  COALESCE(MAX(cm.timestamp), w.timestamp),
+  COALESCE(MAX(s.timestamp), w.timestamp),
+  w.timestamp
+)
+```
+
+**Problem:** You cannot nest aggregate functions like `MAX(COALESCE(MAX(...), ...))`. SQLite may accept this syntax but produce incorrect/undefined results.
+
+**Why tests pass:** SQLite is extremely permissive and may be executing something other than intended. The tests may pass by coincidence rather than correctness.
+
+**Correct SQL should be:**
+```sql
+-- Option 1: Use MAX() on pre-aggregated values (subquery approach)
+SELECT w.id,
+  (SELECT MAX(x) FROM (
+    SELECT MAX(cm.timestamp) as x FROM chat_messages cm WHERE cm.chat_id = w.chat_id
+    UNION ALL SELECT MAX(s.timestamp) FROM scripts s WHERE s.workflow_id = w.id
+    UNION ALL SELECT w.timestamp
+  )) as last_activity
+FROM workflows w
+
+-- Option 2: Use GREATEST() function (SQLite 3.35+)
+GREATEST(
+  COALESCE(MAX(cm.timestamp), w.timestamp),
+  COALESCE(MAX(s.timestamp), w.timestamp),
+  w.timestamp
+)
+
+-- Option 3: Use CASE expression
+CASE
+  WHEN MAX(cm.timestamp) IS NOT NULL AND MAX(cm.timestamp) > COALESCE(MAX(s.timestamp), w.timestamp)
+    THEN MAX(cm.timestamp)
+  WHEN MAX(s.timestamp) IS NOT NULL AND MAX(s.timestamp) > w.timestamp
+    THEN MAX(s.timestamp)
+  ELSE w.timestamp
+END as last_activity
+```
+
+### Issue 2: Disconnect Handler Not Using Mutation Hook Pattern
+
+**Severity:** Low (Code style)
+**Location:** apps/web/src/components/ConnectionsSection.tsx (lines 396-421)
+
+The disconnect functionality is implemented inline in the component instead of using a mutation hook like `useDisconnectConnection` in `dbWrites.ts`. This breaks the established architectural pattern where all database mutations are encapsulated in reusable hooks.
+
+**Impact:**
+- Mutation logic scattered (others in hooks, this one in component)
+- Less reusable
+- No TanStack Query mutation benefits (loading states, retry, etc.)
+- Inconsistent with codebase conventions
+
+### Issue 3: ArchivedPage Missing Error Handler Callback
+
+**Severity:** Low
+**Location:** apps/web/src/components/ArchivedPage.tsx (lines 27-30)
+
+While try-catch handles most cases, TanStack Query mutations can also fail through React Query's error handling mechanism. Adding an `onError` callback would be defense-in-depth.
+
+### Issue 4: ArchivedPage Workflow Not Found Edge Case
+
+**Severity:** Low
+**Location:** apps/web/src/components/ArchivedPage.tsx (lines 24-25)
+
+```typescript
+const workflow = workflows.find(w => w.id === workflowId);
+const restoreStatus = workflow?.active_script_id ? "paused" : "draft";
+```
+
+If workflow is not found (race condition), code proceeds with `restoreStatus = "draft"` due to optional chaining. Should add explicit check:
+```typescript
+if (!workflow) {
+  error.show("Workflow not found. It may have been deleted.");
+  return;
+}
+```
+
+---
+
+## Proposals
+
+### Proposal 1: Fix SQL Nested Aggregation (Critical)
+
+**Location:** packages/db/src/script-store.ts
+
+Replace the nested MAX/COALESCE pattern with valid SQL. Recommended approach using CASE:
+
+```typescript
+const results = await this.db.db.execO<Record<string, unknown>>(
+  `SELECT
+    w.id, w.title, w.task_id, w.chat_id, w.timestamp, w.cron, w.events, w.status,
+    w.next_run_timestamp, w.maintenance, w.maintenance_fix_count, w.active_script_id,
+    CASE
+      WHEN MAX(cm.timestamp) IS NOT NULL
+           AND MAX(cm.timestamp) > COALESCE(MAX(s.timestamp), w.timestamp)
+        THEN MAX(cm.timestamp)
+      WHEN MAX(s.timestamp) IS NOT NULL
+           AND MAX(s.timestamp) > w.timestamp
+        THEN MAX(s.timestamp)
+      ELSE w.timestamp
+    END as last_activity,
+    ...
+```
+
+**Effort:** Small - SQL change only, existing tests should validate behavior
+
+### Proposal 2: Create useDisconnectConnection Hook
+
+**Location:** apps/web/src/hooks/dbWrites.ts
+
+Extract disconnect logic to a mutation hook for consistency:
+
+```typescript
+export function useDisconnectConnection() {
+  const { api } = useDbQuery();
+  return useMutation({
+    mutationFn: async (connectionId: string) => {
+      const [service, accountId] = connectionId.split(":");
+      const response = await fetch(
+        `${API_ENDPOINT}/connectors/${service}/${encodeURIComponent(accountId)}`,
+        { method: "DELETE" }
+      );
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || "Failed to disconnect");
+      }
+      return connectionId;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: qk.allConnections() });
+      notifyTablesChanged(["connections"], true, api!);
+    },
+  });
+}
+```
+
+**Effort:** Small - extract and refactor
+
+### Proposal 3: Add Explicit Workflow Check in ArchivedPage
+
+**Location:** apps/web/src/components/ArchivedPage.tsx
+
+```typescript
+const handleRestore = async (workflowId: string) => {
+  try {
+    const workflow = workflows.find(w => w.id === workflowId);
+    if (!workflow) {
+      error.show("Workflow not found. It may have been deleted.");
+      return;
+    }
+    const restoreStatus = workflow.active_script_id ? "paused" : "draft";
+    // ... rest of handler
+```
+
+**Effort:** Trivial
+
+---
+
+## Summary
+
+| Fix | Assessment | Issues Found |
+|-----|------------|--------------|
+| Draft activity COALESCE | Critical SQL bug | Nested aggregation invalid |
+| Archived notifications | Good | None |
+| Disconnect invalidation | Works but non-standard | Should use mutation hook |
+| Archived page feedback | Good | Minor edge case |
+
+**Overall:** The commit addresses real bugs but introduces a critical SQL syntax issue that needs immediate attention. The other changes are solid improvements with minor code quality suggestions.

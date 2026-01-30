@@ -1,0 +1,164 @@
+COMMIT REVIEW: be0f1af
+========================
+test(agent): Add integration tests for maintainer task type
+
+SUMMARY OF CHANGES
+------------------
+This commit adds 793 lines of integration tests for the maintainer task type in
+packages/tests/src/maintainer-integration.test.ts. The tests verify:
+
+1. Logic error to fix flow: Script fails -> maintenance mode -> fix applied -> re-run
+2. Fix escalation flow: Max fix attempts -> user escalation with notification
+3. Race condition handling when planner updates script during maintainer work
+4. Multiple fix attempts with incrementing minor versions
+5. Maintainer task isolation (separate thread_id, empty chat_id)
+6. Inbox item creation with script run metadata
+
+The tests use an in-memory database with manually created tables (matching the
+actual migration schema) and test the interaction between:
+- KeepDbApi.enterMaintenanceMode()
+- makeFixTool() from @app/agent
+- ScriptStore workflow and script management
+- InboxStore for message routing
+- NotificationStore for escalation notifications
+
+Also updates IMPLEMENTATION_PLAN.md to mark integration tests as complete.
+
+ISSUES FOUND
+------------
+
+### Issue 1: Hardcoded MAX_FIX_ATTEMPTS Constant
+**Severity: MEDIUM**
+**Location:** Lines 499, 591, 695
+
+The tests hardcode `MAX_FIX_ATTEMPTS = 3` instead of importing from workflow-worker.
+The actual constant is defined in packages/agent/src/workflow-worker.ts (line 25).
+
+```typescript
+// TEST CODE (line 499)
+maintenance_fix_count: 3, // Already at max (MAX_FIX_ATTEMPTS = 3)
+
+// ACTUAL CODE (workflow-worker.ts)
+const MAX_FIX_ATTEMPTS = 3;
+```
+
+If MAX_FIX_ATTEMPTS changes in production, tests won't detect the behavioral
+change and will continue to pass with stale expectations.
+
+**Proposal:** Create a shared constant in @app/db or export from workflow-worker,
+then import it in both the implementation and tests.
+
+---
+
+### Issue 2: Test Mocks escalateToUser Instead of Testing Actual Implementation
+**Severity: MEDIUM**
+**Location:** Lines 516-559
+
+The escalation test manually implements the escalation logic instead of calling
+the actual `escalateToUser` from workflow-worker:
+
+```typescript
+// TEST (lines 520-524) - manual implementation
+await api.scriptStore.updateWorkflowFields(workflow.id, {
+  status: "error",
+  maintenance: false,
+  maintenance_fix_count: 0,
+});
+```
+
+The actual escalateToUser (workflow-worker.ts lines 569-620) does more:
+- Creates user notification with detailed payload
+- Sends message to user's chat
+- Logs the escalation
+- Handles error cases during task retrieval
+
+**Missing coverage:**
+- User notification creation and content verification
+- Message sending to user's chat
+- Error handling during escalation
+
+**Proposal:** Add tests that call the actual escalateToUser method (or refactor
+it to be more testable) to verify the full escalation behavior.
+
+---
+
+### Issue 3: Potential Race Condition in incrementMaintenanceFixCount
+**Severity: LOW**
+**Location:** packages/db/src/script-store.ts lines 752-764 (not in this commit but tested)
+
+The method performs UPDATE and SELECT in separate queries:
+```typescript
+await db.exec(`UPDATE ... SET maintenance_fix_count = maintenance_fix_count + 1 ...`);
+const result = await db.execO(`SELECT maintenance_fix_count ...`);
+```
+
+Even within a transaction, this is technically a TOCTOU pattern. SQLite's
+`RETURNING` clause would be atomic.
+
+**Proposal:** Use `UPDATE ... RETURNING maintenance_fix_count` for atomic
+read-modify-write operation.
+
+---
+
+### Issue 4: Test Does Not Verify Notification Payload Structure in Fix Flow
+**Severity: LOW**
+**Location:** Lines 243-374 (full flow test)
+
+The full flow test verifies maintenance mode is entered but doesn't check if
+any notifications are created during the normal fix flow. While the escalation
+test manually creates a notification, the actual system behavior for
+notifications during successful fixes isn't tested.
+
+**Proposal:** Add assertions to verify notification creation (or lack thereof)
+during the normal fix flow.
+
+---
+
+### Issue 5: Inbox Item ID Format Not Documented
+**Severity: LOW**
+**Location:** api.ts line 402 (used by these tests)
+
+The inbox item ID format `maintenance.${workflowId}.${scriptRunId}.${random}` is
+hardcoded without documentation. Tests validate the prefix (`toContain("maintenance.")`)
+but if parsing is needed later, the format isn't explicitly documented.
+
+```typescript
+expect(maintenanceResult.inboxItemId).toContain("maintenance.");
+```
+
+**Proposal:** Add a utility function or constant documenting the format:
+```typescript
+// Maintenance inbox items: maintenance.{workflowId}.{scriptRunId}.{random8bytes}
+```
+
+---
+
+POSITIVE OBSERVATIONS
+---------------------
+1. Test schema in createIntegrationTables() exactly matches the v4 migration
+2. Race condition test (lines 340-394) correctly verifies fix rejection when
+   planner updates during maintainer work
+3. Good isolation between tests using beforeEach/afterEach with :memory: db
+4. Version progression test (lines 432-515) properly verifies 2.0 -> 2.1 -> 2.2 -> 2.3
+5. Maintainer task isolation assertions (empty chat_id, separate thread_id) are correct
+6. Inbox item metadata verification is thorough
+
+SUMMARY
+-------
+The integration tests are well-structured and cover the core maintainer task flow.
+The main gaps are around testing the actual escalateToUser implementation and
+hardcoded constants. The tests provide confidence in the fix tool's race condition
+handling and version semantics.
+
+Recommendation: Accept with follow-up work to:
+1. Extract MAX_FIX_ATTEMPTS to shared constant
+2. Add tests for actual escalateToUser implementation
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Hardcoded MAX_FIX_ATTEMPTS) - created specs/new/export-max-fix-attempts-constant.md
+- Issue #2 (Mocked escalateToUser) - created specs/new/add-escalatetouser-integration-tests.md
+- Issue #3 (incrementMaintenanceFixCount atomicity) - created specs/new/fix-increment-maintenance-fix-count-atomicity.md
+- Issue #4 (Notification payload not verified) - skipped (covered by escalateToUser spec)
+- Issue #5 (Inbox item ID format undocumented) - skipped (minor documentation)

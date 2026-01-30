@@ -1,0 +1,41 @@
+COMMIT: 64bd82f - Remove done specs
+AUTHOR: Artur Briugeman <brugeman.artur@gmail.com>
+DATE: Tue Jan 27 09:26:39 2026 +0100
+
+=== CHANGES SUMMARY ===
+
+This commit moves 8 connector-related specification files from `specs/` to `specs/done/`. This is a housekeeping commit to organize completed specification documents related to the connectors feature.
+
+Files moved (all are renames with no content changes):
+- connectors-00-build-secrets.md
+- connectors-01-core-package.md
+- connectors-02-connection-manager.md
+- connectors-03-gmail-refactor.md
+- connectors-04-server-endpoints.md
+- connectors-05-ui-connections-page.md
+- connectors-06-google-services.md
+- connectors-07-notion.md
+
+NOTE: The commit message says "Remove done specs" but it's actually moving them to `specs/done/`, not deleting them. The message is slightly misleading.
+
+=== POTENTIAL ISSUES ===
+
+1. MISLEADING COMMIT MESSAGE (Trivial)
+   - The commit message "Remove done specs" implies deletion
+   - Actually the files are moved to `specs/done/`
+   - A more accurate message would be "Move done specs" or "Archive connector specs to done/"
+
+   SEVERITY: Trivial. The files are preserved, just the commit message could cause confusion when reading git history.
+
+=== PROPOSALS ===
+
+None required. This is a simple organizational commit. The misleading commit message is too minor to warrant any action.
+
+=== VERDICT ===
+
+CLEAN - No code issues. The commit properly archives completed connector specifications. The commit message could be clearer but this is trivial.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Misleading commit message) - skipped (trivial, no action needed)

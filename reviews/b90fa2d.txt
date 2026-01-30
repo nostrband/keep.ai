@@ -1,0 +1,60 @@
+COMMIT REVIEW: b90fa2d
+=======================
+Title: perf: Optimize has_script subquery in getAbandonedDrafts
+Date: Mon Jan 26 17:14:46 2026 +0100
+Files changed: 2 (packages/db/src/script-store.ts, IMPLEMENTATION_PLAN.md)
+
+SUMMARY OF CHANGES
+------------------
+This commit optimizes the `getAbandonedDrafts` SQL query in `packages/db/src/script-store.ts`
+by replacing `COUNT(DISTINCT s.id) > 0` with `MAX(s.id IS NOT NULL)` for the `has_script`
+boolean calculation.
+
+The function identifies draft workflows that have been inactive for a specified number of
+days (default: 7). It returns information about each abandoned draft including:
+- The workflow metadata
+- Last activity timestamp
+- Days since last activity
+- Whether it has any scripts (the optimized column)
+- Whether it's waiting for user input
+
+TECHNICAL ANALYSIS
+------------------
+The optimization changes how `has_script` is computed:
+
+Before:
+  COUNT(DISTINCT s.id) > 0 as has_script
+
+After:
+  MAX(s.id IS NOT NULL) as has_script
+
+How it works:
+1. In SQLite, `s.id IS NOT NULL` returns 1 (true) or 0 (false)
+2. With LEFT JOIN, if no scripts exist, all s.id values are NULL
+3. `MAX()` over boolean values returns 1 if ANY row has non-NULL s.id, 0 otherwise
+4. The result is functionally identical to COUNT(DISTINCT) > 0
+
+Performance benefit:
+- COUNT(DISTINCT) must scan ALL matching rows to count unique IDs
+- MAX() can short-circuit once it finds a 1 value (first non-NULL match)
+- MAX() tracks a single value vs maintaining a set of unique IDs
+- Simpler execution plan with boolean comparison
+
+ISSUES FOUND
+------------
+None identified.
+
+The optimization is:
+- Functionally correct (returns identical boolean results)
+- Well-tested (existing tests at script-store.test.ts:1593 validate hasScript behavior)
+- Semantically clear
+- SQLite-compatible (uses standard boolean semantics)
+
+PROPOSALS
+---------
+No changes required. This is a clean performance optimization.
+
+Minor observation: The commit message accurately describes the optimization rationale,
+and the change is minimal and focused on the specific performance improvement.
+
+VERDICT: APPROVED

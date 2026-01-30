@@ -1,0 +1,228 @@
+COMMIT: 1c2ed5b4cabf3407ec38346e0f1461cb910180a4
+DATE: 2026-01-28 11:43:49 +0100
+TITLE: feat(db): Implement enterMaintenanceMode transactional method
+
+================================================================================
+SUMMARY OF CHANGES
+================================================================================
+
+This commit implements the core database method for entering maintenance mode
+when a workflow experiences a logic error. It's part of the maintainer task type
+feature (see specs/maintainer-task-type.md).
+
+**Changes:**
+
+1. **packages/db/src/api.ts** - Added `enterMaintenanceMode()` method (lines 366-428)
+   - Wraps all operations in a single database transaction
+   - Increments workflow.maintenance_fix_count
+   - Sets workflow.maintenance = true
+   - Creates a maintainer task with isolated thread
+   - Creates inbox item targeting the maintainer task
+
+2. **packages/db/src/index.ts** - Exports the new types
+   - EnterMaintenanceModeParams
+   - EnterMaintenanceModeResult
+
+3. **packages/tests/src/api.test.ts** - Added 8 comprehensive unit tests
+   - Tests task creation, fix count increment, maintenance flag
+   - Tests inbox item targeting and metadata
+   - Tests queryability and uniqueness
+   - Tests transaction atomicity
+
+4. **IMPLEMENTATION_PLAN.md** - Updated checklist items
+
+5. **specs/new/maintainer-task-type.md** - Moved to specs/maintainer-task-type.md
+
+================================================================================
+DETAILED ANALYSIS
+================================================================================
+
+### Method Implementation (api.ts:366-428)
+
+**Parameters:**
+```typescript
+interface EnterMaintenanceModeParams {
+  workflowId: string;
+  workflowTitle: string;
+  scriptRunId: string;
+}
+```
+
+**Returns:**
+```typescript
+interface EnterMaintenanceModeResult {
+  maintainerTask: Task;
+  inboxItemId: string;
+  newFixCount: number;
+}
+```
+
+**Transaction Flow:**
+1. Generates timestamp for task creation
+2. Calls `scriptStore.incrementMaintenanceFixCount(workflowId, tx)` - returns new count
+3. Calls `scriptStore.setWorkflowMaintenance(workflowId, true, tx)`
+4. Creates maintainer task with:
+   - `type: "maintainer"`
+   - `chat_id: ""` (maintainer does NOT write to user-facing chat)
+   - `thread_id: <new_random>` (isolated thread for maintenance conversation)
+   - `title: "Auto-fix: {workflowTitle}"`
+5. Calls `taskStore.addTask(maintainerTask, tx)`
+6. Creates inbox item targeting the maintainer task
+7. Calls `inboxStore.saveInbox(inboxItem, tx)`
+8. Returns the task, inbox item ID, and new fix count
+
+**Transaction Correctness:**
+All database operations receive the `tx` parameter, ensuring atomicity.
+If any operation fails, the entire transaction rolls back.
+
+### ScriptStore Methods (verified to exist)
+
+1. **incrementMaintenanceFixCount(workflowId, tx)** - script-store.ts:752-764
+   - Uses atomic SQL: `UPDATE workflows SET maintenance_fix_count = maintenance_fix_count + 1`
+   - Returns new count via SELECT after UPDATE
+
+2. **setWorkflowMaintenance(workflowId, maintenance, tx)** - script-store.ts:743-749
+   - Simple UPDATE: `UPDATE workflows SET maintenance = ? WHERE id = ?`
+
+### Test Coverage
+
+The tests are comprehensive and cover:
+1. Task creation with correct properties (type, workflow_id, chat_id, title, thread_id)
+2. Fix count increment across multiple calls
+3. Maintenance flag setting
+4. Inbox item creation with correct targeting
+5. Metadata inclusion (scriptRunId)
+6. Task queryability via getMaintainerTasksForWorkflow
+7. Unique task creation per call
+8. Transaction atomicity verification
+
+================================================================================
+ISSUES IDENTIFIED
+================================================================================
+
+### Issue 1: No workflow existence validation (Minor)
+
+**Location:** api.ts:373
+
+**Problem:**
+The method doesn't verify that the workflow exists before attempting operations.
+If called with an invalid workflowId:
+- `incrementMaintenanceFixCount` will return 0 (from SELECT after UPDATE affects 0 rows)
+- `setWorkflowMaintenance` will silently succeed (UPDATE affects 0 rows)
+- A maintainer task will be created for a non-existent workflow
+
+**Impact:**
+- Orphaned maintainer tasks could be created
+- The newFixCount would be 0 (incorrect, should fail instead)
+- UI might display confusing state
+
+**Proposal:**
+Add a workflow existence check at the start of the transaction:
+```typescript
+const workflow = await tx.execO<{id: string}>(
+  "SELECT id FROM workflows WHERE id = ?", [workflowId]
+);
+if (!workflow || workflow.length === 0) {
+  throw new Error(`Workflow not found: ${workflowId}`);
+}
+```
+
+This is defensive programming - the caller (workflow-worker.ts) should always
+pass a valid workflowId, but explicit validation prevents silent failures.
+
+================================================================================
+
+### Issue 2: incrementMaintenanceFixCount returns 0 for missing workflow (Minor)
+
+**Location:** script-store.ts:759-763
+
+**Problem:**
+The method does:
+```typescript
+const result = await (tx || this.db).execO<{ maintenance_fix_count: number }>(
+  "SELECT maintenance_fix_count FROM workflows WHERE id = ?",
+  [workflowId]
+);
+return result?.[0]?.maintenance_fix_count ?? 0;
+```
+
+If the workflow doesn't exist, it returns 0 instead of throwing an error.
+Combined with Issue 1, this means invalid calls complete "successfully" with
+incorrect data.
+
+**Impact:**
+Same as Issue 1 - silent failure with incorrect data.
+
+**Proposal:**
+Either:
+a) Throw an error if the workflow is not found
+b) Add the existence check in enterMaintenanceMode (Issue 1 proposal)
+
+Option (b) is preferred as it keeps the ScriptStore method flexible while
+enforcing the constraint at the API level.
+
+================================================================================
+
+### Issue 3: Inbox item ID includes random suffix (Design Observation)
+
+**Location:** api.ts:408-409
+
+**Code:**
+```typescript
+const inboxItemId = `maintenance.${workflowId}.${scriptRunId}.${bytesToHex(randomBytes(8))}`;
+```
+
+**Observation:**
+The ID includes a random 8-byte suffix, making it globally unique. This is good
+for preventing ID collisions but makes it harder to find/delete specific items
+by workflowId and scriptRunId alone.
+
+**Impact:**
+None - this is a design choice. The random suffix ensures uniqueness even if
+the same scriptRunId is reused (which shouldn't happen but provides safety).
+
+**Proposal:**
+No change needed. This is correct design.
+
+================================================================================
+
+### Issue 4: Race condition in caller (workflow-worker.ts) - Not in this commit
+
+**Note:** Review 71cfc6e.txt identified a race condition in workflow-worker.ts
+where the fix count limit check uses a stale workflow object. This is NOT an
+issue with enterMaintenanceMode itself, but with how it's called.
+
+The caller does:
+```typescript
+if (workflow.maintenance_fix_count >= MAX_FIX_ATTEMPTS) { ... }
+// Later:
+await api.enterMaintenanceMode(...)
+```
+
+If two failures occur concurrently, both might pass the check before either
+increments the counter.
+
+**Status:** Already documented. Single-threaded per-workflow execution model
+prevents this in practice. Not an issue with this commit.
+
+================================================================================
+VERDICT
+================================================================================
+
+This is a **well-implemented feature** with comprehensive test coverage:
+
+1. Transaction handling is correct - all operations are atomic
+2. Required ScriptStore methods exist and work correctly
+3. The method matches the specification exactly
+4. Tests cover all important scenarios
+5. The code is clean and well-documented
+
+**Minor improvements suggested:**
+- Issue 1: Add workflow existence validation (defensive programming)
+- Issue 2: Related to Issue 1 - fix at API level
+
+These are minor enhancements for robustness, not bugs. The current implementation
+will work correctly when called with valid inputs (which is the expected case).
+
+RECOMMENDATION: Accept as-is. Issues 1-2 are minor defensive improvements that
+could be added in a follow-up commit but don't block the feature.

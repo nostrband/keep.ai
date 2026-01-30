@@ -1,0 +1,52 @@
+COMMIT REVIEW: b03c383
+=======================
+docs: Remove stale note from IMPLEMENTATION_PLAN.md
+
+SUMMARY OF CHANGES
+------------------
+This commit removes an outdated parenthetical note from the IMPLEMENTATION_PLAN.md
+file. The change is a single line modification:
+
+Before:
+  - [x] **enterMaintenanceMode() method** - Logic error routing via enterMaintenanceMode()
+        in `workflow-worker.ts` (NOTE: currently routes to planner inbox, not maintainer)
+
+After:
+  - [x] **enterMaintenanceMode() method** - Logic error routing via enterMaintenanceMode()
+        in `workflow-worker.ts`
+
+The note "(NOTE: currently routes to planner inbox, not maintainer)" was stale because
+the implementation had already been fixed to properly route to the maintainer task type,
+but the documentation hadn't been updated to reflect this.
+
+CONTEXT
+-------
+The enterMaintenanceMode() function is a core mechanism for automatic script repair.
+When logic errors occur in workflows, this function:
+1. Increments maintenance_fix_count (tracking fix budget, max 3 attempts)
+2. Sets maintenance = true flag on the workflow
+3. Creates a maintainer task (type: "maintainer") with isolated thread
+4. Routes the failing script_run to the maintainer for bounded repair
+
+The stale note incorrectly suggested this routing still went to "planner inbox" when
+it had already been updated to route to the maintainer.
+
+POTENTIAL ISSUES
+----------------
+None identified.
+
+This is a straightforward documentation cleanup. The change is correct - removing
+stale information that would confuse readers about the current implementation state.
+
+PROPOSALS
+---------
+No changes needed. The commit is clean and appropriate.
+
+VERDICT: APPROVED
+-----------------
+Simple, correct documentation fix. No issues found.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+(No issues found)

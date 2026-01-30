@@ -1,0 +1,86 @@
+COMMIT: ff1d7e5 - Move processed specs to done
+AUTHOR: Artur <artur@keep.ai>
+DATE: Thu Jan 22 08:50:52 2026 +0100
+
+=== CHANGES SUMMARY ===
+
+This commit moves 60 specification files from `specs/` to `specs/done/`. This is a housekeeping commit to organize completed specification documents.
+
+Files moved (all are renames with no content changes):
+- active-script-version-pointer.md
+- add-types-debug-dependency.md
+- app-update-banner-timeout-cleanup.md
+- auth-chat-event-item.md
+- auth-header-notice.md
+- auth-need-auth-flag.md
+- auth-popup-clerk-hash.md
+- chat-resizeobserver-height-reference.md
+- chat-scroll-position-save-cleanup.md
+- complete-statusbadge-consolidation.md
+- complete-tool-error-classification-migration.md
+- cost-tracking-helper.md
+- electron-icon-creation-error-handling.md
+- electron-ipc-error-handling.md
+- electron-notification-click-error-handling.md
+- electron-notification-return-type.md
+- electron-window-ready-promise-rejection.md
+- emit-signal-on-max-retry-escalation.md
+- extract-auto-hiding-message-hook.md
+- fix-max-retry-state-deletion-order.md
+- fix-max-retry-updateworkflow-method.md
+- fix-set-iteration-delete-bug.md
+- focus-input-url-param.md
+- in-clause-length-limits.md
+- legacy-error-type-notification-handling.md
+- localstorage-error-handling.md
+- mainpage-autonomy-toggle-positioning.md
+- mainpage-autonomy-tooltip-styling.md
+- mainpage-input-positioning.md
+- mainpage-latestRuns-type-safety.md
+- mainpage-submission-creates-task.md
+- mainpage-suggestion-focus-textarea.md
+- maintenance-fixed-event-chat-routing.md
+- mermaid-diagram-usememo.md
+- notification-grouping-batch-errors.md
+- pause-all-ensure-window-ready.md
+- pause-all-user-feedback.md
+- payment-required-error-type.md
+- quick-reply-double-click-prevention.md
+- quick-reply-option-length-validation.md
+- reduce-event-group-duplication.md
+- rollback-script-query-invalidation.md
+- save-ts-atomic-workflow-update.md
+- script-run-detail-test-badge.md
+- script-run-retry-link-script-mismatch.md
+- script-runs-retry-of-index.md
+- script-runs-workflow-id-index.md
+- scriptdiff-find-version-by-number.md
+- service-worker-update-detection.md
+- settimeout-cleanup-remaining-components.md
+- shared-header-debug-mode-memoize.md
+- standardize-debug-version.md
+- streamdown-tailwind-source.md
+- taskeventgroup-header-refactor.md
+- test-run-async-response.md
+- test-run-id-upfront.md
+- test-run-single-concurrent.md
+- tray-badge-count-accuracy.md
+- workflow-notifications-internal-error.md
+- workflow-timestamp-as-creation-time.md
+
+=== POTENTIAL ISSUES ===
+
+None. This is purely an organizational commit that moves completed spec files to a `done/` subdirectory. No code was changed.
+
+=== PROPOSALS ===
+
+None needed. The commit is clean and serves its purpose of organizing the specs directory.
+
+=== VERDICT ===
+
+CLEAN - No issues found. Good housekeeping practice to separate completed specs from active ones.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+(No issues found)

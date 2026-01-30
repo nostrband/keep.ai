@@ -42,7 +42,12 @@
       "Bash(then grep -A 20 \"ISSUE REVIEW\" /home/artur/keep.ai/reviews/$f.txt)",
       "Bash(else)",
       "Bash(if grep -q \"ISSUE REVIEW\" /home/artur/keep.ai/reviews/$f.txt)",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Bash(then echo \"NO_SECTION: $f\")",
+      "Bash(if grep -q \"ISSUE REVIEW\" \"$f\")",
+      "Bash(if grep -q \"pending\" \"$f\")",
+      "Bash(while read f)",
+      "Bash(do echo \"=== $f ===\" sed -n '/ISSUE REVIEW/,$p' \"$f\")"
     ]
   }
 }

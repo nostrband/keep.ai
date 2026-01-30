@@ -1,0 +1,206 @@
+COMMIT: 1cef119
+TITLE: fix(ui): Fix 4 ConnectionsSection bugs
+DATE: Mon Jan 26 16:30:18 2026 +0100
+
+==============================================================================
+SUMMARY OF CHANGES
+==============================================================================
+
+This commit fixes 4 bugs in the ConnectionsSection React component:
+
+1. Timeout Memory Leak (Lines 338, 341-347, 354-357, 380-389):
+   - Added pendingTimeoutRef using useRef to store timeout ID
+   - Added cleanup useEffect that clears timeout on unmount
+   - Clear timeout when connection succeeds (in success useEffect)
+   - Clear existing timeouts before setting new ones
+
+2. useEffect Dependency Fix (Line 361):
+   - Changed dependency from `success` object to `success.show` callback
+   - success.show is stable (wrapped in useCallback in useAutoHidingMessage)
+   - Prevents unnecessary re-renders when success state changes
+
+3. Rename State Sync (Lines 149-154 in ConnectionCard):
+   - Added useEffect to sync newLabel when connection.label changes externally
+   - Only syncs when not actively renaming to preserve user edits
+   - Handles database sync and multi-tab updates
+
+4. Response Validation (Lines 439-452 in handleCheck):
+   - Added response.ok check before parsing JSON
+   - Graceful fallback when error response isn't JSON
+   - Uses statusText as fallback error message
+
+FILES CHANGED:
+- IMPLEMENTATION_PLAN.md (documentation)
+- apps/web/src/components/ConnectionsSection.tsx (all 4 fixes)
+- 4 spec files moved from specs/new to specs/done
+
+==============================================================================
+ISSUES IDENTIFIED
+==============================================================================
+
+ISSUE #1: Missing Timeout Cleanup in Error Path
+SEVERITY: MEDIUM
+LOCATION: apps/web/src/components/ConnectionsSection.tsx:390-393
+
+When handleConnect throws an error in the catch block, the timeout is NOT
+cleared if it was set from a previous attempt. Scenario:
+1. User clicks connect -> timeout starts
+2. User clicks again before timeout fires
+3. Error occurs -> old timeout still active
+
+  } catch (err) {
+    // Missing: clearTimeout(pendingTimeoutRef.current)
+    setPendingService(null);
+    setError(err instanceof Error ? err.message : "Failed to connect");
+  }
+
+PROPOSAL: Add timeout cleanup in the catch block:
+  if (pendingTimeoutRef.current) {
+    clearTimeout(pendingTimeoutRef.current);
+    pendingTimeoutRef.current = null;
+  }
+
+------------------------------------------------------------------------------
+
+ISSUE #2: No Cleanup for In-Flight Fetch Requests
+SEVERITY: MEDIUM
+LOCATION: apps/web/src/components/ConnectionsSection.tsx:368, 401, 434
+
+While timeouts are cleaned up, if the component unmounts while fetch calls
+are in-flight, they will still attempt to call setState when they resolve.
+This violates React best practices and can cause "setState on unmounted
+component" warnings.
+
+PROPOSAL: Use AbortController pattern:
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    return () => {
+      abortControllerRef.current?.abort();
+    };
+  }, []);
+
+  // In fetch calls:
+  abortControllerRef.current = new AbortController();
+  const response = await fetch(url, { signal: abortControllerRef.current.signal });
+
+------------------------------------------------------------------------------
+
+ISSUE #3: handleConnect/handleDisconnect JSON Parsing Vulnerable
+SEVERITY: MEDIUM
+LOCATION: apps/web/src/components/ConnectionsSection.tsx:372-374, 406-409
+
+The handleCheck fix added proper response.ok checking before JSON parsing,
+but handleConnect and handleDisconnect still assume error responses are JSON:
+
+  if (!response.ok) {
+    const data = await response.json();  // Fails if server returns HTML 500 page
+    throw new Error(data.error || "Failed to start connection");
+  }
+
+PROPOSAL: Apply the same try-catch pattern from handleCheck:
+  if (!response.ok) {
+    let errorMessage = "Failed to start connection";
+    try {
+      const data = await response.json();
+      errorMessage = data.error || errorMessage;
+    } catch {
+      errorMessage = response.statusText || errorMessage;
+    }
+    throw new Error(errorMessage);
+  }
+
+------------------------------------------------------------------------------
+
+ISSUE #4: Rename State Sync Race Condition
+SEVERITY: LOW
+LOCATION: apps/web/src/components/ConnectionsSection.tsx:156-161
+
+In handleRenameSubmit:
+1. onRename(newLabel.trim()) is called (async mutation)
+2. setIsRenaming(false) is called immediately
+3. The mutation hasn't completed yet
+4. Since isRenaming is now false, the useEffect can run
+5. If connection.label updates from another source, it overwrites pending change
+
+  const handleRenameSubmit = () => {
+    if (newLabel.trim() !== connection.label) {
+      onRename(newLabel.trim());  // Async, not awaited
+    }
+    setIsRenaming(false);  // Immediately sets isRenaming to false
+  };
+
+PROPOSAL: Track mutation pending state to prevent external overwrites:
+  const [isPendingRename, setIsPendingRename] = useState(false);
+
+  useEffect(() => {
+    if (!isRenaming && !isPendingRename) {
+      setNewLabel(connection.label || "");
+    }
+  }, [connection.label, isRenaming, isPendingRename]);
+
+------------------------------------------------------------------------------
+
+ISSUE #5: No Loading State for Rename Operation
+SEVERITY: LOW
+LOCATION: apps/web/src/components/ConnectionsSection.tsx:472-483
+
+When handleRename is called, there's no visual feedback that the mutation
+is in progress. User can click elsewhere and close the rename UI while
+mutation is pending.
+
+PROPOSAL: Pass updateLabelMutation.isPending to ConnectionCard to show
+loading state during rename.
+
+------------------------------------------------------------------------------
+
+ISSUE #6: Error State Never Auto-Clears
+SEVERITY: LOW
+LOCATION: apps/web/src/components/ConnectionsSection.tsx:337, 513-517
+
+The error state is set by various handlers but has no timeout or dismiss
+mechanism. The error banner shows indefinitely until next action.
+
+PROPOSAL: Either use useAutoHidingMessage for errors too, or add a dismiss
+button to the error banner.
+
+------------------------------------------------------------------------------
+
+ISSUE #7: Success Message Timing Imprecise
+SEVERITY: LOW
+LOCATION: apps/web/src/components/ConnectionsSection.tsx:351-361
+
+The success message shows when connections.some((c) => c.service === pendingService)
+becomes true. However, if a connection already exists for that service and
+user adds another account, the condition becomes true immediately when ANY
+connection exists, potentially showing success before the new connection
+appears.
+
+PROPOSAL: Track the specific connection ID being added, not just the service:
+  const [pendingConnectionId, setPendingConnectionId] = useState<string | null>(null);
+
+==============================================================================
+POSITIVE OBSERVATIONS
+==============================================================================
+
++ Timeout cleanup on unmount correctly prevents memory leaks
++ Using success.show (stable callback) as dependency is correct React pattern
++ Rename state sync guards against overwriting user input correctly
++ Response validation gracefully handles non-JSON error responses
++ All fixes have corresponding specs that were moved to done/
+
+==============================================================================
+ARCHITECTURAL NOTES
+==============================================================================
+
+The ConnectionsSection component manages complex async state:
+- OAuth flow initiation and completion
+- Connection health checks
+- Inline renaming with optimistic updates
+- Error and success message display
+
+The fixes address real-world edge cases but reveal the component could
+benefit from a more structured approach to async operation lifecycle
+management (AbortController, pending state tracking).
+
+Overall, the fixes are correct and improve reliability significantly.

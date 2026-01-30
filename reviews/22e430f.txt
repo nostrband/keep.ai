@@ -1,0 +1,206 @@
+COMMIT: 22e430f
+TITLE: security: Fix 8 critical OAuth and credential security vulnerabilities
+DATE: Mon Jan 26 16:24:59 2026 +0100
+
+==============================================================================
+SUMMARY OF CHANGES
+==============================================================================
+
+This commit addresses 8 critical security vulnerabilities across OAuth state
+management, credential storage, error handling, and API security:
+
+1. OAuth State Management (manager.ts):
+   - Hard limit of 100 pending OAuth states to prevent memory exhaustion DoS
+   - Periodic cleanup timer for expired states (every 60 seconds)
+   - Reduced state TTL from 10 to 5 minutes
+   - Redirect URI validation against whitelist at flow start AND completion
+   - Atomic state consumption to prevent replay attacks
+   - Per-connection mutex for token refresh to prevent concurrent refresh races
+
+2. Credential Store Security (store.ts):
+   - Switched from lossy encodeURIComponent to collision-free base64url encoding
+   - Path traversal protection with resolved path validation
+   - Service ID validation (alphanumeric only)
+   - Atomic writes using temp file + rename pattern
+   - Permission verification after every write (0o600)
+   - Startup audit to check and fix permissions on existing credentials
+   - Migration support for legacy encoding format
+
+3. OAuth Error Handling (oauth.ts):
+   - User-friendly error message mapping for 12 common OAuth error codes
+   - Sanitized error messages to prevent information leakage
+   - Full error details logged server-side only
+
+4. API Security (server.ts):
+   - Redacted API keys in /api/get_config response (show only last 4 chars)
+   - Credential store audit called on startup
+
+FILES CHANGED:
+- IMPLEMENTATION_PLAN.md (documentation)
+- apps/server/src/server.ts (API key redaction, startup audit)
+- packages/connectors/src/manager.ts (OAuth state management, token refresh mutex)
+- packages/connectors/src/store.ts (credential storage security)
+- packages/connectors/src/oauth.ts (error sanitization)
+- 7 spec files moved from specs/new to specs/done
+
+==============================================================================
+ISSUES IDENTIFIED
+==============================================================================
+
+ISSUE #1: Missing ConnectionManager.shutdown() Call in Server Close Handler
+SEVERITY: MEDIUM
+LOCATION: apps/server/src/server.ts:2034-2076
+
+The server's close() method does NOT call connectionManager.shutdown(). The
+cleanup timer for OAuth states (setInterval) continues running after server
+shutdown, preventing clean process exit and causing memory leaks.
+
+PROPOSAL: Add connectionManager.shutdown() to the server's close handler,
+between stopping schedulers and closing database.
+
+------------------------------------------------------------------------------
+
+ISSUE #2: Redirect URI Whitelist Too Restrictive for Production
+SEVERITY: MEDIUM
+LOCATION: packages/connectors/src/manager.ts:46
+
+The hardcoded whitelist only allows localhost:
+  const ALLOWED_REDIRECT_HOSTS = ["127.0.0.1", "localhost"];
+
+This makes OAuth impossible in production deployments without code changes.
+
+PROPOSAL: Make the whitelist configurable via constructor, config, or
+environment variables to support production deployments.
+
+------------------------------------------------------------------------------
+
+ISSUE #3: refreshPromises Not Cleared on Disconnect
+SEVERITY: LOW
+LOCATION: packages/connectors/src/manager.ts:338-377
+
+The disconnect() method doesn't check or clean up refreshPromises. If a token
+refresh is in-progress when disconnect is called, the refresh completes and
+saves new credentials, which are then immediately deleted by disconnect.
+
+PROPOSAL: In disconnect(), check if a refresh is pending and either wait for
+it to complete or log a warning.
+
+------------------------------------------------------------------------------
+
+ISSUE #4: Temp File Cleanup Failures Silently Ignored
+SEVERITY: LOW
+LOCATION: packages/connectors/src/store.ts:174-178
+
+In atomicWrite(), if temp file deletion fails in the catch block, the error
+is silently ignored. Over time, .tmp-{uuid}.json files could accumulate.
+
+  } catch (error) {
+    try {
+      await fs.unlink(tempPath);
+    } catch {
+      // Ignore cleanup errors <-- Should log this
+    }
+    throw error;
+  }
+
+PROPOSAL: Add debug logging for failed cleanup attempts for monitoring.
+
+------------------------------------------------------------------------------
+
+ISSUE #5: Service ID Validation Allows Empty/Long Strings
+SEVERITY: LOW
+LOCATION: packages/connectors/src/store.ts:61-65
+
+The validateServiceId() regex /^[a-zA-Z0-9_-]+$/ doesn't prevent:
+- Empty strings ("" technically passes the regex as zero matches)
+- Excessively long service names (could cause path length issues)
+
+PROPOSAL: Add length check: if (!service || service.length > 100 || ...)
+
+------------------------------------------------------------------------------
+
+ISSUE #6: Symlink Attack Vector in auditPermissions()
+SEVERITY: MEDIUM
+LOCATION: packages/connectors/src/store.ts:214, 235-236
+
+Uses fs.stat() (follows symlinks) instead of fs.lstat(). Attack scenario:
+1. Attacker creates: ~/.keep/connectors/evil/creds.json -> /etc/shadow
+2. auditPermissions() runs and attempts chmod() on /etc/shadow
+
+Mitigated by: Requires attacker to have FS write access (already compromised)
+
+PROPOSAL: Use fs.lstat() to detect symlinks and skip them:
+  const stat = await fs.lstat(filePath);
+  if (stat.isSymbolicLink()) continue;
+
+------------------------------------------------------------------------------
+
+ISSUE #7: API Key Redaction Incomplete for EXTRA_SYSTEM_PROMPT
+SEVERITY: MEDIUM
+LOCATION: apps/server/src/server.ts:895-908
+
+The /api/get_config endpoint redacts OPENROUTER_API_KEY and EXA_API_KEY, but
+EXTRA_SYSTEM_PROMPT is exposed without redaction. This field may contain
+sensitive business logic, prompts, or context.
+
+PROPOSAL: Either redact or omit EXTRA_SYSTEM_PROMPT from the response.
+
+------------------------------------------------------------------------------
+
+ISSUE #8: Missing OAuth Error Code
+SEVERITY: LOW
+LOCATION: packages/connectors/src/oauth.ts:242-262
+
+The OAUTH_ERROR_MESSAGES map covers 12 common codes but misses:
+- unsupported_response_type (RFC 6749 authorization endpoint error)
+
+PROPOSAL: Add the mapping:
+  unsupported_response_type: "The authentication method is not supported."
+
+------------------------------------------------------------------------------
+
+ISSUE #9: No Test Coverage for OAuth Security
+SEVERITY: MEDIUM
+LOCATION: packages/connectors/
+
+No test files exist in packages/connectors/. Critical security code should
+have unit tests for:
+- OAuth state replay attacks
+- Concurrent token refresh scenarios
+- Redirect URI validation edge cases
+- Path traversal attempts
+- Atomic write failure recovery
+
+PROPOSAL: Add comprehensive test suite for security-critical code paths.
+
+==============================================================================
+POSITIVE OBSERVATIONS
+==============================================================================
+
++ Excellent defense-in-depth approach with multiple layers of protection
++ Atomic state consumption prevents replay attacks correctly
++ Base64url encoding is collision-free and path-safe
++ Mutex implementation for token refresh is well-designed
++ Error sanitization properly separates user-facing vs server-side messages
++ Atomic writes with temp file + rename pattern is best practice
++ Comprehensive OAuth error mapping covers most common cases
++ Permission enforcement at both file and directory level
+
+==============================================================================
+ARCHITECTURAL NOTES
+==============================================================================
+
+The security improvements align with OAuth 2.0 best practices:
+- State parameter is cryptographically random (crypto.randomBytes)
+- State is single-use (deleted immediately after retrieval)
+- Redirect URI validation at both flow endpoints
+- Short state TTL reduces replay window
+
+The credential storage follows secure file handling patterns:
+- 0o600 permissions (owner read/write only)
+- Parent directory 0o700 (owner-only access)
+- Atomic writes prevent corruption on crash
+- Path validation prevents directory traversal
+
+Overall, this is a high-quality security fix that significantly improves
+the security posture of the OAuth and credential management subsystems.

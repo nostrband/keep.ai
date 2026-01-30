@@ -1,0 +1,232 @@
+COMMIT: 3fe6035
+TITLE: fix: Fix 3 validation and error handling bugs
+DATE: Mon Jan 26 16:34:45 2026 +0100
+
+==============================================================================
+SUMMARY OF CHANGES
+==============================================================================
+
+This commit fixes 3 validation and error handling bugs:
+
+1. Cron Hourly NaN Validation (apps/web/src/lib/formatCronSchedule.ts):
+   - Added parseInt and NaN check for minute field in hourly patterns
+   - Falls back to raw cron string for invalid format
+   - Prevents displaying "Every hour at :NaN"
+
+2. Console-Log Quote Escaping (packages/agent/src/tools/console-log.ts):
+   - Added escaping for single quotes using backslash escape
+   - Prevents malformed output when messages contain single quotes
+
+3. Check Endpoint Status Codes (apps/server/src/routes/connectors.ts):
+   - Returns 401 for auth errors (unauthorized, invalid_grant, token, expired, revoked)
+   - Returns 503 for service unavailable (timeout, econnrefused, rate limit)
+   - Returns 500 for other errors (was always returning 200 before)
+
+FILES CHANGED:
+- IMPLEMENTATION_PLAN.md (documentation)
+- apps/server/src/routes/connectors.ts (status code fix)
+- apps/web/src/lib/formatCronSchedule.ts (NaN validation)
+- packages/agent/src/tools/console-log.ts (quote escaping)
+- packages/tests/src/utility-tools.test.ts (updated test expectations)
+- 3 spec files moved from specs/new to specs/done
+
+==============================================================================
+ISSUES IDENTIFIED
+==============================================================================
+
+ISSUE #1: formatCronSchedule Missing Range Validation
+SEVERITY: MEDIUM
+LOCATION: apps/web/src/lib/formatCronSchedule.ts:22-27, 31-32, 47-48
+
+All parseInt calls now have NaN validation, but there's no range validation.
+Out-of-range values would display impossible times:
+- "75 * * * *" -> "Every hour at :75" (minutes must be 0-59)
+- "0 99 * * *" -> "Every day at 87:00 PM" (hours must be 0-23)
+
+  const minuteNum = parseInt(minute, 10);
+  if (isNaN(minuteNum)) {
+    return cron;
+  }
+  // Missing: if (minuteNum < 0 || minuteNum > 59) return cron;
+
+PROPOSAL: Add range validation after NaN checks:
+  if (minuteNum < 0 || minuteNum > 59) return cron;
+  if (hourNum < 0 || hourNum > 23) return cron;
+
+------------------------------------------------------------------------------
+
+ISSUE #2: formatCronSchedule "Every Minute" Ambiguity
+SEVERITY: LOW
+LOCATION: apps/web/src/lib/formatCronSchedule.ts:16-18
+
+The "every minute" check only verifies minute and hour are wildcards:
+
+  if (minute === "*" && hour === "*") {
+    return "Every minute";
+  }
+
+But "* * 1 * *" (every minute on the 1st of the month) would also return
+"Every minute", which is misleading.
+
+PROPOSAL: Check all fields:
+  if (minute === "*" && hour === "*" && dayOfMonth === "*" &&
+      month === "*" && dayOfWeek === "*") {
+    return "Every minute";
+  }
+
+------------------------------------------------------------------------------
+
+ISSUE #3: console-log Incomplete Escaping - Backslash Not Escaped
+SEVERITY: MEDIUM
+LOCATION: packages/agent/src/tools/console-log.ts:20
+
+Only single quotes are escaped, but backslashes are NOT escaped:
+
+  const escapedLine = input.line.replace(/'/g, "\\'");
+
+This creates ambiguity when a message contains both backslash and quote:
+- Input: "test\'" -> Output: "'test\''"
+- The backslash might be misinterpreted as escaping the quote
+
+PROPOSAL: Escape backslashes first, then single quotes:
+  const escapedLine = input.line
+    .replace(/\\/g, "\\\\")
+    .replace(/'/g, "\\'");
+
+------------------------------------------------------------------------------
+
+ISSUE #4: console-log Cropping May Break Escape Sequences
+SEVERITY: LOW
+LOCATION: packages/agent/src/tools/console-log.ts:23-26
+
+The 1000 char limit is applied AFTER escaping, and substring might cut in
+the middle of an escape sequence:
+
+  const croppedLine =
+    escapedLine.length > 1000
+      ? "'" + escapedLine.substring(0, 1000) + "..."
+      : "'" + escapedLine + "'";
+
+If substring cuts at position 1000 and lands on a backslash that was meant
+to escape a quote, the output becomes malformed.
+
+Also: cropping after escaping means a 990-char message with 20 single quotes
+becomes 1010 chars after escaping, triggering truncation unexpectedly.
+
+PROPOSAL: Either crop before escaping, or ensure we don't cut escape sequences:
+  // Don't cut in the middle of an escape sequence
+  let cutPoint = 1000;
+  if (escapedLine[cutPoint - 1] === '\\') cutPoint--;
+
+------------------------------------------------------------------------------
+
+ISSUE #5: connectors.ts Error Classification Too Broad - "token"
+SEVERITY: MEDIUM
+LOCATION: apps/server/src/routes/connectors.ts:209
+
+The pattern includes("token") is too broad:
+
+  errorMessageLower.includes("token") ||
+
+This could match unrelated errors like "token bucket", "tokenize", "token count".
+
+PROPOSAL: Use more specific patterns:
+  errorMessageLower.includes("token expired") ||
+  errorMessageLower.includes("invalid token") ||
+  errorMessageLower.includes("token revoked") ||
+
+------------------------------------------------------------------------------
+
+ISSUE #6: connectors.ts Error Classification Too Broad - "service"
+SEVERITY: MEDIUM
+LOCATION: apps/server/src/routes/connectors.ts:219
+
+The pattern includes("service") is extremely broad:
+
+  errorMessageLower.includes("service") ||
+
+This would match "Unknown service", "service definition", "service ID",
+incorrectly classifying them as 503 Service Unavailable.
+
+PROPOSAL: Use more specific patterns:
+  errorMessageLower.includes("service unavailable") ||
+  errorMessageLower.includes("service error") ||
+  errorMessageLower.includes("service down") ||
+
+------------------------------------------------------------------------------
+
+ISSUE #7: connectors.ts Missing 403 Permission Error Classification
+SEVERITY: MEDIUM
+LOCATION: apps/server/src/routes/connectors.ts:206-223
+
+The error classification distinguishes 401 (auth) and 503 (service unavailable)
+but NOT 403 (permission/authorization errors). These keywords are missing:
+- "forbidden"
+- "access denied"
+- "permission denied"
+- "insufficient scope"
+
+Currently, permission errors would return 500 instead of 403.
+
+PROPOSAL: Add 403 classification between 401 and 503 blocks:
+  } else if (
+    errorMessageLower.includes("forbidden") ||
+    errorMessageLower.includes("access denied") ||
+    errorMessageLower.includes("permission denied") ||
+    errorMessageLower.includes("insufficient scope") ||
+    errorMessageLower.includes("not authorized")
+  ) {
+    statusCode = 403; // Forbidden
+  } else if (
+
+------------------------------------------------------------------------------
+
+ISSUE #8: connectors.ts Missing Network Error Patterns
+SEVERITY: LOW
+LOCATION: apps/server/src/routes/connectors.ts:215-223
+
+Several network error patterns from packages/agent/src/errors.ts are missing:
+- "econnreset" (connection reset)
+- "bad gateway" (502 errors)
+- "gateway timeout" (504 errors)
+- "network" (generic network issues)
+
+PROPOSAL: Add additional network patterns:
+  errorMessageLower.includes("econnreset") ||
+  errorMessageLower.includes("bad gateway") ||
+  errorMessageLower.includes("gateway timeout") ||
+  errorMessageLower.includes("network error") ||
+
+==============================================================================
+POSITIVE OBSERVATIONS
+==============================================================================
+
++ NaN validation follows consistent pattern across all parseInt calls
++ Escaping single quotes prevents the most common malformed output case
++ HTTP status code classification is a significant improvement over always 200
++ Tests were updated to match new escaping behavior
++ Error classification covers the most common OAuth error codes
+
+==============================================================================
+ARCHITECTURAL NOTES
+==============================================================================
+
+formatCronSchedule Design:
+- Defensive approach: returns raw cron on any parsing issue
+- Try-catch wrapper prevents crashes
+- Supports common patterns: every minute, hourly, daily, weekly
+- Intentionally doesn't support complex patterns (ranges, steps, lists)
+
+console-log Tool Design:
+- Wraps messages in single quotes for display
+- Timestamps in ISO format
+- Three log levels supported
+- 1000 char limit prevents excessive output
+
+Error Classification Pattern:
+- Keyword-based matching is simple but fragile
+- The agent's errors.ts has a more comprehensive classification system
+- Consider extracting shared error classification utility
+
+Overall, these fixes address real bugs but reveal areas where more
+comprehensive validation would improve robustness.

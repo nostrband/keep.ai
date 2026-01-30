@@ -1,0 +1,121 @@
+COMMIT REVIEW: a077382
+=======================
+Title: test: Add TransportClientHttp integration tests
+Date: Mon Jan 26 17:18:58 2026 +0100
+Files changed: 14 (1 new test file, spec file moves, package.json updates)
+
+SUMMARY OF CHANGES
+------------------
+This commit adds 16 integration tests for the TransportClientHttp SSE transport class.
+The tests cover the full transport lifecycle including:
+- Connection lifecycle (connect, disconnect, cleanup)
+- Message sending (sync, data) via POST endpoints
+- Message receiving (sync, data, ping) via SSE stream
+- Error handling and reconnection behavior
+- Utility methods
+
+Key implementation details:
+- Uses real Fastify server for integration testing (not mocks)
+- Creates a mock SSE server that simulates the production server behavior
+- Tests both happy path and error scenarios
+
+The commit also moves several completed specs from specs/new/ to specs/done/.
+
+TECHNICAL ANALYSIS
+------------------
+Test Structure:
+1. MockServerState interface tracks connected peers and received messages
+2. createMockServer() creates a Fastify server with:
+   - GET /stream - SSE endpoint with connection hijacking
+   - POST /sync - Accepts sync messages
+   - POST /data - Accepts data messages
+3. Each test creates fresh server and transport instances
+4. Tests use wait() helper for async operation timing
+
+Coverage Areas (16 tests):
+- Connection lifecycle: 4 tests
+- Message sending: 4 tests
+- Message receiving: 3 tests
+- Error handling/reconnection: 2 tests
+- Utility methods: 2 tests
+- Edge cases (no server): 1 test
+
+ISSUES FOUND
+------------
+
+ISSUE 1: Potential flakiness from fixed wait() timers
+Severity: Low
+Location: Throughout test file (wait(100), wait(50))
+
+The tests use fixed delays like `await wait(100)` to allow async operations to complete.
+This can cause flaky tests under heavy system load where operations take longer.
+
+Proposal: Consider using polling assertions or event-driven waiting:
+```typescript
+// Instead of:
+await wait(100);
+expect(transport.isSSEConnected()).toBe(true);
+
+// Consider:
+await waitFor(() => transport.isSSEConnected(), { timeout: 1000 });
+```
+
+---
+
+ISSUE 2: Test file lacks error case for POST endpoint failures
+Severity: Low
+Location: Message sending tests
+
+The tests verify that messages aren't sent to unknown peers or before start(),
+but don't test what happens when the POST endpoints return errors (500, timeout, etc.).
+
+Proposal: Add tests for POST endpoint failures:
+```typescript
+it("should handle sync endpoint failure gracefully", async () => {
+  // Configure mock server to return 500 on /sync
+  // Verify transport doesn't throw and handles error appropriately
+});
+```
+
+---
+
+ISSUE 3: Hardcoded test data uses non-obvious hex strings
+Severity: Low (style)
+Location: Line 341-351
+
+The test data includes hex-encoded values like `"706b31"` (hex for "pk1") and `"010203"`.
+While comments explain one of them, it's not immediately clear what they represent.
+
+Proposal: Use helper functions or constants for test data clarity:
+```typescript
+const TEST_SITE_ID = "010203";  // hex-encoded test site identifier
+const TEST_PK = Buffer.from("pk1").toString("hex");
+```
+
+---
+
+ISSUE 4: Missing test for reconnection with exponential backoff
+Severity: Low
+Location: Error handling tests
+
+The transport implements exponential backoff for reconnection (baseReconnectDelay * 2^attempts,
+max 30 seconds), but the tests only verify that attempts are reset on success. There's no
+test verifying the actual backoff timing behavior.
+
+Proposal: Consider adding a test that verifies multiple reconnection attempts
+increase the delay appropriately (may require exposing internal state or using
+time mocking).
+
+PROPOSALS
+---------
+
+1. Consider adding vitest's fake timers for more reliable async testing
+2. Add negative test cases for server-side errors (500 responses, connection drops)
+3. Add test for message queue ordering (verify sequential processing)
+4. Consider extracting test data helpers for hex encoding/decoding
+
+Overall this is a solid test suite that provides good coverage of the TransportClientHttp
+class. The use of real Fastify servers instead of mocks is a good integration testing
+approach that validates actual SSE behavior.
+
+VERDICT: APPROVED (with minor suggestions)

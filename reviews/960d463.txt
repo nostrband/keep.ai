@@ -1,0 +1,136 @@
+COMMIT REVIEW: 960d463
+=======================
+test(agent): Add unit tests for fix and save AI tools
+
+CHANGES SUMMARY
+---------------
+This commit adds comprehensive unit tests for the fix and save AI tools, which are critical components of the maintainer and planner agent workflows respectively. It also exports these tools from the @app/agent package for test access.
+
+FILES CHANGED:
+1. packages/agent/src/ai-tools/index.ts (NEW, +6 lines)
+   - New barrel file exporting all AI tools
+   - Exports: makeAskTool, makeEvalTool, makeFinishTool, makeFixTool, makeSaveTool, makeScheduleTool
+   - Also exports types: AskInfo, FinishInfo, FixInfo, FixResult, SaveInfo, SaveResult, ScheduleInfo
+
+2. packages/agent/src/index.ts (+17 lines)
+   - Re-exports AI tools from the ai-tools barrel file
+   - Makes tools accessible as @app/agent imports for tests
+
+3. packages/tests/src/fix-tool.test.ts (NEW, +524 lines)
+   - Comprehensive test suite for the fix tool
+   - Test categories:
+     - Successful fix application (7 tests)
+     - Race condition handling (4 tests)
+     - Error handling (3 tests)
+     - Multiple minor version increments (1 test)
+     - Workflow ID preservation (1 test)
+   - Uses in-memory SQLite database with custom table creation
+
+4. packages/tests/src/save-tool.test.ts (NEW, +573 lines)
+   - Comprehensive test suite for the save tool
+   - Test categories:
+     - Version management (3 tests)
+     - Maintenance mode handling (4 tests)
+     - Workflow status transitions (2 tests)
+     - Title handling (3 tests)
+     - Active script management (2 tests)
+     - Error handling (1 test)
+     - Successive major version increments (1 test)
+     - Version interaction between save and fix (1 test)
+     - Optional fields handling (1 test)
+   - Uses in-memory SQLite database with custom table creation
+
+POTENTIAL ISSUES
+----------------
+
+1. **Test table schemas may drift from production** (fix-tool.test.ts:67-106, save-tool.test.ts:97-154)
+   SEVERITY: Medium
+   ISSUE: Both test files manually create database tables instead of using the migration system. Comments reference specific migration versions (v11, v16, v34), but if production schema changes, tests could silently pass while production fails (or vice versa).
+   PROPOSAL: Consider using a shared test helper that imports table creation from migrations, or at minimum add a test that validates test schema matches production schema. Could also add a comment warning to update both locations.
+
+2. **Type assertions used to work around AI SDK union return type** (fix-tool.test.ts:125-174)
+   SEVERITY: Low (will be addressed in commit 533d956)
+   ISSUE: Tests don't use `as FixResult` type assertions on the execute results. The AI SDK's tool() returns `Result | AsyncIterable<Result>`, and without assertions, TypeScript may not narrow the type correctly.
+   PROPOSAL: This appears to be addressed in the following commit (533d956). The tests work because vitest runs the code, but proper type safety would be better.
+
+3. **Race condition test doesn't verify no state mutation** (fix-tool.test.ts:403-424)
+   SEVERITY: Low
+   ISSUE: The "should NOT create new script when race condition detected" test verifies script count didn't change, but doesn't verify the existing script wasn't modified (though it shouldn't be with addScript).
+   PROPOSAL: Could add an assertion that the existing script's properties are unchanged, though this is low priority since addScript doesn't modify existing records.
+
+4. **createToolCallOptions returns minimal mock** (fix-tool.test.ts:52-60)
+   SEVERITY: Low
+   ISSUE: The mock ToolCallOptions has empty messages array and a real AbortController but no actual integration with the signal. If the fix/save tool ever starts using abortSignal, tests wouldn't catch issues.
+   PROPOSAL: This is acceptable for current functionality. Consider adding signal-aware tests if the tools gain abort support.
+
+5. **Time-based test may have race condition** (fix-tool.test.ts:299-327)
+   SEVERITY: Low
+   ISSUE: The test "should set next_run_timestamp to now for immediate re-run" captures beforeFix and afterFix timestamps and expects the result to be between them. On very fast or slow systems, this could theoretically fail.
+   PROPOSAL: The time window should be sufficiently wide for typical execution. Could be made more robust by mocking Date.now(), but this adds complexity for minimal benefit.
+
+6. **Missing test for concurrent fix attempts** (fix-tool.test.ts)
+   SEVERITY: Medium
+   ISSUE: The tests verify sequential fix attempts work (minor version 2.0 -> 2.1 -> 2.2), but don't test what happens if two maintainer tasks try to fix the same workflow simultaneously. The database doesn't have a unique constraint on (workflow_id, major_version, minor_version) that would prevent duplicates.
+   PROPOSAL: Add a test verifying behavior when two concurrent fixes are attempted. May reveal need for a database unique constraint or transaction isolation.
+
+7. **Save tool test doesn't verify script type field** (save-tool.test.ts)
+   SEVERITY: Low
+   ISSUE: The save tool sets `type: ""` on new scripts (line 75 of save.ts), but tests don't verify this behavior. If the field should be populated from elsewhere, this could be a bug.
+   PROPOSAL: Verify whether empty string is intentional for save tool (planner may set type differently). If intentional, add a test asserting type is empty string. If not, this may be a bug in save.ts.
+
+8. **Workflow factory defaults may hide bugs** (save-tool.test.ts:674-688)
+   SEVERITY: Low
+   ISSUE: createWorkflow() helper uses sensible defaults that may accidentally mask issues. For example, maintenance_fix_count defaults to 0, so tests never exercise non-zero values unless explicitly set.
+   PROPOSAL: Consider adding tests with various maintenance_fix_count values to ensure it's handled correctly (though the save tool doesn't actually use this field).
+
+9. **wasMaintenanceFix not asserted in all maintenance tests** (save-tool.test.ts:816-834)
+   SEVERITY: Low
+   ISSUE: The "should clear maintenance flag after save" test doesn't check the return value's wasMaintenanceFix property. It only checks the workflow state in DB.
+   PROPOSAL: Add `expect(result.wasMaintenanceFix).toBe(true)` to the test for completeness. Similar tests do check this, but not all.
+
+POSITIVE OBSERVATIONS
+---------------------
+- Excellent test coverage: covers happy path, edge cases, error handling, and race conditions
+- Clean test organization with describe blocks for each category
+- Proper setup/teardown with beforeEach/afterEach for database
+- In-memory database avoids test pollution and is fast
+- Tests verify both return values AND database state (important for side effects)
+- Race condition tests are particularly valuable - they verify critical safety behavior
+- Version interaction test (save-tool.test.ts:1089-1124) covers the planner/maintainer interplay
+- Helper functions (createWorkflow, createScript) make tests readable
+- Uses KeepDb/ScriptStore production classes rather than mocks, ensuring realistic behavior
+
+ARCHITECTURE NOTES
+------------------
+The test structure follows good patterns:
+1. Custom table creation avoids CR-SQLite migration complexity for unit tests
+2. In-memory SQLite provides isolation without file system overhead
+3. Helper factories with overrides allow concise test cases
+4. Tests validate both the tool's return value and side effects in the database
+
+The export structure change is clean:
+- ai-tools/index.ts provides a barrel for internal organization
+- Main index.ts re-exports for external consumers
+- Types are co-located with their implementations
+
+Test coverage addresses key scenarios:
+- Fix tool: version incrementing, race detection, metadata preservation, error cases
+- Save tool: version management, maintenance handling, status transitions, title handling
+
+Missing coverage (acceptable for initial commit):
+- Concurrent access scenarios
+- Edge cases with very large scripts/comments
+- Performance under load
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Test schema drift) - skipped (established pattern in other tests)
+- Issue #2 (Type assertions) - skipped (addressed in commit 533d956)
+- Issue #3 (Race condition verification) - skipped (low priority)
+- Issue #4 (Minimal mock) - skipped (acceptable for current functionality)
+- Issue #5 (Time-based test) - skipped (low, window is sufficient)
+- Issue #6 (Concurrent fix attempts) - skipped (test coverage gap)
+- Issue #7 (Script type field) - skipped (low)
+- Issue #8 (Factory defaults) - skipped (low)
+- Issue #9 (wasMaintenanceFix assertion) - skipped (low)

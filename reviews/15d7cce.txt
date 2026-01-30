@@ -1,0 +1,282 @@
+# Review: 15d7cce - refactor: Complete 3 Priority 3 code quality improvements
+
+**Commit:** 15d7cce4fdd656dcaa05878ca1a727f1ca194f7a
+**Date:** Mon Jan 26 17:02:35 2026 +0100
+**Author:** Artur Briugeman (Co-Authored-By: Claude Opus 4.5)
+
+## Summary of Changes
+
+This commit completes 3 code quality improvements:
+
+1. **consolidate-parse-message-content** (packages/db/src/chat-store.ts)
+   - Created shared `parseMessageContent()` utility
+   - Eliminates DRY violation across apps/web, apps/cli, and apps/server
+   - Handles ChatMessage to AssistantUIMessage conversion with JSON parse fallback
+
+2. **standardize-tool-patterns** (packages/agent/src/tools/*.ts)
+   - Converted 5 tools from plain objects to AI SDK's tool() pattern
+   - Tools: get-script, get-script-run, list-scripts, list-script-runs, script-history
+   - All tools now receive ToolCallOptions (toolCallId, messages, abortSignal)
+
+3. **refactor-gmail-use-google-common** (packages/agent/src/tools/gmail.ts)
+   - Gmail tool now uses shared `getGoogleCredentials()` and `createGoogleOAuthClient()`
+   - Consistent with gdrive, gsheets, and gdocs tools
+
+---
+
+## Detailed Analysis
+
+### Refactor 1: parseMessageContent Consolidation
+
+**Files Changed:**
+- packages/db/src/chat-store.ts (new function, lines 52-74)
+- packages/db/src/index.ts (export)
+- apps/web/src/hooks/dbChatReads.ts (import shared function)
+- apps/cli/src/commands/chat.ts (import shared function)
+- apps/server/src/server.ts (import shared function)
+
+**New Implementation:**
+```typescript
+export function parseMessageContent(msg: ChatMessage): AssistantUIMessage {
+  try {
+    return JSON.parse(msg.content);
+  } catch {
+    // Fallback for messages that aren't JSON
+    return {
+      id: msg.id,
+      role: msg.role,
+      parts: [{ type: "text", text: msg.content }],
+      metadata: {
+        threadId: msg.chat_id,
+        createdAt: msg.timestamp,
+      },
+    };
+  }
+}
+```
+
+**Assessment:** Excellent implementation.
+- Single source of truth for ChatMessage -> AssistantUIMessage conversion
+- Properly exported from @app/db package
+- All three locations now use the shared function
+- No behavioral changes from original implementations
+
+### Refactor 2: AI SDK tool() Pattern Standardization
+
+**Files Changed:**
+- packages/agent/src/tools/get-script.ts
+- packages/agent/src/tools/get-script-run.ts
+- packages/agent/src/tools/list-scripts.ts
+- packages/agent/src/tools/list-script-runs.ts
+- packages/agent/src/tools/script-history.ts
+
+**Pattern Change Example (get-script.ts):**
+```typescript
+// Before: Plain object
+return {
+  execute: async (id?: string) => { ... },
+  description: "...",
+  inputSchema: z.string().optional(),
+  outputSchema: z.object({...})
+}
+
+// After: AI SDK tool() wrapper
+return tool({
+  description: "...",
+  inputSchema: z.object({ id: z.string().optional() }).optional().nullable(),
+  outputSchema: z.object({...}),
+  execute: async (input, options) => { ... }  // Now receives ToolCallOptions
+})
+```
+
+**Assessment:** Good standardization. All 36 tools in the directory now use the tool() pattern consistently.
+
+### Refactor 3: Gmail Google-Common Integration
+
+**Files Changed:**
+- packages/agent/src/tools/gmail.ts
+
+**Before:**
+```typescript
+// Inline account validation
+if (!account) {
+  const connections = await connectionManager.listConnectionsByService("gmail");
+  // ... error handling ...
+}
+
+try {
+  const creds = await connectionManager.getCredentials(connectionId);
+  const oAuth2Client = new google.auth.OAuth2();
+  oAuth2Client.setCredentials({...creds...});
+  // ...
+}
+```
+
+**After:**
+```typescript
+// Using shared utilities
+const creds = await getGoogleCredentials(connectionManager, "gmail", account, "Gmail.api");
+const connectionId = { service: "gmail", accountId: account };
+
+try {
+  const oAuth2Client = createGoogleOAuthClient(creds);
+  // ...
+}
+```
+
+**Assessment:** Successfully eliminates code duplication. Now consistent with gdrive, gsheets, gdocs tools.
+
+---
+
+## Issues Identified
+
+### Issue 1: Breaking InputSchema Changes
+
+**Severity:** Medium
+**Location:** packages/agent/src/tools/get-script.ts, list-script-runs.ts
+
+The inputSchema was changed from simple string to object:
+
+```typescript
+// Before
+inputSchema: z.string().optional()
+// Call: Scripts.get("script-123")
+
+// After
+inputSchema: z.object({ id: z.string().optional() }).optional().nullable()
+// Call: Scripts.get({ id: "script-123" })
+```
+
+**Impact:** Existing scripts/workflows that call these tools with string arguments will fail:
+- `Scripts.get("123")` -> Validation error (string is not an object)
+- `Scripts.get({ id: "123" })` -> Works
+- `Scripts.get()` -> Still works (undefined/null accepted)
+
+**Affected tools:**
+- get-script.ts - `id` parameter
+- list-script-runs.ts - `task_id` parameter
+
+**Note:** get-script-run.ts, list-scripts.ts, and script-history.ts already used object schemas, so no breaking change there.
+
+### Issue 2: Credential Fetching Outside Try-Catch (Gmail)
+
+**Severity:** Medium
+**Location:** packages/agent/src/tools/gmail.ts
+
+The `getGoogleCredentials()` call is **outside** the try-catch block:
+```typescript
+const creds = await getGoogleCredentials(...);  // <-- OUTSIDE try-catch
+const connectionId = { service: "gmail", accountId: account };
+
+try {
+  const oAuth2Client = createGoogleOAuthClient(creds);
+  // ... API calls ...
+} catch (error) {
+  if (classified instanceof AuthError) {
+    await connectionManager.markError(connectionId, classified.message);
+  }
+  throw classified;
+}
+```
+
+**Impact:** If `getGoogleCredentials()` fails (token refresh error, connection missing):
+- Error propagates directly without classification
+- `connectionManager.markError()` is NOT called
+- Connection is NOT marked as errored in the database
+- User won't see clear error state in UI
+
+**Note:** This is consistent with other Google tools (gdrive, gsheets, gdocs) which have the same pattern. If this is an issue, it affects all of them.
+
+### Issue 3: ToolCallOptions Not Used Yet
+
+**Severity:** Low (Enhancement opportunity)
+**Location:** All converted tools
+
+The converted tools now receive `ToolCallOptions` but don't use them:
+```typescript
+execute: async (input, options) => {  // options available but unused
+  // No usage of options.abortSignal, options.toolCallId, options.messages
+}
+```
+
+This is not a bug - the capability is now available for future use (e.g., implementing cancellation via `abortSignal`).
+
+---
+
+## Proposals
+
+### Proposal 1: Add Backward-Compatible InputSchema
+
+**Location:** packages/agent/src/tools/get-script.ts, list-script-runs.ts
+
+Use `z.union()` to accept both patterns:
+```typescript
+inputSchema: z.union([
+  z.object({ id: z.string().optional() }),
+  z.string().optional(),
+]).optional().nullable()
+```
+
+Then normalize in execute:
+```typescript
+execute: async (input, options) => {
+  const id = typeof input === 'string' ? input : input?.id;
+  // ... rest of implementation
+}
+```
+
+**Effort:** Small
+
+### Proposal 2: Move getGoogleCredentials Inside Try-Catch
+
+**Location:** All Google tools (gmail.ts, gdrive.ts, gsheets.ts, gdocs.ts)
+
+```typescript
+const connectionId = { service: "gmail", accountId: account };
+
+try {
+  const creds = await getGoogleCredentials(  // <-- Move inside try
+    connectionManager, "gmail", account, "Gmail.api"
+  );
+  const oAuth2Client = createGoogleOAuthClient(creds);
+  // ... API calls ...
+} catch (error) {
+  const classified = classifyGoogleApiError(error, "Gmail.api");
+  if (classified instanceof AuthError) {
+    await connectionManager.markError(connectionId, classified.message);
+  }
+  throw classified;
+}
+```
+
+**Note:** Requires defining `connectionId` before validation, which might mark invalid accounts. Alternative: have `getGoogleCredentials()` handle marking internally.
+
+**Effort:** Small - same change needed in 4 files
+
+### Proposal 3: Document ToolCallOptions Usage
+
+**Location:** packages/agent/src/tools/README.md or inline comments
+
+Add documentation explaining:
+- What ToolCallOptions provides (toolCallId, messages, abortSignal)
+- When to use each option
+- Example patterns for implementing cancellation
+
+**Effort:** Trivial
+
+---
+
+## Summary
+
+| Refactor | Assessment | Issues Found |
+|----------|------------|--------------|
+| parseMessageContent consolidation | Excellent | None |
+| AI SDK tool() pattern | Good | Breaking inputSchema changes |
+| Gmail google-common | Good | Credential errors not marked |
+
+**Overall:** The commit successfully eliminates code duplication and standardizes patterns. The parseMessageContent consolidation is clean with no issues. The tool() pattern conversion is good but introduces breaking changes for 2 tools. The Gmail refactoring is consistent with other Google tools but inherits the same error handling gap.
+
+**Priority Fixes:**
+1. **Medium:** Add backward-compatible inputSchema for get-script and list-script-runs
+2. **Medium:** Consider moving credential fetching inside try-catch for all Google tools (design decision)
+3. **Low:** Document ToolCallOptions usage for future development

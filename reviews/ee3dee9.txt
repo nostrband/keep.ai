@@ -1,0 +1,117 @@
+COMMIT REVIEW: ee3dee9
+=======================
+feat(ui): Add maintainer task hook and fix version display format
+
+## Summary of Changes
+
+This commit makes several related changes to support the maintainer task UI:
+
+### 1. New React Query Hook: useMaintainerTasks
+**File: apps/web/src/hooks/dbTaskReads.ts**
+- Adds `useMaintainerTasks(workflowId)` hook that calls `taskStore.getMaintainerTasksForWorkflow()`
+- Returns all maintainer (auto-fix) tasks for a workflow
+- Includes proper error handling (returns empty array on error)
+- Adds corresponding query key in queryKeys.ts
+
+### 2. Version Display Format Fix
+**Files: WorkflowDetailPage.tsx, ScriptDetailPage.tsx**
+- Changes version display from single integer (v1, v2) to major.minor format (v2.1)
+- Updates `handleActivateVersion()` signature to accept both majorVersion and minorVersion
+- Fixes the version history comparison logic to use array index (already sorted DESC) instead of version number lookup
+
+### 3. Comprehensive Unit Tests
+**File: packages/tests/src/script-store.test.ts**
+- Adds tests for `getScriptsByWorkflowAndMajorVersion()` method
+- Adds tests for maintainer changelog construction logic
+- Tests edge cases: empty workflow, non-existent major version, empty change_comment
+
+### 4. IMPLEMENTATION_PLAN.md Updates
+- Marks version display format and query hook as complete
+- Marks maintainer context loading tests as complete
+
+## Potential Issues
+
+### Issue 1: Missing newline at end of dbTaskReads.ts
+**Severity: Very Low**
+**Location: apps/web/src/hooks/dbTaskReads.ts:112**
+
+The file ends without a trailing newline, which can cause issues with some tools and is against common style conventions.
+
+**Proposal**: Add a trailing newline at the end of the file.
+
+### Issue 2: Silent Error Swallowing in useMaintainerTasks
+**Severity: Low**
+**Location: apps/web/src/hooks/dbTaskReads.ts:102-105**
+
+```typescript
+} catch (error) {
+  return [];
+}
+```
+
+The hook silently catches and ignores all errors, returning an empty array. This could hide database connection issues or schema problems.
+
+**Proposal**: At minimum, log the error for debugging:
+```typescript
+} catch (error) {
+  console.error("Failed to fetch maintainer tasks:", error);
+  return [];
+}
+```
+
+### Issue 3: Type Safety in WorkflowDetailPage
+**Severity: Low**
+**Location: apps/web/src/components/WorkflowDetailPage.tsx:540**
+
+```typescript
+{scriptVersions.map((version: any, index: number) => {
+```
+
+The `version` is typed as `any`, losing type safety. This is likely inherited from the query result type.
+
+**Proposal**: Define proper type for script versions and avoid `any` typing.
+
+### Issue 4: Previous Version Logic Change
+**Severity: Medium**
+**Location: apps/web/src/components/WorkflowDetailPage.tsx:543-544**
+
+Changed from:
+```typescript
+const previousVersion = scriptVersions.find((v: any) => v.version === version.version - 1);
+```
+To:
+```typescript
+const previousVersion = scriptVersions[index + 1]; // Already sorted DESC
+```
+
+This change assumes `scriptVersions` is always sorted DESC and that adjacent array elements represent logically adjacent versions. This works correctly for showing diffs between chronologically adjacent versions, but the comment "Already sorted DESC" relies on the query's ORDER BY behavior.
+
+**Proposal**: This is actually a correct improvement since the old logic would break with major.minor versioning (v2.0 doesn't have a v1.9). However, consider adding a defensive comment or assertion to ensure the array is sorted as expected.
+
+### Issue 5: Test Coverage for getScriptsByWorkflowAndMajorVersion ordering
+**Severity: Very Low**
+**Location: packages/tests/src/script-store.test.ts**
+
+The tests verify ordering by minor_version DESC, but don't test what happens when scripts are inserted out of order (timestamps vary). The implementation relies on SQL ORDER BY which should be deterministic, but it's worth having a test that creates scripts in random order.
+
+**Proposal**: Add a test that creates scripts with varying timestamps to ensure ORDER BY is by minor_version, not insertion order.
+
+## Positive Observations
+
+1. **Comprehensive test coverage**: The changelog construction tests thoroughly verify the logic used by loadMaintainerContext
+2. **Proper separation of concerns**: Query hook follows existing patterns in the codebase
+3. **Correct versioning format**: The X.Y format properly represents semantic versioning for scripts
+4. **Edge case handling**: Tests cover empty changelog, version limit (5 entries), and cross-major-version isolation
+
+## Conclusion
+
+This is a well-structured commit that adds necessary UI infrastructure for displaying maintainer tasks. The version display fix is important for the new major.minor versioning scheme. The tests are comprehensive and follow the existing patterns. Minor issues include silent error handling and type safety that could be improved.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Missing trailing newline) - skipped (very low)
+- Issue #2 (Silent error swallowing) - skipped (low, acceptable pattern)
+- Issue #3 (Type safety - any) - skipped (low)
+- Issue #4 (Previous version logic) - skipped (correct behavior)
+- Issue #5 (Test ordering coverage) - skipped (very low)
