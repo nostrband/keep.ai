@@ -42,11 +42,17 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
   - Fix: Return `undefined` instead of fallback context
   - Status: **FIXED** - now returns `undefined` instead of fallback context
 
-- [ ] **Fix Electron symlink vulnerability** - [specs/new/electron-symlink-vulnerability-fix.md](specs/new/electron-symlink-vulnerability-fix.md)
+- [x] **Fix Electron symlink vulnerability** - [specs/new/electron-symlink-vulnerability-fix.md](specs/new/electron-symlink-vulnerability-fix.md)
   - File: Electron file protocol handler in `apps/electron`
   - Issue: Uses `path.resolve()` which doesn't resolve symlinks, allowing bypass if attacker can create symlink in `public/`
   - Fix: Replace `path.resolve()` with `fs.realpathSync()` to resolve symbolic links before validation
-  - Status: **NOT FIXED** - file protocol handler still uses `path.resolve()`
+  - Status: **FIXED** - now uses `fs.realpathSync()` instead of `path.resolve()` to resolve both symlinks and path syntax
+
+- [x] **Fix Electron Windows case sensitivity** - [specs/new/electron-windows-case-sensitivity-fix.md](specs/new/electron-windows-case-sensitivity-fix.md)
+  - File: Electron file protocol handler in `apps/electron`
+  - Issue: Case-sensitive path comparison on case-insensitive Windows filesystem allows access to files outside intended directory
+  - Fix: Normalize paths to lowercase on Windows before comparison
+  - Status: **FIXED** - paths are now normalized to lowercase on Windows before comparison
 
 ### P1 - High (Core Features & Significant Fixes)
 
@@ -183,11 +189,11 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
 
 | Priority | Count | Status |
 |----------|-------|--------|
-| P0 Critical | 5 | 4 complete |
+| P0 Critical | 6 | 5 complete |
 | P1 High | 8 | 0 complete |
 | P2 Medium | 9 | 0 complete (1 documented) |
 | P3 Low | 2 | 0 complete |
-| **Total** | **24** | **4 complete** |
+| **Total** | **25** | **5 complete** |
 
 ---
 

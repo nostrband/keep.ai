@@ -460,7 +460,8 @@ function registerGlobalShortcuts(): void {
 
 function setupDownloadHandler() {
   // Allowed directory for serving local files (the bundled SPA)
-  const allowedBaseDir = path.resolve(__dirname, "../public");
+  // Use realpathSync to resolve symlinks in the base directory path itself
+  const allowedBaseDir = fs.realpathSync(path.resolve(__dirname, "../public"));
 
   // Handle all file:// requests in this session
   protocol.handle("file", async (request) => {
@@ -487,9 +488,29 @@ function setupDownloadHandler() {
       // request.url is file:///absolute/path/to/file
       const filePath = fileURLToPath(request.url);
 
-      // SECURITY: Resolve to canonical path and verify it's within allowed directory
-      const resolvedPath = path.resolve(filePath);
-      if (!resolvedPath.startsWith(allowedBaseDir + path.sep) && resolvedPath !== allowedBaseDir) {
+      // SECURITY: Resolve symlinks and normalize path to canonical form
+      // fs.realpathSync resolves both path syntax (../) AND symbolic links
+      let resolvedPath: string;
+      try {
+        resolvedPath = fs.realpathSync(filePath);
+      } catch {
+        // File doesn't exist - return 404
+        return new Response("Not found", {
+          status: 404,
+          headers: { "content-type": "text/plain" },
+        });
+      }
+
+      // SECURITY: Verify resolved path is within allowed directory
+      // On Windows, normalize case for comparison (filesystem is case-insensitive)
+      let normalizedResolved = resolvedPath;
+      let normalizedBase = allowedBaseDir;
+      if (process.platform === 'win32') {
+        normalizedResolved = resolvedPath.toLowerCase();
+        normalizedBase = allowedBaseDir.toLowerCase();
+      }
+
+      if (!normalizedResolved.startsWith(normalizedBase + path.sep) && normalizedResolved !== normalizedBase) {
         debugMain("[protocol.handle(file)] blocked path traversal attempt:", resolvedPath);
         return new Response("Forbidden", {
           status: 403,
