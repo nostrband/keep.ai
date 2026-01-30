@@ -25,17 +25,6 @@ async function createItemsTable(db: DBInterface): Promise<void> {
   `);
 }
 
-/**
- * Creates mock ToolCallOptions for testing.
- */
-function createToolCallOptions() {
-  return {
-    toolCallId: "test-call",
-    messages: [],
-    abortSignal: new AbortController().signal,
-  };
-}
-
 describe("ItemStore", () => {
   let db: DBInterface;
   let keepDb: KeepDb;
@@ -329,14 +318,14 @@ describe("Items.list Tool", () => {
       const tool = makeItemsListTool(itemStore, () => undefined);
 
       await expect(
-        tool.execute!({}, createToolCallOptions())
+        tool.execute({})
       ).rejects.toThrow("Items.list requires a workflow context");
     });
 
     it("should return empty result for empty workflow", async () => {
       const tool = makeItemsListTool(itemStore, () => workflowId);
 
-      const result = await tool.execute!({}, createToolCallOptions());
+      const result = await tool.execute({});
 
       expect(result.items).toHaveLength(0);
       expect(result.total).toBe(0);
@@ -349,7 +338,7 @@ describe("Items.list Tool", () => {
       await itemStore.setStatus(workflowId, "item-1", "done", "run-1");
 
       const tool = makeItemsListTool(itemStore, () => workflowId);
-      const result = await tool.execute!({}, createToolCallOptions());
+      const result = await tool.execute({});
 
       expect(result.items).toHaveLength(1);
       const item = result.items[0];
@@ -380,17 +369,11 @@ describe("Items.list Tool", () => {
     it("should filter by status", async () => {
       const tool = makeItemsListTool(itemStore, () => workflowId);
 
-      const doneResult = await tool.execute!(
-        { status: "done" },
-        createToolCallOptions()
-      );
+      const doneResult = await tool.execute({ status: "done" });
       expect(doneResult.items).toHaveLength(2);
       expect(doneResult.total).toBe(2);
 
-      const failedResult = await tool.execute!(
-        { status: "failed" },
-        createToolCallOptions()
-      );
+      const failedResult = await tool.execute({ status: "failed" });
       expect(failedResult.items).toHaveLength(1);
       expect(failedResult.total).toBe(1);
     });
@@ -398,10 +381,7 @@ describe("Items.list Tool", () => {
     it("should filter by logical_item_id", async () => {
       const tool = makeItemsListTool(itemStore, () => workflowId);
 
-      const result = await tool.execute!(
-        { logical_item_id: "item-2" },
-        createToolCallOptions()
-      );
+      const result = await tool.execute({ logical_item_id: "item-2" });
 
       expect(result.items).toHaveLength(1);
       expect(result.items[0].logical_item_id).toBe("item-2");
@@ -411,10 +391,7 @@ describe("Items.list Tool", () => {
     it("should return empty for non-existent logical_item_id", async () => {
       const tool = makeItemsListTool(itemStore, () => workflowId);
 
-      const result = await tool.execute!(
-        { logical_item_id: "non-existent" },
-        createToolCallOptions()
-      );
+      const result = await tool.execute({ logical_item_id: "non-existent" });
 
       expect(result.items).toHaveLength(0);
       expect(result.total).toBe(0);
@@ -424,17 +401,11 @@ describe("Items.list Tool", () => {
       const tool = makeItemsListTool(itemStore, () => workflowId);
 
       // Match: item-1 is done
-      const matchResult = await tool.execute!(
-        { logical_item_id: "item-1", status: "done" },
-        createToolCallOptions()
-      );
+      const matchResult = await tool.execute({ logical_item_id: "item-1", status: "done" });
       expect(matchResult.items).toHaveLength(1);
 
       // No match: item-3 is failed, not done
-      const noMatchResult = await tool.execute!(
-        { logical_item_id: "item-3", status: "done" },
-        createToolCallOptions()
-      );
+      const noMatchResult = await tool.execute({ logical_item_id: "item-3", status: "done" });
       expect(noMatchResult.items).toHaveLength(0);
     });
   });
@@ -451,7 +422,7 @@ describe("Items.list Tool", () => {
     it("should use default limit of 100", async () => {
       const tool = makeItemsListTool(itemStore, () => workflowId);
 
-      const result = await tool.execute!({}, createToolCallOptions());
+      const result = await tool.execute({});
 
       expect(result.items).toHaveLength(100);
       expect(result.total).toBe(150);
@@ -461,10 +432,7 @@ describe("Items.list Tool", () => {
     it("should respect custom limit", async () => {
       const tool = makeItemsListTool(itemStore, () => workflowId);
 
-      const result = await tool.execute!(
-        { limit: 50 },
-        createToolCallOptions()
-      );
+      const result = await tool.execute({ limit: 50 });
 
       expect(result.items).toHaveLength(50);
       expect(result.has_more).toBe(true);
@@ -473,14 +441,8 @@ describe("Items.list Tool", () => {
     it("should support pagination with offset", async () => {
       const tool = makeItemsListTool(itemStore, () => workflowId);
 
-      const page1 = await tool.execute!(
-        { limit: 50, offset: 0 },
-        createToolCallOptions()
-      );
-      const page2 = await tool.execute!(
-        { limit: 50, offset: 50 },
-        createToolCallOptions()
-      );
+      const page1 = await tool.execute({ limit: 50, offset: 0 });
+      const page2 = await tool.execute({ limit: 50, offset: 50 });
 
       expect(page1.items).toHaveLength(50);
       expect(page2.items).toHaveLength(50);
@@ -496,17 +458,11 @@ describe("Items.list Tool", () => {
       const tool = makeItemsListTool(itemStore, () => workflowId);
 
       // Has more (150 items, limit 100)
-      const hasMoreResult = await tool.execute!(
-        { limit: 100 },
-        createToolCallOptions()
-      );
+      const hasMoreResult = await tool.execute({ limit: 100 });
       expect(hasMoreResult.has_more).toBe(true);
 
       // No more (offset 100, 50 remaining)
-      const noMoreResult = await tool.execute!(
-        { limit: 100, offset: 100 },
-        createToolCallOptions()
-      );
+      const noMoreResult = await tool.execute({ limit: 100, offset: 100 });
       expect(noMoreResult.items).toHaveLength(50);
       expect(noMoreResult.has_more).toBe(false);
     });
