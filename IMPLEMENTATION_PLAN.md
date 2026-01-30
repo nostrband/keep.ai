@@ -102,11 +102,11 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
   - Fix: Use `.slice(-5000)` for last 5000 chars, add `[truncated]` prefix
   - Status: **NOT FIXED** - still uses `.split('\n').slice(-50)`
 
-- [ ] **Validate workflow_id early for maintainer tasks** - [specs/new/maintainer-workflow-id-validation.md](specs/new/maintainer-workflow-id-validation.md)
+- [x] **Validate workflow_id early for maintainer tasks** - [specs/new/maintainer-workflow-id-validation.md](specs/new/maintainer-workflow-id-validation.md)
   - File: `packages/agent/src/task-worker.ts` (in `executeTask()`)
   - Issue: Missing `workflow_id` causes late failure with confusing "Maintainer task requires maintainerContext" error
   - Fix: Add early validation after type check; fail fast with clear error message
-  - Status: **NOT FIXED** - no early validation exists
+  - Status: **FIXED** - early validation added at line 118, fails with clear "Maintainer task missing workflow_id" error
 
 ### P2 - Medium (Code Quality & Tests)
 
@@ -190,10 +190,10 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
 | Priority | Count | Status |
 |----------|-------|--------|
 | P0 Critical | 6 | 5 complete |
-| P1 High | 8 | 0 complete |
+| P1 High | 8 | 1 complete |
 | P2 Medium | 9 | 0 complete (1 documented) |
 | P3 Low | 2 | 0 complete |
-| **Total** | **25** | **5 complete** |
+| **Total** | **25** | **6 complete** |
 
 ---
 

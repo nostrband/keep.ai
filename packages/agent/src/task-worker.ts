@@ -116,6 +116,12 @@ export class TaskWorker {
       }
       const taskType: TaskType = task.type;
 
+      // Fail fast: maintainer tasks require workflow_id to load context
+      if (taskType === "maintainer" && !task.workflow_id) {
+        this.debug("Maintainer task missing workflow_id");
+        return this.finishTask(task, "Configuration error", "Maintainer task missing workflow_id");
+      }
+
       const { inboxItems, inbox: rawInbox } = await this.getInboxItems(taskType, task.id);
       let inbox = rawInbox;
       
