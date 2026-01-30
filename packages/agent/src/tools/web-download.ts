@@ -1,38 +1,54 @@
 import { z } from "zod";
-import { tool } from "ai";
 import { FileStore } from "@app/db";
 import { storeFileData } from "@app/node";
 import { EvalContext } from "../sandbox/sandbox";
 import debug from "debug";
 import { LogicError, NetworkError, PermissionError, classifyHttpError, classifyGenericError } from "../errors";
+import { defineTool, Tool } from "./types";
 
 const debugWebDownload = debug("agent:web-download");
 
+const inputSchema = z.object({
+  url: z.string().url().describe("URL of the file to download"),
+  filename: z.string().optional().describe("Name to save the file as (if not provided, will try to extract from URL and payload)"),
+  summary: z.string().optional().describe("Optional summary/description of the downloaded file"),
+});
+
+const outputSchema = z.object({
+  id: z.string().describe("Generated file ID (SHA256 hash)"),
+  name: z.string().describe("Filename"),
+  path: z.string().describe("Local file path relative to files directory"),
+  summary: z.string().describe("File summary"),
+  upload_time: z.string().describe("Download/upload timestamp"),
+  media_type: z.string().describe("Detected MIME type from response headers"),
+  size: z.number().describe("File size in bytes"),
+  url: z.string().describe("Original download URL"),
+});
+
+type Input = z.infer<typeof inputSchema>;
+type Output = z.infer<typeof outputSchema>;
+
+/**
+ * Create the Web.download tool.
+ * This is a mutation - must be called inside Items.withItem().
+ */
 export function makeWebDownloadTool(
-  fileStore: FileStore, 
-  userPath: string | undefined, 
+  fileStore: FileStore,
+  userPath: string | undefined,
   getContext: () => EvalContext
-) {
-  return tool({
+): Tool<Input, Output> {
+  return defineTool({
+    namespace: "Web",
+    name: "download",
     description: `Download a file from a URL and save it to local filesystem and database.
 Fetches the file directly from the URL (up to 10MB), detects MIME type from response headers,
 and stores the file data using the same system as Files.save.
-Returns the created file record with metadata.`,
-    inputSchema: z.object({
-      url: z.string().url().describe("URL of the file to download"),
-      filename: z.string().optional().describe("Name to save the file as (if not provided, will try to extract from URL and payload)"),
-      summary: z.string().optional().describe("Optional summary/description of the downloaded file"),
-    }),
-    outputSchema: z.object({
-      id: z.string().describe("Generated file ID (SHA256 hash)"),
-      name: z.string().describe("Filename"),
-      path: z.string().describe("Local file path relative to files directory"),
-      summary: z.string().describe("File summary"),
-      upload_time: z.string().describe("Download/upload timestamp"),
-      media_type: z.string().describe("Detected MIME type from response headers"),
-      size: z.number().describe("File size in bytes"),
-      url: z.string().describe("Original download URL"),
-    }),
+Returns the created file record with metadata.
+
+⚠️ MUTATION - must be called inside Items.withItem().`,
+    inputSchema,
+    outputSchema,
+    isReadOnly: () => false,
     execute: async (input) => {
       if (!userPath) {
         throw new PermissionError("User path not configured", { source: "Web.download" });
@@ -193,5 +209,5 @@ Returns the created file record with metadata.`,
         url: input.url,
       };
     },
-  });
+  }) as Tool<Input, Output>;
 }

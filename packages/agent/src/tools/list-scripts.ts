@@ -1,21 +1,37 @@
 import { z } from "zod";
-import { tool } from "ai";
 import { ScriptStore } from "@app/db";
+import { defineReadOnlyTool, Tool } from "./types";
 
-export function makeListScriptsTool(scriptStore: ScriptStore) {
-  return tool({
-    description:
-      "List the latest versions of scripts for distinct task_ids (all fields except 'code')",
-    inputSchema: z.object({}).optional().nullable(),
-    outputSchema: z.array(
-      z.object({
-        id: z.string(),
-        task_id: z.string(),
-        version: z.string(), // Format: "major.minor" e.g., "2.1"
-        timestamp: z.string(),
-        change_comment: z.string(),
-      })
-    ),
+const inputSchema = z.object({}).optional().nullable();
+
+const outputSchema = z.array(
+  z.object({
+    id: z.string(),
+    task_id: z.string(),
+    version: z.string(), // Format: "major.minor" e.g., "2.1"
+    timestamp: z.string(),
+    change_comment: z.string(),
+  })
+);
+
+type Input = z.infer<typeof inputSchema>;
+type Output = z.infer<typeof outputSchema>;
+
+/**
+ * Create the Scripts.list tool.
+ * This is a read-only tool - can be used outside Items.withItem().
+ * Only available during planning/maintenance.
+ */
+export function makeListScriptsTool(scriptStore: ScriptStore): Tool<Input, Output> {
+  return defineReadOnlyTool({
+    namespace: "Scripts",
+    name: "list",
+    description: `List the latest versions of scripts for distinct task_ids (all fields except 'code').
+
+⚠️ This tool is only available during planning/maintenance. Do not use in production scripts.
+ℹ️ Not a mutation - can be used outside Items.withItem().`,
+    inputSchema,
+    outputSchema,
     execute: async () => {
       const scripts = await scriptStore.listLatestScripts();
 
@@ -28,5 +44,5 @@ export function makeListScriptsTool(scriptStore: ScriptStore) {
         change_comment: script.change_comment,
       }));
     },
-  });
+  }) as Tool<Input, Output>;
 }

@@ -6,13 +6,13 @@
  */
 
 import { z } from "zod";
-import { tool } from "ai";
 import { EvalContext } from "../sandbox/sandbox";
 import debug from "debug";
 import { google } from "googleapis";
 import { AuthError, classifyGoogleApiError } from "../errors";
 import type { ConnectionManager } from "@app/connectors";
 import { getGoogleCredentials, createGoogleOAuthClient } from "./google-common";
+import { defineTool, Tool } from "./types";
 
 const debugSheets = debug("agent:gsheets");
 
@@ -28,6 +28,13 @@ const SUPPORTED_METHODS = [
   "spreadsheets.batchUpdate",
 ] as const;
 
+// Read-only methods (can be used outside Items.withItem)
+const READ_METHODS = new Set<string>([
+  "spreadsheets.get",
+  "spreadsheets.values.get",
+  "spreadsheets.values.batchGet",
+]);
+
 // Methods that should trigger event tracking (write operations)
 // Uses explicit Set membership instead of includes() to avoid false positives (spec: fix-google-tools-event-tracking-pattern)
 const TRACKED_METHODS = new Set<string>([
@@ -39,6 +46,21 @@ const TRACKED_METHODS = new Set<string>([
   "spreadsheets.batchUpdate",
 ]);
 
+const inputSchema = z.object({
+  method: z.enum(SUPPORTED_METHODS).describe("Google Sheets API method to call"),
+  params: z
+    .any()
+    .optional()
+    .describe("Parameters to pass to the Google Sheets API method"),
+  account: z
+    .string()
+    .describe(
+      "Email address of the Google Sheets account to use (e.g., user@gmail.com)"
+    ),
+});
+
+type Input = z.infer<typeof inputSchema>;
+
 /**
  * Create Google Sheets tool that uses ConnectionManager for credentials.
  *
@@ -49,21 +71,17 @@ const TRACKED_METHODS = new Set<string>([
 export function makeGSheetsTool(
   getContext: () => EvalContext,
   connectionManager: ConnectionManager
-) {
-  return tool({
-    description: `Access Google Sheets API with various methods. Supported methods: ${SUPPORTED_METHODS.join(", ")}. Returns dynamic results based on the method used. Knowledge of param and output structure is expected from the assistant. REQUIRED: 'account' parameter must be the email address of the connected Google Sheets account.`,
-    inputSchema: z.object({
-      method: z.enum(SUPPORTED_METHODS).describe("Google Sheets API method to call"),
-      params: z
-        .any()
-        .optional()
-        .describe("Parameters to pass to the Google Sheets API method"),
-      account: z
-        .string()
-        .describe(
-          "Email address of the Google Sheets account to use (e.g., user@gmail.com)"
-        ),
-    }),
+): Tool<Input, unknown> {
+  return defineTool({
+    namespace: "GoogleSheets",
+    name: "api",
+    description: `Access Google Sheets API with various methods. Supported methods: ${SUPPORTED_METHODS.join(", ")}. Returns dynamic results based on the method used. Knowledge of param and output structure is expected from the assistant. REQUIRED: 'account' parameter must be the email address of the connected Google Sheets account.
+
+⚠️ MUTATION INFO:
+- Read methods (can use outside Items.withItem): spreadsheets.get, spreadsheets.values.get, spreadsheets.values.batchGet
+- Write methods (MUST use inside Items.withItem): spreadsheets.create, spreadsheets.values.update, spreadsheets.values.append, spreadsheets.values.clear, spreadsheets.values.batchUpdate, spreadsheets.batchUpdate`,
+    inputSchema,
+    isReadOnly: (params) => READ_METHODS.has(params.method),
     execute: async (input) => {
       const { method, params = {}, account } = input;
 
@@ -149,5 +167,5 @@ export function makeGSheetsTool(
         throw classified;
       }
     },
-  });
+  }) as Tool<Input, unknown>;
 }

@@ -1,29 +1,44 @@
 import { z } from "zod";
-import { tool } from "ai";
 import { EvalContext } from "../sandbox/sandbox";
 import { getEnv } from "../env";
 import { getTextModelName } from "../model";
 import debug from "debug";
 import { AuthError, LogicError, NetworkError, classifyHttpError, classifyGenericError, formatUsageForEvent } from "../errors";
+import { defineReadOnlyTool, Tool } from "./types";
 
 const debugTextExtract = debug("TextExtract");
 
-export function makeTextExtractTool(getContext: () => EvalContext) {
-  return tool({
+const inputSchema = z.object({
+  text: z.string().min(1).describe("Input text to extract data from"),
+  json_schema: z
+    .any()
+    .describe(
+      "JSON schema object describing the expected output structure"
+    ),
+});
+
+const outputSchema = z.object({
+  result: z.any().describe("Extracted object matching the json_schema"),
+});
+
+type Input = z.infer<typeof inputSchema>;
+type Output = z.infer<typeof outputSchema>;
+
+/**
+ * Create the Text.extract tool.
+ * This is a read-only tool - can be used outside Items.withItem().
+ */
+export function makeTextExtractTool(getContext: () => EvalContext): Tool<Input, Output> {
+  return defineReadOnlyTool({
+    namespace: "Text",
+    name: "extract",
     description: `Extract structured data from text according to a JSON schema using AI.
 Takes input text and a JSON schema, and returns the extracted data in JSON format.
-Uses temperature 0 and light reasoning for reliable parsing.`,
-    inputSchema: z.object({
-      text: z.string().min(1).describe("Input text to extract data from"),
-      json_schema: z
-        .any()
-        .describe(
-          "JSON schema object describing the expected output structure"
-        ),
-    }),
-    outputSchema: z.object({
-      result: z.any().describe("Extracted object matching the json_schema"),
-    }),
+Uses temperature 0 and light reasoning for reliable parsing.
+
+ℹ️ Not a mutation - can be used outside Items.withItem().`,
+    inputSchema,
+    outputSchema,
     execute: async (input) => {
       const { text, json_schema } = input;
 
@@ -131,5 +146,5 @@ Output only valid JSON matching the schema, no additional text or markdown forma
         throw classifyGenericError(error instanceof Error ? error : new Error(String(error)), "Text.extract");
       }
     },
-  });
+  }) as Tool<Input, Output>;
 }

@@ -1,76 +1,90 @@
-import { tool } from "ai";
 import { z } from "zod";
 import debug from "debug";
 import { EvalContext } from "../sandbox/sandbox";
-import { LogicError, NetworkError, classifyHttpError, classifyGenericError, isClassifiedError } from "../errors";
+import { LogicError, classifyHttpError, classifyGenericError, isClassifiedError } from "../errors";
+import { defineReadOnlyTool, Tool } from "./types";
 
 const debugGetWeather = debug("agent:get-weather");
 
-export function makeGetWeatherTool(getContext: () => EvalContext) {
-  return tool({
-    description:
-      "Get weather forecast for a specified location for up to 16 days. If location not found, try higher-level location name. If user didn't specify location, try to get user's location from Notes or message history (Memory.* APIs).",
-    inputSchema: z.union([
-      z
-        .string()
-        .min(1)
-        .describe("Location name string (shorthand for { place: string })"),
+const inputSchema = z.union([
+  z
+    .string()
+    .min(1)
+    .describe("Location name string (shorthand for { place: string })"),
+  z.object({
+    place: z
+      .string()
+      .min(1)
+      .describe(
+        "Location name (e.g., 'Madrid', 'New York', 'Tokyo, Japan')"
+      ),
+    days: z
+      .number()
+      .int()
+      .min(1)
+      .max(16)
+      .optional()
+      .default(1)
+      .describe("Number of forecast days (1-16, default: 1)"),
+  }),
+  z.object({
+    location: z
+      .string()
+      .min(1)
+      .describe("Location name (alternative to 'place')"),
+    days: z
+      .number()
+      .int()
+      .min(1)
+      .max(16)
+      .optional()
+      .default(1)
+      .describe("Number of forecast days (1-16, default: 1)"),
+  }),
+]);
+
+const outputSchema = z.object({
+  place: z.string().describe("Formatted location name"),
+  coordinates: z
+    .object({
+      latitude: z.number(),
+      longitude: z.number(),
+    })
+    .describe("Geographic coordinates"),
+  timezone: z.string().describe("Local timezone"),
+  days: z.number().describe("Number of forecast days returned"),
+  daily: z
+    .array(
       z.object({
-        place: z
-          .string()
-          .min(1)
-          .describe(
-            "Location name (e.g., 'Madrid', 'New York', 'Tokyo, Japan')"
-          ),
-        days: z
+        date: z.string().describe("Local date at the location"),
+        summary: z.string().describe("Weather condition summary"),
+        tempMaxC: z.number().describe("Maximum temperature in Celsius"),
+        tempMinC: z.number().describe("Minimum temperature in Celsius"),
+        precipMm: z
           .number()
-          .int()
-          .min(1)
-          .max(16)
-          .optional()
-          .default(1)
-          .describe("Number of forecast days (1-16, default: 1)"),
-      }),
-      z.object({
-        location: z
-          .string()
-          .min(1)
-          .describe("Location name (alternative to 'place')"),
-        days: z
-          .number()
-          .int()
-          .min(1)
-          .max(16)
-          .optional()
-          .default(1)
-          .describe("Number of forecast days (1-16, default: 1)"),
-      }),
-    ]),
-    outputSchema: z.object({
-      place: z.string().describe("Formatted location name"),
-      coordinates: z
-        .object({
-          latitude: z.number(),
-          longitude: z.number(),
-        })
-        .describe("Geographic coordinates"),
-      timezone: z.string().describe("Local timezone"),
-      days: z.number().describe("Number of forecast days returned"),
-      daily: z
-        .array(
-          z.object({
-            date: z.string().describe("Local date at the location"),
-            summary: z.string().describe("Weather condition summary"),
-            tempMaxC: z.number().describe("Maximum temperature in Celsius"),
-            tempMinC: z.number().describe("Minimum temperature in Celsius"),
-            precipMm: z
-              .number()
-              .describe("Precipitation amount in millimeters"),
-            windMaxKph: z.number().describe("Maximum wind speed in km/h"),
-          })
-        )
-        .describe("Daily weather forecast array"),
-    }),
+          .describe("Precipitation amount in millimeters"),
+        windMaxKph: z.number().describe("Maximum wind speed in km/h"),
+      })
+    )
+    .describe("Daily weather forecast array"),
+});
+
+type Input = z.infer<typeof inputSchema>;
+type Output = z.infer<typeof outputSchema>;
+
+/**
+ * Create the Weather.get tool.
+ * This is a read-only tool - can be used outside Items.withItem().
+ */
+export function makeGetWeatherTool(getContext: () => EvalContext): Tool<Input, Output> {
+  return defineReadOnlyTool({
+    namespace: "Weather",
+    name: "get",
+    description: `Get weather forecast for a specified location for up to 16 days. If location not found, try higher-level location name. If user didn't specify location, try to get user's location from Notes or message history (Memory.* APIs).
+
+ℹ️ Not a mutation - can be used outside Items.withItem().`,
+    inputSchema,
+    outputSchema,
     execute: async (params) => {
       let place: string;
       let days: number = 1;
@@ -204,5 +218,5 @@ export function makeGetWeatherTool(getContext: () => EvalContext) {
       debugGetWeather("Weather forecast result:", result);
       return result;
     },
-  });
+  }) as Tool<Input, Output>;
 }

@@ -1,45 +1,59 @@
 import { z } from "zod";
-import { tool } from "ai";
 import { FileStore } from "@app/db";
 import { EvalContext } from "../sandbox/sandbox";
 import { getEnv } from "../env";
 import { fileUtils } from "@app/node";
 import debug from "debug";
 import { AuthError, LogicError, NetworkError, PermissionError, classifyHttpError, classifyGenericError, isClassifiedError, formatUsageForEvent } from "../errors";
+import { defineReadOnlyTool, Tool } from "./types";
 
 const debugPdfExplain = debug("PdfExplain");
 
+const inputSchema = z.object({
+  file_path: z.string().min(1).describe("File path of the PDF to analyze"),
+  prompt: z
+    .string()
+    .min(1)
+    .max(2000)
+    .describe(
+      "Question or prompt about the PDF - what you want to know or understand about the document"
+    ),
+});
+
+const outputSchema = z.object({
+  explanation: z
+    .string()
+    .describe("AI-generated textual explanation or analysis of the PDF"),
+  file_info: z
+    .object({
+      id: z.string().describe("File ID"),
+      name: z.string().describe("Original filename"),
+      size: z.number().describe("File size in bytes"),
+    })
+    .describe("Information about the analyzed PDF file"),
+});
+
+type Input = z.infer<typeof inputSchema>;
+type Output = z.infer<typeof outputSchema>;
+
+/**
+ * Create the Pdf.explain tool.
+ * This is a read-only tool - can be used outside Items.withItem().
+ */
 export function makePdfExplainTool(
   fileStore: FileStore,
   userPath: string | undefined,
   getContext: () => EvalContext
-) {
-  return tool({
+): Tool<Input, Output> {
+  return defineReadOnlyTool({
+    namespace: "Pdf",
+    name: "explain",
     description: `Analyze and explain PDF documents using AI.
 Takes a PDF file path/ID and a question about the document, uploads the PDF to an AI model and returns the textual explanation.
-`,
-    inputSchema: z.object({
-      file_path: z.string().min(1).describe("File path of the PDF to analyze"),
-      prompt: z
-        .string()
-        .min(1)
-        .max(2000)
-        .describe(
-          "Question or prompt about the PDF - what you want to know or understand about the document"
-        ),
-    }),
-    outputSchema: z.object({
-      explanation: z
-        .string()
-        .describe("AI-generated textual explanation or analysis of the PDF"),
-      file_info: z
-        .object({
-          id: z.string().describe("File ID"),
-          name: z.string().describe("Original filename"),
-          size: z.number().describe("File size in bytes"),
-        })
-        .describe("Information about the analyzed PDF file"),
-    }),
+
+ℹ️ Not a mutation - can be used outside Items.withItem().`,
+    inputSchema,
+    outputSchema,
     execute: async (input) => {
       const { file_path: file, prompt } = input;
 
@@ -218,5 +232,5 @@ Takes a PDF file path/ID and a question about the document, uploads the PDF to a
         throw classifyGenericError(error instanceof Error ? error : new Error(String(error)), "Pdf.explain");
       }
     },
-  });
+  }) as Tool<Input, Output>;
 }

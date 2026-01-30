@@ -57,7 +57,7 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
 ### P1 - High (Core Features & Significant Fixes)
 
 - [ ] **Implement logical items infrastructure** - [specs/logical-items.md](specs/logical-items.md)
-  - Status: **PARTIALLY IMPLEMENTED** (core infrastructure + Memory/Files tools migrated, more tools pending)
+  - Status: **PARTIALLY IMPLEMENTED** (core infrastructure + tool interface refactor complete)
   - Implemented:
     - [x] Items database table (v35 migration) with states (processing, done, failed, skipped)
     - [x] ItemStore for database operations
@@ -65,11 +65,23 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
     - [x] `Items.list` tool for introspection
     - [x] Sandbox callback support (`wrapGuestCallback`, `awaitGuestPromise`)
     - [x] **Tests for ItemStore, Items.list, and sandbox callback functionality** (28 tests in `logical-items.test.ts`)
-    - [x] **Memory tools migrated** (getNote, createNote, updateNote, deleteNote, listNotesMetadata, searchNotes)
-    - [x] **Files tools migrated** (read, save, list, search)
     - [x] Tool interface with `namespace`, `name`, `isReadOnly` metadata (`packages/agent/src/tools/types.ts`)
+    - [x] **Tool interface refactor complete** - ALL tools now use new interface with namespace, name, isReadOnly metadata:
+      - Memory tools (6): getNote, createNote, updateNote, deleteNote, listNotesMetadata, searchNotes
+      - Files tools (4): read, save, list, search
+      - Web tools (3): search, fetchParse, download
+      - Gmail tool (1): api (read-only)
+      - Google tools (3): GoogleDrive.api, GoogleSheets.api, GoogleDocs.api (dynamic read/write)
+      - Notion tool (1): api (dynamic read/write)
+      - Images tools (3): generate, explain, transform
+      - Text tools (4): extract, classify, summarize, generate
+      - PDF tool (1): explain
+      - Audio tool (1): explain
+      - Utils tools (2): Weather.get, Util.atob
+      - User tool (1): send
+      - Console tool (1): log
+      - Scripts tools (5): get, list, history, listRuns, getRun
   - Remaining (not blocking):
-    - [ ] Tool interface refactor (migrate remaining tools: Web, Gmail, GDrive, Images, Text, etc.)
     - [ ] ToolWrapper integration (replace SandboxAPI with ToolWrapper in workflow-worker)
     - [ ] Mutation enforcement (ToolWrapper has code but not yet used)
     - [ ] Prompting changes (planner/maintainer prompts need updating)

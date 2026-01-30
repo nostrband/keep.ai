@@ -1,7 +1,7 @@
 import { z } from "zod";
-import { tool } from "ai";
 import { KeepDbApi } from "@app/db";
 import { generateId } from "ai";
+import { defineTool, Tool } from "./types";
 
 export interface UserSendContext {
   workflowId?: string;
@@ -9,18 +9,34 @@ export interface UserSendContext {
   scriptRunId?: string;
 }
 
-export function makeUserSendTool(api: KeepDbApi, context?: UserSendContext) {
-  return tool({
+const inputSchema = z.object({
+  message: z.string().describe("The message text to send to the user"),
+});
+
+const outputSchema = z.object({
+  id: z.string().describe("Generated notification/message ID"),
+  success: z.boolean().describe("Whether the message was sent successfully"),
+});
+
+type Input = z.infer<typeof inputSchema>;
+type Output = z.infer<typeof outputSchema>;
+
+/**
+ * Create the User.send tool.
+ * This is a mutation - must be called inside Items.withItem().
+ */
+export function makeUserSendTool(api: KeepDbApi, context?: UserSendContext): Tool<Input, Output> {
+  return defineTool({
+    namespace: "User",
+    name: "send",
     description: `Send a message to the user.
 This is useful for scripts to send execution results to user.
-The message will create a notification that appears in the user's notification list.`,
-    inputSchema: z.object({
-      message: z.string().describe("The message text to send to the user"),
-    }),
-    outputSchema: z.object({
-      id: z.string().describe("Generated notification/message ID"),
-      success: z.boolean().describe("Whether the message was sent successfully"),
-    }),
+The message will create a notification that appears in the user's notification list.
+
+⚠️ MUTATION - must be called inside Items.withItem().`,
+    inputSchema,
+    outputSchema,
+    isReadOnly: () => false,
     execute: async (input) => {
       const notificationId = generateId();
       const timestamp = new Date().toISOString();
@@ -75,5 +91,5 @@ The message will create a notification that appears in the user's notification l
         success: true,
       };
     },
-  });
+  }) as Tool<Input, Output>;
 }

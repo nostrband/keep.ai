@@ -1,11 +1,11 @@
 import { z } from "zod";
-import { tool } from "ai";
 import { EvalContext } from "../sandbox/sandbox";
 import debug from "debug";
 import { google } from "googleapis";
 import { AuthError, classifyGoogleApiError } from "../errors";
 import type { ConnectionManager } from "@app/connectors";
 import { getGoogleCredentials, createGoogleOAuthClient } from "./google-common";
+import { defineReadOnlyTool, Tool } from "./types";
 
 const debugGmail = debug("agent:gmail");
 
@@ -19,31 +19,41 @@ const SUPPORTED_METHODS = [
   "users.getProfile",
 ] as const;
 
+const inputSchema = z.object({
+  method: z.enum(SUPPORTED_METHODS).describe("Gmail API method to call"),
+  params: z
+    .any()
+    .optional()
+    .describe("Parameters to pass to the Gmail API method"),
+  account: z
+    .string()
+    .describe(
+      "Email address of the Gmail account to use (e.g., user@gmail.com)"
+    ),
+});
+
+type Input = z.infer<typeof inputSchema>;
+
 /**
  * Create Gmail tool that uses ConnectionManager for credentials.
  *
  * The tool requires an explicit `account` parameter (email address) to specify
  * which Gmail account to use. This prevents accidental account mixing in
  * multi-account setups.
+ *
+ * This is a read-only tool - can be used outside Items.withItem().
  */
 export function makeGmailTool(
   getContext: () => EvalContext,
   connectionManager: ConnectionManager
-) {
-  return tool({
-    description: `Access Gmail API with various methods. Supported methods: ${SUPPORTED_METHODS.join(", ")}. For all methods that require userId param, it will be automatically set to 'me'. Returns dynamic results based on the method used. Knowledge of param and output structure is expected from the assistant. REQUIRED: 'account' parameter must be the email address of the connected Gmail account.`,
-    inputSchema: z.object({
-      method: z.enum(SUPPORTED_METHODS).describe("Gmail API method to call"),
-      params: z
-        .any()
-        .optional()
-        .describe("Parameters to pass to the Gmail API method"),
-      account: z
-        .string()
-        .describe(
-          "Email address of the Gmail account to use (e.g., user@gmail.com)"
-        ),
-    }),
+): Tool<Input, unknown> {
+  return defineReadOnlyTool({
+    namespace: "Gmail",
+    name: "api",
+    description: `Access Gmail API with various methods. Supported methods: ${SUPPORTED_METHODS.join(", ")}. For all methods that require userId param, it will be automatically set to 'me'. Returns dynamic results based on the method used. Knowledge of param and output structure is expected from the assistant. REQUIRED: 'account' parameter must be the email address of the connected Gmail account.
+
+ℹ️ Not a mutation - can be used outside Items.withItem().`,
+    inputSchema,
     // Skip output schema since it's dynamic based on method
     execute: async (input) => {
       const { method, params = {}, account } = input;
@@ -130,5 +140,5 @@ export function makeGmailTool(
         throw classified;
       }
     },
-  });
+  }) as Tool<Input, unknown>;
 }

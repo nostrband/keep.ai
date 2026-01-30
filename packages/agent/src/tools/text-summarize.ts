@@ -1,34 +1,49 @@
 import { z } from "zod";
-import { tool } from "ai";
 import { EvalContext } from "../sandbox/sandbox";
 import { getEnv } from "../env";
 import { getTextModelName } from "../model";
 import debug from "debug";
 import { AuthError, LogicError, NetworkError, classifyHttpError, classifyGenericError, isClassifiedError, formatUsageForEvent } from "../errors";
+import { defineReadOnlyTool, Tool } from "./types";
 
 const debugTextSummarize = debug("TextSummarize");
 
-export function makeTextSummarizeTool(getContext: () => EvalContext) {
-  return tool({
+const inputSchema = z.object({
+  text: z.string().min(1).describe("Input text to summarize"),
+  prompt: z.string().optional().describe("Additional prompt on how to perform the summarization, preferred output format, etc"),
+  max_chars: z
+    .number()
+    .min(100)
+    .max(10000)
+    .default(1500)
+    .optional()
+    .describe(
+      "Maximum number of characters in the summary (default: 1500)"
+    ),
+});
+
+const outputSchema = z.object({
+  summary: z.string().describe("Summarized text"),
+});
+
+type Input = z.infer<typeof inputSchema>;
+type Output = z.infer<typeof outputSchema>;
+
+/**
+ * Create the Text.summarize tool.
+ * This is a read-only tool - can be used outside Items.withItem().
+ */
+export function makeTextSummarizeTool(getContext: () => EvalContext): Tool<Input, Output> {
+  return defineReadOnlyTool({
+    namespace: "Text",
+    name: "summarize",
     description: `Summarize text to a specified maximum length using AI.
 Takes input text and optional maximum character count, returns a concise summary.
-Uses temperature 0 and no reasoning for straightforward summarization.`,
-    inputSchema: z.object({
-      text: z.string().min(1).describe("Input text to summarize"),
-      prompt: z.string().optional().describe("Additional prompt on how to perform the summarization, preferred output format, etc"),
-      max_chars: z
-        .number()
-        .min(100)
-        .max(10000)
-        .default(1500)
-        .optional()
-        .describe(
-          "Maximum number of characters in the summary (default: 1500)"
-        ),
-    }),
-    outputSchema: z.object({
-      summary: z.string().describe("Summarized text"),
-    }),
+Uses temperature 0 and no reasoning for straightforward summarization.
+
+ℹ️ Not a mutation - can be used outside Items.withItem().`,
+    inputSchema,
+    outputSchema,
     execute: async (input) => {
       const { text, prompt: userPrompt = '', max_chars = 1500 } = input;
 
@@ -130,5 +145,5 @@ ${text}`;
         throw classifyGenericError(error instanceof Error ? error : new Error(String(error)), "Text.summarize");
       }
     },
-  });
+  }) as Tool<Input, Output>;
 }

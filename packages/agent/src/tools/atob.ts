@@ -1,16 +1,29 @@
-import { tool } from "ai";
 import { z } from "zod";
+import { defineReadOnlyTool, Tool } from "./types";
 
-export function makeAtobTool() {
-  return tool({
-    description:
-      "Decode base64 or base64url encoded string to binary string, similar to Window.atob() (but with base64url support).",
-    inputSchema: z.string().describe("Base64 or base64url encoded string"),
-    outputSchema: z.string().describe("Decoded binary string"),
+const inputSchema = z.string().describe("Base64 or base64url encoded string");
+const outputSchema = z.string().describe("Decoded binary string");
+
+type Input = z.infer<typeof inputSchema>;
+type Output = z.infer<typeof outputSchema>;
+
+/**
+ * Create the Util.atob tool.
+ * This is a read-only tool - can be used outside Items.withItem().
+ */
+export function makeAtobTool(): Tool<Input, Output> {
+  return defineReadOnlyTool({
+    namespace: "Util",
+    name: "atob",
+    description: `Decode base64 or base64url encoded string to binary string, similar to Window.atob() (but with base64url support).
+
+ℹ️ Not a mutation - can be used outside Items.withItem().`,
+    inputSchema,
+    outputSchema,
     execute: async (input: string) => {
       return atobCompatAny(input);
     },
-  });
+  }) as Tool<Input, Output>;
 }
 
 export function atobCompatAny(input: string): string {

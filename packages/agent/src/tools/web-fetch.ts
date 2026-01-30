@@ -1,65 +1,79 @@
 import { z } from "zod";
 import { Exa } from "exa-js";
-import { tool } from "ai";
 import { getEnv } from "../env";
 import debug from "debug";
 import { EvalContext } from "../sandbox/sandbox";
 import { AuthError, LogicError, NetworkError, classifyGenericError } from "../errors";
+import { defineReadOnlyTool, Tool } from "./types";
 
 const debugWebFetch = debug("agent:web-fetch");
 
-export function makeWebFetchTool(getContext: () => EvalContext) {
-  return tool({
-    description:
-      "Fetch content from a specific URL using Exa API. Returns the full text content of the webpage or API endpoint. Use live: true to get up-to-date content for time-sensitive data.",
-    inputSchema: z.union([
-      z.object({
-        url: z.string().url().describe("The URL to fetch content from"),
-        live: z
-          .boolean()
-          .optional()
-          .default(true)
-          .describe("If false, allows cached not up-to-date content"),
-        maxCharacters: z
-          .number()
-          .int()
-          .min(1000)
-          .max(100000)
-          .optional()
-          .default(100000)
-          .describe(
-            "Maximum number of characters to fetch (1000-100000, default: 100000)"
-          ),
-        includeHtmlTags: z
-          .boolean()
-          .optional()
-          .default(false)
-          .describe("Whether to include HTML tags in the content"),
-      }),
-      z
-        .string()
-        .url()
-        .describe("URL to fetch content from (shorthand for { url: string })"),
-    ]),
-    outputSchema: z.object({
-      url: z.string().describe("The actual URL that was fetched"),
-      title: z.string().describe("Page title"),
-      author: z.string().nullable().describe("Page author if available"),
-      publishedDate: z
-        .string()
-        .nullable()
-        .describe("Published date if available"),
-      text: z.string().describe("Full text content of the page"),
-      textLength: z.number().describe("Length of the text content"),
-      summary: z.string().nullable().describe("Brief summary of the content"),
-      fetchOptions: z
-        .object({
-          live: z.boolean(),
-          maxCharacters: z.number(),
-          includeHtmlTags: z.boolean(),
-        })
-        .describe("Options used for fetching"),
-    }),
+const inputSchema = z.union([
+  z.object({
+    url: z.string().url().describe("The URL to fetch content from"),
+    live: z
+      .boolean()
+      .optional()
+      .default(true)
+      .describe("If false, allows cached not up-to-date content"),
+    maxCharacters: z
+      .number()
+      .int()
+      .min(1000)
+      .max(100000)
+      .optional()
+      .default(100000)
+      .describe(
+        "Maximum number of characters to fetch (1000-100000, default: 100000)"
+      ),
+    includeHtmlTags: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe("Whether to include HTML tags in the content"),
+  }),
+  z
+    .string()
+    .url()
+    .describe("URL to fetch content from (shorthand for { url: string })"),
+]);
+
+const outputSchema = z.object({
+  url: z.string().describe("The actual URL that was fetched"),
+  title: z.string().describe("Page title"),
+  author: z.string().nullable().describe("Page author if available"),
+  publishedDate: z
+    .string()
+    .nullable()
+    .describe("Published date if available"),
+  text: z.string().describe("Full text content of the page"),
+  textLength: z.number().describe("Length of the text content"),
+  summary: z.string().nullable().describe("Brief summary of the content"),
+  fetchOptions: z
+    .object({
+      live: z.boolean(),
+      maxCharacters: z.number(),
+      includeHtmlTags: z.boolean(),
+    })
+    .describe("Options used for fetching"),
+});
+
+type Input = z.infer<typeof inputSchema>;
+type Output = z.infer<typeof outputSchema>;
+
+/**
+ * Create the Web.fetchParse tool.
+ * This is a read-only tool - can be used outside Items.withItem().
+ */
+export function makeWebFetchTool(getContext: () => EvalContext): Tool<Input, Output> {
+  return defineReadOnlyTool({
+    namespace: "Web",
+    name: "fetchParse",
+    description: `Fetch content from a specific URL using Exa API. Returns the full text content of the webpage or API endpoint. Use live: true to get up-to-date content for time-sensitive data.
+
+ℹ️ Not a mutation - can be used outside Items.withItem().`,
+    inputSchema,
+    outputSchema,
     execute: async (params) => {
       let url: string;
       let live: boolean = false;
@@ -148,5 +162,5 @@ export function makeWebFetchTool(getContext: () => EvalContext) {
 
       return formattedResult;
     },
-  });
+  }) as Tool<Input, Output>;
 }

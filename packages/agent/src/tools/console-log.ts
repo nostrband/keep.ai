@@ -1,20 +1,39 @@
 import { z } from "zod";
-import { tool } from "ai";
 import { EvalContext } from "../sandbox/sandbox";
+import { defineReadOnlyTool, Tool } from "./types";
 
-export function makeConsoleLogTool(getContext: () => EvalContext) {
-  return tool({
+const inputSchema = z.object({
+  type: z
+    .enum(["log", "warn", "error"])
+    .describe(
+      "Log level: log for general info, warn for warnings, error for errors"
+    ),
+  line: z.string().describe("The message to log"),
+});
+
+const outputSchema = z.object({
+  success: z.boolean().describe("Whether the log was recorded successfully"),
+});
+
+type Input = z.infer<typeof inputSchema>;
+type Output = z.infer<typeof outputSchema>;
+
+/**
+ * Create the Console.log tool.
+ * This is read-only (logging doesn't mutate user-controlled external state).
+ * Allowed outside Items.withItem() per spec.
+ */
+export function makeConsoleLogTool(getContext: () => EvalContext): Tool<Input, Output> {
+  return defineReadOnlyTool({
+    namespace: "Console",
+    name: "log",
     description: `Log messages to console for debugging and monitoring.
 Accepts log messages with different severity levels (log, warn, error).
-Messages are timestamped and stored in run logs.`,
-    inputSchema: z.object({
-      type: z
-        .enum(["log", "warn", "error"])
-        .describe(
-          "Log level: log for general info, warn for warnings, error for errors"
-        ),
-      line: z.string().describe("The message to log"),
-    }),
+Messages are timestamped and stored in run logs.
+
+ℹ️ Not a mutation - can be used outside Items.withItem().`,
+    inputSchema,
+    outputSchema,
     execute: async (input) => {
       // Crop input BEFORE escaping to ensure predictable 1000 char limit on original input
       // and to avoid cutting escape sequences mid-way
@@ -46,5 +65,5 @@ Messages are timestamped and stored in run logs.`,
 
       return { success: true };
     },
-  });
+  }) as Tool<Input, Output>;
 }

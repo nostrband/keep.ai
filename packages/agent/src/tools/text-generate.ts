@@ -1,41 +1,56 @@
 import { z } from "zod";
-import { tool } from "ai";
 import { EvalContext } from "../sandbox/sandbox";
 import { getEnv } from "../env";
 import { getModelName } from "../model";
 import debug from "debug";
 import { AuthError, LogicError, NetworkError, classifyHttpError, classifyGenericError, isClassifiedError, formatUsageForEvent } from "../errors";
+import { defineReadOnlyTool, Tool } from "./types";
 
 const debugTextGenerate = debug("TextGenerate");
 
-export function makeTextGenerateTool(getContext: () => EvalContext) {
-  return tool({
+const inputSchema = z.object({
+  prompt: z
+    .string()
+    .min(1)
+    .describe("Prompt to generate text from"),
+  temperature: z
+    .number()
+    .min(0)
+    .max(1)
+    .default(0.3)
+    .optional()
+    .describe("Sampling temperature: 0 is deterministic, 1 is very random (default: 0.3)"),
+  max_chars: z
+    .number()
+    .min(100)
+    .max(10000)
+    .default(1500)
+    .optional()
+    .describe("Maximum number of characters to generate (default: 1500)"),
+});
+
+const outputSchema = z.object({
+  text: z.string().describe("Generated text"),
+});
+
+type Input = z.infer<typeof inputSchema>;
+type Output = z.infer<typeof outputSchema>;
+
+/**
+ * Create the Text.generate tool.
+ * This is a read-only tool - can be used outside Items.withItem().
+ */
+export function makeTextGenerateTool(getContext: () => EvalContext): Tool<Input, Output> {
+  return defineReadOnlyTool({
+    namespace: "Text",
+    name: "generate",
     description: `Generate text based on a prompt using AI.
 Takes a prompt and optional temperature/max_chars parameters, returns generated text.
-Temperature controls randomness (0=deterministic, 1=very random), default 0.3.`,
-    inputSchema: z.object({
-      prompt: z
-        .string()
-        .min(1)
-        .describe("Prompt to generate text from"),
-      temperature: z
-        .number()
-        .min(0)
-        .max(1)
-        .default(0.3)
-        .optional()
-        .describe("Sampling temperature: 0 is deterministic, 1 is very random (default: 0.3)"),
-      max_chars: z
-        .number()
-        .min(100)
-        .max(10000)
-        .default(1500)
-        .optional()
-        .describe("Maximum number of characters to generate (default: 1500)"),
-    }),
-    outputSchema: z.object({
-      text: z.string().describe("Generated text"),
-    }),
+Temperature controls randomness (0=deterministic, 1=very random), default 0.3.
+
+ℹ️ Not a mutation - can be used outside Items.withItem().`,
+    inputSchema,
+    outputSchema,
     execute: async (input) => {
       const { prompt, temperature = 0.3, max_chars = 1500 } = input;
 
@@ -130,5 +145,5 @@ If the prompt is malformed, unclear, inappropriate, or you cannot fulfill the re
         throw classifyGenericError(error instanceof Error ? error : new Error(String(error)), "Text.generate");
       }
     },
-  });
+  }) as Tool<Input, Output>;
 }
