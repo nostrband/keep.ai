@@ -57,7 +57,7 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
 ### P1 - High (Core Features & Significant Fixes)
 
 - [ ] **Implement logical items infrastructure** - [specs/logical-items.md](specs/logical-items.md)
-  - Status: **PARTIALLY IMPLEMENTED** (core infrastructure complete with tests, integration pending)
+  - Status: **PARTIALLY IMPLEMENTED** (core infrastructure + Memory/Files tools migrated, more tools pending)
   - Implemented:
     - [x] Items database table (v35 migration) with states (processing, done, failed, skipped)
     - [x] ItemStore for database operations
@@ -65,9 +65,13 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
     - [x] `Items.list` tool for introspection
     - [x] Sandbox callback support (`wrapGuestCallback`, `awaitGuestPromise`)
     - [x] **Tests for ItemStore, Items.list, and sandbox callback functionality** (28 tests in `logical-items.test.ts`)
+    - [x] **Memory tools migrated** (getNote, createNote, updateNote, deleteNote, listNotesMetadata, searchNotes)
+    - [x] **Files tools migrated** (read, save, list, search)
+    - [x] Tool interface with `namespace`, `name`, `isReadOnly` metadata (`packages/agent/src/tools/types.ts`)
   - Remaining (not blocking):
-    - [ ] Tool interface refactor (migrate existing tools to new Tool interface with `isReadOnly` metadata)
-    - [ ] Mutation enforcement (currently withItem works but doesn't enforce mutation restrictions)
+    - [ ] Tool interface refactor (migrate remaining tools: Web, Gmail, GDrive, Images, Text, etc.)
+    - [ ] ToolWrapper integration (replace SandboxAPI with ToolWrapper in workflow-worker)
+    - [ ] Mutation enforcement (ToolWrapper has code but not yet used)
     - [ ] Prompting changes (planner/maintainer prompts need updating)
 
 - [x] **Fix tool always saves, check active for race** - [specs/fix-tool-always-save-check-active.md](specs/fix-tool-always-save-check-active.md)
