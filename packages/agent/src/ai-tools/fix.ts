@@ -11,13 +11,15 @@ export type FixInfo = z.infer<typeof FixInfoSchema>;
 
 /**
  * Result of the fix tool.
- * applied = true means the fix was saved as a new minor version.
- * applied = false means the planner updated the script while maintainer was running (race condition),
- * so the fix was discarded.
+ * The fix is always saved as a new minor version.
+ * activated = true means the fix became the active script.
+ * activated = false means the planner updated the script while maintainer was running,
+ * so the fix was saved but not activated.
  */
 export interface FixResult {
   script: Script;
-  applied: boolean;
+  /** Whether the fix became the active script (false if race condition detected) */
+  activated: boolean;
 }
 
 /**
@@ -26,14 +28,18 @@ export interface FixResult {
  * preserving the script's major version from when the maintainer started.
  *
  * Race condition handling:
- * If the planner has updated the script (new major_version) while the maintainer
- * was running, the fix is discarded and applied = false is returned.
+ * If the planner has updated the script (new active_script_id) while the maintainer
+ * was running, the fix is still saved but not activated. The maintainer's work is
+ * never discarded.
  */
 export function makeFixTool(opts: {
   maintainerTaskId: string;
   workflowId: string;
-  expectedMajorVersion: number;
+  /** The script ID that the maintainer is fixing */
+  expectedScriptId: string;
   scriptStore: ScriptStore;
+  /** Optional callback invoked when the fix tool is called */
+  onCalled?: (result: FixResult) => void;
 }) {
   return tool({
     execute: async (info: FixInfo): Promise<FixResult> => {
@@ -47,71 +53,73 @@ export function makeFixTool(opts: {
         throw new Error(`Workflow ${opts.workflowId} has no active script`);
       }
 
-      // Get the current active script
-      const currentScript = await opts.scriptStore.getScript(workflow.active_script_id);
-      if (!currentScript) {
-        throw new Error(`Script not found: ${workflow.active_script_id}`);
-      }
-
-      // Race condition check: only apply fix if planner hasn't updated
-      // Maintainer was working on major version X, if current is still X, we can proceed
-      if (currentScript.major_version !== opts.expectedMajorVersion) {
-        // Planner updated the script while maintainer was running
-        // Our fix is stale - don't apply it
-        // Clear maintenance mode since the planner's new version should be tried
-        await opts.scriptStore.updateWorkflowFields(opts.workflowId, {
-          maintenance: false,
-        });
-
-        return {
-          script: currentScript,
-          applied: false,
-        };
+      // Get the script the maintainer was working on
+      const originalScript = await opts.scriptStore.getScript(opts.expectedScriptId);
+      if (!originalScript) {
+        throw new Error(`Original script not found: ${opts.expectedScriptId}`);
       }
 
       // Create new script with same major_version, incremented minor_version
+      // Fix is ALWAYS saved - maintainer's work is never discarded
       const newScript: Script = {
         id: generateId(),
         code: info.code,
         change_comment: info.comment,
         task_id: opts.maintainerTaskId,
         timestamp: new Date().toISOString(),
-        major_version: currentScript.major_version,
-        minor_version: currentScript.minor_version + 1,
+        major_version: originalScript.major_version,
+        minor_version: originalScript.minor_version + 1,
         workflow_id: opts.workflowId,
         // Preserve existing metadata - maintainer cannot change these
-        type: currentScript.type,
-        summary: currentScript.summary,
-        diagram: currentScript.diagram,
+        type: originalScript.type,
+        summary: originalScript.summary,
+        diagram: originalScript.diagram,
       };
 
       await opts.scriptStore.addScript(newScript);
 
-      // Update workflow atomically:
-      // - Set active_script_id to the new fixed script
-      // - Clear maintenance flag
-      // - Set next_run_timestamp to now for immediate re-run to verify the fix
-      await opts.scriptStore.updateWorkflowFields(opts.workflowId, {
-        active_script_id: newScript.id,
-        maintenance: false,
-        next_run_timestamp: new Date().toISOString(),
-      });
+      // Race condition check: only activate if planner hasn't updated
+      // Compare active_script_id to know if planner changed it while we worked
+      const shouldActivate = workflow.active_script_id === opts.expectedScriptId;
 
-      return {
+      if (shouldActivate) {
+        // No race - make this fix the active script
+        await opts.scriptStore.updateWorkflowFields(opts.workflowId, {
+          active_script_id: newScript.id,
+          maintenance: false,
+          next_run_timestamp: new Date().toISOString(),
+        });
+      } else {
+        // Race detected - planner updated the script
+        // Fix is saved but not activated; clear maintenance so planner's version runs
+        await opts.scriptStore.updateWorkflowFields(opts.workflowId, {
+          maintenance: false,
+        });
+      }
+
+      const result: FixResult = {
         script: newScript,
-        applied: true,
+        activated: shouldActivate,
       };
+
+      // Invoke callback if provided
+      if (opts.onCalled) {
+        opts.onCalled(result);
+      }
+
+      return result;
     },
     description: `Propose a fix for the script error.
 This tool can ONLY modify the script code - it cannot change title, summary, schedule, or other metadata.
 Call this tool when you have identified and fixed the bug in the script.
 If you cannot fix the issue, do NOT call this tool - provide an explanation instead.
 
-The fix will be saved as a new minor version (e.g., 1.0 → 1.1) and the workflow will immediately re-run to verify it works.
+The fix will be saved as a new minor version (e.g., 1.0 → 1.1).
+If no other changes occurred, the workflow will immediately re-run to verify it works.
 
 Returns:
-- applied: true if the fix was saved and workflow will re-run
-- applied: false if the planner updated the script while you were working (your fix was discarded)
+- activated: true if the fix became active and workflow will re-run
+- activated: false if the planner updated the script while you were working (your fix was saved but not activated)
 `,
     inputSchema: FixInfoSchema,
   });

@@ -299,7 +299,7 @@ describe("Maintainer Integration Tests", () => {
       const fixTool = makeFixTool({
         maintainerTaskId: maintenanceResult.maintainerTask.id,
         workflowId: workflow.id,
-        expectedMajorVersion: 1, // Maintainer started with major version 1
+        expectedScriptId: "script-1", // Maintainer was fixing script-1
         scriptStore: api.scriptStore,
       });
 
@@ -312,7 +312,7 @@ describe("Maintainer Integration Tests", () => {
       ) as FixResult;
 
       // 5. Verify fix was applied correctly
-      expect(fixResult.applied).toBe(true);
+      expect(fixResult.activated).toBe(true);
       expect(fixResult.script.major_version).toBe(1); // Same major version
       expect(fixResult.script.minor_version).toBe(1); // Incremented minor version
       expect(fixResult.script.code).toContain("if (response.data)"); // Fixed code
@@ -369,7 +369,7 @@ describe("Maintainer Integration Tests", () => {
       const fixTool = makeFixTool({
         maintainerTaskId: maintenanceResult.maintainerTask.id,
         workflowId: workflow.id,
-        expectedMajorVersion: 1, // Maintainer expected version 1
+        expectedScriptId: "script-1", // Maintainer was fixing script-1
         scriptStore: api.scriptStore,
       });
 
@@ -381,16 +381,24 @@ describe("Maintainer Integration Tests", () => {
         createToolCallOptions()
       ) as FixResult;
 
-      // Fix should NOT be applied due to race condition
-      expect(fixResult.applied).toBe(false);
-      expect(fixResult.script.major_version).toBe(2); // Returns current (planner's) script
+      // Fix should NOT be activated due to race condition, but IS saved
+      expect(fixResult.activated).toBe(false);
+      // The fix is saved based on the original script (v1), so major_version is 1
+      expect(fixResult.script.major_version).toBe(1);
+      expect(fixResult.script.minor_version).toBe(1); // Incremented from 0
+      expect(fixResult.script.code).toContain("maintainer fix for v1");
 
-      // Verify workflow still points to planner's script
+      // Verify workflow still points to planner's script (not the maintainer's fix)
       const dbWorkflow = await api.scriptStore.getWorkflow(workflow.id);
       expect(dbWorkflow?.active_script_id).toBe(plannerScript.id);
 
       // Verify maintenance flag is cleared (no longer in maintenance)
       expect(dbWorkflow?.maintenance).toBe(false);
+
+      // Verify the fix was saved (maintainer's work is preserved for history)
+      const savedFix = await api.scriptStore.getScript(fixResult.script.id);
+      expect(savedFix).not.toBeNull();
+      expect(savedFix?.code).toContain("maintainer fix for v1");
     });
 
     it("should allow multiple fix attempts with incrementing minor versions", async () => {
@@ -411,7 +419,7 @@ describe("Maintainer Integration Tests", () => {
       const fixTool1 = makeFixTool({
         maintainerTaskId: result1.maintainerTask.id,
         workflowId: workflow.id,
-        expectedMajorVersion: 2,
+        expectedScriptId: "script-1", // Original script
         scriptStore: api.scriptStore,
       });
 
@@ -420,7 +428,7 @@ describe("Maintainer Integration Tests", () => {
         createToolCallOptions()
       ) as FixResult;
 
-      expect(fix1.applied).toBe(true);
+      expect(fix1.activated).toBe(true);
       expect(fix1.script.minor_version).toBe(1);
 
       // Second maintenance cycle (fix 1 didn't work): 2.1 -> 2.2
@@ -434,7 +442,7 @@ describe("Maintainer Integration Tests", () => {
       const fixTool2 = makeFixTool({
         maintainerTaskId: result2.maintainerTask.id,
         workflowId: workflow.id,
-        expectedMajorVersion: 2,
+        expectedScriptId: fix1.script.id, // Now fixing the first fix
         scriptStore: api.scriptStore,
       });
 
@@ -443,7 +451,7 @@ describe("Maintainer Integration Tests", () => {
         createToolCallOptions()
       ) as FixResult;
 
-      expect(fix2.applied).toBe(true);
+      expect(fix2.activated).toBe(true);
       expect(fix2.script.minor_version).toBe(2);
 
       // Third maintenance cycle: 2.2 -> 2.3
@@ -457,7 +465,7 @@ describe("Maintainer Integration Tests", () => {
       const fixTool3 = makeFixTool({
         maintainerTaskId: result3.maintainerTask.id,
         workflowId: workflow.id,
-        expectedMajorVersion: 2,
+        expectedScriptId: fix2.script.id, // Now fixing the second fix
         scriptStore: api.scriptStore,
       });
 
@@ -466,7 +474,7 @@ describe("Maintainer Integration Tests", () => {
         createToolCallOptions()
       ) as FixResult;
 
-      expect(fix3.applied).toBe(true);
+      expect(fix3.activated).toBe(true);
       expect(fix3.script.minor_version).toBe(3);
 
       // Verify all scripts exist
@@ -649,13 +657,13 @@ describe("Maintainer Integration Tests", () => {
       const fixTool = makeFixTool({
         maintainerTaskId: result.maintainerTask.id,
         workflowId: workflow.id,
-        expectedMajorVersion: 1,
+        expectedScriptId: "script-1",
         scriptStore: api.scriptStore,
       });
-      await fixTool.execute!(
+      const fix1Result = await fixTool.execute!(
         { code: "// fix 1", comment: "Fix 1" },
         createToolCallOptions()
-      );
+      ) as FixResult;
 
       // Second fix attempt (fix 1 didn't work)
       result = await api.enterMaintenanceMode({
@@ -669,7 +677,7 @@ describe("Maintainer Integration Tests", () => {
       const fixTool2 = makeFixTool({
         maintainerTaskId: result.maintainerTask.id,
         workflowId: workflow.id,
-        expectedMajorVersion: 1,
+        expectedScriptId: fix1Result.script.id, // Use the previous fix's script id
         scriptStore: api.scriptStore,
       });
       await fixTool2.execute!(
@@ -762,7 +770,7 @@ describe("Maintainer Integration Tests", () => {
       const fixTool1 = makeFixTool({
         maintainerTaskId: result1.maintainerTask.id,
         workflowId: workflow.id,
-        expectedMajorVersion: 1,
+        expectedScriptId: "script-1",
         scriptStore: api.scriptStore,
       });
       await fixTool1.execute!(

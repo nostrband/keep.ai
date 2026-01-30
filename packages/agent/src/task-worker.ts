@@ -555,7 +555,7 @@ export class TaskWorker {
       this.debug("loadMaintainerContext: Script run not found", scriptRunId);
       return {
         workflowId,
-        expectedMajorVersion: activeScript.major_version,
+        expectedScriptId: activeScript.id,
         scriptRunId,
         error: { type: "unknown", message: "Script run not found" },
         logs: "",
@@ -591,7 +591,7 @@ export class TaskWorker {
 
     return {
       workflowId,
-      expectedMajorVersion: scriptToUse.major_version,
+      expectedScriptId: scriptToUse.id,
       scriptRunId,
       error: {
         type: scriptRun.error_type || "unknown",
@@ -673,8 +673,8 @@ If you cannot fix this issue autonomously, explain why without calling the \`fix
     context: MaintainerContext,
     agent: ReplAgent
   ): Promise<void> {
-    // Check if fix tool was called by looking at agent history
-    const fixCalled = this.checkIfFixToolCalled(agent);
+    // Check if fix tool was called using the agent's callback-tracked flag
+    const fixCalled = agent.fixCalled;
     this.debug("Maintainer completion - fix called:", fixCalled);
 
     if (fixCalled) {
@@ -705,23 +705,6 @@ If you cannot fix this issue autonomously, explain why without calling the \`fix
       context.scriptRunId,
       explanation || "The maintainer was unable to automatically fix this issue."
     );
-  }
-
-  /**
-   * Check if the fix tool was called during the agent loop.
-   * Looks through agent history for tool parts with type 'tool-fix'.
-   */
-  private checkIfFixToolCalled(agent: ReplAgent): boolean {
-    for (const message of agent.history) {
-      if (message.role !== "assistant" || !message.parts) continue;
-      for (const part of message.parts) {
-        // The AI SDK uses `tool-${toolName}` format for tool parts
-        if (part.type === "tool-fix") {
-          return true;
-        }
-      }
-    }
-    return false;
   }
 
   /**

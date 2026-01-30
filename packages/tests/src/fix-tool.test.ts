@@ -118,7 +118,7 @@ describe("Fix Tool", () => {
       const fixTool = makeFixTool({
         maintainerTaskId: "maintainer-task-1",
         workflowId: "workflow-1",
-        expectedMajorVersion: 2,
+        expectedScriptId: "script-1",
         scriptStore,
       });
 
@@ -127,7 +127,7 @@ describe("Fix Tool", () => {
         createToolCallOptions()
       ) as FixResult;
 
-      expect(result.applied).toBe(true);
+      expect(result.activated).toBe(true);
       expect(result.script.major_version).toBe(2);
       expect(result.script.minor_version).toBe(1);
       expect(result.script.code).toBe("console.log('fixed');");
@@ -143,7 +143,7 @@ describe("Fix Tool", () => {
       const fixTool = makeFixTool({
         maintainerTaskId: "maintainer-task-1",
         workflowId: "workflow-1",
-        expectedMajorVersion: 5,
+        expectedScriptId: "script-1",
         scriptStore,
       });
 
@@ -152,7 +152,7 @@ describe("Fix Tool", () => {
         createToolCallOptions()
       ) as FixResult;
 
-      expect(result.applied).toBe(true);
+      expect(result.activated).toBe(true);
       expect(result.script.major_version).toBe(5); // Same major version
       expect(result.script.minor_version).toBe(4); // Incremented from 3
     });
@@ -170,7 +170,7 @@ describe("Fix Tool", () => {
       const fixTool = makeFixTool({
         maintainerTaskId: "maintainer-task-1",
         workflowId: "workflow-1",
-        expectedMajorVersion: 1,
+        expectedScriptId: "script-1",
         scriptStore,
       });
 
@@ -179,7 +179,7 @@ describe("Fix Tool", () => {
         createToolCallOptions()
       ) as FixResult;
 
-      expect(result.applied).toBe(true);
+      expect(result.activated).toBe(true);
       expect(result.script.type).toBe("event");
       expect(result.script.summary).toBe("This does something important");
       expect(result.script.diagram).toBe("flowchart LR\nA-->B");
@@ -194,7 +194,7 @@ describe("Fix Tool", () => {
       const fixTool = makeFixTool({
         maintainerTaskId: "maintainer-task-123",
         workflowId: "workflow-1",
-        expectedMajorVersion: 1,
+        expectedScriptId: "script-1",
         scriptStore,
       });
 
@@ -215,7 +215,7 @@ describe("Fix Tool", () => {
       const fixTool = makeFixTool({
         maintainerTaskId: "maintainer-task-1",
         workflowId: "workflow-1",
-        expectedMajorVersion: 1,
+        expectedScriptId: "script-1",
         scriptStore,
       });
 
@@ -237,7 +237,7 @@ describe("Fix Tool", () => {
       const fixTool = makeFixTool({
         maintainerTaskId: "maintainer-task-1",
         workflowId: "workflow-1",
-        expectedMajorVersion: 1,
+        expectedScriptId: "script-1",
         scriptStore,
       });
 
@@ -262,7 +262,7 @@ describe("Fix Tool", () => {
       const fixTool = makeFixTool({
         maintainerTaskId: "maintainer-task-1",
         workflowId: "workflow-1",
-        expectedMajorVersion: 1,
+        expectedScriptId: "script-1",
         scriptStore,
       });
 
@@ -289,7 +289,7 @@ describe("Fix Tool", () => {
       const fixTool = makeFixTool({
         maintainerTaskId: "maintainer-task-1",
         workflowId: "workflow-1",
-        expectedMajorVersion: 1,
+        expectedScriptId: "script-1",
         scriptStore,
       });
 
@@ -306,41 +306,75 @@ describe("Fix Tool", () => {
     });
   });
 
-  describe("Race condition handling", () => {
-    it("should return applied=false when major_version has changed", async () => {
-      // Maintainer started with major_version 2, but planner updated to major_version 3
-      const workflow = createWorkflow();
-      const script = createScript({ major_version: 3, minor_version: 0 }); // Planner updated
+  describe("Race condition handling - fix always saved but may not activate", () => {
+    it("should return activated=false when active_script_id changed", async () => {
+      // Maintainer started with script-1, but planner updated to script-2
+      const workflow = createWorkflow({ active_script_id: "script-2" });
+      const originalScript = createScript({ id: "script-1", major_version: 2, minor_version: 0 });
+      const newPlannerScript = createScript({ id: "script-2", major_version: 3, minor_version: 0 });
       await scriptStore.addWorkflow(workflow);
-      await scriptStore.addScript(script);
+      await scriptStore.addScript(originalScript);
+      await scriptStore.addScript(newPlannerScript);
 
       const fixTool = makeFixTool({
         maintainerTaskId: "maintainer-task-1",
         workflowId: "workflow-1",
-        expectedMajorVersion: 2, // Maintainer expected version 2
+        expectedScriptId: "script-1", // Maintainer was fixing script-1
         scriptStore,
       });
 
       const result = await fixTool.execute!(
-        { code: "console.log('stale fix');", comment: "This fix is stale" },
+        { code: "console.log('fix for v2');", comment: "Fix for original script" },
         createToolCallOptions()
       ) as FixResult;
 
-      expect(result.applied).toBe(false);
-      // Should return the current script (not the stale fix)
-      expect(result.script.major_version).toBe(3);
+      expect(result.activated).toBe(false);
+      // Fix was saved - maintainer's work is NOT discarded
+      expect(result.script.code).toBe("console.log('fix for v2');");
+      expect(result.script.major_version).toBe(2); // Based on original script
     });
 
-    it("should clear maintenance flag when race condition detected", async () => {
-      const workflow = createWorkflow({ maintenance: true });
-      const script = createScript({ major_version: 3 });
+    it("should SAVE new script even when race condition detected", async () => {
+      // Maintainer started with script-1, but planner updated to script-2
+      const workflow = createWorkflow({ active_script_id: "script-2" });
+      const originalScript = createScript({ id: "script-1", major_version: 2 });
+      const newPlannerScript = createScript({ id: "script-2", major_version: 3 });
       await scriptStore.addWorkflow(workflow);
-      await scriptStore.addScript(script);
+      await scriptStore.addScript(originalScript);
+      await scriptStore.addScript(newPlannerScript);
+
+      const scriptCountBefore = (await scriptStore.getScriptsByWorkflowId("workflow-1")).length;
 
       const fixTool = makeFixTool({
         maintainerTaskId: "maintainer-task-1",
         workflowId: "workflow-1",
-        expectedMajorVersion: 2, // Stale version
+        expectedScriptId: "script-1", // Stale script
+        scriptStore,
+      });
+
+      const result = await fixTool.execute!(
+        { code: "stale fix", comment: "Fix based on old version" },
+        createToolCallOptions()
+      ) as FixResult;
+
+      const scriptCountAfter = (await scriptStore.getScriptsByWorkflowId("workflow-1")).length;
+      // Fix IS saved even though race detected
+      expect(scriptCountAfter).toBe(scriptCountBefore + 1);
+      expect(result.script.code).toBe("stale fix");
+    });
+
+    it("should clear maintenance flag when race condition detected", async () => {
+      const workflow = createWorkflow({ maintenance: true, active_script_id: "script-2" });
+      const originalScript = createScript({ id: "script-1", major_version: 2 });
+      const newPlannerScript = createScript({ id: "script-2", major_version: 3 });
+      await scriptStore.addWorkflow(workflow);
+      await scriptStore.addScript(originalScript);
+      await scriptStore.addScript(newPlannerScript);
+
+      const fixTool = makeFixTool({
+        maintainerTaskId: "maintainer-task-1",
+        workflowId: "workflow-1",
+        expectedScriptId: "script-1", // Stale script
         scriptStore,
       });
 
@@ -353,40 +387,18 @@ describe("Fix Tool", () => {
       expect(updatedWorkflow?.maintenance).toBe(false);
     });
 
-    it("should NOT create new script when race condition detected", async () => {
-      const workflow = createWorkflow();
-      const script = createScript({ major_version: 3 });
-      await scriptStore.addWorkflow(workflow);
-      await scriptStore.addScript(script);
-
-      const scriptCountBefore = (await scriptStore.getScriptsByWorkflowId("workflow-1")).length;
-
-      const fixTool = makeFixTool({
-        maintainerTaskId: "maintainer-task-1",
-        workflowId: "workflow-1",
-        expectedMajorVersion: 2, // Stale version
-        scriptStore,
-      });
-
-      await fixTool.execute!(
-        { code: "stale fix", comment: "Should not be saved" },
-        createToolCallOptions()
-      );
-
-      const scriptCountAfter = (await scriptStore.getScriptsByWorkflowId("workflow-1")).length;
-      expect(scriptCountAfter).toBe(scriptCountBefore);
-    });
-
     it("should NOT update active_script_id when race condition detected", async () => {
-      const workflow = createWorkflow({ active_script_id: "current-script" });
-      const script = createScript({ id: "current-script", major_version: 3 });
+      const workflow = createWorkflow({ active_script_id: "script-2" });
+      const originalScript = createScript({ id: "script-1", major_version: 2 });
+      const newPlannerScript = createScript({ id: "script-2", major_version: 3 });
       await scriptStore.addWorkflow(workflow);
-      await scriptStore.addScript(script);
+      await scriptStore.addScript(originalScript);
+      await scriptStore.addScript(newPlannerScript);
 
       const fixTool = makeFixTool({
         maintainerTaskId: "maintainer-task-1",
         workflowId: "workflow-1",
-        expectedMajorVersion: 2, // Stale version
+        expectedScriptId: "script-1", // Stale script
         scriptStore,
       });
 
@@ -396,7 +408,67 @@ describe("Fix Tool", () => {
       );
 
       const updatedWorkflow = await scriptStore.getWorkflow("workflow-1");
-      expect(updatedWorkflow?.active_script_id).toBe("current-script");
+      // Active script should still be the planner's new version
+      expect(updatedWorkflow?.active_script_id).toBe("script-2");
+    });
+  });
+
+  describe("onCalled callback", () => {
+    it("should invoke onCalled callback when fix tool executes", async () => {
+      const workflow = createWorkflow();
+      const script = createScript();
+      await scriptStore.addWorkflow(workflow);
+      await scriptStore.addScript(script);
+
+      let callbackResult: FixResult | null = null;
+      const fixTool = makeFixTool({
+        maintainerTaskId: "maintainer-task-1",
+        workflowId: "workflow-1",
+        expectedScriptId: "script-1",
+        scriptStore,
+        onCalled: (result) => {
+          callbackResult = result;
+        },
+      });
+
+      const executeResult = await fixTool.execute!(
+        { code: "fixed code", comment: "Fix" },
+        createToolCallOptions()
+      ) as FixResult;
+
+      expect(callbackResult).not.toBeNull();
+      expect(callbackResult!.activated).toBe(true);
+      expect(callbackResult!.script.id).toBe(executeResult.script.id);
+    });
+
+    it("should invoke onCalled callback even on race condition", async () => {
+      const workflow = createWorkflow({ active_script_id: "script-2" });
+      const originalScript = createScript({ id: "script-1" });
+      const newPlannerScript = createScript({ id: "script-2", major_version: 2 });
+      await scriptStore.addWorkflow(workflow);
+      await scriptStore.addScript(originalScript);
+      await scriptStore.addScript(newPlannerScript);
+
+      let callbackInvoked = false;
+      let callbackActivated: boolean | null = null;
+      const fixTool = makeFixTool({
+        maintainerTaskId: "maintainer-task-1",
+        workflowId: "workflow-1",
+        expectedScriptId: "script-1",
+        scriptStore,
+        onCalled: (result) => {
+          callbackInvoked = true;
+          callbackActivated = result.activated;
+        },
+      });
+
+      await fixTool.execute!(
+        { code: "stale fix", comment: "Stale fix" },
+        createToolCallOptions()
+      );
+
+      expect(callbackInvoked).toBe(true);
+      expect(callbackActivated).toBe(false);
     });
   });
 
@@ -405,7 +477,7 @@ describe("Fix Tool", () => {
       const fixTool = makeFixTool({
         maintainerTaskId: "maintainer-task-1",
         workflowId: "non-existent-workflow",
-        expectedMajorVersion: 1,
+        expectedScriptId: "script-1",
         scriptStore,
       });
 
@@ -424,7 +496,7 @@ describe("Fix Tool", () => {
       const fixTool = makeFixTool({
         maintainerTaskId: "maintainer-task-1",
         workflowId: "workflow-1",
-        expectedMajorVersion: 1,
+        expectedScriptId: "script-1",
         scriptStore,
       });
 
@@ -436,14 +508,15 @@ describe("Fix Tool", () => {
       ).rejects.toThrow("Workflow workflow-1 has no active script");
     });
 
-    it("should throw error if active script not found", async () => {
-      const workflow = createWorkflow({ active_script_id: "non-existent-script" });
+    it("should throw error if expected script not found", async () => {
+      const workflow = createWorkflow();
       await scriptStore.addWorkflow(workflow);
+      // Don't add any scripts
 
       const fixTool = makeFixTool({
         maintainerTaskId: "maintainer-task-1",
         workflowId: "workflow-1",
-        expectedMajorVersion: 1,
+        expectedScriptId: "non-existent-script",
         scriptStore,
       });
 
@@ -452,7 +525,7 @@ describe("Fix Tool", () => {
           { code: "code", comment: "comment" },
           createToolCallOptions()
         )
-      ).rejects.toThrow("Script not found: non-existent-script");
+      ).rejects.toThrow("Original script not found: non-existent-script");
     });
   });
 
@@ -467,7 +540,7 @@ describe("Fix Tool", () => {
       const fixTool1 = makeFixTool({
         maintainerTaskId: "maintainer-task-1",
         workflowId: "workflow-1",
-        expectedMajorVersion: 2,
+        expectedScriptId: "script-1",
         scriptStore,
       });
 
@@ -479,13 +552,11 @@ describe("Fix Tool", () => {
       expect(result1.script.major_version).toBe(2);
       expect(result1.script.minor_version).toBe(1);
 
-      // Second fix: 2.1 -> 2.2
-      // Note: In practice, maintainer would need to reload with new expectedMajorVersion
-      // But here we're testing that fix tool correctly uses current minor_version
+      // Second fix: need to use the new script as expected
       const fixTool2 = makeFixTool({
         maintainerTaskId: "maintainer-task-2",
         workflowId: "workflow-1",
-        expectedMajorVersion: 2, // Still same major version
+        expectedScriptId: result1.script.id, // Use the new script ID
         scriptStore,
       });
 
@@ -501,15 +572,15 @@ describe("Fix Tool", () => {
 
   describe("Workflow ID preservation", () => {
     it("should set workflow_id correctly on new script", async () => {
-      const workflow = createWorkflow({ id: "my-workflow-123" });
-      const script = createScript({ workflow_id: "my-workflow-123" });
+      const workflow = createWorkflow({ id: "my-workflow-123", active_script_id: "my-script" });
+      const script = createScript({ id: "my-script", workflow_id: "my-workflow-123" });
       await scriptStore.addWorkflow(workflow);
       await scriptStore.addScript(script);
 
       const fixTool = makeFixTool({
         maintainerTaskId: "maintainer-task-1",
         workflowId: "my-workflow-123",
-        expectedMajorVersion: 1,
+        expectedScriptId: "my-script",
         scriptStore,
       });
 

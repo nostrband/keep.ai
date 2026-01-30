@@ -36,6 +36,8 @@ export class Agent {
     reasoningTokens: 0,
   };
   public openRouterUsage = { cost: 0 };
+  /** Whether the fix tool was called during the agent loop (maintainer only) */
+  public fixCalled = false;
   private model: LanguageModel;
   private env: AgentEnv;
   private sandbox: Sandbox;
@@ -186,8 +188,11 @@ export class Agent {
       tools.fix = makeFixTool({
         maintainerTaskId: this.task.id,
         workflowId: this.task.maintainerContext.workflowId,
-        expectedMajorVersion: this.task.maintainerContext.expectedMajorVersion,
+        expectedScriptId: this.task.maintainerContext.expectedScriptId,
         scriptStore: this.env.api.scriptStore,
+        onCalled: () => {
+          this.fixCalled = true;
+        },
       });
     } else {
       // Worker and Planner have ask, save, schedule tools

@@ -66,11 +66,11 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
     - [ ] Tool wrapper refactor with `isReadOnly` metadata
     - [ ] Mutation restrictions (writes only inside `withItem()`)
 
-- [ ] **Fix tool always saves, check active for race** - [specs/fix-tool-always-save-check-active.md](specs/fix-tool-always-save-check-active.md)
-  - File: `packages/agent/src/ai-tools/fix.ts:56-70`
+- [x] **Fix tool always saves, check active for race** - [specs/fix-tool-always-save-check-active.md](specs/fix-tool-always-save-check-active.md)
+  - File: `packages/agent/src/ai-tools/fix.ts`
   - Issue: Fixes discarded on race instead of saved; uses majorVersion not scriptId
   - Fix: Always save fixes; compare `active_script_id`; replace `expectedMajorVersion` with `expectedScriptId`
-  - Status: **NOT FIXED** - returns `applied: false` without saving; compares `major_version`
+  - Status: **FIXED** - returns `activated: false` but still saves fix; compares `active_script_id` to `expectedScriptId`
 
 - [x] **Fix draft activity double-counting** - [specs/fix-draft-activity-double-counting.md](specs/fix-draft-activity-double-counting.md)
   - File: `packages/db/src/script-store.ts:1005-1014`
@@ -84,11 +84,11 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
   - Fix: Remove `.slice(0, 5)` to include all entries for major version
   - Status: **FIXED** - `.slice(0, 5)` removed; all entries for major version now included
 
-- [ ] **Add fix tool onCalled callback** - [specs/fix-tool-called-callback.md](specs/fix-tool-called-callback.md)
-  - Files: `packages/agent/src/ai-tools/fix.ts`, `packages/agent/src/task-worker.ts:717-728`
+- [x] **Add fix tool onCalled callback** - [specs/fix-tool-called-callback.md](specs/fix-tool-called-callback.md)
+  - Files: `packages/agent/src/ai-tools/fix.ts`, `packages/agent/src/task-worker.ts`, `packages/agent/src/agent.ts`
   - Issue: Uses fragile `part.type === "tool-fix"` SDK inspection
   - Fix: Add `onCalled` callback parameter like other tools (ask, finish)
-  - Status: **NOT FIXED** - `checkIfFixToolCalled()` still inspects `part.type === "tool-fix"`
+  - Status: **FIXED** - `makeFixTool` has `onCalled` callback; Agent tracks `fixCalled` flag; removed `checkIfFixToolCalled()`
 
 - [x] **Fix MIME detection fallback** - [specs/fix-mime-detection-fallback.md](specs/fix-mime-detection-fallback.md)
   - File: `packages/node/src/fileUtils.ts:118`
@@ -189,11 +189,11 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
 
 | Priority | Count | Status |
 |----------|-------|--------|
-| P0 Critical | 6 | 5 complete |
-| P1 High | 8 | 5 complete |
+| P0 Critical | 6 | 6 complete |
+| P1 High | 8 | 7 complete |
 | P2 Medium | 9 | 6 complete (1 documented) |
 | P3 Low | 2 | 0 complete |
-| **Total** | **25** | **16 complete** |
+| **Total** | **25** | **19 complete** |
 
 ---
 

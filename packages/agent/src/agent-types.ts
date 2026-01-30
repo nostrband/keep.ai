@@ -50,8 +50,8 @@ export type StepOutput = { steps: number; reasoning?: string } & (
 export interface MaintainerContext {
   /** Workflow being maintained */
   workflowId: string;
-  /** Major version when maintainer started - used for race condition detection */
-  expectedMajorVersion: number;
+  /** The script ID that the maintainer is fixing - used for race condition detection */
+  expectedScriptId: string;
   /** The failed script run ID for tracking */
   scriptRunId: string;
   /** Error details from the failed run */
