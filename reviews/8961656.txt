@@ -1,0 +1,125 @@
+COMMIT REVIEW: 8961656
+=======================
+Author: Claude Agent <claude@anthropic.com>
+Date: Wed Jan 28 10:29:00 2026 +0100
+Title: Add maintainer spec, attemt fixing a dropdown
+
+Note: Typo in commit title - "attemt" should be "attempt"
+
+CHANGES SUMMARY
+---------------
+This commit makes UI styling changes and adds the maintainer task type specification:
+
+1. **Dropdown Menu Styling Overhaul**: Reformatted dropdown-menu.tsx with:
+   - Split long className strings into multiple lines for readability
+   - Changed cursor from `cursor-default` to `cursor-pointer` for interactive elements
+   - Replaced CSS variable design tokens with hardcoded Tailwind color classes
+
+2. **CSS Variable Syntax Fix**: Fixed broken Tailwind arbitrary value syntax in multiple UI components:
+   - Changed `origin-(--radix-...)` to `origin-[var(--radix-...)]`
+   - Applied to hover-card.tsx, select.tsx, tooltip.tsx
+
+3. **Tailwind Plugin**: Added tailwindcss-animate plugin for animation classes
+
+4. **Maintainer Spec**: Added comprehensive specs/new/maintainer-task-type.md (771 lines) defining:
+   - TaskType enum expansion to include "maintainer"
+   - Script version schema (major_version + minor_version)
+   - Fix tool for maintainer
+   - Maintainer system prompt
+   - Race condition handling
+
+5. **ISSUES.md Updates**: Added TODOs for future work items (Intent Contract, withItem mutations, etc.)
+
+6. **Spec Move**: Moved planner-connected-accounts-context.md to specs/done/
+
+ISSUE REVIEW
+------------
+
+### HIGH SEVERITY
+
+1. **Missing Transform-Origin Property**
+   Location: apps/web/src/ui/components/ui/dropdown-menu.tsx lines 42, 248
+
+   The CSS variable fix removed `origin-(--radix-dropdown-menu-content-transform-origin)` but didn't add the correct replacement. The DropdownMenuContent and DropdownMenuSubContent are now missing the origin property entirely.
+
+   Expected: `origin-[var(--radix-dropdown-menu-content-transform-origin)]`
+   Actual: Property not present
+
+   Impact: Radix UI's transform-origin calculations won't work correctly, causing animation origin misalignment when dropdowns open/close.
+
+   Proposal: Add `origin-[var(--radix-dropdown-menu-content-transform-origin)]` to both DropdownMenuContent (line 42 area) and DropdownMenuSubContent (line 248 area).
+
+### MEDIUM SEVERITY
+
+2. **Hardcoded Colors Break Design System**
+   Location: apps/web/src/ui/components/ui/dropdown-menu.tsx
+
+   The component was refactored to use hardcoded colors instead of CSS variable tokens:
+   - `bg-white` instead of `bg-popover`
+   - `border-gray-200` instead of `border-border`
+   - `text-gray-900` instead of `text-popover-foreground`
+   - `focus:bg-gray-100` instead of `focus:bg-accent`
+   - `bg-gray-200` instead of `bg-border`
+   - `text-gray-500` instead of `text-muted-foreground`
+
+   Problems:
+   - Loses the golden accent color (--accent: 42 67% 55%) for focus states
+   - Prevents future dark mode implementation
+   - Breaks design system consistency
+   - Requires editing multiple files for theme changes
+
+   Proposal: Revert to CSS variable tokens. The original `focus:bg-accent focus:text-accent-foreground` classes should be used.
+
+3. **Inconsistent Component Styling**
+   Location: Multiple UI component files
+
+   Only dropdown-menu.tsx was refactored with hardcoded colors, while similar components remain on design tokens:
+   - dropdown-menu.tsx: Uses hardcoded `bg-white`, `text-gray-900`
+   - hover-card.tsx: Uses `bg-popover`, `text-popover-foreground`
+   - select.tsx: Uses `bg-popover`, `text-popover-foreground`
+   - tooltip.tsx: Uses hardcoded colors (same as dropdown)
+
+   Proposal: Apply consistent styling approach across all UI components.
+
+### LOW SEVERITY
+
+4. **Commit Message Typo**
+   Location: Commit title
+
+   "attemt" should be "attempt"
+
+   Proposal: Use proper spelling in commit messages.
+
+POSITIVE OBSERVATIONS
+---------------------
+- CSS variable syntax fix is correct in hover-card, select, and tooltip components
+- tailwindcss-animate plugin is correctly configured
+- Animation classes are properly defined
+- Line splitting improves className readability
+- Cursor change to pointer for interactive items is appropriate
+- Maintainer spec is comprehensive and well-structured
+
+MAINTAINER SPEC ANALYSIS
+------------------------
+The maintainer-task-type.md spec is well-designed:
+- Clear separation of responsibilities (planner vs maintainer)
+- Proper version schema (major.minor) for tracking changes
+- Fix tool constraints are appropriate (backward-compatible only)
+- Race condition handling with version checks is sound
+- System prompt clearly defines maintainer limitations
+
+Minor concern in spec:
+- FIXME at line 824 about mutation reconciliation when fix is rejected - this is appropriately flagged for future work
+
+CODE QUALITY
+------------
+- UI component changes are reasonably formatted
+- Package.json and lock file properly updated
+- Spec follows project conventions
+- ISSUES.md provides good roadmap visibility
+
+SUMMARY
+-------
+This commit has a critical bug (missing transform-origin property) and medium-severity design system violation (hardcoded colors). The CSS variable syntax fixes in other components are correct. The maintainer task type spec is comprehensive and well-designed. Priority should be given to fixing the missing origin property and reverting to CSS variable design tokens.
+
+Reviewed by: Claude Opus 4.5

@@ -1,0 +1,159 @@
+COMMIT REVIEW: 682d55d
+=======================
+test(db): Add unit tests for connection-store, memory-store, file-store
+
+SUMMARY OF CHANGES
+------------------
+This commit adds comprehensive test coverage for three database stores:
+
+Files Added:
+1. packages/tests/src/connection-store.test.ts (605 lines, 25 tests)
+2. packages/tests/src/file-store.test.ts (567 lines, 46 tests)
+3. packages/tests/src/memory-store.test.ts (626 lines, 34 tests)
+
+Files Modified:
+- IMPLEMENTATION_PLAN.md (marks these stores as tested)
+
+Total: 1,798 lines added, 105 new tests
+Test count increased from 353 to 458 passing tests.
+
+TEST COVERAGE DETAILS
+---------------------
+ConnectionStore Tests (25 tests):
+- CRUD operations (insert, retrieve, update, delete)
+- Upsert with COALESCE for label/metadata preservation
+- Status updates with error messages
+- Last-used timestamp tracking
+- Service filtering
+- Edge cases: unicode, special characters, very long error messages
+
+MemoryStore Tests (34 tests):
+- Thread CRUD with Date object handling
+- Thread without title/metadata
+- INSERT OR REPLACE idempotency
+- Transaction support
+- Message saving (single and batch)
+- Message validation (requires metadata.threadId)
+- Filtering by threadId, messageId, since timestamp
+- Result sorting (ASC despite DESC query)
+- Content parsing and malformed message filtering
+- Default pagination (limit 50)
+- Edge cases: unicode, very long content, complex metadata
+
+FileStore Tests (46 tests):
+- CRUD operations
+- Various MIME types
+- Batch operations with IN clause validation
+- Pagination (limit, offset)
+- Media type filtering and pattern matching (image/*, video/*)
+- Full-text search (id, name, path, summary)
+- Case-insensitive search
+- Count operations
+- Edge cases: unicode filenames, 500+ char names, 10GB file sizes
+
+TESTING PATTERNS USED
+---------------------
+The tests follow established codebase patterns:
+- In-memory SQLite (`:memory:`) for isolation
+- Manual table creation without full migration system
+- Helper factory functions (createMessage, createFile)
+- beforeEach/afterEach lifecycle management
+- Nested describe blocks for organization
+- Comprehensive edge case coverage
+
+POTENTIAL ISSUES
+----------------
+1. TABLE SCHEMA DRIFT RISK
+   Location: All three test files, table creation helpers
+
+   The test helper functions manually recreate table schemas:
+   - createConnectionsTable() references "Schema matches v33.ts migration"
+   - createFilesTable() references "Schema matches v10.ts migration"
+   - createMemoryTables() references "Schema matches v1.ts migration"
+
+   If future migrations alter these table schemas, the test helpers won't
+   automatically update, potentially causing false positives (tests pass
+   but production code doesn't work) or false negatives.
+
+   Severity: Low-Medium - The JSDoc comments noting the migration versions
+   help, but this still requires manual maintenance.
+
+   Proposal: Consider extracting table creation SQL from migration files
+   to a shared location that both tests and migrations can import, ensuring
+   single source of truth. Alternatively, add a migration version constant
+   to each store that tests can validate against.
+
+2. TIMING-SENSITIVE TEST
+   Location: memory-store.test.ts, "should use current timestamp when
+   createdAt not provided" test (around line 390)
+
+   The test captures before/after timestamps and verifies the saved
+   timestamp falls within that range. This could theoretically be flaky
+   under extreme system load, though the time window is generous.
+
+   Severity: Very Low - This pattern is common and the test is reasonable.
+
+   Proposal: None needed, acceptable risk.
+
+3. CONNECTION STORE UPDATESTATUS FOR NON-EXISTENT
+   Location: connection-store.test.ts, "should handle update for
+   non-existent connection" test
+
+   The test verifies that updateStatus() for a non-existent connection
+   doesn't throw. This is correct behavior (no-op), but the test comment
+   says "Should not throw, just no-op" without verifying the update
+   actually had no effect on other data.
+
+   Severity: Very Low - The test correctly verifies the return is null.
+
+   Proposal: None needed.
+
+4. MISSING TEST FOR CONCURRENT OPERATIONS
+   The tests don't cover concurrent database operations (e.g., two
+   upsertConnection calls racing). This is acceptable for unit tests
+   but worth noting for integration testing.
+
+   Severity: Low - Out of scope for unit tests.
+
+   Proposal: None for this commit; consider integration tests separately.
+
+5. HARDCODED LIMIT VALUES
+   Location: Multiple tests reference default limits (50 for messages,
+   100 for files) as magic numbers.
+
+   Severity: Very Low - These match the store implementations.
+
+   Proposal: Consider extracting these as constants from the store
+   implementations to ensure test expectations stay in sync.
+
+POSITIVE OBSERVATIONS
+---------------------
+1. Excellent edge case coverage (unicode, special characters, boundaries)
+2. Tests verify both happy paths and error conditions
+3. Clear test organization with descriptive names
+4. Factory helpers reduce test boilerplate
+5. Tests validate ordering, filtering, and pagination thoroughly
+6. Good isolation - each test gets fresh database state
+7. Error validation tests (e.g., message without threadId must throw)
+8. Tests cover the COALESCE behavior for preserving existing values
+
+PROPOSALS SUMMARY
+-----------------
+No blocking issues. Minor suggestions:
+1. (Optional) Extract table schemas to shared location to prevent drift
+2. (Optional) Import default limit constants from store implementations
+
+VERDICT: APPROVED
+-----------------
+High-quality test coverage addition. The tests follow established patterns,
+provide comprehensive coverage, and include excellent edge case handling.
+The 105 new tests significantly improve confidence in the database layer.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Table schema drift risk) - skipped (optional improvement)
+- Issue #2 (Timing-sensitive test) - skipped (acceptable risk)
+- Issue #3 (Update non-existent connection) - skipped (test is correct)
+- Issue #4 (Concurrent operations) - skipped (out of scope for unit tests)
+- Issue #5 (Hardcoded limit values) - skipped (optional improvement)

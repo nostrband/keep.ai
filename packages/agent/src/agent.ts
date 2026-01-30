@@ -18,6 +18,7 @@ import { makeFinishTool } from "./ai-tools/finish";
 import { makeAskTool } from "./ai-tools/ask";
 import { makeSaveTool } from "./ai-tools/save";
 import { makeScheduleTool } from "./ai-tools/schedule";
+import { makeFixTool } from "./ai-tools/fix";
 
 export const ERROR_BAD_REQUEST = "BAD_REQUEST";
 export const ERROR_PAYMENT_REQUIRED = "PAYMENT_REQUIRED";
@@ -176,34 +177,49 @@ export class Agent {
         };
       },
     });
-    tools.ask = makeAskTool({
-      onAsk: (info) => {
-        if (!info.asks) throw new Error("Asks not provided");
+    // Maintainer has restricted tools - no ask, save, schedule
+    // Instead it has the fix tool for proposing script repairs
+    if (this.task.type === "maintainer") {
+      if (!this.task.maintainerContext) {
+        throw new Error("Maintainer task requires maintainerContext");
+      }
+      tools.fix = makeFixTool({
+        maintainerTaskId: this.task.id,
+        workflowId: this.task.maintainerContext.workflowId,
+        expectedMajorVersion: this.task.maintainerContext.expectedMajorVersion,
+        scriptStore: this.env.api.scriptStore,
+      });
+    } else {
+      // Worker and Planner have ask, save, schedule tools
+      tools.ask = makeAskTool({
+        onAsk: (info) => {
+          if (!info.asks) throw new Error("Asks not provided");
 
-        // Stop the loop
-        stopped = true;
+          // Stop the loop
+          stopped = true;
 
-        // 'wait' output (Spec 10: notes and plan removed)
-        // Use formattedAsks which includes options as JSON if provided
-        output = {
-          kind: "wait",
-          steps: input.step + 1,
-          patch: {
-            asks: info.formattedAsks,
-          },
-        };
-      },
-    });
-    tools.save = makeSaveTool({
-      taskId: this.task.id,
-      taskRunId: this.taskRunId,
-      chatId: this.task.chat_id,
-      scriptStore: this.env.api.scriptStore,
-    });
-    tools.schedule = makeScheduleTool({
-      taskId: this.task.id,
-      scriptStore: this.env.api.scriptStore,
-    });
+          // 'wait' output (Spec 10: notes and plan removed)
+          // Use formattedAsks which includes options as JSON if provided
+          output = {
+            kind: "wait",
+            steps: input.step + 1,
+            patch: {
+              asks: info.formattedAsks,
+            },
+          };
+        },
+      });
+      tools.save = makeSaveTool({
+        taskId: this.task.id,
+        taskRunId: this.taskRunId,
+        chatId: this.task.chat_id,
+        scriptStore: this.env.api.scriptStore,
+      });
+      tools.schedule = makeScheduleTool({
+        taskId: this.task.id,
+        scriptStore: this.env.api.scriptStore,
+      });
+    }
 
     try {
       // Call LLM

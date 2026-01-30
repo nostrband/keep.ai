@@ -1,7 +1,27 @@
 import { CRSqliteDB } from "./database";
 import { DBInterface, validateInClauseLength } from "./interfaces";
 
-export type TaskType = "worker" | "planner";
+export type TaskType = "worker" | "planner" | "maintainer";
+
+/**
+ * Parameters for entering maintenance mode on a workflow.
+ * Used by the transactional enterMaintenanceMode operation.
+ */
+export interface EnterMaintenanceModeParams {
+  workflowId: string;
+  workflowTitle: string;
+  scriptRunId: string;
+}
+
+/**
+ * Result of entering maintenance mode.
+ * Contains the created maintainer task and related data.
+ */
+export interface EnterMaintenanceModeResult {
+  maintainerTask: Task;
+  inboxItemId: string;
+  newFixCount: number;
+}
 
 export interface Task {
   id: string;
@@ -649,5 +669,36 @@ export class TaskStore {
     // Return count of affected rows - unfortunately cr-sqlite doesn't return this
     // We'll just return 0 and log separately if needed
     return 0;
+  }
+
+  /**
+   * Get all maintainer tasks for a workflow.
+   * Used by the UI to display auto-fix threads separately from the main chat.
+   * Returns tasks ordered by timestamp descending (most recent first).
+   */
+  async getMaintainerTasksForWorkflow(workflowId: string): Promise<Task[]> {
+    const results = await this.db.db.execO<Record<string, unknown>>(
+      `SELECT id, timestamp, reply, state, thread_id, error, type, title, chat_id, workflow_id, asks
+       FROM tasks
+       WHERE workflow_id = ? AND type = 'maintainer' AND (deleted IS NULL OR deleted = FALSE)
+       ORDER BY timestamp DESC`,
+      [workflowId]
+    );
+
+    if (!results) return [];
+
+    return results.map((row) => ({
+      id: row.id as string,
+      timestamp: row.timestamp as number,
+      reply: row.reply as string,
+      state: row.state as string,
+      thread_id: row.thread_id as string,
+      error: row.error as string,
+      type: row.type as string,
+      title: row.title as string,
+      chat_id: row.chat_id as string,
+      workflow_id: row.workflow_id as string,
+      asks: row.asks as string,
+    }));
   }
 }

@@ -1,5 +1,5 @@
-import React from "react";
-import { Link, useNavigate } from "react-router-dom";
+import React, { useMemo } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useWorkflows } from "../hooks/dbScriptReads";
 import SharedHeader from "./SharedHeader";
 import { Button } from "../ui";
@@ -9,15 +9,30 @@ import { getWorkflowTitle } from "../lib/workflowUtils";
 export default function WorkflowsPage() {
   const { data: workflows = [], isLoading } = useWorkflows();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const filterParam = searchParams.get("filter");
+
+  // Filter workflows based on query parameter
+  const filteredWorkflows = useMemo(() => {
+    if (filterParam === "drafts") {
+      return workflows.filter((w) => w.status === "draft");
+    }
+    return workflows;
+  }, [workflows, filterParam]);
+
+  // Determine page title based on filter
+  const pageTitle = filterParam === "drafts" ? "Drafts" : "Workflows";
+  const emptyMessage =
+    filterParam === "drafts" ? "No draft workflows found" : "No workflows found";
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <SharedHeader title="Workflows" />
+      <SharedHeader title={pageTitle} />
 
       {/* Main content */}
       <div className="max-w-4xl mx-auto px-6 py-6">
         {/* Create Workflow Button */}
-        <div className="mb-6">
+        <div className="mb-6 flex items-center gap-4">
           <Button
             onClick={() => navigate("/")}
             size="sm"
@@ -26,19 +41,27 @@ export default function WorkflowsPage() {
           >
             Create Workflow
           </Button>
+          {filterParam === "drafts" && (
+            <Link
+              to="/workflows"
+              className="text-sm text-gray-500 hover:text-gray-700"
+            >
+              View all workflows
+            </Link>
+          )}
         </div>
 
         {isLoading ? (
           <div className="flex items-center justify-center py-8">
             <div>Loading workflows...</div>
           </div>
-        ) : workflows.length === 0 ? (
+        ) : filteredWorkflows.length === 0 ? (
           <div className="flex items-center justify-center py-8">
-            <div className="text-gray-500">No workflows found</div>
+            <div className="text-gray-500">{emptyMessage}</div>
           </div>
         ) : (
           <div className="space-y-4">
-            {workflows.map((workflow) => (
+            {filteredWorkflows.map((workflow) => (
               <Link
                 key={workflow.id}
                 to={`/workflows/${workflow.id}`}

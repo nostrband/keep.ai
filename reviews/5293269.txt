@@ -1,0 +1,282 @@
+COMMIT: 5293269
+TITLE: feat(agent): Add maintainer task type support
+DATE: Wed Jan 28 11:50:47 2026 +0100
+FILES: IMPLEMENTATION_PLAN.md, packages/agent/src/agent-env.ts, packages/agent/src/task-worker.ts
+
+## SUMMARY
+
+This commit adds support for the "maintainer" task type in the agent layer, enabling autonomous script repair without user interaction.
+
+### Changes in task-worker.ts
+
+1. **Type Check (line 109):** Added `"maintainer"` to the accepted task types in `executeTask()`:
+   ```typescript
+   if (task.type !== "worker" && task.type !== "planner" && task.type !== "maintainer")
+   ```
+
+2. **History Loading (line 138):** Maintainer tasks now load history like worker/planner:
+   ```typescript
+   if ((taskType === "worker" || taskType === "planner" || taskType === "maintainer") && task.thread_id)
+   ```
+
+3. **Thread Title (line 729):** Added fallback title generation for maintainer:
+   ```typescript
+   title = taskType === "worker" ? "Worker" : taskType === "planner" ? "Planner" : "Maintainer";
+   ```
+
+### Changes in agent-env.ts
+
+1. **Temperature (lines 46-47):** Added maintainer to return 0.1 (deterministic):
+   ```typescript
+   case "maintainer":
+     return 0.1;
+   ```
+
+2. **System Prompt Switch (lines 63-66):** Added case for maintainer:
+   ```typescript
+   case "maintainer": {
+     systemPrompt = this.maintainerSystemPrompt();
+     break;
+   }
+   ```
+
+3. **maintainerSystemPrompt() (lines 488-572):** New 85-line system prompt defining bounded repair agent role.
+
+---
+
+## ISSUES IDENTIFIED
+
+### ISSUE 1: Missing Validation for workflow_id on Maintainer Tasks (HIGH SEVERITY)
+
+**Location:** task-worker.ts line 109
+
+**Problem:**
+The type check accepts maintainer tasks, but there's no immediate validation that `task.workflow_id` exists. The check only happens later at lines 169-183 (added in subsequent commit d5dcfac):
+
+```typescript
+if (taskType === "maintainer" && task.workflow_id) {
+  // loads context
+}
+```
+
+If `task.workflow_id` is undefined, the maintainer task proceeds without context loading, and only fails much later in `Agent.loop()` when it throws "Maintainer task requires maintainerContext".
+
+**Impact:**
+Late failure with confusing error message. The task should fail early with a clear configuration error.
+
+**Recommendation:**
+Add early validation in executeTask():
+```typescript
+if (taskType === "maintainer" && !task.workflow_id) {
+  this.debug("Maintainer task requires workflow_id");
+  return this.finishTask(task, "Configuration Error", "Maintainer task missing workflow_id");
+}
+```
+
+---
+
+### ISSUE 2: Temperature Getter Missing Default Return (LOW SEVERITY)
+
+**Location:** agent-env.ts lines 43-50
+
+**Problem:**
+```typescript
+get temperature() {
+  switch (this.type) {
+    case "worker":
+    case "planner":
+    case "maintainer":
+      return 0.1;
+  }
+  // No default return - returns undefined for unknown types
+}
+```
+
+**Impact:**
+TypeScript should catch this since `this.type` is `TaskType`, but at runtime an unexpected type would cause undefined behavior.
+
+**Recommendation:**
+Add exhaustive check:
+```typescript
+get temperature() {
+  switch (this.type) {
+    case "worker":
+    case "planner":
+    case "maintainer":
+      return 0.1;
+    default:
+      const _exhaustive: never = this.type;
+      return 0.1;
+  }
+}
+```
+
+---
+
+### ISSUE 3: buildUser Explicitly Excludes Maintainer (INFORMATIONAL)
+
+**Location:** agent-env.ts lines 111-112
+
+**Problem:**
+```typescript
+if (input.step !== 0 || (this.type !== "worker" && this.type !== "planner"))
+  return undefined;
+```
+
+Maintainer tasks are excluded from `buildUser()`, meaning they don't get the `===TASK_ID===` and `===TASK_ASKS===` metadata blocks.
+
+**Analysis:**
+This is INTENTIONAL. Maintainer tasks get their context via `enrichMaintainerInbox()` (added in subsequent commit e5962c6) which creates a comprehensive markdown message with error details, logs, and script code.
+
+**Recommendation:**
+Add a clarifying comment:
+```typescript
+// Note: Maintainer tasks get context via enrichMaintainerInbox() in task-worker.ts,
+// not via buildUser(). Only worker/planner use this metadata injection.
+if (input.step !== 0 || (this.type !== "worker" && this.type !== "planner"))
+  return undefined;
+```
+
+---
+
+### ISSUE 4: maintainerSystemPrompt Quality Analysis (INFORMATIONAL)
+
+**Location:** agent-env.ts lines 488-572
+
+The maintainer system prompt is well-designed:
+
+**Strengths:**
+- Clear role definition: "autonomous JS script repair agent"
+- Bounded scope emphasized throughout
+- Input specification: scriptCode, scriptVersion, error, logs, result
+- Explicit "User is not available" statement
+- Tool guidance: fix (primary), eval (testing)
+- Methodology: analyze → investigate with eval → propose fix
+- Clear constraints: preserve intent, minimal fixes, backward-compatible
+- Escalation path: if can't fix, explain why (no infinite loops)
+- Includes jsPrompt, filesPrompt, localePrompt for context
+
+**Minor Observations:**
+- `${this.jsPrompt([])}` passes empty array - maintainer doesn't need main APIs highlighted
+- Backward-compatibility emphasized 4 times - good reinforcement
+- Time/locale sections appropriately included
+
+**Recommendation:**
+No changes needed. The prompt is comprehensive and correct.
+
+---
+
+### ISSUE 5: Thread Title Ternary Could Be Cleaner (STYLE)
+
+**Location:** task-worker.ts line 729
+
+**Problem:**
+```typescript
+title = taskType === "worker" ? "Worker" : taskType === "planner" ? "Planner" : "Maintainer";
+```
+
+This nested ternary is readable but could be cleaner with a lookup.
+
+**Recommendation:**
+Consider using a lookup object for maintainability:
+```typescript
+const TASK_TYPE_TITLES: Record<TaskType, string> = {
+  worker: "Worker",
+  planner: "Planner",
+  maintainer: "Maintainer",
+};
+title = TASK_TYPE_TITLES[taskType];
+```
+
+**Priority:** Very low - current code is acceptable.
+
+---
+
+## PROPOSALS
+
+### Proposal 1: Add Early workflow_id Validation
+
+**For Issue 1**
+
+Add validation at the start of maintainer task execution in task-worker.ts:
+
+```typescript
+// After line 109, add:
+if (taskType === "maintainer") {
+  if (!task.workflow_id) {
+    this.debug("Maintainer task requires workflow_id");
+    return this.finishTask(task, "Configuration Error", "Maintainer task missing workflow_id");
+  }
+}
+```
+
+This ensures maintainer tasks fail fast with a clear error instead of failing deep in the agent loop.
+
+### Proposal 2: Add Exhaustive Type Check to Temperature Getter
+
+**For Issue 2**
+
+```typescript
+get temperature() {
+  switch (this.type) {
+    case "worker":
+    case "planner":
+    case "maintainer":
+      return 0.1;
+    default:
+      // TypeScript exhaustiveness check
+      const _exhaustive: never = this.type;
+      throw new Error(`Unknown task type: ${this.type}`);
+  }
+}
+```
+
+### Proposal 3: Document buildUser Exclusion
+
+**For Issue 3**
+
+Add comment to clarify intentional exclusion of maintainer from buildUser():
+
+```typescript
+// Maintainer tasks receive context via enrichMaintainerInbox() in task-worker.ts
+// which provides error details, logs, script code in a formatted message.
+// Only worker and planner tasks use the ===TASK_ID=== metadata injection.
+if (input.step !== 0 || (this.type !== "worker" && this.type !== "planner"))
+  return undefined;
+```
+
+---
+
+## CONSISTENCY ANALYSIS
+
+| Aspect | Worker | Planner | Maintainer | Consistent? |
+|--------|--------|---------|------------|-------------|
+| Type check in executeTask | ✓ | ✓ | ✓ | Yes |
+| History loading | ✓ | ✓ | ✓ | Yes |
+| Temperature (0.1) | ✓ | ✓ | ✓ | Yes |
+| System prompt | worker | planner | maintainer | Yes |
+| buildUser context | ✓ | ✓ | ✗ (via enrichInbox) | Intentional |
+| Thread title | Worker | Planner | Maintainer | Yes |
+
+The maintainer task type is consistently integrated with appropriate differentiation where needed.
+
+---
+
+## VERIFICATION CHECKLIST
+
+- [x] Maintainer type accepted in executeTask
+- [x] Maintainer loads thread history correctly
+- [x] Maintainer has correct temperature (0.1)
+- [x] Maintainer has dedicated system prompt
+- [x] System prompt is comprehensive and correct
+- [x] Thread title generation includes maintainer
+- [ ] workflow_id validation (recommended addition)
+- [ ] Temperature getter exhaustiveness (minor improvement)
+
+---
+
+## CONCLUSION
+
+This commit correctly adds maintainer task type support at the agent layer. The system prompt is well-designed with clear bounded repair constraints. The main issue is the lack of early validation for `workflow_id` on maintainer tasks, which could lead to confusing late failures. The temperature getter could also benefit from an exhaustive type check for safety.
+
+RATING: GOOD (one high-severity validation gap to address)

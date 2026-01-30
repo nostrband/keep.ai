@@ -1,0 +1,284 @@
+# Review: 45be846 - fix: Complete all Priority 2 bug fixes (final 3)
+
+**Commit:** 45be84613750285a6ff76a39272ed165a8b90d1d
+**Date:** Mon Jan 26 16:48:56 2026 +0100
+**Author:** Artur Briugeman (Co-Authored-By: Claude Opus 4.5)
+
+## Summary of Changes
+
+This commit addresses 3 bug fixes completing all Priority 2 items:
+
+1. **Workflow timestamp preservation** (packages/db/src/script-store.ts)
+   - Removed timestamp from UPDATE in updateWorkflow and updateWorkflowFields
+   - Timestamp is now preserved as creation-only field
+
+2. **Test schema consistency** (packages/tests/src/*.test.ts)
+   - Changed tasks.deleted from INTEGER to BOOLEAN to match production migrations
+
+3. **Server shutdown handling** (apps/server/src/server.ts)
+   - Added comprehensive graceful shutdown with correct resource cleanup order
+   - Order: schedulers -> file transfers -> transports -> peer -> pool -> HTTP server -> database
+
+---
+
+## Detailed Analysis
+
+### Fix 1: Workflow Timestamp Preservation
+
+**Files Changed:**
+- packages/db/src/script-store.ts (lines 587-617, 753-824)
+
+**Changes Made:**
+
+In `updateWorkflow()`:
+```typescript
+// Note: timestamp is NOT updated - it's the creation timestamp and should be preserved
+await db.exec(
+  `UPDATE workflows
+   SET title = ?, task_id = ?, chat_id = ?, cron = ?, events = ?, status = ?,
+       next_run_timestamp = ?, maintenance = ?, maintenance_fix_count = ?, active_script_id = ?
+   WHERE id = ?`,
+  [/* timestamp excluded from parameters */]
+);
+```
+
+In `updateWorkflowFields()` type signature:
+```typescript
+async updateWorkflowFields(
+  workflowId: string,
+  fields: Partial<Pick<Workflow, 'next_run_timestamp' | 'status' | 'cron' | 'maintenance' |
+                                 'maintenance_fix_count' | 'active_script_id' | 'title'>>,
+  // Note: 'timestamp' intentionally excluded from Pick
+  tx?: DBInterface
+): Promise<void>
+```
+
+**Assessment:** Clean implementation. Timestamp is now enforced at the type level to never be updated. The comments clearly document the intent.
+
+### Fix 2: Test Schema Consistency
+
+**Files Changed:**
+- packages/tests/src/script-store.test.ts
+- packages/tests/src/task-store.test.ts
+
+**Changes Made:**
+```sql
+-- Before
+deleted INTEGER NOT NULL DEFAULT 0
+
+-- After
+deleted BOOLEAN DEFAULT FALSE
+```
+
+**Assessment:** Correct. Test schema now matches production migrations.
+
+### Fix 3: Server Shutdown Handling
+
+**Files Changed:**
+- apps/server/src/server.ts (lines 2042-2076)
+
+**Changes Made:**
+```typescript
+async close() {
+  debugServer("Initiating graceful shutdown...");
+
+  // 1. Stop schedulers first (prevents new work from being scheduled)
+  await taskScheduler.close();
+  await workflowScheduler.close();
+
+  // 2. Clean up file transfer instances
+  for (const sender of fileSenders.values()) {
+    sender.stop();
+  }
+  for (const receiver of fileReceivers.values()) {
+    receiver.stop();
+  }
+  fileSenders.clear();
+  fileReceivers.clear();
+
+  // 3. Stop transports (nostr and http)
+  nostr.stop();
+  http.stop();
+
+  // 4. Stop the cr-sqlite peer
+  peer.stop();
+
+  // 5. Close the SimplePool
+  pool.close(getNostrRelays());
+
+  // 6. Close HTTP server
+  await app.close();
+
+  // 7. Close database and key store
+  await keyStore.stop();
+  await keepDB.close();
+
+  debugServer("Graceful shutdown complete");
+}
+```
+
+**Shutdown Order:** Generally correct - dependencies are respected.
+
+---
+
+## Issues Identified
+
+### CRITICAL: Missing await on nostr.stop()
+
+**Severity:** High
+**Location:** apps/server/src/server.ts (line 2060)
+
+`nostr.stop()` is an async method but is NOT awaited:
+```typescript
+// In NostrTransport.ts:
+async stop() {
+  for (const r of this.recvs.values()) await r.stop();
+  for (const s of this.sends.values()) await s.stop();
+  if (!this.isExternalPool) {
+    this.pool.destroy();
+  }
+}
+```
+
+**Impact:** Peer.stop() and Pool.close() might execute while nostr transport is still stopping, causing incomplete cleanup or errors.
+
+### CRITICAL: Missing await on peer.stop()
+
+**Severity:** High
+**Location:** apps/server/src/server.ts (line 2064)
+
+`peer.stop()` is an async method but is NOT awaited:
+```typescript
+// In Peer.ts:
+async stop(): Promise<void> {
+  this.isStarted = false;
+  // ...
+  for (const transport of this.transports) {
+    if ("stop" in transport && typeof transport.stop === "function") {
+      await transport.stop();
+    }
+  }
+}
+```
+
+**Impact:** Pool.close() might execute while peer is still stopping transports. Database might close while peer is still using it.
+
+### Issue 3: Scheduler close() Doesn't Wait for In-Progress Work
+
+**Severity:** Medium
+**Location:** packages/agent/src/task-scheduler.ts, workflow-scheduler.ts
+
+Both scheduler `close()` methods only set flags and clear intervals but don't wait for in-progress work:
+```typescript
+async close(): Promise<void> {
+  if (!this.isRunning) return;
+  this.isShuttingDown = true;
+  if (this.interval) clearInterval(this.interval);
+  // Does NOT wait for checkWork() to finish
+}
+```
+
+**Impact:** If `checkWork()` is running when close() is called:
+- Tasks/workflows may attempt to execute while resources are being torn down
+- Database operations may occur after database is closed
+- Transport operations may occur after transports are stopped
+
+### Issue 4: One Remaining Caller Uses Old updateWorkflow Pattern
+
+**Severity:** Low
+**Location:** packages/agent/src/ai-tools/schedule.ts (lines 37-42)
+
+Still uses the spread pattern with `updateWorkflow`:
+```typescript
+const updatedWorkflow: Workflow = {
+  ...workflow,
+  cron: info.cron,
+  next_run_timestamp: nextRunTimestamp,
+};
+await opts.scriptStore.updateWorkflow(updatedWorkflow);
+```
+
+Should be migrated to `updateWorkflowFields` for consistency and to prevent race conditions.
+
+---
+
+## Proposals
+
+### Proposal 1: Add Missing awaits in Shutdown (Critical)
+
+**Location:** apps/server/src/server.ts
+
+```typescript
+// 3. Stop transports (nostr and http)
+debugServer("Stopping transports...");
+await nostr.stop();  // Add await
+http.stop();
+
+// 4. Stop the cr-sqlite peer
+debugServer("Stopping peer...");
+await peer.stop();  // Add await
+```
+
+**Effort:** Trivial - just add await keywords
+
+### Proposal 2: Make Scheduler close() Wait for In-Progress Work
+
+**Location:** packages/agent/src/task-scheduler.ts, workflow-scheduler.ts
+
+```typescript
+async close(): Promise<void> {
+  if (!this.interval) return; // Already closed
+
+  this.isShuttingDown = true;
+
+  // Stop accepting new work
+  if (this.interval) {
+    clearInterval(this.interval);
+    this.interval = undefined;
+  }
+
+  // Wait for in-progress work to complete (with timeout)
+  const timeout = 30000; // 30 seconds
+  const startTime = Date.now();
+  while (this.isRunning && (Date.now() - startTime) < timeout) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+
+  if (this.isRunning) {
+    this.debug("Warning: Shutdown timeout - work still in progress");
+  }
+}
+```
+
+**Effort:** Small - add polling loop with timeout
+
+### Proposal 3: Migrate schedule.ts to updateWorkflowFields
+
+**Location:** packages/agent/src/ai-tools/schedule.ts
+
+```typescript
+// Replace lines 37-42:
+await opts.scriptStore.updateWorkflowFields(workflow.id, {
+  cron: info.cron,
+  next_run_timestamp: nextRunTimestamp,
+});
+```
+
+**Effort:** Trivial
+
+---
+
+## Summary
+
+| Fix | Assessment | Issues Found |
+|-----|------------|--------------|
+| Timestamp preservation | Good | One caller needs migration |
+| Test schema consistency | Good | None |
+| Server shutdown handling | Incomplete | Missing awaits, scheduler doesn't wait |
+
+**Overall:** The commit makes good progress on shutdown handling but has critical missing awaits that could cause race conditions during shutdown. The timestamp preservation is well implemented with type-level enforcement. The test schema fix is straightforward and correct.
+
+**Priority Fixes:**
+1. **Critical:** Add `await` to `nostr.stop()` and `peer.stop()`
+2. **Medium:** Enhance scheduler close() to wait for in-progress work
+3. **Low:** Migrate schedule.ts to updateWorkflowFields

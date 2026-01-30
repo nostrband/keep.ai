@@ -25,7 +25,7 @@ export function makeGetScriptTool(
       .object({
         id: z.string(),
         task_id: z.string(),
-        version: z.number(),
+        version: z.string(), // Format: "major.minor" e.g., "2.1"
         timestamp: z.string(),
         code: z.string(),
         change_comment: z.string(),
@@ -50,7 +50,7 @@ export function makeGetScriptTool(
         return {
           id: script.id,
           task_id: script.task_id,
-          version: script.version,
+          version: `${script.major_version}.${script.minor_version}`,
           timestamp: script.timestamp,
           code: script.code,
           change_comment: script.change_comment,
@@ -64,7 +64,7 @@ export function makeGetScriptTool(
       return {
         id: script.id,
         task_id: script.task_id,
-        version: script.version,
+        version: `${script.major_version}.${script.minor_version}`,
         timestamp: script.timestamp,
         code: script.code,
         change_comment: script.change_comment,

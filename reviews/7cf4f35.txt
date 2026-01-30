@@ -1,0 +1,156 @@
+COMMIT: 7cf4f358e74bca5c004ea3beddee5ceaf367ab92
+DATE: 2026-01-26 18:09:53 +0100
+TITLE: fix: Add error handling for async sync loops and SSE queue processing
+
+================================================================================
+SUMMARY OF CHANGES
+================================================================================
+
+This commit adds error handling to two critical async patterns:
+
+1. **Periodic Sync Check Loop** (apps/server/src/server.ts:841-851)
+   - Added try/catch around `peer.checkLocalChanges()` call
+   - Errors are logged via debug module (`debugServer`)
+   - The loop continues running regardless of errors (setTimeout at line 849)
+
+2. **TransportClientHttp SSE Queue Processing** (packages/sync/src/TransportClientHttp.ts:211-216)
+   - Changed empty `.catch()` handler to log errors via `debugTransport`
+   - Comment clarifies this stops queue processing to prevent cascade
+
+3. **IMPLEMENTATION_PLAN.md Updates**
+   - Added new section 4.3 "Error Handling Fixes" documenting both fixes
+   - Renumbered subsequent sections (4.4, 4.5)
+
+================================================================================
+DETAILED ANALYSIS
+================================================================================
+
+### Periodic Sync Check Loop (server.ts)
+
+**What it does:**
+- Runs every 5 seconds as a fallback sync mechanism
+- Calls `peer.checkLocalChanges()` which queries for local DB changes and broadcasts them
+- Complements the immediate sync triggers that fire after mutation operations
+
+**Error handling approach:**
+- Catches all errors and logs them
+- Continues running the loop regardless of errors
+- Does not differentiate between error types
+
+**Why this is appropriate:**
+- Sync failures shouldn't crash the server
+- The 5-second interval provides automatic retry
+- `broadcastLocalChanges()` internally has its own try/catch that swallows errors
+- The queuing mechanism in Peer.ts also catches and logs errors
+
+**Potential concern:**
+- If persistent errors occur, they only appear in debug logs (requires DEBUG env var)
+- No exponential backoff for repeated failures
+- However, for a local sync mechanism, this is acceptable behavior
+
+### SSE Queue Processing (TransportClientHttp.ts)
+
+**What it does:**
+- Serializes SSE message processing through a promise queue
+- Each incoming message is processed sequentially
+- Errors in processing should stop the queue and trigger reconnection
+
+**Error handling approach:**
+- Inner try/catch (lines 205-212) handles parsing/processing errors
+  - Calls `handleConnectionError()` which triggers reconnection
+  - Re-throws the error
+- Outer `.catch()` (lines 214-217) catches the re-thrown error
+  - Logs the error via debugTransport
+  - Stops queue processing
+
+**Analysis:**
+The implementation follows the Transport.ts contract which states:
+"if cb throws transport should reconnect after pause"
+
+The `handleConnectionError()` call triggers reconnection, and the queue
+stops processing to prevent cascading failures during the reconnection period.
+
+================================================================================
+ISSUES IDENTIFIED
+================================================================================
+
+### Issue 1: Debug-only error visibility (Low Severity)
+
+**Location:** server.ts:846-848, TransportClientHttp.ts:214-217
+
+**Problem:**
+Both error handlers use the `debug` module which is OFF by default. Users won't
+see sync/transport errors unless they set DEBUG=worker:TransportClientHttp or
+DEBUG=server:* environment variables.
+
+**Impact:**
+- Silent failures in production
+- Users have no visibility into connection issues
+- Debugging sync problems requires prior knowledge to enable debug logging
+
+**Proposal:**
+Consider emitting error events or setting error flags that can be exposed in
+the UI (e.g., a "sync status" indicator). For critical failures, use
+console.error() in addition to debug logging.
+
+================================================================================
+
+### Issue 2: Redundant re-throw in SSE error handling (Minor)
+
+**Location:** TransportClientHttp.ts:211
+
+**Problem:**
+The `throw error` after `handleConnectionError()` is immediately caught by the
+outer `.catch()`. This creates a confusing flow:
+1. Error occurs
+2. handleConnectionError() is called (triggers reconnect)
+3. Error is re-thrown
+4. Error is caught and logged
+5. Queue continues in rejected state
+
+**Impact:**
+- Slightly harder to understand the error flow
+- No functional issue, but the re-throw serves no purpose beyond reaching the catch
+
+**Proposal:**
+Consider removing the `throw error` and just returning after `handleConnectionError()`.
+The outer `.catch()` could be simplified or removed. Alternatively, add a comment
+explaining why the re-throw is needed (if there's a reason).
+
+================================================================================
+
+### Issue 3: No exponential backoff for sync errors (Minor)
+
+**Location:** server.ts:841-851
+
+**Problem:**
+The periodic check runs every 5 seconds regardless of errors. If the database
+is locked or corrupted, it will retry every 5 seconds indefinitely.
+
+**Impact:**
+- Potential CPU/IO waste during persistent error conditions
+- Log spam if debugging is enabled
+- No way to detect and alert on chronic sync failures
+
+**Proposal:**
+Consider implementing a simple backoff strategy:
+- After 3 consecutive errors, increase interval to 30 seconds
+- Reset to 5 seconds after successful sync
+- This is a minor enhancement, not critical for v1
+
+================================================================================
+VERDICT
+================================================================================
+
+This is a **good, low-risk improvement** to the codebase. The changes:
+
+1. Fix the empty catch block that was silently swallowing errors
+2. Prevent the sync loop from terminating on transient errors
+3. Add appropriate logging for debugging purposes
+
+The issues identified are minor and don't represent bugs or regressions. The
+main concern is that errors are only visible via debug logging, which is
+acceptable for v1 but could be improved post-release.
+
+RECOMMENDATION: Accept as-is. Consider Issue 1 (debug-only visibility) for
+post-v1 improvement to add user-visible sync status indicators.

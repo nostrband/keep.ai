@@ -222,7 +222,7 @@ export function useActivateScriptVersion() {
           active_script_id: input.scriptId,
         }, tx);
 
-        return { scriptId: input.scriptId, version: script.version };
+        return { scriptId: input.scriptId, version: `${script.major_version}.${script.minor_version}` };
       });
     },
     onSuccess: (_result, { workflowId }) => {

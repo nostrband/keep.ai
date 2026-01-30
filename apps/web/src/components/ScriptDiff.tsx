@@ -4,8 +4,8 @@ import { diffLines } from "diff";
 interface ScriptDiffProps {
   oldCode: string;
   newCode: string;
-  oldVersion: number;
-  newVersion: number;
+  oldVersion: string;  // Format: "major.minor" e.g., "2.1"
+  newVersion: string;  // Format: "major.minor" e.g., "2.2"
 }
 
 interface DiffLine {

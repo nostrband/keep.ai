@@ -23,7 +23,7 @@ export type { Note, NoteListItem } from "./note-store";
 
 // Task store
 export { TaskStore } from "./task-store";
-export type { Task, TaskRun, TaskRunEnd, TaskRunStart, TaskType } from "./task-store";
+export type { Task, TaskRun, TaskRunEnd, TaskRunStart, TaskType, EnterMaintenanceModeParams, EnterMaintenanceModeResult } from "./task-store";
 
 // Nostr peer store
 export { NostrPeerStore } from "./nostr-peer-store";
@@ -38,7 +38,7 @@ export { FileStore } from "./file-store";
 export type { File } from "./file-store";
 
 // Script store
-export { ScriptStore, DRAFT_THRESHOLDS } from "./script-store";
+export { ScriptStore, DRAFT_THRESHOLDS, formatVersion } from "./script-store";
 export type { Script, ScriptRun, Workflow, AbandonedDraft, DraftActivitySummary } from "./script-store";
 
 // Notification store (Spec 12)

@@ -1,0 +1,129 @@
+COMMIT REVIEW: 1356324
+=======================
+Author: Claude Agent <claude@anthropic.com>
+Date: Tue Jan 27 14:55:27 2026 +0100
+Title: Fix /settings page query provider, fix logic error on invalid tool input, add auto-abort workflow script on invalid tool input, fix gmail secrets passing, fix gmail scopes
+
+CHANGES SUMMARY
+---------------
+This commit addresses multiple issues across the codebase:
+
+1. **QueryProvider Import Fix**: Changed ConnectionsSection.tsx to import from QueryProviderEmbedded instead of QueryProvider, aligning with the app's current embedded provider architecture.
+
+2. **Auto-Abort on Invalid Tool Input**: Added abort controller support to workflow execution so that invalid tool inputs cause immediate script termination rather than silent failures.
+   - Added `classifiedError` field to EvalContext interface
+   - Added `abortController` parameter to SandboxAPIConfig
+   - workflow-worker.ts now creates AbortController and checks for classified errors after eval
+
+3. **Gmail/Google OAuth Scope Fix**: Added `userinfo.email` scope to all Google services (Gmail, Drive, Sheets, Docs) to fix profile fetching during OAuth flow.
+
+4. **New Documentation**: Added extensive developer documentation files:
+   - README_new.md - Product philosophy and FAQ
+   - docs/dev/01-philosophy.md - Delegation vs authorship philosophy
+   - docs/dev/02-ux-model.md - UX surfaces and states
+   - docs/dev/04-runtime-planner-executor-maintainer.md - Runtime model
+   - docs/dev/09-failure-repair.md - Failure handling system
+   - docs/dev/DRAFT.md - Documentation outline
+
+5. **Spec File**: Added planner-connected-accounts-context.md spec
+
+6. **Settings Update**: Added "Bash(npx tsc:*)" to .claude/settings.local.json
+
+7. **Issue Tracking**: Added ISSUES.md with filter=drafts bug report
+
+ISSUE REVIEW
+------------
+
+### HIGH SEVERITY
+
+1. **OAuth Token Backward Incompatibility**
+   Location: packages/connectors/src/services/google.ts
+
+   Adding `userinfo.email` scope to all Google services creates backward incompatibility:
+   - Existing tokens granted without this scope will fail on reconnection/refresh
+   - Users will be forced to re-authenticate without warning
+   - This breaking change is not documented in the commit message
+
+   Proposal: Add migration logic to detect tokens without the new scope and prompt users to re-authenticate, or add a warning notification when token refresh fails due to scope mismatch.
+
+2. **Race Condition in Error Storage**
+   Location: packages/agent/src/sandbox/api.ts
+
+   The error is stored in `EvalContext.classifiedError` before abort, but abort happens asynchronously:
+   - If multiple tool calls execute in rapid succession, later errors could overwrite earlier ones
+   - The abort signal doesn't immediately stop JavaScript execution
+
+   Proposal: Use a queue or array to store all errors encountered, or ensure single error storage with atomic check-and-set.
+
+### MEDIUM SEVERITY
+
+3. **Cross-Runtime Error Preservation Fragility**
+   Location: packages/agent/src/sandbox/sandbox.ts, api.ts
+
+   Storing error class in `EvalContext.classifiedError` to survive WASM boundary is a workaround:
+   - Requires explicit retrieval after eval completes
+   - Error class information could be lost if context isn't maintained
+   - Creates implicit coupling between error storage and retrieval
+
+   Proposal: Consider serializing error type/code explicitly or using discriminated unions for error handling.
+
+4. **Asymmetric Error Handling Between Workflows and Tasks**
+   Location: packages/agent/src/workflow-worker.ts, task-worker.ts
+
+   Only workflows use abort controller for invalid input handling. Tasks have different error handling:
+   - Creates two code paths for similar functionality
+   - Increases maintenance burden
+   - May cause confusion about expected behavior
+
+   Proposal: Unify error handling approach across both workflows and tasks.
+
+5. **Redundant OAuth Scopes**
+   Location: packages/connectors/src/services/google.ts
+
+   Adding `userinfo.email` to all 4 Google services separately causes:
+   - Users see 4 separate permission requests for the same scope
+   - Could confuse users about why email access is requested 4 times
+   - Drive, Sheets, and Docs scopes already implicitly grant profile access
+
+   Proposal: Request `userinfo.email` once globally or consolidate profile fetching.
+
+### LOW SEVERITY
+
+6. **Dead Code: Unused QueryProvider**
+   Location: apps/web/src/QueryProvider.tsx
+
+   The original worker-based QueryProvider is still in the codebase but never instantiated:
+   - Adds maintenance burden
+   - Could cause import confusion
+
+   Proposal: Remove the unused QueryProvider implementation entirely.
+
+7. **Type Incompatibility Risk**
+   Location: apps/web/src/QueryProvider.tsx, QueryProviderEmbedded.tsx
+
+   Both providers export same hook but with different context types:
+   - QueryProviderEmbedded has additional methods (resyncTransport, reconnectServerless)
+   - Switching back to old provider could cause runtime errors
+
+   Proposal: Create shared interface for both providers or consolidate to single implementation.
+
+POSITIVE OBSERVATIONS
+---------------------
+- The documentation added is comprehensive and well-written
+- Auto-abort logic provides better error propagation for workflows
+- The abort controller pattern is correctly implemented
+- ISSUES.md provides good bug tracking visibility
+- Spec file follows project conventions
+
+CODE QUALITY
+------------
+- Good use of AbortController API for cancellation
+- Error classification is properly maintained through the sandbox boundary
+- Documentation is thorough with good examples and rationale
+- Changes are logically grouped (though could have been separate commits)
+
+SUMMARY
+-------
+This commit addresses real issues (QueryProvider import, OAuth scopes, error handling) but introduces backward incompatibility with existing OAuth tokens and has some architectural concerns around error handling asymmetry. The documentation additions are valuable. Priority should be given to addressing the OAuth token migration issue.
+
+Reviewed by: Claude Opus 4.5

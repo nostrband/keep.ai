@@ -88,3 +88,25 @@ export function useTaskByChatId(chatId: string) {
     enabled: !!api && !!chatId,
   });
 }
+
+/**
+ * Get all maintainer tasks for a workflow.
+ * Used to display auto-fix threads in the workflow detail page.
+ */
+export function useMaintainerTasks(workflowId: string) {
+  const { api } = useDbQuery();
+  return useQuery({
+    queryKey: qk.maintainerTasks(workflowId),
+    queryFn: async () => {
+      if (!api) return [];
+      try {
+        const tasks = await api.taskStore.getMaintainerTasksForWorkflow(workflowId);
+        return tasks;
+      } catch (error) {
+        return [];
+      }
+    },
+    meta: { tables: ["tasks"] },
+    enabled: !!api && !!workflowId,
+  });
+}

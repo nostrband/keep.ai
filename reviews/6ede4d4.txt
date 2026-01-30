@@ -1,0 +1,140 @@
+COMMIT REVIEW: 6ede4d4
+=======================
+feat(ui): Complete maintainer UI with auto-fix threads and notification
+
+## Summary of Changes
+
+This commit completes the maintainer UI feature by adding:
+
+### 1. Auto-Fix History Section in WorkflowDetailPage
+**File: apps/web/src/components/WorkflowDetailPage.tsx**
+- Adds new "Auto-Fix History" section that displays all maintainer tasks for the workflow
+- Each task shows: title (or generated "Auto-fix {id}"), status badge, error message, timestamp
+- Tasks are clickable and link to `/tasks/{task.id}` for detailed view
+- Uses the `useMaintainerTasks` hook added in the previous commit
+- Imports `TaskStatusBadge` for consistent status display
+
+### 2. MaintenanceFailedCard Notification Component
+**File: apps/web/src/components/NotificationCard.tsx**
+- Adds new notification card for `maintenance_failed` type
+- Shows wrench emoji, "Auto-fix failed - Re-plan needed" title, and explanation
+- Two action buttons: "Re-plan" (navigates to workflow) and "Report Issue" (opens bug report)
+- Integrates with existing openBugReport() utility
+
+### 3. Notification Type Extension
+**File: packages/db/src/notification-store.ts**
+- Adds `maintenance_failed` to the NotificationType union
+- Updates type documentation
+
+### 4. Task Worker Update for Maintenance Failed Notifications
+**File: packages/agent/src/task-worker.ts**
+- Changes escalation notification type from `escalated` to `maintenance_failed`
+- Removes `reason: "maintenance_failed"` field (redundant with type)
+- Notification now carries `explanation` directly in payload
+
+### 5. NotificationsPage Replan Action Handler
+**File: apps/web/src/components/NotificationsPage.tsx**
+- Adds "replan" action case that navigates to workflow detail page
+- Comment indicates user can click Edit to discuss with planner
+
+### 6. IMPLEMENTATION_PLAN.md Updates
+- Marks auto-fix thread display and maintenance failed notification as complete
+
+## Potential Issues
+
+### Issue 1: Type Safety with `any` for maintainerTasks
+**Severity: Low**
+**Location: apps/web/src/components/WorkflowDetailPage.tsx:502**
+
+```typescript
+{maintainerTasks.map((task: any) => (
+```
+
+The task is typed as `any`, losing type safety. Should use the `Task` type from @app/db.
+
+**Proposal**: Import and use the Task type:
+```typescript
+import { Task } from "@app/db";
+// ...
+{maintainerTasks.map((task: Task) => (
+```
+
+### Issue 2: Potential Redundancy: "replan" vs "view_details" Actions
+**Severity: Very Low**
+**Location: apps/web/src/components/NotificationsPage.tsx:40-43**
+
+Both "replan" and "view_details" actions navigate to the same URL (`/workflows/${notification.workflow_id}`). The comment says "user can click Edit to discuss with planner" but there's no programmatic difference.
+
+**Proposal**: Consider whether "replan" should do something more specific, like:
+- Navigate to `/workflows/${id}?action=edit` and auto-open the edit dialog
+- Or directly navigate to the chat interface for the planner task
+- Current implementation is fine for MVP, but could be more helpful
+
+### Issue 3: MaintenanceFailedPayload.script_run_id Not Used
+**Severity: Very Low**
+**Location: apps/web/src/components/NotificationCard.tsx:27-30**
+
+The `MaintenanceFailedPayload` interface defines `script_run_id` but it's never used in the component. Only `explanation` is extracted and displayed.
+
+**Proposal**: Either:
+1. Use script_run_id to link to the specific failed run
+2. Or remove it from the interface if not needed
+
+### Issue 4: Inconsistent Error Display in Auto-Fix History
+**Severity: Very Low**
+**Location: apps/web/src/components/WorkflowDetailPage.tsx:511-514**
+
+The error is shown with `line-clamp-2` but the explanation in MaintenanceFailedCard uses `line-clamp-3`. Minor inconsistency.
+
+**Proposal**: Use consistent line clamping across similar error displays.
+
+### Issue 5: Missing Loading State for Maintainer Tasks
+**Severity: Very Low**
+**Location: apps/web/src/components/WorkflowDetailPage.tsx**
+
+Unlike `scriptVersions` which has `isLoadingVersions`, the `maintainerTasks` query doesn't have its loading state destructured or displayed. If maintainer tasks are loading slowly, users see nothing (empty array default) rather than a loading indicator.
+
+**Proposal**: Add loading state handling:
+```typescript
+const { data: maintainerTasks = [], isLoading: isLoadingMaintainerTasks } = useMaintainerTasks(id!);
+// Later in JSX
+{isLoadingMaintainerTasks ? (
+  <div>Loading auto-fix history...</div>
+) : maintainerTasks.length > 0 && (
+  // existing Auto-Fix History section
+)}
+```
+
+### Issue 6: Notification Type Change Could Break Existing Notifications
+**Severity: Medium**
+**Location: packages/agent/src/task-worker.ts:776**
+
+Changed from `type: "escalated"` to `type: "maintenance_failed"`. Existing notifications in the database with `type: "escalated"` and `reason: "maintenance_failed"` payload will no longer render with the new MaintenanceFailedCard.
+
+**Proposal**: Either:
+1. Add backward compatibility in NotificationCard to handle old "escalated" notifications with "maintenance_failed" reason
+2. Or run a migration to update existing notification types
+3. If no existing notifications (new feature), this is fine
+
+## Positive Observations
+
+1. **Consistent UI patterns**: Uses existing Badge, Button, Link components from the design system
+2. **Good UX flow**: "Re-plan" action takes users to the right place to fix the issue
+3. **Bug reporting integration**: Allows users to report issues directly from the notification
+4. **Proper component composition**: MaintenanceFailedCard follows the same pattern as other notification cards
+5. **Status badge reuse**: Uses TaskStatusBadge for consistent status display
+6. **Accessibility**: Clickable tasks have proper hover states and transitions
+
+## Conclusion
+
+This commit completes a cohesive feature by connecting the backend maintainer task system to the UI. The Auto-Fix History section gives users visibility into what automated fixes have been attempted. The maintenance_failed notification provides a clear path for users when auto-fix fails. Minor issues include type safety and a potential backward compatibility concern with existing notifications. Overall, well-implemented feature completion.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Type safety with any) - created specs/new/fix-maintainer-tasks-type-safety.md
+- Issue #2 (Redundant replan vs view_details) - skipped (very low, MVP is fine)
+- Issue #3 (script_run_id not used) - skipped (very low)
+- Issue #4 (Inconsistent line-clamp) - skipped (very low)
+- Issue #5 (Missing loading state) - skipped (very low)
+- Issue #6 (Notification type backward compat) - skipped (new feature, no existing data)

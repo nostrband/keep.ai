@@ -1,0 +1,83 @@
+COMMIT REVIEW: 01327b2
+=======================
+test(agent): Add unit tests for task scheduler priority
+
+## Summary of Changes
+
+This commit adds comprehensive unit tests for the task scheduler's priority logic in a new file `packages/tests/src/task-scheduler-priority.test.ts`. The tests verify:
+
+1. **Basic priority ordering**: planner > worker > maintainer
+2. **Per-workflow conflict resolution**: maintainer tasks are skipped when a planner task exists for the same workflow
+3. **Race condition prevention**: prevents stale maintainer fixes from running when user has requested changes (planner created)
+4. **Edge cases**: empty workflow_id handling, multiple tasks of same type
+
+The tests create an in-memory database, set up minimal tasks and inbox tables, and use a `selectTaskByPriority()` helper function that mirrors the production scheduler logic.
+
+Also updates IMPLEMENTATION_PLAN.md to mark the task scheduler priority tests as complete.
+
+## Potential Issues
+
+### Issue 1: Test Helper Duplicates Production Code
+**Severity: Medium**
+**Location: packages/tests/src/task-scheduler-priority.test.ts:110-133**
+
+The test file contains a `selectTaskByPriority()` function that duplicates the exact logic from `task-scheduler.ts`. This is a code smell because:
+- If the production code changes, tests will still pass with outdated logic
+- The test doesn't actually verify the real scheduler implementation
+
+**Proposal**: Instead of duplicating the logic, consider:
+1. Exporting the priority selection logic from task-scheduler.ts as a testable pure function
+2. Testing that exported function directly
+3. Or use integration tests that call the actual scheduler methods
+
+### Issue 2: Missing Integration with Full processNextTask Flow
+**Severity: Low**
+**Location: Entire test file**
+
+The tests verify the priority selection algorithm in isolation but don't test the full `processNextTask()` method which includes:
+- Inbox item dependency (tasks only scheduled if they have unhandled inbox)
+- Retry backoff filtering
+- Global pause checking
+- Timestamp sorting
+
+**Proposal**: Add integration tests that verify:
+1. Tasks without inbox items are not selected
+2. Retry backoff is respected
+3. Global pause prevents all task processing
+
+### Issue 3: Table Schema Inconsistency
+**Severity: Low**
+**Location: packages/tests/src/task-scheduler-priority.test.ts:27-59**
+
+The test creates its own table schema via `createSchedulerTestTables()` which may drift from the actual migration-managed schema. Currently the `tasks` table is missing columns that exist in production (e.g., potentially `deleted` column behavior differs).
+
+**Proposal**: Consider using the actual migration system or a shared test utility that ensures schema consistency.
+
+### Issue 4: InboxItem Interface Usage
+**Severity: Very Low**
+**Location: packages/tests/src/task-scheduler-priority.test.ts:88-98**
+
+The `createInboxItem()` helper creates inbox items but the tests don't actually verify inbox-task relationships. The inbox items are created but the `selectTaskByPriority()` function operates on raw tasks, not inbox-driven task discovery.
+
+**Proposal**: Either:
+1. Remove the inbox item creation if not used in assertions
+2. Or add tests that verify the inbox->task lookup flow
+
+## Positive Observations
+
+1. **Comprehensive edge cases**: Tests cover empty workflow_id, multiple tasks of same type, and the specific race condition scenario
+2. **Clear documentation**: Each test has descriptive names and comments explaining the scenario
+3. **Proper cleanup**: Uses beforeEach/afterEach for database setup/teardown
+4. **Real database usage**: Uses actual KeepDb and TaskStore instead of mocks, ensuring type compatibility
+
+## Conclusion
+
+The tests provide good coverage of the core priority selection algorithm. The main concern is that they test a duplicated helper function rather than the actual scheduler code, which could lead to false confidence if the production code diverges. The tests are well-structured and document the expected behavior clearly.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Test helper duplicates production code) - created specs/new/refactor-task-scheduler-priority-tests.md
+- Issue #2 (Missing full processNextTask integration) - skipped (test improvement)
+- Issue #3 (Table schema inconsistency) - skipped (low, test file)
+- Issue #4 (InboxItem interface unused) - skipped (very low)

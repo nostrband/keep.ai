@@ -1,0 +1,453 @@
+COMMIT: d5dcfac
+TITLE: feat(agent): Add fix tool and wire up maintainer tool set
+DATE: Wed Jan 28 11:59:16 2026 +0100
+FILES: IMPLEMENTATION_PLAN.md, packages/agent/src/agent-types.ts, packages/agent/src/agent.ts, packages/agent/src/ai-tools/fix.ts, packages/agent/src/task-worker.ts
+
+## SUMMARY
+
+This commit implements the core fix capability for the maintainer agent, including:
+
+1. **New fix.ts tool (118 lines):** Allows maintainer to propose script repairs
+   - Parameters: `code` (complete fixed script) and `comment` (fix description)
+   - Race condition handling: compares `current.major_version` with `expectedMajorVersion`
+   - If stale (planner updated), returns `{ applied: false }` and clears maintenance
+   - If valid, creates new minor version (e.g., 1.0 → 1.1)
+   - Updates workflow: `active_script_id`, clears `maintenance`, triggers re-run
+
+2. **MaintainerContext interface:** Added to agent-types.ts
+   - Contains `workflowId` and `expectedMajorVersion`
+   - Used for fix tool's race condition check
+
+3. **Conditional tool registration in agent.ts:**
+   - Maintainer: gets `fix` tool (no save, ask, schedule)
+   - Worker/Planner: get `save`, `ask`, `schedule` tools (no fix)
+
+4. **Context loading in task-worker.ts:**
+   - Loads workflow and script before agent creation
+   - Populates `maintainerContext` with version info
+
+---
+
+## ISSUES IDENTIFIED
+
+### ISSUE 1: Should Return applied:false Instead of Throwing on Missing active_script_id (MEDIUM SEVERITY)
+
+**Location:** fix.ts lines 44-46
+
+**Problem:**
+```typescript
+if (!workflow.active_script_id) {
+  throw new Error(`Workflow ${opts.workflowId} has no active script`);
+}
+```
+
+When `active_script_id` is missing, the tool throws an error, which crashes the maintainer task. This could happen if:
+- Workflow is in draft state without a saved script
+- Database corruption or race condition
+
+**Impact:**
+The maintainer task fails with an unexpected error instead of gracefully indicating the fix couldn't be applied.
+
+**Recommendation:**
+Return `{ applied: false }` with the current script (or null) instead of throwing:
+```typescript
+if (!workflow.active_script_id) {
+  return {
+    script: null,
+    applied: false,
+    reason: "Workflow has no active script",
+  };
+}
+```
+
+Or clear maintenance and return false:
+```typescript
+if (!workflow.active_script_id) {
+  await opts.scriptStore.updateWorkflowFields(opts.workflowId, {
+    maintenance: false,
+  });
+  return { script: null, applied: false };
+}
+```
+
+---
+
+### ISSUE 2: Non-Atomic Script Add + Workflow Update (MEDIUM SEVERITY)
+
+**Location:** fix.ts lines 88-98
+
+**Problem:**
+```typescript
+await opts.scriptStore.addScript(newScript);
+
+await opts.scriptStore.updateWorkflowFields(opts.workflowId, {
+  active_script_id: newScript.id,
+  maintenance: false,
+  next_run_timestamp: new Date().toISOString(),
+});
+```
+
+These are two separate database operations. If:
+1. `addScript()` succeeds
+2. `updateWorkflowFields()` fails (database error, constraint violation)
+
+Then we have an orphaned script record that is never used and workflow remains in maintenance mode.
+
+**Analysis:**
+Looking at the codebase, this pattern is used elsewhere (save.ts lines 79-104). The architecture accepts this risk - orphaned records are harmless and the next fix attempt will succeed.
+
+**Recommendation:**
+Consider using a transaction if the database supports it:
+```typescript
+await opts.scriptStore.db.tx(async (tx) => {
+  await opts.scriptStore.addScript(newScript, tx);
+  await opts.scriptStore.updateWorkflowFields(opts.workflowId, {...}, tx);
+});
+```
+
+**Priority:** Medium - current behavior is acceptable but not ideal.
+
+---
+
+### ISSUE 3: Race Condition Feedback Missing (LOW SEVERITY)
+
+**Location:** fix.ts lines 56-69
+
+**Problem:**
+When the race condition is detected (planner updated while maintainer was working):
+```typescript
+if (currentScript.major_version !== opts.expectedMajorVersion) {
+  await opts.scriptStore.updateWorkflowFields(opts.workflowId, {
+    maintenance: false,
+  });
+  return {
+    script: currentScript,
+    applied: false,
+  };
+}
+```
+
+The maintainer agent receives `{ applied: false }` but no explanation WHY. The agent might try to fix again, not understanding that the script has already been updated by the planner.
+
+**Recommendation:**
+Add a `reason` field to FixResult:
+```typescript
+interface FixResult {
+  script: Script;
+  applied: boolean;
+  reason?: string;  // "stale_version" | "success" | etc.
+}
+
+// In race condition case:
+return {
+  script: currentScript,
+  applied: false,
+  reason: "Script was updated by planner while you were working. Your fix was discarded.",
+};
+```
+
+Update the tool description to explain this:
+```typescript
+description: `...
+Returns:
+- applied: true if the fix was saved and workflow will re-run
+- applied: false if the planner updated the script while you were working (your fix was discarded)
+  In this case, do NOT attempt to fix again - the planner's update supersedes your repair.
+`
+```
+
+---
+
+### ISSUE 4: Input Validation Missing (LOW SEVERITY)
+
+**Location:** fix.ts lines 5-8
+
+**Problem:**
+```typescript
+const FixInfoSchema = z.object({
+  code: z.string().describe("The complete fixed script code"),
+  comment: z.string().describe("Brief description of what was fixed"),
+});
+```
+
+No length validation on `code` or `comment`. In theory, an LLM could provide:
+- Empty code string
+- Extremely large code (memory exhaustion)
+- Empty comment
+
+**Analysis:**
+This matches the pattern in save.ts which also lacks these validations. The codebase relies on LLM behavior and database constraints.
+
+**Recommendation:**
+Add basic validation:
+```typescript
+const FixInfoSchema = z.object({
+  code: z.string()
+    .min(1, "Code cannot be empty")
+    .max(500000, "Code exceeds maximum size")
+    .describe("The complete fixed script code"),
+  comment: z.string()
+    .min(1, "Comment cannot be empty")
+    .max(1000, "Comment exceeds maximum size")
+    .describe("Brief description of what was fixed"),
+});
+```
+
+**Priority:** Low - current behavior is acceptable.
+
+---
+
+### ISSUE 5: MaintainerContext Interface Incomplete (INFORMATIONAL)
+
+**Location:** agent-types.ts lines 50-54
+
+**Problem:**
+The interface only includes minimal fields:
+```typescript
+export interface MaintainerContext {
+  workflowId: string;
+  expectedMajorVersion: number;
+}
+```
+
+The IMPLEMENTATION_PLAN.md mentions additional fields needed:
+- scriptRunId
+- error (type, message)
+- logs
+- scriptCode
+- scriptVersion
+- changelog
+
+**Analysis:**
+This is intentional - this commit implements the MINIMAL context needed for the fix tool's race condition check. The rich context (error, logs, etc.) is added in subsequent commits (e5962c6) via `loadMaintainerContext()` and `enrichMaintainerInbox()`.
+
+**Recommendation:**
+No change needed. The incremental approach is correct.
+
+---
+
+### ISSUE 6: Tool Wiring Lacks Exhaustiveness Check (LOW SEVERITY)
+
+**Location:** agent.ts lines 182-222
+
+**Problem:**
+```typescript
+if (this.task.type === "maintainer") {
+  // maintainer tools
+} else {
+  // worker/planner tools
+}
+```
+
+If a new task type is added in the future, it would silently get worker/planner tools (ask, save, schedule) without explicit consideration.
+
+**Recommendation:**
+Use exhaustive check:
+```typescript
+switch (this.task.type) {
+  case "maintainer":
+    tools.fix = makeFixTool({...});
+    break;
+  case "worker":
+  case "planner":
+    tools.ask = makeAskTool({...});
+    tools.save = makeSaveTool({...});
+    tools.schedule = makeScheduleTool({...});
+    break;
+  default:
+    const _exhaustive: never = this.task.type;
+}
+```
+
+---
+
+### ISSUE 7: Context Loading Fails Silently if Script Missing (MEDIUM SEVERITY)
+
+**Location:** task-worker.ts lines 168-183
+
+**Problem:**
+```typescript
+if (taskType === "maintainer" && task.workflow_id) {
+  const workflow = await this.api.scriptStore.getWorkflow(task.workflow_id);
+  if (workflow && workflow.active_script_id) {
+    const script = await this.api.scriptStore.getScript(workflow.active_script_id);
+    if (script) {
+      maintainerContext = {
+        workflowId: workflow.id,
+        expectedMajorVersion: script.major_version,
+      };
+    }
+  }
+  if (!maintainerContext) {
+    this.debug("Cannot create maintainer context - missing workflow or script");
+    return this.finishTask(task, "Error", "Cannot load maintainer context");
+  }
+}
+```
+
+**Analysis:**
+The error handling is actually correct - it returns an error if context can't be loaded. However, the debug message doesn't specify WHICH component is missing (workflow vs script).
+
+**Recommendation:**
+Improve debug messages:
+```typescript
+if (!workflow) {
+  this.debug("Cannot create maintainer context - workflow not found", task.workflow_id);
+  return this.finishTask(task, "Error", `Workflow not found: ${task.workflow_id}`);
+}
+if (!workflow.active_script_id) {
+  this.debug("Cannot create maintainer context - no active script", task.workflow_id);
+  return this.finishTask(task, "Error", "Workflow has no active script");
+}
+const script = await this.api.scriptStore.getScript(workflow.active_script_id);
+if (!script) {
+  this.debug("Cannot create maintainer context - script not found", workflow.active_script_id);
+  return this.finishTask(task, "Error", `Script not found: ${workflow.active_script_id}`);
+}
+```
+
+---
+
+## PROPOSALS
+
+### Proposal 1: Graceful Handling of Missing active_script_id
+
+**For Issue 1**
+
+Modify fix.ts to return applied:false instead of throwing:
+
+```typescript
+if (!workflow.active_script_id) {
+  // Workflow has no script to fix - clear maintenance and abort
+  await opts.scriptStore.updateWorkflowFields(opts.workflowId, {
+    maintenance: false,
+  });
+  // Return null script with applied: false
+  return {
+    script: null as any, // Or modify FixResult to allow null
+    applied: false,
+  };
+}
+```
+
+Or modify FixResult interface:
+```typescript
+interface FixResult {
+  script: Script | null;
+  applied: boolean;
+  reason?: string;
+}
+```
+
+### Proposal 2: Add Transaction Wrapping
+
+**For Issue 2**
+
+If ScriptStore supports transactions:
+
+```typescript
+const result = await opts.scriptStore.db.tx(async (tx) => {
+  await opts.scriptStore.addScript(newScript, tx);
+  await opts.scriptStore.updateWorkflowFields(opts.workflowId, {
+    active_script_id: newScript.id,
+    maintenance: false,
+    next_run_timestamp: new Date().toISOString(),
+  }, tx);
+  return newScript;
+});
+```
+
+### Proposal 3: Add Reason Field to FixResult
+
+**For Issue 3**
+
+```typescript
+interface FixResult {
+  script: Script;
+  applied: boolean;
+  reason?: "success" | "stale_version" | "no_active_script";
+}
+
+// In race condition:
+return {
+  script: currentScript,
+  applied: false,
+  reason: "stale_version",
+};
+```
+
+### Proposal 4: Add Input Validation
+
+**For Issue 4**
+
+```typescript
+const FixInfoSchema = z.object({
+  code: z.string()
+    .min(1, "Code cannot be empty")
+    .max(500_000, "Code too large")
+    .describe("The complete fixed script code"),
+  comment: z.string()
+    .min(1, "Comment required")
+    .max(1000, "Comment too long")
+    .describe("Brief description of what was fixed"),
+});
+```
+
+---
+
+## TOOL COMPARISON ANALYSIS
+
+| Aspect | save.ts | fix.ts | Consistent? |
+|--------|---------|--------|-------------|
+| Version increment | major++ | minor++ | Correct (different roles) |
+| Workflow update | updateWorkflowFields | updateWorkflowFields | Yes |
+| Transaction | No | No | Yes (both lack) |
+| Input validation | Basic zod | Basic zod | Yes |
+| Error handling | Throws on missing | Throws on missing | Yes |
+| Maintenance clear | If maintenance=true | Always | Correct (different roles) |
+
+The fix.ts tool follows the established patterns in the codebase.
+
+---
+
+## VERIFICATION CHECKLIST
+
+- [x] Fix tool correctly increments minor_version (not major)
+- [x] Fix tool preserves major_version from current script
+- [x] Race condition check compares expectedMajorVersion
+- [x] Stale fix is discarded (applied: false)
+- [x] Stale fix clears maintenance flag
+- [x] Valid fix creates new script record
+- [x] Valid fix updates workflow.active_script_id
+- [x] Valid fix sets next_run_timestamp for immediate re-run
+- [x] Maintainer gets fix tool, not save/ask/schedule
+- [x] Worker/Planner get save/ask/schedule, not fix
+- [x] MaintainerContext loaded before agent creation
+- [ ] Missing active_script_id handling (should return false, not throw)
+- [ ] Atomic transaction for script+workflow update (nice to have)
+
+---
+
+## CONCLUSION
+
+This commit implements the core fix capability for the maintainer agent. The race condition handling via `expectedMajorVersion` comparison is correct and prevents stale fixes from overwriting planner updates. The tool follows established patterns in the codebase (similar to save.ts).
+
+Main issues:
+1. Should return applied:false instead of throwing when active_script_id is missing
+2. Non-atomic operations could leave orphaned records (low impact)
+3. Missing feedback about WHY a fix was rejected
+
+The conditional tool registration correctly restricts maintainer to only the fix tool, preventing unintended user interaction or schedule modifications.
+
+RATING: GOOD (one medium-severity error handling issue to address)
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Throw on missing active_script_id) - skipped
+- Issue #2 (Non-atomic operations) - skipped (established pattern)
+- Issue #3 (Race condition feedback) - created specs/new/fix-tool-always-save-check-active.md (redesigned approach)
+- Issue #4 (Input validation missing) - skipped (established pattern)
+- Issue #5 (MaintainerContext incomplete) - skipped (intentional, incremental)
+- Issue #6 (Tool wiring exhaustiveness) - skipped
+- Issue #7 (Debug messages not specific) - skipped (minor)

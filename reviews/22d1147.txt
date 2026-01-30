@@ -1,0 +1,205 @@
+COMMIT REVIEW: 22d1147
+=======================
+feat(db): Add 30-day auto-archive threshold detection
+
+SUMMARY OF CHANGES
+------------------
+This commit implements archivable drafts detection for workflows inactive 30+ days:
+- Adds DRAFT_THRESHOLDS.ARCHIVE_DAYS (30 days) constant
+- Adds archivableDrafts count to DraftActivitySummary interface
+- Updates getDraftActivitySummary() to track 30-day threshold
+- Adds draft_archived notification type for future silent auto-archive
+- Updates StaleDraftsBanner to show archivable drafts with archive prompt
+- Adds unit tests for archivable draft detection and boundary conditions
+
+Files changed:
+- IMPLEMENTATION_PLAN.md (doc updates)
+- apps/web/src/components/StaleDraftsBanner.tsx (UI updates)
+- apps/web/src/hooks/dbScriptReads.ts (default values)
+- packages/db/src/notification-store.ts (new type)
+- packages/db/src/script-store.ts (core logic)
+- packages/tests/src/script-store.test.ts (tests)
+
+ISSUES FOUND
+------------
+
+### Issue 1: Double-Counting Bug in getDraftActivitySummary() [HIGH]
+Location: packages/db/src/script-store.ts:1005-1014
+
+The counting logic incorrectly counts archivable drafts twice:
+```typescript
+if (lastActivity < archiveTimestamp) {
+  archivableDrafts++;
+  abandonedDrafts++; // Also counts as abandoned for backward compatibility
+} else if (lastActivity < abandonedTimestamp) {
+  abandonedDrafts++;
+} else if (lastActivity < staleTimestamp) {
+  staleDrafts++;
+}
+```
+
+Problem: A draft that is 30+ days old gets counted in BOTH archivableDrafts AND
+abandonedDrafts. The comment says "backward compatibility" but this breaks the
+semantic meaning of abandonedDrafts (7-30 days).
+
+Example with 3 drafts (35 days, 10 days, 5 days):
+- Current: archivableDrafts=1, abandonedDrafts=2 (35-day counted twice!), staleDrafts=1
+- Expected: archivableDrafts=1, abandonedDrafts=1 (10-day only), staleDrafts=1
+
+Impact: The UI will show inflated abandonedDrafts counts. The sum of categories
+may exceed totalDrafts.
+
+Proposal: Remove the double-counting line:
+```typescript
+if (lastActivity < archiveTimestamp) {
+  archivableDrafts++;
+  // Don't also count as abandoned - they're separate age brackets
+} else if (lastActivity < abandonedTimestamp) {
+  abandonedDrafts++;
+} else if (lastActivity < staleTimestamp) {
+  staleDrafts++;
+}
+```
+
+### Issue 2: UI Logic Hides Abandoned Drafts When Archivable Exist [MEDIUM]
+Location: apps/web/src/components/StaleDraftsBanner.tsx:33-43
+
+```typescript
+if (archivableDrafts > 0) {
+  messageParts.push(`${archivableDrafts} draft${...} been inactive for 30+ days`);
+} else if (abandonedDrafts > 0) {
+  // Only shows abandoned if NO archivable exist
+  messageParts.push(`${abandonedDrafts} draft${...} been inactive for 7+ days`);
+}
+```
+
+Problem: The else-if means users won't see information about 7-30 day abandoned
+drafts when there are ANY 30+ day archivable drafts.
+
+Example: 2 archivable (35 days) + 3 abandoned (10-25 days) = User only sees
+"2 drafts have been inactive for 30+ days", missing information about the 3 others.
+
+Proposal: Show both categories when applicable:
+```typescript
+if (archivableDrafts > 0) {
+  messageParts.push(`${archivableDrafts} draft${...} been inactive for 30+ days`);
+}
+
+// Calculate remaining abandoned (7-30 days), accounting for double-count in data
+const recentlyAbandoned = abandonedDrafts - archivableDrafts;
+if (recentlyAbandoned > 0) {
+  messageParts.push(`${recentlyAbandoned} draft${...} been inactive for 7+ days`);
+}
+```
+
+Note: This proposal works with the current double-counting backend. If Issue 1 is
+fixed first, simplify to:
+```typescript
+if (archivableDrafts > 0) {
+  messageParts.push(...);
+}
+if (abandonedDrafts > 0) {
+  messageParts.push(...);
+}
+```
+
+### Issue 3: Banner Visibility Logic Doesn't Consider archivableDrafts [LOW]
+Location: apps/web/src/components/StaleDraftsBanner.tsx:24
+
+```typescript
+if (abandonedDrafts === 0 && waitingForInput === 0) return null;
+```
+
+Due to Issue 1 (double-counting), this condition currently works because archivable
+drafts are always counted in abandonedDrafts. However, if Issue 1 is fixed, this
+condition needs updating:
+
+```typescript
+if (abandonedDrafts === 0 && archivableDrafts === 0 && waitingForInput === 0) return null;
+```
+
+### Issue 4: Tests Validate The Bug [MEDIUM]
+Location: packages/tests/src/script-store.test.ts:1622-1628
+
+The test explicitly validates the double-counting behavior as correct:
+```typescript
+expect(summary.archivableDrafts).toBe(1);   // Only 35-day old draft
+expect(summary.abandonedDrafts).toBe(2);    // 35-day and 10-day (archivable counts as abandoned too)
+```
+
+Comment says "archivable counts as abandoned too" - this is testing the bug as a feature.
+
+Proposal: Update test expectations after fixing Issue 1:
+```typescript
+expect(summary.archivableDrafts).toBe(1);   // 35-day old draft
+expect(summary.abandonedDrafts).toBe(1);    // 10-day old draft (7-30 days range)
+```
+
+### Issue 5: Notification Type Added But Not Used [LOW]
+Location: packages/db/src/notification-store.ts:12
+
+Added `draft_archived` notification type:
+```typescript
+export type NotificationType = "error" | "escalated" | "maintenance_failed" |
+                               "script_message" | "script_ask" | "draft_archived";
+```
+
+The type is defined but no code actually creates draft_archived notifications.
+The comment says "for future silent auto-archive" but there's no TODO or spec reference.
+
+Proposal: Either implement the notification creation in the archive flow, or add a
+TODO comment with spec reference for when it should be implemented.
+
+### Issue 6: Missing Default Value in Hook [LOW]
+Location: apps/web/src/hooks/dbScriptReads.ts:294-305
+
+The fallback object includes archivableDrafts: 0, which is good. But the pattern
+of having two identical fallback objects (lines 294-298 and 302-306) is error-prone.
+
+Proposal: Extract to a constant:
+```typescript
+const DEFAULT_SUMMARY: DraftActivitySummary = {
+  totalDrafts: 0,
+  staleDrafts: 0,
+  abandonedDrafts: 0,
+  archivableDrafts: 0,
+  waitingForInput: 0,
+};
+```
+
+POSITIVE ASPECTS
+----------------
+1. Clean separation of concerns (threshold constant, interface, implementation)
+2. Proper UI styling hierarchy (amber > orange > gray)
+3. Good boundary condition tests (30 days +/- 1 second)
+4. Appropriate icon selection (Archive icon for archivable state)
+5. CTA text changes appropriately ("Review & archive" vs "View drafts")
+6. Backward-compatible interface extension (new field added, not breaking)
+
+OVERALL ASSESSMENT
+------------------
+The feature intent is correct and well-structured, but there's a critical logic error
+in the counting (Issue 1) that propagates through the UI (Issue 2) and tests (Issue 4).
+
+The double-counting was likely intentional for "backward compatibility" but breaks
+the semantic meaning of each category. Categories should be mutually exclusive:
+- staleDrafts: 3-7 days
+- abandonedDrafts: 7-30 days
+- archivableDrafts: 30+ days
+
+Priority for fixes:
+1. HIGH: Fix double-counting in getDraftActivitySummary() (Issue 1)
+2. MEDIUM: Fix UI to show both categories (Issue 2)
+3. MEDIUM: Update tests to validate correct behavior (Issue 4)
+4. LOW: Update banner visibility condition (Issue 3)
+5. LOW: Implement or document draft_archived notification (Issue 5)
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Double-Counting Bug) - created specs/new/fix-draft-activity-double-counting.md
+- Issue #2 (UI Hides Abandoned Drafts) - covered by specs/new/fix-draft-activity-double-counting.md
+- Issue #3 (Banner Visibility Logic) - covered by specs/new/fix-draft-activity-double-counting.md
+- Issue #4 (Tests Validate Bug) - covered by specs/new/fix-draft-activity-double-counting.md
+- Issue #5 (Notification Type Not Used) - skipped (dead code until auto-archive implemented)
+- Issue #6 (Duplicated Default Object) - created specs/new/extract-draft-activity-summary-default.md

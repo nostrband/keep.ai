@@ -1,0 +1,133 @@
+COMMIT REVIEW: e5962c6
+=======================
+feat(agent): Complete maintainer task handling and context loading
+
+CHANGES SUMMARY
+---------------
+This commit implements comprehensive maintainer task support for autonomous script repair. The maintainer agent can now automatically diagnose and fix script logic errors without user intervention.
+
+FILES CHANGED:
+1. packages/agent/src/agent-types.ts (+18 lines)
+   - Extended MaintainerContext interface with rich diagnostic fields:
+     - scriptRunId: tracks the failed script run
+     - error: { type, message } for error classification
+     - logs: last 50 lines of console output
+     - scriptCode: the failed script's code
+     - scriptVersion: formatted version string (e.g., "2.1")
+     - changelog: prior minor version fix attempts for context
+
+2. packages/agent/src/task-scheduler.ts (+21 lines)
+   - Added per-workflow conflict resolution for task priority
+   - When a planner task exists for a workflow, maintainer tasks for the same workflow are skipped
+   - Prevents stale fixes: if user is re-planning, don't apply fixes to old version
+   - Added maintainer to the priority chain: planner > worker > maintainer
+
+3. packages/agent/src/task-worker.ts (+330 lines)
+   - loadMaintainerContext(): Loads rich context from failed script run
+     - Extracts scriptRunId from inbox metadata
+     - Loads script run, error details, logs
+     - Builds changelog from prior minor versions (last 5)
+     - Trims logs to last 50 lines to avoid context bloat
+   - enrichMaintainerInbox(): Transforms inbox into detailed diagnostic message
+     - Formats error details, script info, logs, changelog as Markdown
+     - Provides clear instructions for the maintainer agent
+   - handleMaintainerCompletion(): Handles completion outcomes
+     - Checks if fix tool was called via agent history inspection
+     - If fix applied: maintenance flag cleared by fix tool
+     - If fix not called: escalates to user with explanation
+   - escalateMaintainerFailure(): Notifies user when auto-fix fails
+     - Sets workflow status to "error"
+     - Creates notification with explanation
+     - Sends message to user's chat if available
+
+4. packages/db/src/index.ts (+1 line)
+   - Exports formatVersion function from script-store
+
+POTENTIAL ISSUES
+----------------
+
+1. **Missing scriptRunId handling may lose context** (task-worker.ts:539-551)
+   SEVERITY: Medium
+   ISSUE: When scriptRunId is not found in inbox, the function returns a fallback context with empty scriptRunId and "unknown" error type. However, the maintainer agent will still attempt to fix based on the active script, which may not be the script that actually failed if the planner updated it in the meantime.
+   PROPOSAL: Consider returning undefined when scriptRunId is missing to fail fast rather than attempting a blind fix. The calling code already handles undefined return by finishing the task with an error message.
+
+2. **Race condition window in handleMaintainerCompletion** (task-worker.ts:689-699)
+   SEVERITY: Low
+   ISSUE: After checking if the fix tool was called, there's a window where the workflow state could change before clearing the maintenance flag. The code fetches workflow, then updates it in separate operations.
+   PROPOSAL: This is likely acceptable given the low probability and the fact that the worst case is a redundant maintenance=false update. However, could use a single atomic update with WHERE maintenance=true condition for extra safety.
+
+3. **Tool part type check may be fragile** (task-worker.ts:718-726)
+   SEVERITY: Medium
+   ISSUE: The checkIfFixToolCalled method looks for `part.type === "tool-fix"`. This assumes the AI SDK uses this exact format for tool parts. If the SDK changes its internal representation, this check would silently fail.
+   PROPOSAL: Consider checking for tool calls in a more robust way, perhaps by looking for a toolCallId or checking the tool name in tool-call parts. Also add a comment documenting the expected format.
+
+4. **Changelog limited to 5 entries without indication** (task-worker.ts:577-586)
+   SEVERITY: Low
+   ISSUE: The changelog is silently truncated to 5 entries. If there have been many fix attempts, the maintainer won't know how many were truncated and may repeat earlier unsuccessful approaches.
+   PROPOSAL: Add a note in the enriched message like "Showing 5 of 12 prior attempts" when truncation occurs.
+
+5. **Logs parsing doesn't handle edge cases** (task-worker.ts:588-593)
+   SEVERITY: Low
+   ISSUE: The log trimming splits on "\n" and takes last 50 lines. If logs contain very long lines or unusual line endings (\r\n), behavior may be unexpected.
+   PROPOSAL: Consider normalizing line endings and potentially truncating individual lines that are excessively long to prevent context overflow.
+
+6. **Missing null check for parts array** (task-worker.ts:719-725)
+   SEVERITY: Low
+   ISSUE: In checkIfFixToolCalled, the code checks `message.parts` exists with `if (!message.parts)` but then iterates. The check is good but could be more defensive with optional chaining.
+   PROPOSAL: Use `message.parts?.forEach` or keep the explicit check but ensure TypeScript narrowing works correctly.
+
+7. **Error notification may fail silently** (task-worker.ts:806-809)
+   SEVERITY: Low
+   ISSUE: When saving the maintenance_failed notification fails, it's only logged with debug. The user may not be notified of the failure.
+   PROPOSAL: This is probably acceptable since the workflow status is already set to "error" and the user will see that. However, consider whether a more prominent log level is warranted.
+
+8. **Hardcoded "escalated" notification type** (task-worker.ts:797)
+   SEVERITY: Low
+   ISSUE: The notification type "escalated" is hardcoded as a string. If notification types are used elsewhere, this could lead to inconsistencies.
+   PROPOSAL: Define notification types as constants or an enum in a central location if not already done.
+
+9. **Chat message format assumes Markdown support** (task-worker.ts:816-826)
+   SEVERITY: Low
+   ISSUE: The escalation message uses Markdown formatting (**bold**). If the chat UI doesn't render Markdown, the message will look awkward.
+   PROPOSAL: Verify that the chat UI supports Markdown rendering. This is likely fine given other parts of the codebase appear to use Markdown.
+
+POSITIVE OBSERVATIONS
+---------------------
+- Clean separation of concerns: loading context, enriching inbox, handling completion are separate methods
+- Good defensive programming with early returns and null checks
+- Comprehensive MaintainerContext provides all necessary debugging information
+- The changelog feature helps maintainer avoid repeating unsuccessful fixes
+- Per-workflow conflict resolution prevents race conditions at the scheduler level
+- Escalation to user provides clear next steps when auto-fix fails
+- The 50-line log limit is a sensible choice to balance context vs. token usage
+
+ARCHITECTURE NOTES
+------------------
+The maintainer task flow is now:
+1. Script fails with logic error → enterMaintenanceMode() creates maintainer task
+2. Scheduler picks up task (respecting planner > worker > maintainer priority)
+3. TaskWorker loads MaintainerContext with full diagnostic info
+4. Inbox enriched with formatted error report
+5. Maintainer agent analyzes and calls fix tool (or doesn't)
+6. Fix tool applies version check (race condition detection)
+7. On success: workflow re-runs immediately to verify fix
+8. On failure: user notified with explanation
+
+This architecture properly handles:
+- Race conditions (planner takes precedence, fix tool checks version)
+- Context management (rich diagnostic info without overwhelming LLM)
+- User communication (escalation with actionable information)
+- Retry semantics (immediate re-run after fix)
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Missing scriptRunId handling) - created specs/new/fail-fast-missing-scriptrunid.md
+- Issue #2 (Race condition window) - skipped (low probability)
+- Issue #3 (Fragile tool part type check) - created specs/new/fix-tool-called-callback.md
+- Issue #4 (Changelog truncated to 5) - created specs/new/include-full-changelog-in-maintainer-context.md
+- Issue #5 (Logs parsing edge cases) - created specs/new/truncate-maintainer-logs-by-chars.md
+- Issue #6 (Missing null check) - skipped (check exists)
+- Issue #7 (Error notification silent) - skipped (workflow status visible)
+- Issue #8 (Hardcoded notification type) - skipped (types defined centrally)
+- Issue #9 (Markdown assumption) - skipped (chat UI supports Markdown)

@@ -1,0 +1,170 @@
+COMMIT REVIEW: 3ea0f7c
+========================
+test(db): Add unit tests for InboxStore
+
+SUMMARY OF CHANGES
+------------------
+This commit adds 490 lines of unit tests for InboxStore in
+packages/tests/src/inbox-store.test.ts with 23 test cases covering:
+
+1. saveInbox and getInboxItem CRUD operations
+2. INSERT OR REPLACE idempotency behavior
+3. handleInboxItem state transition (marks items as handled)
+4. listInboxItems with filtering by source, target, handled status
+5. Pagination with limit and offset
+6. deleteInboxItem and postponeItem
+7. Transaction support with optional tx parameter
+8. All source types (user, worker, script)
+9. All target types (worker, planner, maintainer)
+10. JSON content serialization/deserialization
+
+Also updates IMPLEMENTATION_PLAN.md to mark:
+- Priority 2 items as complete (dry-run, collapse/highlight events, detect drafts)
+- Priority 3 items as complete (prompt stale drafts, archive drafts, versioning UI, agent status)
+- Priority 4 items as complete (script diff view, quick reply)
+- inbox-store.ts tests as complete
+
+ISSUES FOUND
+------------
+
+### Issue 1: Always-True Return Values Not Validated
+**Severity: LOW**
+**Location:** Multiple test cases
+
+The tests document that handleInboxItem, deleteInboxItem, and postponeItem
+always return true due to cr-sqlite limitations:
+
+```typescript
+// Line 159
+it("should return true even for non-existent item", async () => {
+  // cr-sqlite doesn't return changes count, so we always return true
+  const result = await inboxStore.handleInboxItem("non-existent", ...);
+  expect(result).toBe(true);
+});
+```
+
+While this is correctly documented, it means these methods can't distinguish
+between success and no-op operations. The tests acknowledge this but don't
+test any error scenarios since none can occur.
+
+**Proposal:** Consider if the API should change - perhaps return void instead
+of misleading boolean, or use a different pattern that can report actual
+operation results.
+
+---
+
+### Issue 2: Test Data Uses Arbitrary Timestamp Ordering
+**Severity: LOW**
+**Location:** Lines 166-202
+
+The listInboxItems beforeEach creates test data with timestamps:
+```typescript
+timestamp: new Date(now - 3000).toISOString(),  // inbox-1
+timestamp: new Date(now - 2000).toISOString(),  // inbox-2
+timestamp: new Date(now - 1000).toISOString(),  // inbox-3
+timestamp: new Date(now).toISOString(),          // inbox-4
+```
+
+The tests verify ASC ordering (oldest first), which matches the implementation.
+However, the hardcoded millisecond offsets (3000, 2000, 1000, 0) could be
+replaced with more readable constants or helper functions.
+
+**Proposal:** Minor improvement - use named constants like:
+```typescript
+const OLDEST = new Date(now - 3 * SECOND).toISOString();
+```
+
+---
+
+### Issue 3: No Test for Empty Content Field
+**Severity: LOW**
+**Location:** Throughout tests
+
+All tests use non-empty content fields. The schema allows empty content
+(DEFAULT ''), but no test verifies behavior with empty content.
+
+```typescript
+// Not tested:
+const item: InboxItem = { ...base, content: "" };
+await inboxStore.saveInbox(item);
+```
+
+**Proposal:** Add a test case for empty content handling.
+
+---
+
+### Issue 4: handler_thread_id Semantic Not Clear from Tests
+**Severity: LOW**
+**Location:** Lines 151-161
+
+The handleInboxItem method accepts a thread_id parameter:
+```typescript
+await inboxStore.handleInboxItem("inbox-1", handleTimestamp, handleThreadId);
+```
+
+The semantic purpose of handler_thread_id isn't clear from the tests - is it
+the thread that processed the item? A reference for audit purposes? The test
+uses "thread-789" without explaining why this field exists.
+
+**Proposal:** Add a comment or test name explaining the purpose:
+```typescript
+it("should track which thread processed the inbox item for audit", ...);
+```
+
+---
+
+POSITIVE OBSERVATIONS
+---------------------
+
+1. **Schema Consistency:** The createInboxTable() helper exactly matches the
+   v4 migration schema - all columns, indexes, and defaults verified.
+
+2. **Comprehensive Coverage:** All 6 public methods are tested:
+   - saveInbox() ✓
+   - getInboxItem() ✓
+   - listInboxItems() ✓
+   - handleInboxItem() ✓
+   - deleteInboxItem() ✓
+   - postponeItem() ✓
+
+3. **Filter Combinations:** Tests verify individual filters (source, target,
+   handled) and combined filters work correctly.
+
+4. **Pagination:** Both limit-only and limit+offset pagination are tested.
+
+5. **Type Coverage:** All enum values tested:
+   - Sources: user, worker, script
+   - Targets: worker, planner, maintainer
+
+6. **Transaction Support:** Verified that optional tx parameter works.
+
+7. **Idempotency:** INSERT OR REPLACE behavior correctly tested - same ID
+   with different content updates the record.
+
+8. **Isolation:** Tests use :memory: database with beforeEach/afterEach
+   cleanup, preventing test pollution.
+
+9. **JSON Handling:** Content serialization/deserialization verified with
+   complex nested objects including arrays and nested metadata.
+
+SUMMARY
+-------
+This is a thorough and well-written test suite. The createInboxTable helper
+matches the actual migration schema exactly, ensuring the tests validate
+real behavior. The main observation is that cr-sqlite's limitations mean
+write operations always return true regardless of whether they modified
+data - this is correctly documented but worth noting for future API design.
+
+The IMPLEMENTATION_PLAN.md updates accurately reflect the state of the
+codebase based on my analysis of related features.
+
+Recommendation: Accept. Minor suggestions for empty content testing and
+clearer documentation of handler_thread_id purpose.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Always-true return values) - skipped (cr-sqlite limitation, documented)
+- Issue #2 (Timestamp ordering readability) - skipped (minor test improvement)
+- Issue #3 (No empty content test) - skipped (minor test coverage)
+- Issue #4 (handler_thread_id semantic) - skipped (minor documentation)

@@ -1,0 +1,186 @@
+COMMIT REVIEW: 24f6f21
+=======================
+test(node): Add unit tests for getDBPath, mimeUtils, fileUtils, compression
+
+SUMMARY OF CHANGES
+------------------
+This commit adds 137 unit tests across 4 new test files for packages/node modules:
+- compression.test.ts (35 tests): Gzip/none compression, streaming API, size limits
+- fileUtils.test.ts (41 tests): Path utilities, file system operations, storeFileData
+- getDBPath.test.ts (25 tests): Path construction, ensureEnv initialization
+- mimeUtils.test.ts (36 tests): MIME detection from buffers and filenames
+
+Also updates IMPLEMENTATION_PLAN.md to track test coverage progress.
+
+ISSUES FOUND
+------------
+
+### Issue 1: Logic Error in compression.ts maxResultSizeSafe() [MEDIUM]
+Location: packages/node/src/compression.ts:86-90
+
+The implementation has backwards logic:
+```typescript
+private maxResultSizeSafe() {
+  if (!this.maxResultSize) return this.maxResultSize;
+  return Math.max(64, this.maxResultSize - 1024);
+}
+```
+
+Problem: When maxResultSize is undefined/null/0 (falsy), it returns that falsy value.
+When maxResultSize IS defined (truthy), it applies the 1KB margin.
+The condition is semantically backwards - it should return undefined when no limit is set.
+
+The same bug exists in NoCompression.maxResultSizeSafe() (lines 361-363).
+
+Impact: Currently doesn't cause immediate issues because calling code also checks
+`if (!maxResultSize)`, but the function doesn't do what its name suggests.
+
+Proposal: Fix the conditional:
+```typescript
+private maxResultSizeSafe() {
+  if (!this.maxResultSize) return undefined;
+  return Math.max(64, this.maxResultSize - 1024);
+}
+```
+
+### Issue 2: Confusing Error Message in compression.ts [LOW]
+Location: packages/node/src/compression.ts:435
+
+```typescript
+if (typeof chunk !== "string" && !this.binary)
+  throw new Error("Uint8Array input in binary mode");
+```
+
+The error says "in binary mode" but the condition is `!this.binary` (NOT binary mode).
+Should say "expected string input in string mode".
+
+Proposal: Fix error message to "Expected string input in string mode, got Uint8Array"
+
+### Issue 3: Critical MIME Detection Bug in fileUtils.ts [HIGH]
+Location: packages/node/src/fileUtils.ts:108-126
+
+The filename-based MIME detection fallback is unreachable:
+```typescript
+mediaType = await detectBufferMime(fileBuffer); // Always returns string
+
+if (!mediaType && filename && filename !== "unknown") {
+  mediaType = detectFilenameMime(filename);  // NEVER REACHED
+}
+```
+
+Problem: detectBufferMime() always returns a string (either detected type or
+'application/octet-stream'), so the condition `!mediaType` is always false.
+
+Impact: Files without magic bytes (text files, JSON, CSS, etc.) always get
+'application/octet-stream' even when filename provides better hint.
+
+The test at line 410-425 documents this as "expected behavior" but it's actually a bug.
+The codebase already has a proper detectMime() function in mimeUtils.ts that correctly
+implements two-step fallback.
+
+Proposal: Either use detectMime() from mimeUtils.ts, or fix the condition:
+```typescript
+mediaType = await detectBufferMime(fileBuffer);
+
+// Fall back to filename detection if content detection returned generic type
+if (mediaType === 'application/octet-stream' && filename && filename !== "unknown") {
+  const filenameMime = detectFilenameMime(filename);
+  if (filenameMime !== 'application/octet-stream') {
+    mediaType = filenameMime;
+  }
+}
+```
+
+### Issue 4: Security Concern - Secret Key Storage [MEDIUM]
+Location: packages/node/src/getDBPath.ts:149-152
+
+The ensureEnv() function stores secret keys in plain text in users.json:
+```typescript
+const newUser: User = {
+  key: secretKeyHex,  // SECRET KEY in plain text!
+  pubkey: publicKeyHex
+};
+```
+
+File is created with default permissions (0644 on Unix), making it world-readable.
+
+The tests verify the structure but don't check file permissions or security.
+
+Proposal: Consider encrypting the secret key or restricting file permissions to 0600.
+At minimum, document this security consideration.
+
+### Issue 5: Test Gap - Error Handling Not Tested [LOW]
+Multiple locations
+
+The tests focus on happy paths but don't test:
+- What happens if fileTypeFromBuffer() throws
+- What happens if fs operations fail mid-process
+- Concurrent execution scenarios
+- Very large buffers that could cause memory issues
+
+Proposal: Add error scenario tests, at least for critical functions like storeFileData().
+
+### Issue 6: Race Condition in getUserPath() [LOW]
+Location: packages/node/src/getDBPath.ts:63-64
+
+```typescript
+if (!fs.existsSync(userDir)) {
+  fs.mkdirSync(userDir, { recursive: true });
+}
+```
+
+Between existsSync check and mkdirSync, another process could create the directory.
+While recursive: true handles this in most cases, it's a race condition pattern.
+
+Proposal: Remove the existsSync check and rely on recursive: true handling duplicates:
+```typescript
+fs.mkdirSync(userDir, { recursive: true });
+```
+
+### Issue 7: Skipped Tests Not Clearly Justified [LOW]
+Location: compression.test.ts:590-630
+
+Two tests are skipped with comment about "zlib stream timing sensitivity":
+```typescript
+it.skip("should handle invalid gzip data", async () => {
+it.skip("should handle truncated gzip data", async () => {
+```
+
+While the comment explains the timing issue, these are important error handling paths
+that should be tested, even if through a different mechanism.
+
+Proposal: Consider testing error handling through synchronous validation before
+decompression, or using timeout-based verification.
+
+POSITIVE ASPECTS
+----------------
+1. Comprehensive test coverage (137 tests) for critical infrastructure modules
+2. Good documentation of why tests exist (comments explaining "Why these tests matter")
+3. Tests use proper setup/teardown with temp directories
+4. Tests verify idempotency of ensureEnv()
+5. Tests verify hash consistency for file deduplication
+6. Tests cover both string and binary modes for compression
+7. Tests include Unicode handling and large file scenarios
+
+OVERALL ASSESSMENT
+------------------
+The tests are well-written and comprehensive for happy paths. However, they missed
+identifying a critical MIME detection bug in fileUtils.ts (Issue 3) - the tests
+actually document the bug as expected behavior rather than catching it.
+
+Priority for fixes:
+1. HIGH: Fix MIME detection fallback in fileUtils.ts (Issue 3)
+2. MEDIUM: Fix compression.ts maxResultSizeSafe() logic (Issue 1)
+3. MEDIUM: Address secret key storage security (Issue 4)
+4. LOW: Fix error message (Issue 2), race condition (Issue 6), add error tests (Issue 5)
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (maxResultSizeSafe logic) - created specs/new/fix-maxresultsizesafe-return-value.md
+- Issue #2 (Confusing error message) - created specs/new/fix-compression-error-message.md
+- Issue #3 (MIME detection fallback) - created specs/new/fix-mime-detection-fallback.md
+- Issue #4 (Secret key permissions) - created specs/new/fix-secret-key-file-permissions.md
+- Issue #5 (Test gap - error handling) - skipped (test improvement, not a bug)
+- Issue #6 (Race condition) - created specs/new/fix-getdbpath-race-condition.md
+- Issue #7 (Skipped tests) - created specs/new/fix-skipped-compression-tests.md

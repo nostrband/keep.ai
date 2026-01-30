@@ -1,0 +1,91 @@
+COMMIT REVIEW: 533d956
+=======================
+fix(tests): Add type assertions for AI tool test results
+
+CHANGES SUMMARY
+---------------
+This commit adds explicit type assertions to test files to fix TypeScript errors. The AI SDK's tool() function returns a union type (Result | AsyncIterable<Result>) for the execute method, which requires type narrowing when accessing result properties.
+
+FILES CHANGED:
+1. packages/tests/src/fix-tool.test.ts (+10 lines, -10 lines)
+   - Added `as FixResult` type assertions to 10 execute() call results
+   - Locations: lines 125, 150, 177, 201, 222, 296, 324, 474, 492, 516
+
+2. packages/tests/src/save-tool.test.ts (+4 lines, -4 lines)
+   - Added `as SaveResult` type assertions to 4 execute() call results
+   - Locations: lines 141, 166, 191, 213
+
+CHANGES DETAIL
+--------------
+Before (example from fix-tool.test.ts:125):
+```typescript
+const result = await fixTool.execute!(
+  { code: "console.log('fixed');", comment: "Fixed the bug" },
+  createToolCallOptions()
+);
+```
+
+After:
+```typescript
+const result = await fixTool.execute!(
+  { code: "console.log('fixed');", comment: "Fixed the bug" },
+  createToolCallOptions()
+) as FixResult;
+```
+
+POTENTIAL ISSUES
+----------------
+
+1. **Type assertions bypass type safety**
+   SEVERITY: Low
+   ISSUE: Using `as Type` assertions tells TypeScript to trust the developer rather than verify the type. If the AI SDK changes its behavior to return an AsyncIterable in certain conditions, the tests would compile but fail at runtime.
+   PROPOSAL: Consider using a type guard function instead:
+   ```typescript
+   function isFixResult(result: FixResult | AsyncIterable<FixResult>): result is FixResult {
+     return result && typeof result === 'object' && 'applied' in result;
+   }
+   ```
+   However, for unit tests this is acceptable pragmatism - the assertion is safe because:
+   - The tool function doesn't use streaming (returns Promise, not AsyncIterable)
+   - Tests would immediately fail if the type was wrong
+
+2. **Inconsistent assertion placement** (various lines)
+   SEVERITY: Very Low
+   ISSUE: Some tests in the files still don't have type assertions (e.g., save-tool.test.ts tests at lines 827, 908, etc. don't assert on the result). This inconsistency may confuse future maintainers.
+   PROPOSAL: Either add assertions to all execute() calls for consistency, or add a comment explaining which tests need assertions (those that access typed properties) and which don't (those that only check database state).
+
+3. **Non-null assertion on execute** (all affected lines)
+   SEVERITY: Low
+   ISSUE: The code uses `execute!` (non-null assertion) which assumes execute is always defined. The AI SDK's tool() does provide execute, but the type signature makes it optional.
+   PROPOSAL: This is acceptable - the AI SDK documentation indicates execute is provided when using the tool() helper. The alternative would be verbose null checks that don't add value.
+
+POSITIVE OBSERVATIONS
+---------------------
+- Clean, minimal fix that addresses the exact issue
+- Consistent pattern across all assertions
+- Commit message clearly explains the root cause (AI SDK union type)
+- Does not change test logic, only type information
+- Fix allows TypeScript strict mode to pass
+
+ARCHITECTURE NOTES
+------------------
+This is a TypeScript ergonomics issue common when using the Vercel AI SDK:
+- The SDK is designed to support both sync and streaming tool responses
+- The union type `Result | AsyncIterable<Result>` captures both cases
+- For non-streaming tools like fix/save, the result is always the direct type
+- Type assertions are the pragmatic solution when you know the runtime behavior
+
+The fix is appropriate because:
+1. These are test files - runtime type safety is less critical than production code
+2. The tools are non-streaming by design (they return Promises, not streams)
+3. Tests would immediately fail with clear errors if types were wrong
+4. Alternative solutions (type guards, runtime checks) add unnecessary complexity
+
+This pattern may be worth documenting in a project-level TESTING.md or similar to help future developers understand why assertions are needed for AI SDK tool testing.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Type assertions bypass safety) - skipped (acceptable for tests)
+- Issue #2 (Inconsistent assertion placement) - skipped (very low)
+- Issue #3 (Non-null assertion on execute) - skipped (acceptable per AI SDK)

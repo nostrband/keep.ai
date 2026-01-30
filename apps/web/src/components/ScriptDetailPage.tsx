@@ -89,7 +89,7 @@ export default function ScriptDetailPage() {
                   <h2 className="text-xl font-semibold text-gray-900 mb-2">
                     Script {script.id.slice(0, 8)}
                   </h2>
-                  <Badge variant="outline">Version {script.version}</Badge>
+                  <Badge variant="outline">Version {script.major_version}.{script.minor_version}</Badge>
                 </div>
                 <div className="flex flex-col items-end gap-2">
                   <Button
@@ -182,7 +182,7 @@ export default function ScriptDetailPage() {
                       <div className="flex items-center justify-between">
                         <div className="flex-1">
                           <div className="flex items-center gap-2 mb-1">
-                            <span className="font-medium text-gray-900">Version {version.version}</span>
+                            <span className="font-medium text-gray-900">Version {version.major_version}.{version.minor_version}</span>
                             {version.id === script.id && (
                               <Badge variant="default">Current</Badge>
                             )}

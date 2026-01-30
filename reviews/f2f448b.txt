@@ -1,0 +1,225 @@
+COMMIT REVIEW: f2f448b
+========================
+fix(ui): Add filter=drafts query param support to WorkflowsPage
+
+SUMMARY OF CHANGES
+------------------
+This commit adds query parameter support to WorkflowsPage.tsx (30 lines added,
+10 removed) enabling filtering of workflows by status:
+
+1. Reads 'filter' query parameter from URL using useSearchParams()
+2. When filter=drafts, shows only workflows with status === "draft"
+3. Updates page title to "Drafts" when filtering
+4. Adds "View all workflows" link when viewing drafts
+5. Shows appropriate empty state message ("No draft workflows found")
+
+Also removes item 1 from ISSUES.md (the issue this commit fixes).
+
+Implementation uses client-side filtering with useMemo():
+```typescript
+const filteredWorkflows = useMemo(() => {
+  if (filterParam === "drafts") {
+    return workflows.filter((w) => w.status === "draft");
+  }
+  return workflows;
+}, [workflows, filterParam]);
+```
+
+ISSUES FOUND
+------------
+
+### Issue 1: No Parameter Validation/Whitelist
+**Severity: MEDIUM**
+**Location:** Lines 12-20
+
+The filter parameter accepts any string without validation:
+```typescript
+const filterParam = searchParams.get("filter");
+if (filterParam === "drafts") {
+  // applies filter
+}
+return workflows; // silently ignores unknown values
+```
+
+Risk scenarios:
+- `/workflows?filter=invalid` - shows all workflows silently
+- `/workflows?filter=active` - ignored (user might expect it to work)
+- `/workflows?filter=DRAFTS` - case-sensitive, doesn't work
+- `/workflows?filter=draft` (singular) - won't match
+
+Users receive no feedback when using an invalid filter value.
+
+**Proposal:** Add validation with user feedback:
+```typescript
+const VALID_FILTERS = ["drafts"] as const;
+const filterParam = searchParams.get("filter")?.toLowerCase();
+const isValidFilter = filterParam && VALID_FILTERS.includes(filterParam);
+// Show warning for invalid filters or normalize case
+```
+
+---
+
+### Issue 2: Case Sensitivity
+**Severity: MEDIUM**
+**Location:** Line 15
+
+Filter matching is case-sensitive:
+```typescript
+if (filterParam === "drafts") { ... }
+```
+
+- `/workflows?filter=drafts` ✓ Works
+- `/workflows?filter=Drafts` ✗ Doesn't work
+- `/workflows?filter=DRAFTS` ✗ Doesn't work
+
+Users typing URLs manually or external systems creating links may use
+different casing.
+
+**Proposal:** Normalize to lowercase:
+```typescript
+const filterParam = searchParams.get("filter")?.toLowerCase();
+```
+
+---
+
+### Issue 3: Client-Side Filtering Performance
+**Severity: LOW**
+**Location:** Lines 14-20
+
+All workflows are fetched before filtering client-side:
+```typescript
+const { data: workflows = [], isLoading } = useWorkflows();
+// useWorkflows() calls scriptStore.listWorkflows() - returns ALL workflows
+
+const filteredWorkflows = useMemo(() => {
+  return workflows.filter((w) => w.status === "draft");
+}, [workflows, filterParam]);
+```
+
+For users with many workflows (100+), this fetches the entire dataset even
+when only a few drafts exist. The database layer (scriptStore.listWorkflows)
+doesn't support status filtering.
+
+This matches the pattern used by ArchivedPage.tsx, so it's consistent with
+the codebase, but worth noting for future optimization.
+
+**Proposal:** For now, this is acceptable as it matches existing patterns.
+Future enhancement: Add server-side filtering support to listWorkflows().
+
+---
+
+### Issue 4: Inconsistent Page Design - Query Param vs Dedicated Route
+**Severity: LOW**
+**Location:** Architecture decision
+
+The codebase uses two patterns for filtered views:
+1. **Dedicated route:** ArchivedPage at /archived
+2. **Query parameter:** WorkflowsPage?filter=drafts
+
+This creates inconsistency:
+- Archived workflows: `/archived` (own page)
+- Draft workflows: `/workflows?filter=drafts` (param on same page)
+
+Both use client-side filtering, but the UX is different.
+
+**Proposal:** Not a bug, but worth documenting the rationale. If more
+status filters are needed, consider:
+- Option A: Use query params consistently (/workflows?filter=archived)
+- Option B: Use dedicated routes consistently (/workflows/drafts)
+
+---
+
+### Issue 5: No "Clear Filter" Indication in URL
+**Severity: LOW**
+**Location:** Line 45-51
+
+The "View all workflows" link correctly clears the filter:
+```typescript
+{filterParam === "drafts" && (
+  <Link to="/workflows" className="text-sm text-gray-500 hover:text-gray-700">
+    View all workflows
+  </Link>
+)}
+```
+
+However, there's no visual indication that a filter is active besides the
+page title. Users might not notice they're viewing a filtered list if they
+bookmark or share the URL.
+
+**Proposal:** Consider adding a more prominent filter indicator, like a
+chip/badge showing "Filtered by: Drafts" with an X to clear.
+
+---
+
+### Issue 6: Empty State During Initial Load
+**Severity: LOW**
+**Location:** Lines 52-57
+
+The empty state message depends on isLoading:
+```typescript
+{isLoading ? (
+  <div>Loading workflows...</div>
+) : filteredWorkflows.length === 0 ? (
+  <div>{emptyMessage}</div>
+) : ...}
+```
+
+When filter=drafts and isLoading=true, it shows "Loading workflows..."
+which is correct. But "Loading drafts..." would be more precise.
+
+**Proposal:** Minor UX improvement:
+```typescript
+const loadingMessage = filterParam === "drafts"
+  ? "Loading drafts..."
+  : "Loading workflows...";
+```
+
+---
+
+POSITIVE OBSERVATIONS
+---------------------
+
+1. **Correct Hook Usage:** Uses useSearchParams() from react-router-dom
+   correctly to read query parameters.
+
+2. **Memo Optimization:** useMemo() prevents re-filtering on every render,
+   only re-computing when workflows or filterParam changes.
+
+3. **Clean UI Updates:** Page title, empty message, and "View all" link
+   all properly respond to filter state.
+
+4. **Pattern Consistency:** Client-side filtering matches ArchivedPage.tsx
+   approach, maintaining codebase consistency.
+
+5. **Integration:** Works correctly with StaleDraftsBanner which links to
+   `/workflows?filter=drafts` - the intended user flow is preserved.
+
+6. **Issue Tracking:** Properly removes the fixed issue from ISSUES.md.
+
+7. **Minimal Changes:** The fix is focused - only WorkflowsPage.tsx changed
+   plus documentation cleanup.
+
+SUMMARY
+-------
+This is a straightforward feature addition that fixes the reported issue.
+The implementation correctly uses React Router's query parameter handling
+and follows existing patterns in the codebase (client-side filtering).
+
+The main concerns are:
+1. No parameter validation - invalid values silently ignored
+2. Case-sensitive matching could frustrate users
+
+These are minor UX issues, not bugs. The core functionality works correctly.
+
+Recommendation: Accept. Consider adding case normalization and parameter
+validation in a follow-up commit for better UX.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (No parameter validation) - created specs/new/improve-workflows-filter-param-handling.md
+- Issue #2 (Case sensitivity) - covered by specs/new/improve-workflows-filter-param-handling.md
+- Issue #3 (Client-side filtering performance) - skipped (matches existing pattern)
+- Issue #4 (Query param vs dedicated route) - skipped (design decision, not a bug)
+- Issue #5 (No clear filter indication) - skipped (minor UX)
+- Issue #6 (Loading message wording) - skipped (very minor UX)

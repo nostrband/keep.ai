@@ -1,0 +1,165 @@
+COMMIT REVIEW: 554c57c
+=======================
+Title: security: Fix path traversal vulnerability in Electron file protocol handler
+Date: Mon Jan 26 17:35:53 2026 +0100
+Files changed: 2 (apps/electron/src/main.ts, IMPLEMENTATION_PLAN.md)
+
+SUMMARY OF CHANGES
+------------------
+This commit fixes a path traversal vulnerability in the Electron app's custom
+file:// protocol handler. The handler serves:
+1. API file downloads (file:///files/get/<id>) - proxied to local API server
+2. Static SPA assets (everything else) - served from bundled public/ directory
+
+Before this fix, the handler would read ANY file path requested without validation,
+allowing attackers to access sensitive files like /etc/passwd via URLs like:
+  file:///path/to/app/public/../../../etc/passwd
+
+The fix adds:
+- Path canonicalization via path.resolve()
+- Prefix validation to ensure resolved path is within allowed directory
+- 403 Forbidden response for blocked attempts
+- Debug logging for blocked attempts
+
+TECHNICAL ANALYSIS
+------------------
+Security implementation:
+
+```javascript
+const allowedBaseDir = path.resolve(__dirname, "../public");
+const filePath = fileURLToPath(request.url);
+const resolvedPath = path.resolve(filePath);
+
+if (!resolvedPath.startsWith(allowedBaseDir + path.sep) &&
+    resolvedPath !== allowedBaseDir) {
+  return new Response("Forbidden", { status: 403 });
+}
+```
+
+What this protects against:
+- Path traversal via ../ sequences (normalized by path.resolve)
+- Prefix attacks like /public_evil/file (blocked by path.sep requirement)
+- URL-encoded path traversal (..%2F rejected by fileURLToPath)
+- Null byte injection (handled by modern Node.js)
+- Backslash traversal on Unix (treated as literal characters)
+
+ISSUES FOUND
+------------
+
+ISSUE 1: CRITICAL - Symlink vulnerability not addressed
+Severity: High
+Location: Line 490-491
+
+The fix uses `path.resolve()` which normalizes path syntax but does NOT resolve
+symbolic links. If an attacker can create a symlink inside the public/ directory,
+they can bypass the validation.
+
+Attack scenario:
+```bash
+# Attacker creates symlink (requires filesystem write access)
+ln -s /etc /path/to/app/public/evil
+
+# Request malicious URL
+file:///path/to/app/public/evil/passwd
+  -> path.resolve() returns: /path/to/app/public/evil/passwd (passes validation)
+  -> fs.readFile() follows symlink -> reads /etc/passwd (VULNERABILITY)
+```
+
+Likelihood: Low (requires attacker to have write access to public/)
+Impact: Critical (full filesystem read access)
+
+Proposal: Use fs.realpathSync() instead of path.resolve() to resolve symlinks:
+```javascript
+try {
+  const resolvedPath = fs.realpathSync(filePath);
+  // ... continue with validation
+} catch (err) {
+  // File doesn't exist
+  return new Response("Not Found", { status: 404 });
+}
+```
+
+Note: realpathSync throws if file doesn't exist, which is actually better
+behavior (immediate 404 vs attempt to read non-existent file).
+
+---
+
+ISSUE 2: MEDIUM - Windows case-sensitivity bypass
+Severity: Medium
+Location: Line 490-491
+
+On Windows, filesystems are case-insensitive but JavaScript string comparison
+is case-sensitive. An attacker could potentially bypass validation:
+
+```javascript
+allowedBaseDir = "C:\\Users\\App\\public"
+resolvedPath   = "C:\\Users\\App\\PUBLIC\\file.html"
+
+resolvedPath.startsWith(allowedBaseDir + "\\")  // false (case mismatch)
+// But Windows filesystem would allow access to the same directory!
+```
+
+Likelihood: Low (requires Windows + specific URL crafting)
+Impact: Medium (directory listing exposure, potentially sensitive files)
+
+Proposal: Normalize case on Windows:
+```javascript
+if (process.platform === 'win32') {
+  resolvedPath = resolvedPath.toLowerCase();
+  allowedBaseDir = allowedBaseDir.toLowerCase();
+}
+```
+
+---
+
+ISSUE 3: LOW - No startup validation of public directory
+Severity: Low
+Location: setupDownloadHandler() function start
+
+The allowedBaseDir is computed as `path.resolve(__dirname, "../public")` without
+verifying the directory actually exists. If the build configuration changes or
+the app is packaged differently, this could silently fail.
+
+Proposal: Add startup validation:
+```javascript
+if (!fs.existsSync(allowedBaseDir) || !fs.statSync(allowedBaseDir).isDirectory()) {
+  throw new Error(`Public directory not found: ${allowedBaseDir}`);
+}
+```
+
+---
+
+ISSUE 4: LOW - Missing security tests
+Severity: Low
+Location: Test suite
+
+There are no automated tests for the path traversal protection. Security-critical
+code should have explicit test coverage to prevent regression.
+
+Proposal: Add security tests:
+- Test that ../../../etc/passwd is blocked
+- Test that /public_evil/file is blocked
+- Test that valid paths within public/ are allowed
+- Test that exact public directory access works
+
+PROPOSALS
+---------
+
+Priority 1 (Security):
+- Replace path.resolve() with fs.realpathSync() to address symlink vulnerability
+- Add case normalization for Windows compatibility
+
+Priority 2 (Hardening):
+- Add startup validation for public directory existence
+- Add security-focused test cases
+
+Priority 3 (Monitoring):
+- Consider adding metrics/alerts for blocked path traversal attempts
+  (the debug log is good but may not be visible in production)
+
+VERDICT: APPROVED with follow-up required
+
+The fix correctly addresses the primary path traversal vulnerability and follows
+security best practices (canonicalization + prefix validation). The symlink issue
+is a real concern but has low likelihood in this context. Recommend addressing
+Issue 1 in a follow-up commit.

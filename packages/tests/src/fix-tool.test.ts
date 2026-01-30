@@ -1,0 +1,524 @@
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { DBInterface, KeepDb, ScriptStore, Script, Workflow } from "@app/db";
+import { createDBNode } from "@app/node";
+import { makeFixTool, FixResult } from "@app/agent";
+
+/**
+ * Creates mock ToolCallOptions for testing.
+ */
+function createToolCallOptions() {
+  return {
+    toolCallId: "test-call",
+    messages: [],
+    abortSignal: new AbortController().signal,
+  };
+}
+
+/**
+ * Helper to create scripts, workflows tables without full migration system.
+ * This allows testing the fix tool in isolation without CR-SQLite dependencies.
+ */
+async function createFixToolTables(db: DBInterface): Promise<void> {
+  // Create scripts table (matches production v11 + v16 + v34 migrations)
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS scripts (
+      id TEXT PRIMARY KEY NOT NULL,
+      task_id TEXT NOT NULL DEFAULT '',
+      major_version INTEGER NOT NULL DEFAULT 0,
+      minor_version INTEGER NOT NULL DEFAULT 0,
+      timestamp TEXT NOT NULL DEFAULT '',
+      code TEXT NOT NULL DEFAULT '',
+      change_comment TEXT NOT NULL DEFAULT '',
+      workflow_id TEXT NOT NULL DEFAULT '',
+      type TEXT NOT NULL DEFAULT '',
+      summary TEXT NOT NULL DEFAULT '',
+      diagram TEXT NOT NULL DEFAULT ''
+    )
+  `);
+  await db.exec(`CREATE INDEX IF NOT EXISTS idx_scripts_task_id ON scripts(task_id)`);
+  await db.exec(`CREATE INDEX IF NOT EXISTS idx_scripts_workflow_id ON scripts(workflow_id)`);
+  await db.exec(`CREATE INDEX IF NOT EXISTS idx_scripts_major_minor_version ON scripts(major_version DESC, minor_version DESC)`);
+
+  // Create workflows table
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS workflows (
+      id TEXT PRIMARY KEY NOT NULL,
+      title TEXT NOT NULL DEFAULT '',
+      task_id TEXT NOT NULL DEFAULT '',
+      chat_id TEXT NOT NULL DEFAULT '',
+      timestamp TEXT NOT NULL DEFAULT '',
+      cron TEXT NOT NULL DEFAULT '',
+      events TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT '',
+      next_run_timestamp TEXT NOT NULL DEFAULT '',
+      maintenance INTEGER NOT NULL DEFAULT 0,
+      maintenance_fix_count INTEGER NOT NULL DEFAULT 0,
+      active_script_id TEXT NOT NULL DEFAULT ''
+    )
+  `);
+  await db.exec(`CREATE INDEX IF NOT EXISTS idx_workflows_task_id ON workflows(task_id)`);
+}
+
+describe("Fix Tool", () => {
+  let db: DBInterface;
+  let keepDb: KeepDb;
+  let scriptStore: ScriptStore;
+
+  beforeEach(async () => {
+    db = await createDBNode(":memory:");
+    keepDb = new KeepDb(db);
+    await createFixToolTables(db);
+    scriptStore = new ScriptStore(keepDb);
+  });
+
+  afterEach(async () => {
+    if (db) {
+      await db.close();
+    }
+  });
+
+  const createWorkflow = (overrides: Partial<Workflow> = {}): Workflow => ({
+    id: "workflow-1",
+    title: "Test Workflow",
+    task_id: "task-1",
+    chat_id: "chat-1",
+    timestamp: new Date().toISOString(),
+    cron: "0 9 * * *",
+    events: "",
+    status: "active",
+    next_run_timestamp: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+    maintenance: true,
+    maintenance_fix_count: 1,
+    active_script_id: "script-1",
+    ...overrides,
+  });
+
+  const createScript = (overrides: Partial<Script> = {}): Script => ({
+    id: "script-1",
+    task_id: "task-1",
+    major_version: 1,
+    minor_version: 0,
+    timestamp: new Date().toISOString(),
+    code: "console.log('original');",
+    change_comment: "Initial version",
+    workflow_id: "workflow-1",
+    type: "cron",
+    summary: "Original summary",
+    diagram: "flowchart TD",
+    ...overrides,
+  });
+
+  describe("Successful fix application", () => {
+    it("should create new script with incremented minor_version", async () => {
+      const workflow = createWorkflow();
+      const script = createScript({ major_version: 2, minor_version: 0 });
+      await scriptStore.addWorkflow(workflow);
+      await scriptStore.addScript(script);
+
+      const fixTool = makeFixTool({
+        maintainerTaskId: "maintainer-task-1",
+        workflowId: "workflow-1",
+        expectedMajorVersion: 2,
+        scriptStore,
+      });
+
+      const result = await fixTool.execute!(
+        { code: "console.log('fixed');", comment: "Fixed the bug" },
+        createToolCallOptions()
+      ) as FixResult;
+
+      expect(result.applied).toBe(true);
+      expect(result.script.major_version).toBe(2);
+      expect(result.script.minor_version).toBe(1);
+      expect(result.script.code).toBe("console.log('fixed');");
+      expect(result.script.change_comment).toBe("Fixed the bug");
+    });
+
+    it("should preserve major_version when creating fix", async () => {
+      const workflow = createWorkflow();
+      const script = createScript({ major_version: 5, minor_version: 3 });
+      await scriptStore.addWorkflow(workflow);
+      await scriptStore.addScript(script);
+
+      const fixTool = makeFixTool({
+        maintainerTaskId: "maintainer-task-1",
+        workflowId: "workflow-1",
+        expectedMajorVersion: 5,
+        scriptStore,
+      });
+
+      const result = await fixTool.execute!(
+        { code: "console.log('fixed');", comment: "Fixed" },
+        createToolCallOptions()
+      ) as FixResult;
+
+      expect(result.applied).toBe(true);
+      expect(result.script.major_version).toBe(5); // Same major version
+      expect(result.script.minor_version).toBe(4); // Incremented from 3
+    });
+
+    it("should preserve script metadata (type, summary, diagram)", async () => {
+      const workflow = createWorkflow();
+      const script = createScript({
+        type: "event",
+        summary: "This does something important",
+        diagram: "flowchart LR\nA-->B",
+      });
+      await scriptStore.addWorkflow(workflow);
+      await scriptStore.addScript(script);
+
+      const fixTool = makeFixTool({
+        maintainerTaskId: "maintainer-task-1",
+        workflowId: "workflow-1",
+        expectedMajorVersion: 1,
+        scriptStore,
+      });
+
+      const result = await fixTool.execute!(
+        { code: "console.log('fixed');", comment: "Bug fix" },
+        createToolCallOptions()
+      ) as FixResult;
+
+      expect(result.applied).toBe(true);
+      expect(result.script.type).toBe("event");
+      expect(result.script.summary).toBe("This does something important");
+      expect(result.script.diagram).toBe("flowchart LR\nA-->B");
+    });
+
+    it("should set task_id to maintainer task ID", async () => {
+      const workflow = createWorkflow();
+      const script = createScript();
+      await scriptStore.addWorkflow(workflow);
+      await scriptStore.addScript(script);
+
+      const fixTool = makeFixTool({
+        maintainerTaskId: "maintainer-task-123",
+        workflowId: "workflow-1",
+        expectedMajorVersion: 1,
+        scriptStore,
+      });
+
+      const result = await fixTool.execute!(
+        { code: "fixed code", comment: "Fix" },
+        createToolCallOptions()
+      ) as FixResult;
+
+      expect(result.script.task_id).toBe("maintainer-task-123");
+    });
+
+    it("should update workflow active_script_id to new script", async () => {
+      const workflow = createWorkflow();
+      const script = createScript();
+      await scriptStore.addWorkflow(workflow);
+      await scriptStore.addScript(script);
+
+      const fixTool = makeFixTool({
+        maintainerTaskId: "maintainer-task-1",
+        workflowId: "workflow-1",
+        expectedMajorVersion: 1,
+        scriptStore,
+      });
+
+      const result = await fixTool.execute!(
+        { code: "fixed code", comment: "Fix" },
+        createToolCallOptions()
+      ) as FixResult;
+
+      const updatedWorkflow = await scriptStore.getWorkflow("workflow-1");
+      expect(updatedWorkflow?.active_script_id).toBe(result.script.id);
+    });
+
+    it("should clear maintenance flag after successful fix", async () => {
+      const workflow = createWorkflow({ maintenance: true });
+      const script = createScript();
+      await scriptStore.addWorkflow(workflow);
+      await scriptStore.addScript(script);
+
+      const fixTool = makeFixTool({
+        maintainerTaskId: "maintainer-task-1",
+        workflowId: "workflow-1",
+        expectedMajorVersion: 1,
+        scriptStore,
+      });
+
+      await fixTool.execute!(
+        { code: "fixed code", comment: "Fix" },
+        createToolCallOptions()
+      );
+
+      const updatedWorkflow = await scriptStore.getWorkflow("workflow-1");
+      expect(updatedWorkflow?.maintenance).toBe(false);
+    });
+
+    it("should set next_run_timestamp to now for immediate re-run", async () => {
+      const futureTime = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+      const workflow = createWorkflow({ next_run_timestamp: futureTime });
+      const script = createScript();
+      await scriptStore.addWorkflow(workflow);
+      await scriptStore.addScript(script);
+
+      const beforeFix = Date.now();
+
+      const fixTool = makeFixTool({
+        maintainerTaskId: "maintainer-task-1",
+        workflowId: "workflow-1",
+        expectedMajorVersion: 1,
+        scriptStore,
+      });
+
+      await fixTool.execute!(
+        { code: "fixed code", comment: "Fix" },
+        createToolCallOptions()
+      );
+
+      const afterFix = Date.now();
+
+      const updatedWorkflow = await scriptStore.getWorkflow("workflow-1");
+      // next_run_timestamp should be set to approximately now (within a reasonable window)
+      const nextRunTime = new Date(updatedWorkflow!.next_run_timestamp).getTime();
+      expect(nextRunTime).toBeGreaterThanOrEqual(beforeFix);
+      expect(nextRunTime).toBeLessThanOrEqual(afterFix);
+    });
+
+    it("should persist new script to database", async () => {
+      const workflow = createWorkflow();
+      const script = createScript();
+      await scriptStore.addWorkflow(workflow);
+      await scriptStore.addScript(script);
+
+      const fixTool = makeFixTool({
+        maintainerTaskId: "maintainer-task-1",
+        workflowId: "workflow-1",
+        expectedMajorVersion: 1,
+        scriptStore,
+      });
+
+      const result = await fixTool.execute!(
+        { code: "console.log('persisted');", comment: "Persisted fix" },
+        createToolCallOptions()
+      ) as FixResult;
+
+      // Verify script was actually saved to database
+      const savedScript = await scriptStore.getScript(result.script.id);
+      expect(savedScript).not.toBeNull();
+      expect(savedScript?.code).toBe("console.log('persisted');");
+      expect(savedScript?.change_comment).toBe("Persisted fix");
+    });
+  });
+
+  describe("Race condition handling", () => {
+    it("should return applied=false when major_version has changed", async () => {
+      // Maintainer started with major_version 2, but planner updated to major_version 3
+      const workflow = createWorkflow();
+      const script = createScript({ major_version: 3, minor_version: 0 }); // Planner updated
+      await scriptStore.addWorkflow(workflow);
+      await scriptStore.addScript(script);
+
+      const fixTool = makeFixTool({
+        maintainerTaskId: "maintainer-task-1",
+        workflowId: "workflow-1",
+        expectedMajorVersion: 2, // Maintainer expected version 2
+        scriptStore,
+      });
+
+      const result = await fixTool.execute!(
+        { code: "console.log('stale fix');", comment: "This fix is stale" },
+        createToolCallOptions()
+      ) as FixResult;
+
+      expect(result.applied).toBe(false);
+      // Should return the current script (not the stale fix)
+      expect(result.script.major_version).toBe(3);
+    });
+
+    it("should clear maintenance flag when race condition detected", async () => {
+      const workflow = createWorkflow({ maintenance: true });
+      const script = createScript({ major_version: 3 });
+      await scriptStore.addWorkflow(workflow);
+      await scriptStore.addScript(script);
+
+      const fixTool = makeFixTool({
+        maintainerTaskId: "maintainer-task-1",
+        workflowId: "workflow-1",
+        expectedMajorVersion: 2, // Stale version
+        scriptStore,
+      });
+
+      await fixTool.execute!(
+        { code: "stale fix", comment: "Stale" },
+        createToolCallOptions()
+      );
+
+      const updatedWorkflow = await scriptStore.getWorkflow("workflow-1");
+      expect(updatedWorkflow?.maintenance).toBe(false);
+    });
+
+    it("should NOT create new script when race condition detected", async () => {
+      const workflow = createWorkflow();
+      const script = createScript({ major_version: 3 });
+      await scriptStore.addWorkflow(workflow);
+      await scriptStore.addScript(script);
+
+      const scriptCountBefore = (await scriptStore.getScriptsByWorkflowId("workflow-1")).length;
+
+      const fixTool = makeFixTool({
+        maintainerTaskId: "maintainer-task-1",
+        workflowId: "workflow-1",
+        expectedMajorVersion: 2, // Stale version
+        scriptStore,
+      });
+
+      await fixTool.execute!(
+        { code: "stale fix", comment: "Should not be saved" },
+        createToolCallOptions()
+      );
+
+      const scriptCountAfter = (await scriptStore.getScriptsByWorkflowId("workflow-1")).length;
+      expect(scriptCountAfter).toBe(scriptCountBefore);
+    });
+
+    it("should NOT update active_script_id when race condition detected", async () => {
+      const workflow = createWorkflow({ active_script_id: "current-script" });
+      const script = createScript({ id: "current-script", major_version: 3 });
+      await scriptStore.addWorkflow(workflow);
+      await scriptStore.addScript(script);
+
+      const fixTool = makeFixTool({
+        maintainerTaskId: "maintainer-task-1",
+        workflowId: "workflow-1",
+        expectedMajorVersion: 2, // Stale version
+        scriptStore,
+      });
+
+      await fixTool.execute!(
+        { code: "stale fix", comment: "Should not update active_script_id" },
+        createToolCallOptions()
+      );
+
+      const updatedWorkflow = await scriptStore.getWorkflow("workflow-1");
+      expect(updatedWorkflow?.active_script_id).toBe("current-script");
+    });
+  });
+
+  describe("Error handling", () => {
+    it("should throw error if workflow not found", async () => {
+      const fixTool = makeFixTool({
+        maintainerTaskId: "maintainer-task-1",
+        workflowId: "non-existent-workflow",
+        expectedMajorVersion: 1,
+        scriptStore,
+      });
+
+      await expect(
+        fixTool.execute!(
+          { code: "code", comment: "comment" },
+          createToolCallOptions()
+        )
+      ).rejects.toThrow("Workflow not found: non-existent-workflow");
+    });
+
+    it("should throw error if workflow has no active script", async () => {
+      const workflow = createWorkflow({ active_script_id: "" });
+      await scriptStore.addWorkflow(workflow);
+
+      const fixTool = makeFixTool({
+        maintainerTaskId: "maintainer-task-1",
+        workflowId: "workflow-1",
+        expectedMajorVersion: 1,
+        scriptStore,
+      });
+
+      await expect(
+        fixTool.execute!(
+          { code: "code", comment: "comment" },
+          createToolCallOptions()
+        )
+      ).rejects.toThrow("Workflow workflow-1 has no active script");
+    });
+
+    it("should throw error if active script not found", async () => {
+      const workflow = createWorkflow({ active_script_id: "non-existent-script" });
+      await scriptStore.addWorkflow(workflow);
+
+      const fixTool = makeFixTool({
+        maintainerTaskId: "maintainer-task-1",
+        workflowId: "workflow-1",
+        expectedMajorVersion: 1,
+        scriptStore,
+      });
+
+      await expect(
+        fixTool.execute!(
+          { code: "code", comment: "comment" },
+          createToolCallOptions()
+        )
+      ).rejects.toThrow("Script not found: non-existent-script");
+    });
+  });
+
+  describe("Multiple minor version increments", () => {
+    it("should correctly increment minor version on successive fixes", async () => {
+      const workflow = createWorkflow();
+      const script = createScript({ major_version: 2, minor_version: 0 });
+      await scriptStore.addWorkflow(workflow);
+      await scriptStore.addScript(script);
+
+      // First fix: 2.0 -> 2.1
+      const fixTool1 = makeFixTool({
+        maintainerTaskId: "maintainer-task-1",
+        workflowId: "workflow-1",
+        expectedMajorVersion: 2,
+        scriptStore,
+      });
+
+      const result1 = await fixTool1.execute!(
+        { code: "fix 1", comment: "First fix" },
+        createToolCallOptions()
+      ) as FixResult;
+
+      expect(result1.script.major_version).toBe(2);
+      expect(result1.script.minor_version).toBe(1);
+
+      // Second fix: 2.1 -> 2.2
+      // Note: In practice, maintainer would need to reload with new expectedMajorVersion
+      // But here we're testing that fix tool correctly uses current minor_version
+      const fixTool2 = makeFixTool({
+        maintainerTaskId: "maintainer-task-2",
+        workflowId: "workflow-1",
+        expectedMajorVersion: 2, // Still same major version
+        scriptStore,
+      });
+
+      const result2 = await fixTool2.execute!(
+        { code: "fix 2", comment: "Second fix" },
+        createToolCallOptions()
+      ) as FixResult;
+
+      expect(result2.script.major_version).toBe(2);
+      expect(result2.script.minor_version).toBe(2);
+    });
+  });
+
+  describe("Workflow ID preservation", () => {
+    it("should set workflow_id correctly on new script", async () => {
+      const workflow = createWorkflow({ id: "my-workflow-123" });
+      const script = createScript({ workflow_id: "my-workflow-123" });
+      await scriptStore.addWorkflow(workflow);
+      await scriptStore.addScript(script);
+
+      const fixTool = makeFixTool({
+        maintainerTaskId: "maintainer-task-1",
+        workflowId: "my-workflow-123",
+        expectedMajorVersion: 1,
+        scriptStore,
+      });
+
+      const result = await fixTool.execute!(
+        { code: "fixed", comment: "Fix" },
+        createToolCallOptions()
+      ) as FixResult;
+
+      expect(result.script.workflow_id).toBe("my-workflow-123");
+    });
+  });
+});

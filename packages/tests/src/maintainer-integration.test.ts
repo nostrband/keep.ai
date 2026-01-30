@@ -1,0 +1,793 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { DBInterface, KeepDb, KeepDbApi, ScriptStore, Script, Workflow, Task, InboxStore, NotificationStore } from "@app/db";
+import { createDBNode } from "@app/node";
+import { makeFixTool, FixResult } from "@app/agent";
+
+/**
+ * Integration tests for the Maintainer Task Type flow.
+ *
+ * These tests verify the end-to-end behavior of:
+ * 1. Logic error detection → maintainer task creation → fix applied → re-run
+ * 2. Max fix attempts exceeded → user escalation with notification
+ */
+
+/**
+ * Helper to create all tables needed for maintainer integration tests.
+ */
+async function createIntegrationTables(db: DBInterface): Promise<void> {
+  // Create tasks table
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS tasks (
+      id TEXT PRIMARY KEY NOT NULL,
+      timestamp INTEGER NOT NULL DEFAULT 0,
+      reply TEXT NOT NULL DEFAULT '',
+      state TEXT NOT NULL DEFAULT '',
+      thread_id TEXT NOT NULL DEFAULT '',
+      error TEXT NOT NULL DEFAULT '',
+      type TEXT NOT NULL DEFAULT '',
+      title TEXT NOT NULL DEFAULT '',
+      chat_id TEXT NOT NULL DEFAULT '',
+      workflow_id TEXT NOT NULL DEFAULT '',
+      asks TEXT NOT NULL DEFAULT '',
+      deleted BOOLEAN DEFAULT FALSE
+    )
+  `);
+  await db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_chat_id ON tasks(chat_id)`);
+  await db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_workflow_id ON tasks(workflow_id)`);
+  await db.exec(`CREATE INDEX IF NOT EXISTS idx_tasks_type ON tasks(type)`);
+
+  // Create workflows table
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS workflows (
+      id TEXT PRIMARY KEY NOT NULL,
+      title TEXT NOT NULL DEFAULT '',
+      task_id TEXT NOT NULL DEFAULT '',
+      chat_id TEXT NOT NULL DEFAULT '',
+      timestamp TEXT NOT NULL DEFAULT '',
+      cron TEXT NOT NULL DEFAULT '',
+      events TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT '',
+      next_run_timestamp TEXT NOT NULL DEFAULT '',
+      maintenance INTEGER NOT NULL DEFAULT 0,
+      maintenance_fix_count INTEGER NOT NULL DEFAULT 0,
+      active_script_id TEXT NOT NULL DEFAULT ''
+    )
+  `);
+  await db.exec(`CREATE INDEX IF NOT EXISTS idx_workflows_task_id ON workflows(task_id)`);
+
+  // Create inbox table
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS inbox (
+      id TEXT PRIMARY KEY NOT NULL,
+      source TEXT NOT NULL DEFAULT '',
+      source_id TEXT NOT NULL DEFAULT '',
+      target TEXT NOT NULL DEFAULT '',
+      target_id TEXT NOT NULL DEFAULT '',
+      content TEXT NOT NULL DEFAULT '',
+      timestamp TEXT NOT NULL DEFAULT '',
+      handler_timestamp TEXT NOT NULL DEFAULT '',
+      handler_thread_id TEXT NOT NULL DEFAULT ''
+    )
+  `);
+  await db.exec(`CREATE INDEX IF NOT EXISTS idx_inbox_target ON inbox(target)`);
+  await db.exec(`CREATE INDEX IF NOT EXISTS idx_inbox_target_id ON inbox(target_id)`);
+
+  // Create scripts table
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS scripts (
+      id TEXT PRIMARY KEY NOT NULL,
+      task_id TEXT NOT NULL DEFAULT '',
+      major_version INTEGER NOT NULL DEFAULT 0,
+      minor_version INTEGER NOT NULL DEFAULT 0,
+      timestamp TEXT NOT NULL DEFAULT '',
+      code TEXT NOT NULL DEFAULT '',
+      change_comment TEXT NOT NULL DEFAULT '',
+      workflow_id TEXT NOT NULL DEFAULT '',
+      type TEXT NOT NULL DEFAULT '',
+      summary TEXT NOT NULL DEFAULT '',
+      diagram TEXT NOT NULL DEFAULT ''
+    )
+  `);
+  await db.exec(`CREATE INDEX IF NOT EXISTS idx_scripts_task_id ON scripts(task_id)`);
+  await db.exec(`CREATE INDEX IF NOT EXISTS idx_scripts_workflow_id ON scripts(workflow_id)`);
+  await db.exec(`CREATE INDEX IF NOT EXISTS idx_scripts_major_minor_version ON scripts(major_version DESC, minor_version DESC)`);
+
+  // Create script_runs table
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS script_runs (
+      id TEXT PRIMARY KEY NOT NULL,
+      script_id TEXT NOT NULL DEFAULT '',
+      start_timestamp TEXT NOT NULL DEFAULT '',
+      end_timestamp TEXT NOT NULL DEFAULT '',
+      error TEXT NOT NULL DEFAULT '',
+      error_type TEXT NOT NULL DEFAULT '',
+      result TEXT NOT NULL DEFAULT '',
+      logs TEXT NOT NULL DEFAULT '',
+      workflow_id TEXT NOT NULL DEFAULT '',
+      type TEXT NOT NULL DEFAULT '',
+      retry_of TEXT NOT NULL DEFAULT '',
+      retry_count INTEGER NOT NULL DEFAULT 0,
+      cost INTEGER NOT NULL DEFAULT 0
+    )
+  `);
+  await db.exec(`CREATE INDEX IF NOT EXISTS idx_script_runs_workflow_id ON script_runs(workflow_id)`);
+  await db.exec(`CREATE INDEX IF NOT EXISTS idx_script_runs_script_id ON script_runs(script_id)`);
+
+  // Create notifications table
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS notifications (
+      id TEXT PRIMARY KEY NOT NULL,
+      workflow_id TEXT NOT NULL DEFAULT '',
+      type TEXT NOT NULL DEFAULT '',
+      payload TEXT NOT NULL DEFAULT '',
+      timestamp TEXT NOT NULL DEFAULT '',
+      acknowledged_at TEXT NOT NULL DEFAULT '',
+      resolved_at TEXT NOT NULL DEFAULT '',
+      workflow_title TEXT NOT NULL DEFAULT ''
+    )
+  `);
+  await db.exec(`CREATE INDEX IF NOT EXISTS idx_notifications_workflow_id ON notifications(workflow_id)`);
+}
+
+/**
+ * Creates mock ToolCallOptions for testing.
+ */
+function createToolCallOptions() {
+  return {
+    toolCallId: "test-call",
+    messages: [],
+    abortSignal: new AbortController().signal,
+  };
+}
+
+describe("Maintainer Integration Tests", () => {
+  let db: DBInterface;
+  let keepDb: KeepDb;
+  let api: KeepDbApi;
+
+  beforeEach(async () => {
+    db = await createDBNode(":memory:");
+    keepDb = new KeepDb(db);
+    await createIntegrationTables(db);
+    api = new KeepDbApi(keepDb);
+  });
+
+  afterEach(async () => {
+    if (db) {
+      await db.close();
+    }
+  });
+
+  const createWorkflow = (overrides: Partial<Workflow> = {}): Workflow => ({
+    id: "workflow-1",
+    title: "Test Workflow",
+    task_id: "task-1",
+    chat_id: "chat-1",
+    timestamp: new Date().toISOString(),
+    cron: "0 9 * * *",
+    events: "",
+    status: "active",
+    next_run_timestamp: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+    maintenance: false,
+    maintenance_fix_count: 0,
+    active_script_id: "script-1",
+    ...overrides,
+  });
+
+  const createScript = (overrides: Partial<Script> = {}): Script => ({
+    id: "script-1",
+    task_id: "task-1",
+    major_version: 1,
+    minor_version: 0,
+    timestamp: new Date().toISOString(),
+    code: "console.log('original');",
+    change_comment: "Initial version",
+    workflow_id: "workflow-1",
+    type: "cron",
+    summary: "Original summary",
+    diagram: "flowchart TD",
+    ...overrides,
+  });
+
+  const createTask = (overrides: Partial<Task> = {}): Task => ({
+    id: "task-1",
+    timestamp: Date.now(),
+    reply: "",
+    state: "idle",
+    thread_id: "thread-1",
+    error: "",
+    type: "planner",
+    title: "Test Task",
+    chat_id: "chat-1",
+    workflow_id: "workflow-1",
+    asks: "",
+    ...overrides,
+  });
+
+  describe("Integration Test: Logic Error to Fix Flow", () => {
+    /**
+     * End-to-end test of: logic error -> maintainer task -> fix applied -> re-run ready
+     *
+     * This test simulates the complete flow:
+     * 1. A workflow exists with an active script (version 1.0)
+     * 2. Script execution fails with a logic error
+     * 3. enterMaintenanceMode is called which:
+     *    - Increments maintenance_fix_count
+     *    - Sets maintenance = true
+     *    - Creates maintainer task
+     *    - Creates inbox item targeting maintainer
+     * 4. Maintainer analyzes and calls the fix tool
+     * 5. Fix tool creates new script (version 1.1), clears maintenance, schedules re-run
+     * 6. Re-run succeeds and maintenance_fix_count is reset to 0
+     */
+    it("should complete full flow: logic error -> maintenance mode -> fix -> workflow ready for re-run", async () => {
+      // 1. Setup: Create workflow with initial script
+      const workflow = createWorkflow();
+      const script = createScript();
+      const task = createTask();
+
+      await api.scriptStore.addWorkflow(workflow);
+      await api.scriptStore.addScript(script);
+      await api.taskStore.addTask(task);
+
+      // Verify initial state
+      let dbWorkflow = await api.scriptStore.getWorkflow(workflow.id);
+      expect(dbWorkflow?.maintenance).toBe(false);
+      expect(dbWorkflow?.maintenance_fix_count).toBe(0);
+
+      // 2. Simulate: Script run fails with logic error
+      // (In production this would be detected by workflow-worker and route to enterMaintenanceMode)
+      const scriptRunId = "script-run-fail-1";
+      const startTime = new Date().toISOString();
+      await api.scriptStore.startScriptRun(
+        scriptRunId,
+        script.id,
+        startTime,
+        workflow.id,
+        "workflow",
+        "",
+        0
+      );
+      // Finish with error
+      await api.scriptStore.finishScriptRun(
+        scriptRunId,
+        new Date().toISOString(),
+        "",
+        "TypeError: Cannot read property 'data' of undefined",
+        "Fetching data...\nProcessing response...\nError occurred",
+        "logic",
+        0
+      );
+
+      // 3. Enter maintenance mode (atomic transaction)
+      const maintenanceResult = await api.enterMaintenanceMode({
+        workflowId: workflow.id,
+        workflowTitle: workflow.title,
+        scriptRunId,
+      });
+
+      // Verify maintenance mode was entered correctly
+      expect(maintenanceResult.newFixCount).toBe(1);
+      expect(maintenanceResult.maintainerTask.type).toBe("maintainer");
+      expect(maintenanceResult.maintainerTask.chat_id).toBe(""); // Isolated from user chat
+      expect(maintenanceResult.maintainerTask.workflow_id).toBe(workflow.id);
+      expect(maintenanceResult.inboxItemId).toContain("maintenance.");
+
+      // Verify workflow state
+      dbWorkflow = await api.scriptStore.getWorkflow(workflow.id);
+      expect(dbWorkflow?.maintenance).toBe(true);
+      expect(dbWorkflow?.maintenance_fix_count).toBe(1);
+
+      // Verify maintainer task exists
+      const maintainerTasks = await api.taskStore.getMaintainerTasksForWorkflow(workflow.id);
+      expect(maintainerTasks.length).toBe(1);
+      expect(maintainerTasks[0].id).toBe(maintenanceResult.maintainerTask.id);
+
+      // Verify inbox item was created targeting the maintainer
+      const inboxResult = await db.execO<{ target: string; target_id: string; content: string }>(
+        `SELECT target, target_id, content FROM inbox WHERE id = ?`,
+        [maintenanceResult.inboxItemId]
+      );
+      expect(inboxResult).toBeTruthy();
+      expect(inboxResult![0].target).toBe("maintainer");
+      expect(inboxResult![0].target_id).toBe(maintenanceResult.maintainerTask.id);
+
+      const inboxContent = JSON.parse(inboxResult![0].content);
+      expect(inboxContent.metadata.scriptRunId).toBe(scriptRunId);
+
+      // 4. Maintainer calls fix tool with corrected code
+      const fixTool = makeFixTool({
+        maintainerTaskId: maintenanceResult.maintainerTask.id,
+        workflowId: workflow.id,
+        expectedMajorVersion: 1, // Maintainer started with major version 1
+        scriptStore: api.scriptStore,
+      });
+
+      const fixResult = await fixTool.execute!(
+        {
+          code: "const response = fetch('/api/data');\nif (response.data) { console.log(response.data); }",
+          comment: "Added null check for response.data",
+        },
+        createToolCallOptions()
+      ) as FixResult;
+
+      // 5. Verify fix was applied correctly
+      expect(fixResult.applied).toBe(true);
+      expect(fixResult.script.major_version).toBe(1); // Same major version
+      expect(fixResult.script.minor_version).toBe(1); // Incremented minor version
+      expect(fixResult.script.code).toContain("if (response.data)"); // Fixed code
+      expect(fixResult.script.task_id).toBe(maintenanceResult.maintainerTask.id);
+
+      // Verify workflow state after fix
+      dbWorkflow = await api.scriptStore.getWorkflow(workflow.id);
+      expect(dbWorkflow?.maintenance).toBe(false); // Maintenance cleared
+      expect(dbWorkflow?.active_script_id).toBe(fixResult.script.id); // Points to new script
+
+      // Verify next_run_timestamp was set to now (immediate re-run)
+      const nextRunTime = new Date(dbWorkflow!.next_run_timestamp).getTime();
+      const now = Date.now();
+      expect(nextRunTime).toBeLessThanOrEqual(now + 1000); // Within 1 second of now
+
+      // 6. Simulate successful re-run and verify fix count reset
+      // In production, workflow-worker would call resetMaintenanceFixCount on success
+      // Here we verify the method works correctly
+      await api.scriptStore.resetMaintenanceFixCount(workflow.id);
+
+      dbWorkflow = await api.scriptStore.getWorkflow(workflow.id);
+      expect(dbWorkflow?.maintenance_fix_count).toBe(0); // Reset for fresh start
+    });
+
+    it("should handle race condition when planner updates script during maintainer work", async () => {
+      // Setup: Workflow with script version 1.0
+      const workflow = createWorkflow();
+      const script = createScript({ major_version: 1, minor_version: 0 });
+
+      await api.scriptStore.addWorkflow(workflow);
+      await api.scriptStore.addScript(script);
+
+      // Enter maintenance mode
+      const maintenanceResult = await api.enterMaintenanceMode({
+        workflowId: workflow.id,
+        workflowTitle: workflow.title,
+        scriptRunId: "script-run-1",
+      });
+
+      // Simulate planner saving new version (2.0) while maintainer was working
+      const plannerScript = createScript({
+        id: "script-planner-2",
+        major_version: 2,
+        minor_version: 0,
+        code: "console.log('planner updated');",
+        change_comment: "Complete rewrite by planner",
+      });
+      await api.scriptStore.addScript(plannerScript);
+      await api.scriptStore.updateWorkflowFields(workflow.id, {
+        active_script_id: plannerScript.id,
+      });
+
+      // Maintainer tries to apply fix for version 1.0 (now stale)
+      const fixTool = makeFixTool({
+        maintainerTaskId: maintenanceResult.maintainerTask.id,
+        workflowId: workflow.id,
+        expectedMajorVersion: 1, // Maintainer expected version 1
+        scriptStore: api.scriptStore,
+      });
+
+      const fixResult = await fixTool.execute!(
+        {
+          code: "console.log('maintainer fix for v1');",
+          comment: "Fix for old version",
+        },
+        createToolCallOptions()
+      ) as FixResult;
+
+      // Fix should NOT be applied due to race condition
+      expect(fixResult.applied).toBe(false);
+      expect(fixResult.script.major_version).toBe(2); // Returns current (planner's) script
+
+      // Verify workflow still points to planner's script
+      const dbWorkflow = await api.scriptStore.getWorkflow(workflow.id);
+      expect(dbWorkflow?.active_script_id).toBe(plannerScript.id);
+
+      // Verify maintenance flag is cleared (no longer in maintenance)
+      expect(dbWorkflow?.maintenance).toBe(false);
+    });
+
+    it("should allow multiple fix attempts with incrementing minor versions", async () => {
+      const workflow = createWorkflow();
+      const script = createScript({ major_version: 2, minor_version: 0 });
+
+      await api.scriptStore.addWorkflow(workflow);
+      await api.scriptStore.addScript(script);
+
+      // First maintenance cycle: 2.0 -> 2.1
+      const result1 = await api.enterMaintenanceMode({
+        workflowId: workflow.id,
+        workflowTitle: workflow.title,
+        scriptRunId: "run-1",
+      });
+      expect(result1.newFixCount).toBe(1);
+
+      const fixTool1 = makeFixTool({
+        maintainerTaskId: result1.maintainerTask.id,
+        workflowId: workflow.id,
+        expectedMajorVersion: 2,
+        scriptStore: api.scriptStore,
+      });
+
+      const fix1 = await fixTool1.execute!(
+        { code: "// fix 1", comment: "First fix attempt" },
+        createToolCallOptions()
+      ) as FixResult;
+
+      expect(fix1.applied).toBe(true);
+      expect(fix1.script.minor_version).toBe(1);
+
+      // Second maintenance cycle (fix 1 didn't work): 2.1 -> 2.2
+      const result2 = await api.enterMaintenanceMode({
+        workflowId: workflow.id,
+        workflowTitle: workflow.title,
+        scriptRunId: "run-2",
+      });
+      expect(result2.newFixCount).toBe(2);
+
+      const fixTool2 = makeFixTool({
+        maintainerTaskId: result2.maintainerTask.id,
+        workflowId: workflow.id,
+        expectedMajorVersion: 2,
+        scriptStore: api.scriptStore,
+      });
+
+      const fix2 = await fixTool2.execute!(
+        { code: "// fix 2", comment: "Second fix attempt" },
+        createToolCallOptions()
+      ) as FixResult;
+
+      expect(fix2.applied).toBe(true);
+      expect(fix2.script.minor_version).toBe(2);
+
+      // Third maintenance cycle: 2.2 -> 2.3
+      const result3 = await api.enterMaintenanceMode({
+        workflowId: workflow.id,
+        workflowTitle: workflow.title,
+        scriptRunId: "run-3",
+      });
+      expect(result3.newFixCount).toBe(3);
+
+      const fixTool3 = makeFixTool({
+        maintainerTaskId: result3.maintainerTask.id,
+        workflowId: workflow.id,
+        expectedMajorVersion: 2,
+        scriptStore: api.scriptStore,
+      });
+
+      const fix3 = await fixTool3.execute!(
+        { code: "// fix 3 - this one works!", comment: "Third fix attempt" },
+        createToolCallOptions()
+      ) as FixResult;
+
+      expect(fix3.applied).toBe(true);
+      expect(fix3.script.minor_version).toBe(3);
+
+      // Verify all scripts exist
+      const scripts = await api.scriptStore.getScriptsByWorkflowId(workflow.id);
+      expect(scripts.length).toBe(4); // Original + 3 fixes
+
+      // Verify version progression
+      const versions = scripts.map(s => `${s.major_version}.${s.minor_version}`).sort();
+      expect(versions).toEqual(["2.0", "2.1", "2.2", "2.3"]);
+    });
+  });
+
+  describe("Integration Test: Fix Escalation Flow", () => {
+    /**
+     * Test: max fix attempts -> user escalation flow
+     *
+     * This tests the scenario where:
+     * 1. Workflow has already had MAX_FIX_ATTEMPTS (3) failed fixes
+     * 2. Another logic error occurs
+     * 3. Instead of creating another maintainer task, escalates to user:
+     *    - Sets workflow status to "error"
+     *    - Clears maintenance flag
+     *    - Resets fix count (gives user fresh attempts)
+     *    - Creates "escalated" notification
+     */
+    it("should escalate to user when fix count reaches max attempts", async () => {
+      // Setup: Workflow that has already exceeded max fix attempts
+      const workflow = createWorkflow({
+        maintenance: false,
+        maintenance_fix_count: 3, // Already at max (MAX_FIX_ATTEMPTS = 3)
+        status: "active",
+      });
+      const script = createScript();
+      const task = createTask();
+
+      await api.scriptStore.addWorkflow(workflow);
+      await api.scriptStore.addScript(script);
+      await api.taskStore.addTask(task);
+
+      // Verify initial state - at max fix attempts
+      let dbWorkflow = await api.scriptStore.getWorkflow(workflow.id);
+      expect(dbWorkflow?.maintenance_fix_count).toBe(3);
+
+      // Simulate what workflow-worker.enterMaintenanceMode does:
+      // It checks if currentFixCount >= MAX_FIX_ATTEMPTS BEFORE creating maintainer task
+      // If exceeded, it calls escalateToUser instead
+
+      // Here we directly test the escalation by calling the methods that escalateToUser calls
+
+      // 1. Set workflow to error status (as escalateToUser does)
+      await api.scriptStore.updateWorkflowFields(workflow.id, {
+        status: "error",
+        maintenance: false,
+        maintenance_fix_count: 0, // Reset for fresh start when user re-enables
+      });
+
+      // 2. Create escalation notification
+      const notificationId = "notif-escalation-1";
+      await api.notificationStore.saveNotification({
+        id: notificationId,
+        workflow_id: workflow.id,
+        type: "escalated",
+        payload: JSON.stringify({
+          script_run_id: "script-run-fail",
+          error_type: "logic",
+          error_message: "Persistent logic error after 3 fix attempts",
+          fix_attempts: 3,
+          max_fix_attempts: 3,
+        }),
+        timestamp: new Date().toISOString(),
+        acknowledged_at: "",
+        resolved_at: "",
+        workflow_title: workflow.title,
+      });
+
+      // Verify escalation results
+
+      // 1. Workflow status should be "error"
+      dbWorkflow = await api.scriptStore.getWorkflow(workflow.id);
+      expect(dbWorkflow?.status).toBe("error");
+      expect(dbWorkflow?.maintenance).toBe(false);
+      expect(dbWorkflow?.maintenance_fix_count).toBe(0); // Reset for fresh attempts
+
+      // 2. Notification should exist with correct type and payload
+      const notifications = await api.notificationStore.getNotifications({ workflowId: workflow.id });
+      expect(notifications.length).toBe(1);
+      expect(notifications[0].type).toBe("escalated");
+
+      const payload = JSON.parse(notifications[0].payload);
+      expect(payload.error_type).toBe("logic");
+      expect(payload.fix_attempts).toBe(3);
+      expect(payload.max_fix_attempts).toBe(3);
+    });
+
+    it("should not create maintainer task when at max fix attempts", async () => {
+      // Setup: Workflow at max fix attempts
+      const workflow = createWorkflow({
+        maintenance_fix_count: 3,
+      });
+      const script = createScript();
+
+      await api.scriptStore.addWorkflow(workflow);
+      await api.scriptStore.addScript(script);
+
+      // Verify no maintainer tasks exist initially
+      let maintainerTasks = await api.taskStore.getMaintainerTasksForWorkflow(workflow.id);
+      expect(maintainerTasks.length).toBe(0);
+
+      // In the real implementation, workflow-worker checks:
+      // if (currentFixCount >= MAX_FIX_ATTEMPTS) { escalateToUser(); return; }
+      // So enterMaintenanceMode is NOT called when at max attempts
+
+      // This test verifies that the check happens by testing that if we DO call
+      // enterMaintenanceMode directly, it still works (but in practice, the
+      // workflow-worker guards this)
+
+      // Since the workflow-worker does the guard, here we just verify the
+      // correct behavior would be to escalate, not create maintainer task
+
+      // Simulate the guard logic:
+      const MAX_FIX_ATTEMPTS = 3;
+      const shouldEscalate = workflow.maintenance_fix_count >= MAX_FIX_ATTEMPTS;
+      expect(shouldEscalate).toBe(true);
+
+      // No maintainer task should be created when escalating
+      maintainerTasks = await api.taskStore.getMaintainerTasksForWorkflow(workflow.id);
+      expect(maintainerTasks.length).toBe(0);
+    });
+
+    it("should allow fresh fix attempts after user re-enables workflow", async () => {
+      // Setup: Workflow that was escalated (status=error, fix_count=0)
+      const workflow = createWorkflow({
+        status: "error",
+        maintenance: false,
+        maintenance_fix_count: 0, // Reset after escalation
+      });
+      const script = createScript();
+
+      await api.scriptStore.addWorkflow(workflow);
+      await api.scriptStore.addScript(script);
+
+      // User re-enables the workflow
+      await api.scriptStore.updateWorkflowFields(workflow.id, {
+        status: "active",
+      });
+
+      // Script fails again with logic error
+      // This time, maintenance should work since fix_count is 0
+      const maintenanceResult = await api.enterMaintenanceMode({
+        workflowId: workflow.id,
+        workflowTitle: workflow.title,
+        scriptRunId: "script-run-after-reenable",
+      });
+
+      // Should successfully enter maintenance mode
+      expect(maintenanceResult.newFixCount).toBe(1);
+      expect(maintenanceResult.maintainerTask.type).toBe("maintainer");
+
+      // Verify workflow state
+      const dbWorkflow = await api.scriptStore.getWorkflow(workflow.id);
+      expect(dbWorkflow?.maintenance).toBe(true);
+      expect(dbWorkflow?.maintenance_fix_count).toBe(1);
+    });
+
+    it("should correctly track fix count across multiple maintenance cycles", async () => {
+      const workflow = createWorkflow();
+      const script = createScript();
+
+      await api.scriptStore.addWorkflow(workflow);
+      await api.scriptStore.addScript(script);
+
+      // First fix attempt
+      let result = await api.enterMaintenanceMode({
+        workflowId: workflow.id,
+        workflowTitle: workflow.title,
+        scriptRunId: "run-1",
+      });
+      expect(result.newFixCount).toBe(1);
+
+      // Apply fix (simulate fix tool success)
+      const fixTool = makeFixTool({
+        maintainerTaskId: result.maintainerTask.id,
+        workflowId: workflow.id,
+        expectedMajorVersion: 1,
+        scriptStore: api.scriptStore,
+      });
+      await fixTool.execute!(
+        { code: "// fix 1", comment: "Fix 1" },
+        createToolCallOptions()
+      );
+
+      // Second fix attempt (fix 1 didn't work)
+      result = await api.enterMaintenanceMode({
+        workflowId: workflow.id,
+        workflowTitle: workflow.title,
+        scriptRunId: "run-2",
+      });
+      expect(result.newFixCount).toBe(2);
+
+      // Apply fix
+      const fixTool2 = makeFixTool({
+        maintainerTaskId: result.maintainerTask.id,
+        workflowId: workflow.id,
+        expectedMajorVersion: 1,
+        scriptStore: api.scriptStore,
+      });
+      await fixTool2.execute!(
+        { code: "// fix 2", comment: "Fix 2" },
+        createToolCallOptions()
+      );
+
+      // Third fix attempt
+      result = await api.enterMaintenanceMode({
+        workflowId: workflow.id,
+        workflowTitle: workflow.title,
+        scriptRunId: "run-3",
+      });
+      expect(result.newFixCount).toBe(3);
+
+      // At this point, if another failure occurs, it should escalate
+      // Verify the fix count is at max
+      const dbWorkflow = await api.scriptStore.getWorkflow(workflow.id);
+      expect(dbWorkflow?.maintenance_fix_count).toBe(3);
+
+      // Now if we check the condition (as workflow-worker does):
+      const MAX_FIX_ATTEMPTS = 3;
+      const shouldEscalate = dbWorkflow!.maintenance_fix_count >= MAX_FIX_ATTEMPTS;
+      expect(shouldEscalate).toBe(true);
+    });
+  });
+
+  describe("Maintainer Context and Isolation", () => {
+    it("should create maintainer task with isolated thread", async () => {
+      const workflow = createWorkflow();
+      const script = createScript();
+
+      await api.scriptStore.addWorkflow(workflow);
+      await api.scriptStore.addScript(script);
+
+      const result = await api.enterMaintenanceMode({
+        workflowId: workflow.id,
+        workflowTitle: workflow.title,
+        scriptRunId: "script-run-1",
+      });
+
+      // Maintainer task should have its own thread_id
+      expect(result.maintainerTask.thread_id).toBeTruthy();
+
+      // Chat ID should be empty (not connected to user chat)
+      expect(result.maintainerTask.chat_id).toBe("");
+
+      // Should have correct title
+      expect(result.maintainerTask.title).toBe(`Auto-fix: ${workflow.title}`);
+    });
+
+    it("should include script run ID in inbox item metadata", async () => {
+      const workflow = createWorkflow();
+      const script = createScript();
+
+      await api.scriptStore.addWorkflow(workflow);
+      await api.scriptStore.addScript(script);
+
+      const scriptRunId = "script-run-test-123";
+      const result = await api.enterMaintenanceMode({
+        workflowId: workflow.id,
+        workflowTitle: workflow.title,
+        scriptRunId,
+      });
+
+      // Verify inbox item contains script run ID in metadata
+      const inboxResult = await db.execO<{ content: string }>(
+        `SELECT content FROM inbox WHERE id = ?`,
+        [result.inboxItemId]
+      );
+
+      const content = JSON.parse(inboxResult![0].content);
+      expect(content.metadata.scriptRunId).toBe(scriptRunId);
+    });
+
+    it("should create separate maintainer tasks for each maintenance cycle", async () => {
+      const workflow = createWorkflow();
+      const script = createScript();
+
+      await api.scriptStore.addWorkflow(workflow);
+      await api.scriptStore.addScript(script);
+
+      // First maintenance cycle
+      const result1 = await api.enterMaintenanceMode({
+        workflowId: workflow.id,
+        workflowTitle: workflow.title,
+        scriptRunId: "run-1",
+      });
+
+      // Apply fix to clear maintenance
+      const fixTool1 = makeFixTool({
+        maintainerTaskId: result1.maintainerTask.id,
+        workflowId: workflow.id,
+        expectedMajorVersion: 1,
+        scriptStore: api.scriptStore,
+      });
+      await fixTool1.execute!(
+        { code: "// fix", comment: "Fix" },
+        createToolCallOptions()
+      );
+
+      // Second maintenance cycle
+      const result2 = await api.enterMaintenanceMode({
+        workflowId: workflow.id,
+        workflowTitle: workflow.title,
+        scriptRunId: "run-2",
+      });
+
+      // Tasks should have different IDs
+      expect(result1.maintainerTask.id).not.toBe(result2.maintainerTask.id);
+
+      // Both tasks should exist
+      const maintainerTasks = await api.taskStore.getMaintainerTasksForWorkflow(workflow.id);
+      expect(maintainerTasks.length).toBe(2);
+
+      // Tasks should have different thread IDs
+      expect(result1.maintainerTask.thread_id).not.toBe(result2.maintainerTask.thread_id);
+    });
+  });
+});

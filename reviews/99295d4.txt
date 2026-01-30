@@ -1,0 +1,147 @@
+COMMIT REVIEW: 99295d4
+=======================
+Subject: Specs for code review issues
+Date: 2026-01-26 11:38:45 +0100
+Files Changed: 86 files, +8,995 lines
+
+================================================================================
+SUMMARY OF CHANGES
+================================================================================
+
+This commit adds comprehensive reviews and specifications documenting security
+and code quality issues found during code review of the connectors framework.
+
+**Key Files Added:**
+- reviews/61812c5.txt (1,598 lines) - Major security review of connectors
+- reviews/602efa1.txt (739 lines) - Merge commit architectural review
+- 33 security/code quality specs in specs/new/
+
+================================================================================
+REVIEW FILE QUALITY ASSESSMENT
+================================================================================
+
+**reviews/61812c5.txt - Exemplary Security Review (9/10)**
+
+Strengths:
+1. Well-structured format with executive summary and issue categorization
+2. Clear severity levels with symbols (CRITICAL, High, Medium)
+3. 4 Critical security issues identified:
+   - Issue #1: Path Traversal Vulnerability (account ID encoding)
+   - Issue #2: CSRF State Storage Vulnerabilities (unbounded map)
+   - Issue #3: Token Refresh Race Condition (concurrent calls)
+   - Issue #4: OAuth Error Information Leakage
+4. Each issue includes:
+   - File and line number locations
+   - Detailed problem description with code snippets
+   - Attack vectors with concrete examples
+   - Impact assessment
+   - Multiple fix options with code examples
+   - Testing requirements
+5. Additional valuable sections:
+   - Architectural Review (positive patterns + concerns)
+   - Migration Safety section
+   - OWASP Top 10 mapping
+   - OAuth 2.0 RFC 6749 compliance analysis
+   - Final verdict with security score (6.5/10)
+
+**reviews/602efa1.txt - Thorough Architectural Review (8/10)**
+
+Strengths:
+1. Comprehensive coverage of merge commit analyzing both branches
+2. Well-organized sections with key code changes (2.1-2.10)
+3. Practical recommendations with Priority 1, 2, 3 categorization
+4. Risk-aware analysis identifying breaking schema changes
+5. DRY violation detection with refactoring suggestions
+
+================================================================================
+SPEC FILE QUALITY ASSESSMENT
+================================================================================
+
+**Security Specs Reviewed:**
+
+1. **fix-credential-store-path-traversal.md** - Excellent (9/10)
+   - Crystal clear problem with attack example
+   - Two concrete options with trade-offs
+   - Addresses migration concerns
+
+2. **fix-oauth-state-management.md** - Good (7/10)
+   - Clear problem with 3 distinct issues
+   - Solutions somewhat vague (lacks code examples)
+   - Good considerations section
+
+3. **fix-token-refresh-race-condition.md** - Good (8/10)
+   - Explicit pattern provided (Map of pending Promises)
+   - Key format specified exactly
+   - Missing timeout handling for hung promises
+
+4. **fix-oauth-error-information-leakage.md** - Good (7/10)
+   - Good examples of what NOT to leak
+   - Missing complete error code mapping
+   - Incomplete provider coverage
+
+**Spec Quality Patterns:**
+- Problem description: Consistently strong (8-9/10)
+- Solution approach: Good but sometimes vague (7-8/10)
+- Implementation details: Often missing (6-7/10)
+- Code examples: Mixed (only ~40% include examples)
+
+================================================================================
+ISSUES FOUND
+================================================================================
+
+**ISSUE 1: Inconsistent Actionability in Specs**
+Severity: MEDIUM
+Top specs (path-traversal, state-race) are 9/10 clarity, but middle specs
+(state-management, error-leakage) are only 7-8/10. Some specs lack code examples.
+
+Proposal: Add code examples to all specs, even pseudocode helps.
+
+**ISSUE 2: Spec Relationship Confusion**
+Severity: LOW
+- fix-credential-store-path-traversal.md mentions "Related specs: fix-account-id-encoding.md"
+- These solve different problems but both affect getFilePath()
+- Creates ambiguity about implementation approach
+
+Proposal: Create spec dependency documentation clarifying relationships.
+
+**ISSUE 3: Missing Implementation Complexity Estimates**
+Severity: LOW
+Some specs are 30-minute implementations (state-race-condition) while others
+are multi-day refactors (consolidate-parse-message-content). No indication
+helps with prioritization.
+
+Proposal: Add effort estimates to help prioritization.
+
+**ISSUE 4: Incomplete Edge Case Coverage in Token Refresh Spec**
+Severity: MEDIUM
+The token-refresh-race-condition spec doesn't mention:
+- Promise timeout (memory leak if refresh hangs forever)
+- What happens to waiters if initial refresh fails
+- Retry logic for transient failures
+
+Proposal: Update spec with edge case handling.
+
+================================================================================
+VERDICT
+================================================================================
+
+**Status: APPROVED with Recommendations**
+
+The commit provides substantial value as documentation and future work guidance.
+The review documents (especially 61812c5) are exemplary. The specifications are
+generally well-structured but vary in actionability.
+
+Quality Scoring:
+| Category              | Review Quality | Spec Quality |
+|-----------------------|----------------|--------------|
+| Clear Problem         | 9/10           | 8.5/10       |
+| Solution Clarity      | 9/10           | 7/10         |
+| Code Examples         | 8/10           | 6/10         |
+| Edge Cases            | 8/10           | 6.5/10       |
+| File Locations        | 9/10           | 9/10         |
+
+Recommendations Before Implementation:
+1. Add code examples to all security specs
+2. Clarify relationships between overlapping specs
+3. Add implementation complexity estimates
+4. Address edge cases in token refresh and error leakage specs

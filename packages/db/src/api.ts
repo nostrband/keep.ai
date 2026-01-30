@@ -4,7 +4,7 @@ import { ConnectionStore } from "./connection-store";
 import { KeepDb } from "./database";
 import { MemoryStore, Thread } from "./memory-store";
 import { NoteStore } from "./note-store";
-import { Task, TaskStore, TaskType } from "./task-store";
+import { Task, TaskStore, TaskType, EnterMaintenanceModeParams, EnterMaintenanceModeResult } from "./task-store";
 import { bytesToHex } from "@noble/ciphers/utils";
 import { randomBytes } from "@noble/ciphers/crypto";
 import { NostrPeerStore } from "./nostr-peer-store";
@@ -347,6 +347,83 @@ export class KeepDbApi {
       await this.inboxStore.saveInbox(inboxItem, tx);
 
       return { chatId, taskId };
+    });
+  }
+
+  /**
+   * Enter maintenance mode for a workflow when a logic error occurs.
+   * This atomically:
+   * 1. Increments workflow.maintenance_fix_count
+   * 2. Sets workflow.maintenance = true
+   * 3. Creates a new maintainer task (with empty chat_id, own thread_id)
+   * 4. Creates an inbox item targeting the maintainer task
+   *
+   * All operations succeed or fail together.
+   *
+   * @param params - The workflow and script run info for the maintenance request
+   * @returns The created maintainer task, inbox item ID, and new fix count
+   */
+  async enterMaintenanceMode(
+    params: EnterMaintenanceModeParams
+  ): Promise<EnterMaintenanceModeResult> {
+    const { workflowId, workflowTitle, scriptRunId } = params;
+
+    return await this.db.db.tx(async (tx) => {
+      const now = new Date();
+      const timestamp = Math.floor(now.getTime() / 1000);
+
+      // 1. Increment fix count
+      const newFixCount = await this.scriptStore.incrementMaintenanceFixCount(workflowId, tx);
+
+      // 2. Set maintenance flag
+      await this.scriptStore.setWorkflowMaintenance(workflowId, true, tx);
+
+      // 3. Create maintainer task
+      const taskId = bytesToHex(randomBytes(16));
+      const threadId = bytesToHex(randomBytes(16));
+
+      const maintainerTask: Task = {
+        id: taskId,
+        timestamp,
+        reply: "",
+        state: "",
+        thread_id: threadId,  // Own thread for isolation
+        error: "",
+        type: "maintainer",
+        title: `Auto-fix: ${workflowTitle}`,
+        chat_id: "",  // Maintainer does NOT write to user-facing chat
+        workflow_id: workflowId,
+        asks: "",
+      };
+
+      await this.taskStore.addTask(maintainerTask, tx);
+
+      // 4. Create inbox item targeting the maintainer task
+      const inboxItemId = `maintenance.${workflowId}.${scriptRunId}.${bytesToHex(randomBytes(8))}`;
+      const inboxItem: InboxItem = {
+        id: inboxItemId,
+        source: "script",
+        source_id: scriptRunId,
+        target: "maintainer",
+        target_id: taskId,
+        timestamp: now.toISOString(),
+        content: JSON.stringify({
+          role: "user",
+          parts: [{
+            type: "text",
+            text: "A logic error occurred. Analyze and fix the script.",
+          }],
+          metadata: {
+            scriptRunId: scriptRunId,
+          },
+        }),
+        handler_thread_id: "",
+        handler_timestamp: "",
+      };
+
+      await this.inboxStore.saveInbox(inboxItem, tx);
+
+      return { maintainerTask, inboxItemId, newFixCount };
     });
   }
 }

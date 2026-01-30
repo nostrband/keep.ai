@@ -212,7 +212,7 @@ export default function TaskDetailPage() {
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-2">
                         <span className="font-medium text-gray-900">Script {latestScript.id.slice(0, 8)}</span>
-                        <Badge variant="outline">v{latestScript.version}</Badge>
+                        <Badge variant="outline">v{latestScript.major_version}.{latestScript.minor_version}</Badge>
                       </div>
                       {latestScript.change_comment && (
                         <p className="text-sm text-gray-600 mb-2 line-clamp-2">

@@ -7,12 +7,14 @@ import { createDBNode } from "@app/node";
  * This allows testing the store in isolation without CR-SQLite dependencies.
  */
 async function createScriptTables(db: DBInterface): Promise<void> {
-  // Create scripts table (matches production v11 + v16 + later migrations)
+  // Create scripts table (matches production v11 + v16 + v34 migrations)
+  // v34 renamed 'version' to 'major_version' and added 'minor_version'
   await db.exec(`
     CREATE TABLE IF NOT EXISTS scripts (
       id TEXT PRIMARY KEY NOT NULL,
       task_id TEXT NOT NULL DEFAULT '',
-      version INTEGER NOT NULL DEFAULT 0,
+      major_version INTEGER NOT NULL DEFAULT 0,
+      minor_version INTEGER NOT NULL DEFAULT 0,
       timestamp TEXT NOT NULL DEFAULT '',
       code TEXT NOT NULL DEFAULT '',
       change_comment TEXT NOT NULL DEFAULT '',
@@ -24,6 +26,7 @@ async function createScriptTables(db: DBInterface): Promise<void> {
   `);
   await db.exec(`CREATE INDEX IF NOT EXISTS idx_scripts_task_id ON scripts(task_id)`);
   await db.exec(`CREATE INDEX IF NOT EXISTS idx_scripts_workflow_id ON scripts(workflow_id)`);
+  await db.exec(`CREATE INDEX IF NOT EXISTS idx_scripts_major_minor_version ON scripts(major_version DESC, minor_version DESC)`);
 
   // Create script_runs table (matches production v11 + v12 + v16 + later migrations)
   await db.exec(`
@@ -124,7 +127,8 @@ describe("ScriptStore", () => {
       const script: Script = {
         id: "script-1",
         task_id: "task-1",
-        version: 1,
+        major_version: 1,
+        minor_version: 0,
         timestamp: new Date().toISOString(),
         code: "console.log('hello');",
         change_comment: "Initial version",
@@ -151,7 +155,8 @@ describe("ScriptStore", () => {
         await scriptStore.addScript({
           id: `script-${i}`,
           task_id: "task-1",
-          version: i + 1,
+          major_version: i + 1,
+        minor_version: 0,
           timestamp: new Date(now + i * 1000).toISOString(),
           code: `code ${i}`,
           change_comment: `version ${i + 1}`,
@@ -179,7 +184,8 @@ describe("ScriptStore", () => {
       await scriptStore.addScript({
         id: "script-1",
         task_id: "task-1",
-        version: 1,
+        major_version: 1,
+        minor_version: 0,
         timestamp: new Date().toISOString(),
         code: "code 1",
         change_comment: "",
@@ -191,7 +197,8 @@ describe("ScriptStore", () => {
       await scriptStore.addScript({
         id: "script-2",
         task_id: "task-2",
-        version: 1,
+        major_version: 1,
+        minor_version: 0,
         timestamp: new Date().toISOString(),
         code: "code 2",
         change_comment: "",
@@ -210,7 +217,8 @@ describe("ScriptStore", () => {
       await scriptStore.addScript({
         id: "script-v1",
         task_id: "task-1",
-        version: 1,
+        major_version: 1,
+        minor_version: 0,
         timestamp: new Date().toISOString(),
         code: "v1",
         change_comment: "",
@@ -222,7 +230,8 @@ describe("ScriptStore", () => {
       await scriptStore.addScript({
         id: "script-v3",
         task_id: "task-1",
-        version: 3,
+        major_version: 3,
+        minor_version: 0,
         timestamp: new Date().toISOString(),
         code: "v3",
         change_comment: "",
@@ -234,7 +243,8 @@ describe("ScriptStore", () => {
       await scriptStore.addScript({
         id: "script-v2",
         task_id: "task-1",
-        version: 2,
+        major_version: 2,
+        minor_version: 0,
         timestamp: new Date().toISOString(),
         code: "v2",
         change_comment: "",
@@ -246,17 +256,18 @@ describe("ScriptStore", () => {
 
       const scripts = await scriptStore.getScriptsByTaskId("task-1");
       expect(scripts).toHaveLength(3);
-      // Should be ordered by version ASC
-      expect(scripts[0].version).toBe(1);
-      expect(scripts[1].version).toBe(2);
-      expect(scripts[2].version).toBe(3);
+      // Should be ordered by major_version ASC, minor_version ASC
+      expect(scripts[0].major_version).toBe(1);
+      expect(scripts[1].major_version).toBe(2);
+      expect(scripts[2].major_version).toBe(3);
     });
 
     it("should get latest script by task_id", async () => {
       await scriptStore.addScript({
         id: "script-v1",
         task_id: "task-1",
-        version: 1,
+        major_version: 1,
+        minor_version: 0,
         timestamp: new Date().toISOString(),
         code: "v1",
         change_comment: "",
@@ -268,7 +279,8 @@ describe("ScriptStore", () => {
       await scriptStore.addScript({
         id: "script-v2",
         task_id: "task-1",
-        version: 2,
+        major_version: 2,
+        minor_version: 0,
         timestamp: new Date().toISOString(),
         code: "v2",
         change_comment: "",
@@ -279,7 +291,7 @@ describe("ScriptStore", () => {
       });
 
       const latest = await scriptStore.getLatestScriptByTaskId("task-1");
-      expect(latest?.version).toBe(2);
+      expect(latest?.major_version).toBe(2);
       expect(latest?.id).toBe("script-v2");
     });
 
@@ -287,7 +299,8 @@ describe("ScriptStore", () => {
       await scriptStore.addScript({
         id: "script-1",
         task_id: "task-1",
-        version: 1,
+        major_version: 1,
+        minor_version: 0,
         timestamp: new Date().toISOString(),
         code: "code 1",
         change_comment: "",
@@ -299,7 +312,8 @@ describe("ScriptStore", () => {
       await scriptStore.addScript({
         id: "script-2",
         task_id: "task-2",
-        version: 1,
+        major_version: 1,
+        minor_version: 0,
         timestamp: new Date().toISOString(),
         code: "code 2",
         change_comment: "",
@@ -318,7 +332,8 @@ describe("ScriptStore", () => {
       await scriptStore.addScript({
         id: "script-v1",
         task_id: "task-1",
-        version: 1,
+        major_version: 1,
+        minor_version: 0,
         timestamp: new Date().toISOString(),
         code: "v1",
         change_comment: "",
@@ -330,7 +345,8 @@ describe("ScriptStore", () => {
       await scriptStore.addScript({
         id: "script-v2",
         task_id: "task-1",
-        version: 2,
+        major_version: 2,
+        minor_version: 0,
         timestamp: new Date().toISOString(),
         code: "v2",
         change_comment: "",
@@ -341,7 +357,7 @@ describe("ScriptStore", () => {
       });
 
       const latest = await scriptStore.getLatestScriptByWorkflowId("workflow-1");
-      expect(latest?.version).toBe(2);
+      expect(latest?.major_version).toBe(2);
     });
 
     it("should list latest scripts for each task", async () => {
@@ -349,7 +365,8 @@ describe("ScriptStore", () => {
       await scriptStore.addScript({
         id: "t1-v1",
         task_id: "task-1",
-        version: 1,
+        major_version: 1,
+        minor_version: 0,
         timestamp: new Date(Date.now() - 3000).toISOString(),
         code: "t1v1",
         change_comment: "",
@@ -361,7 +378,8 @@ describe("ScriptStore", () => {
       await scriptStore.addScript({
         id: "t1-v2",
         task_id: "task-1",
-        version: 2,
+        major_version: 2,
+        minor_version: 0,
         timestamp: new Date(Date.now() - 2000).toISOString(),
         code: "t1v2",
         change_comment: "",
@@ -373,7 +391,8 @@ describe("ScriptStore", () => {
       await scriptStore.addScript({
         id: "t2-v1",
         task_id: "task-2",
-        version: 1,
+        major_version: 1,
+        minor_version: 0,
         timestamp: new Date(Date.now() - 1000).toISOString(),
         code: "t2v1",
         change_comment: "",
@@ -386,8 +405,8 @@ describe("ScriptStore", () => {
       const latest = await scriptStore.listLatestScripts();
       expect(latest).toHaveLength(2);
       // Should only include the highest version for each task
-      expect(latest.find(s => s.task_id === "task-1")?.version).toBe(2);
-      expect(latest.find(s => s.task_id === "task-2")?.version).toBe(1);
+      expect(latest.find(s => s.task_id === "task-1")?.major_version).toBe(2);
+      expect(latest.find(s => s.task_id === "task-2")?.major_version).toBe(1);
     });
   });
 
@@ -755,6 +774,395 @@ describe("ScriptStore", () => {
     });
   });
 
+  describe("Version helper functions", () => {
+    describe("getScriptsByWorkflowAndMajorVersion", () => {
+      it("should return all scripts with the specified major version", async () => {
+        // Create scripts with different major/minor versions
+        await scriptStore.addScript({
+          id: "script-1-0",
+          task_id: "task-1",
+          major_version: 1,
+          minor_version: 0,
+          timestamp: new Date().toISOString(),
+          code: "v1.0",
+          change_comment: "Initial",
+          workflow_id: "workflow-1",
+          type: "",
+          summary: "",
+          diagram: "",
+        });
+        await scriptStore.addScript({
+          id: "script-1-1",
+          task_id: "task-1",
+          major_version: 1,
+          minor_version: 1,
+          timestamp: new Date().toISOString(),
+          code: "v1.1",
+          change_comment: "First fix",
+          workflow_id: "workflow-1",
+          type: "",
+          summary: "",
+          diagram: "",
+        });
+        await scriptStore.addScript({
+          id: "script-1-2",
+          task_id: "task-1",
+          major_version: 1,
+          minor_version: 2,
+          timestamp: new Date().toISOString(),
+          code: "v1.2",
+          change_comment: "Second fix",
+          workflow_id: "workflow-1",
+          type: "",
+          summary: "",
+          diagram: "",
+        });
+        await scriptStore.addScript({
+          id: "script-2-0",
+          task_id: "task-1",
+          major_version: 2,
+          minor_version: 0,
+          timestamp: new Date().toISOString(),
+          code: "v2.0",
+          change_comment: "Major update",
+          workflow_id: "workflow-1",
+          type: "",
+          summary: "",
+          diagram: "",
+        });
+
+        const majorV1Scripts = await scriptStore.getScriptsByWorkflowAndMajorVersion("workflow-1", 1);
+        expect(majorV1Scripts).toHaveLength(3);
+        expect(majorV1Scripts.map(s => s.id)).toContain("script-1-0");
+        expect(majorV1Scripts.map(s => s.id)).toContain("script-1-1");
+        expect(majorV1Scripts.map(s => s.id)).toContain("script-1-2");
+        expect(majorV1Scripts.map(s => s.id)).not.toContain("script-2-0");
+
+        const majorV2Scripts = await scriptStore.getScriptsByWorkflowAndMajorVersion("workflow-1", 2);
+        expect(majorV2Scripts).toHaveLength(1);
+        expect(majorV2Scripts[0].id).toBe("script-2-0");
+      });
+
+      it("should order scripts by minor_version DESC (newest first)", async () => {
+        await scriptStore.addScript({
+          id: "script-1-2",
+          task_id: "task-1",
+          major_version: 1,
+          minor_version: 2,
+          timestamp: new Date().toISOString(),
+          code: "v1.2",
+          change_comment: "Third",
+          workflow_id: "workflow-1",
+          type: "",
+          summary: "",
+          diagram: "",
+        });
+        await scriptStore.addScript({
+          id: "script-1-0",
+          task_id: "task-1",
+          major_version: 1,
+          minor_version: 0,
+          timestamp: new Date().toISOString(),
+          code: "v1.0",
+          change_comment: "First",
+          workflow_id: "workflow-1",
+          type: "",
+          summary: "",
+          diagram: "",
+        });
+        await scriptStore.addScript({
+          id: "script-1-1",
+          task_id: "task-1",
+          major_version: 1,
+          minor_version: 1,
+          timestamp: new Date().toISOString(),
+          code: "v1.1",
+          change_comment: "Second",
+          workflow_id: "workflow-1",
+          type: "",
+          summary: "",
+          diagram: "",
+        });
+
+        const scripts = await scriptStore.getScriptsByWorkflowAndMajorVersion("workflow-1", 1);
+        expect(scripts).toHaveLength(3);
+        expect(scripts[0].minor_version).toBe(2); // Newest first
+        expect(scripts[1].minor_version).toBe(1);
+        expect(scripts[2].minor_version).toBe(0); // Oldest last
+      });
+
+      it("should return empty array for non-existent workflow", async () => {
+        const scripts = await scriptStore.getScriptsByWorkflowAndMajorVersion("non-existent", 1);
+        expect(scripts).toHaveLength(0);
+      });
+
+      it("should return empty array for non-existent major version", async () => {
+        await scriptStore.addScript({
+          id: "script-1-0",
+          task_id: "task-1",
+          major_version: 1,
+          minor_version: 0,
+          timestamp: new Date().toISOString(),
+          code: "v1.0",
+          change_comment: "",
+          workflow_id: "workflow-1",
+          type: "",
+          summary: "",
+          diagram: "",
+        });
+
+        const scripts = await scriptStore.getScriptsByWorkflowAndMajorVersion("workflow-1", 99);
+        expect(scripts).toHaveLength(0);
+      });
+
+      it("should only return scripts for the specified workflow", async () => {
+        await scriptStore.addScript({
+          id: "w1-script-1-0",
+          task_id: "task-1",
+          major_version: 1,
+          minor_version: 0,
+          timestamp: new Date().toISOString(),
+          code: "workflow 1",
+          change_comment: "",
+          workflow_id: "workflow-1",
+          type: "",
+          summary: "",
+          diagram: "",
+        });
+        await scriptStore.addScript({
+          id: "w2-script-1-0",
+          task_id: "task-2",
+          major_version: 1,
+          minor_version: 0,
+          timestamp: new Date().toISOString(),
+          code: "workflow 2",
+          change_comment: "",
+          workflow_id: "workflow-2",
+          type: "",
+          summary: "",
+          diagram: "",
+        });
+
+        const w1Scripts = await scriptStore.getScriptsByWorkflowAndMajorVersion("workflow-1", 1);
+        expect(w1Scripts).toHaveLength(1);
+        expect(w1Scripts[0].workflow_id).toBe("workflow-1");
+
+        const w2Scripts = await scriptStore.getScriptsByWorkflowAndMajorVersion("workflow-2", 1);
+        expect(w2Scripts).toHaveLength(1);
+        expect(w2Scripts[0].workflow_id).toBe("workflow-2");
+      });
+    });
+
+    describe("Maintainer changelog construction (prior minor versions)", () => {
+      /**
+       * These tests verify the changelog construction logic used by loadMaintainerContext:
+       * 1. Get all scripts for workflow with same major version
+       * 2. Filter to those with minor_version < current script's minor_version
+       * 3. Sort by minor_version DESC (newest first)
+       * 4. Limit to 5 entries
+       * 5. Map to { version, comment } format
+       */
+
+      it("should build changelog from prior minor versions", async () => {
+        // Create script versions: 2.0, 2.1, 2.2, 2.3 (current)
+        for (let minor = 0; minor <= 3; minor++) {
+          await scriptStore.addScript({
+            id: `script-2-${minor}`,
+            task_id: "task-1",
+            major_version: 2,
+            minor_version: minor,
+            timestamp: new Date().toISOString(),
+            code: `v2.${minor}`,
+            change_comment: `Fix ${minor}`,
+            workflow_id: "workflow-1",
+            type: "",
+            summary: "",
+            diagram: "",
+          });
+        }
+
+        // Simulate loadMaintainerContext logic for current script 2.3
+        const currentMinorVersion = 3;
+        const priorScripts = await scriptStore.getScriptsByWorkflowAndMajorVersion("workflow-1", 2);
+        const changelog = priorScripts
+          .filter(s => s.minor_version < currentMinorVersion)
+          .sort((a, b) => b.minor_version - a.minor_version) // newest first
+          .slice(0, 5)
+          .map(s => ({
+            version: `${s.major_version}.${s.minor_version}`,
+            comment: s.change_comment || "",
+          }));
+
+        expect(changelog).toHaveLength(3); // 2.2, 2.1, 2.0
+        expect(changelog[0]).toEqual({ version: "2.2", comment: "Fix 2" });
+        expect(changelog[1]).toEqual({ version: "2.1", comment: "Fix 1" });
+        expect(changelog[2]).toEqual({ version: "2.0", comment: "Fix 0" });
+      });
+
+      it("should limit changelog to 5 entries", async () => {
+        // Create 8 minor versions (0 through 7)
+        for (let minor = 0; minor <= 7; minor++) {
+          await scriptStore.addScript({
+            id: `script-1-${minor}`,
+            task_id: "task-1",
+            major_version: 1,
+            minor_version: minor,
+            timestamp: new Date().toISOString(),
+            code: `v1.${minor}`,
+            change_comment: `Change ${minor}`,
+            workflow_id: "workflow-1",
+            type: "",
+            summary: "",
+            diagram: "",
+          });
+        }
+
+        // Simulate changelog for current script 1.7
+        const currentMinorVersion = 7;
+        const priorScripts = await scriptStore.getScriptsByWorkflowAndMajorVersion("workflow-1", 1);
+        const changelog = priorScripts
+          .filter(s => s.minor_version < currentMinorVersion)
+          .sort((a, b) => b.minor_version - a.minor_version)
+          .slice(0, 5) // Limit to 5
+          .map(s => ({
+            version: `${s.major_version}.${s.minor_version}`,
+            comment: s.change_comment,
+          }));
+
+        expect(changelog).toHaveLength(5); // Only 5, not 7
+        expect(changelog[0].version).toBe("1.6"); // Most recent first
+        expect(changelog[4].version).toBe("1.2"); // Oldest in limit
+      });
+
+      it("should return empty changelog when no prior minor versions exist", async () => {
+        // Only version 3.0 exists
+        await scriptStore.addScript({
+          id: "script-3-0",
+          task_id: "task-1",
+          major_version: 3,
+          minor_version: 0,
+          timestamp: new Date().toISOString(),
+          code: "v3.0",
+          change_comment: "Initial",
+          workflow_id: "workflow-1",
+          type: "",
+          summary: "",
+          diagram: "",
+        });
+
+        const currentMinorVersion = 0;
+        const priorScripts = await scriptStore.getScriptsByWorkflowAndMajorVersion("workflow-1", 3);
+        const changelog = priorScripts
+          .filter(s => s.minor_version < currentMinorVersion)
+          .sort((a, b) => b.minor_version - a.minor_version)
+          .slice(0, 5)
+          .map(s => ({
+            version: `${s.major_version}.${s.minor_version}`,
+            comment: s.change_comment,
+          }));
+
+        expect(changelog).toHaveLength(0);
+      });
+
+      it("should not include scripts from different major versions in changelog", async () => {
+        // Version 1.0, 1.1, 2.0
+        await scriptStore.addScript({
+          id: "script-1-0",
+          task_id: "task-1",
+          major_version: 1,
+          minor_version: 0,
+          timestamp: new Date().toISOString(),
+          code: "v1.0",
+          change_comment: "v1 initial",
+          workflow_id: "workflow-1",
+          type: "",
+          summary: "",
+          diagram: "",
+        });
+        await scriptStore.addScript({
+          id: "script-1-1",
+          task_id: "task-1",
+          major_version: 1,
+          minor_version: 1,
+          timestamp: new Date().toISOString(),
+          code: "v1.1",
+          change_comment: "v1 fix",
+          workflow_id: "workflow-1",
+          type: "",
+          summary: "",
+          diagram: "",
+        });
+        await scriptStore.addScript({
+          id: "script-2-0",
+          task_id: "task-1",
+          major_version: 2,
+          minor_version: 0,
+          timestamp: new Date().toISOString(),
+          code: "v2.0",
+          change_comment: "v2 initial",
+          workflow_id: "workflow-1",
+          type: "",
+          summary: "",
+          diagram: "",
+        });
+
+        // Changelog for 2.0 should be empty (no prior minor versions in major 2)
+        const currentMajorVersion = 2;
+        const currentMinorVersion = 0;
+        const priorScripts = await scriptStore.getScriptsByWorkflowAndMajorVersion("workflow-1", currentMajorVersion);
+        const changelog = priorScripts
+          .filter(s => s.minor_version < currentMinorVersion)
+          .map(s => ({
+            version: `${s.major_version}.${s.minor_version}`,
+            comment: s.change_comment,
+          }));
+
+        expect(changelog).toHaveLength(0);
+        // v1.0 and v1.1 should NOT be in changelog for v2.0
+      });
+
+      it("should handle empty change_comment gracefully", async () => {
+        await scriptStore.addScript({
+          id: "script-1-0",
+          task_id: "task-1",
+          major_version: 1,
+          minor_version: 0,
+          timestamp: new Date().toISOString(),
+          code: "v1.0",
+          change_comment: "", // Empty comment
+          workflow_id: "workflow-1",
+          type: "",
+          summary: "",
+          diagram: "",
+        });
+        await scriptStore.addScript({
+          id: "script-1-1",
+          task_id: "task-1",
+          major_version: 1,
+          minor_version: 1,
+          timestamp: new Date().toISOString(),
+          code: "v1.1",
+          change_comment: "Has comment",
+          workflow_id: "workflow-1",
+          type: "",
+          summary: "",
+          diagram: "",
+        });
+
+        const priorScripts = await scriptStore.getScriptsByWorkflowAndMajorVersion("workflow-1", 1);
+        const changelog = priorScripts
+          .filter(s => s.minor_version < 1)
+          .map(s => ({
+            version: `${s.major_version}.${s.minor_version}`,
+            comment: s.change_comment || "",
+          }));
+
+        expect(changelog).toHaveLength(1);
+        expect(changelog[0]).toEqual({ version: "1.0", comment: "" });
+      });
+    });
+  });
+
   describe("Draft activity queries", () => {
     it("should get abandoned drafts", async () => {
       // Create a task and workflow
@@ -878,8 +1286,9 @@ describe("ScriptStore", () => {
 
       const summary = await scriptStore.getDraftActivitySummary();
       expect(summary.totalDrafts).toBe(3);
-      expect(summary.staleDrafts).toBe(1);      // 5 days is stale (3-7)
+      expect(summary.staleDrafts).toBe(1);       // 5 days is stale (3-7)
       expect(summary.abandonedDrafts).toBe(1);   // 10 days is abandoned (7+)
+      expect(summary.archivableDrafts).toBe(0);  // None are 30+ days
       expect(summary.waitingForInput).toBe(1);   // task-1 is in 'wait' state
     });
 
@@ -977,7 +1386,8 @@ describe("ScriptStore", () => {
       await scriptStore.addScript({
         id: "script-recent",
         task_id: "task-no-chat",
-        version: 1,
+        major_version: 1,
+        minor_version: 0,
         timestamp: recentScriptDate.toISOString(),
         code: "console.log('test');",
         change_comment: "Initial",
@@ -1062,7 +1472,8 @@ describe("ScriptStore", () => {
       await scriptStore.addScript({
         id: "script-medium",
         task_id: "task-coalesce",
-        version: 1,
+        major_version: 1,
+        minor_version: 0,
         timestamp: mediumOldDate.toISOString(),
         code: "console.log('medium');",
         change_comment: "",
@@ -1132,7 +1543,8 @@ describe("ScriptStore", () => {
       await scriptStore.addScript({
         id: "script-newer-order",
         task_id: "task-coalesce-order",
-        version: 1,
+        major_version: 1,
+        minor_version: 0,
         timestamp: recentScriptDate.toISOString(),
         code: "console.log('newer');",
         change_comment: "",
@@ -1179,6 +1591,134 @@ describe("ScriptStore", () => {
       expect(abandoned).toHaveLength(1);
       expect(abandoned[0].workflow.id).toBe("workflow-fallback");
       expect(abandoned[0].hasScript).toBe(false);
+    });
+
+    it("should count archivable drafts (30+ days) separately from abandoned drafts", async () => {
+      const now = new Date();
+
+      // Create tasks for each workflow
+      await db.exec(
+        `INSERT INTO tasks (id, timestamp, state, chat_id) VALUES (?, ?, ?, ?)`,
+        ["task-archive-1", Date.now(), "done", "chat-archive-1"]
+      );
+      await db.exec(
+        `INSERT INTO tasks (id, timestamp, state, chat_id) VALUES (?, ?, ?, ?)`,
+        ["task-archive-2", Date.now(), "done", "chat-archive-2"]
+      );
+      await db.exec(
+        `INSERT INTO tasks (id, timestamp, state, chat_id) VALUES (?, ?, ?, ?)`,
+        ["task-archive-3", Date.now(), "done", "chat-archive-3"]
+      );
+
+      // Archivable draft (35 days old - should be in archivableDrafts AND abandonedDrafts)
+      const archivableDateStr = new Date(now.getTime() - 35 * 24 * 60 * 60 * 1000).toISOString();
+      await scriptStore.addWorkflow({
+        id: "archivable-workflow",
+        title: "Archivable",
+        task_id: "task-archive-1",
+        chat_id: "chat-archive-1",
+        timestamp: archivableDateStr,
+        cron: "",
+        events: "",
+        status: "draft",
+        next_run_timestamp: "",
+        maintenance: false,
+        maintenance_fix_count: 0,
+        active_script_id: "",
+      });
+
+      // Abandoned draft (10 days old - should only be in abandonedDrafts)
+      const abandonedDateStr = new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000).toISOString();
+      await scriptStore.addWorkflow({
+        id: "abandoned-only-workflow",
+        title: "Abandoned Only",
+        task_id: "task-archive-2",
+        chat_id: "chat-archive-2",
+        timestamp: abandonedDateStr,
+        cron: "",
+        events: "",
+        status: "draft",
+        next_run_timestamp: "",
+        maintenance: false,
+        maintenance_fix_count: 0,
+        active_script_id: "",
+      });
+
+      // Recent draft (5 days old - should only be in staleDrafts)
+      const staleDateStr = new Date(now.getTime() - 5 * 24 * 60 * 60 * 1000).toISOString();
+      await scriptStore.addWorkflow({
+        id: "stale-only-workflow",
+        title: "Stale Only",
+        task_id: "task-archive-3",
+        chat_id: "chat-archive-3",
+        timestamp: staleDateStr,
+        cron: "",
+        events: "",
+        status: "draft",
+        next_run_timestamp: "",
+        maintenance: false,
+        maintenance_fix_count: 0,
+        active_script_id: "",
+      });
+
+      const summary = await scriptStore.getDraftActivitySummary();
+      expect(summary.totalDrafts).toBe(3);
+      expect(summary.archivableDrafts).toBe(1);   // Only 35-day old draft
+      expect(summary.abandonedDrafts).toBe(2);    // 35-day and 10-day (archivable counts as abandoned too)
+      expect(summary.staleDrafts).toBe(1);        // Only 5-day old draft
+    });
+
+    it("should handle 30-day threshold boundary for archivable drafts", async () => {
+      const now = new Date();
+
+      // Create tasks
+      await db.exec(
+        `INSERT INTO tasks (id, timestamp, state, chat_id) VALUES (?, ?, ?, ?)`,
+        ["task-boundary-30", Date.now(), "done", "chat-boundary-30"]
+      );
+      await db.exec(
+        `INSERT INTO tasks (id, timestamp, state, chat_id) VALUES (?, ?, ?, ?)`,
+        ["task-boundary-30-under", Date.now(), "done", "chat-boundary-30-under"]
+      );
+
+      // Workflow exactly 30 days + 1 second ago (should be included as archivable)
+      const justOverThreshold = new Date(now.getTime() - (30 * 24 * 60 * 60 * 1000 + 1000));
+      await scriptStore.addWorkflow({
+        id: "workflow-archive-over",
+        title: "Just Over Archive Threshold",
+        task_id: "task-boundary-30",
+        chat_id: "chat-boundary-30",
+        timestamp: justOverThreshold.toISOString(),
+        cron: "",
+        events: "",
+        status: "draft",
+        next_run_timestamp: "",
+        maintenance: false,
+        maintenance_fix_count: 0,
+        active_script_id: "",
+      });
+
+      // Workflow exactly 30 days - 1 second ago (should NOT be archivable)
+      const justUnderThreshold = new Date(now.getTime() - (30 * 24 * 60 * 60 * 1000 - 1000));
+      await scriptStore.addWorkflow({
+        id: "workflow-archive-under",
+        title: "Just Under Archive Threshold",
+        task_id: "task-boundary-30-under",
+        chat_id: "chat-boundary-30-under",
+        timestamp: justUnderThreshold.toISOString(),
+        cron: "",
+        events: "",
+        status: "draft",
+        next_run_timestamp: "",
+        maintenance: false,
+        maintenance_fix_count: 0,
+        active_script_id: "",
+      });
+
+      const summary = await scriptStore.getDraftActivitySummary();
+      expect(summary.totalDrafts).toBe(2);
+      expect(summary.archivableDrafts).toBe(1);   // Only the one just over
+      expect(summary.abandonedDrafts).toBe(2);    // Both are > 7 days
     });
   });
 });
