@@ -120,6 +120,18 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
   - Fix: Replace with purpose-built confirmation modal using app's existing UI components
   - Status: **FIXED** - Replaced window.confirm() with a custom modal dialog matching the app's design system; modal is non-blocking, accessible, and consistent with app UX; uses state management (showArchiveConfirm) instead of blocking confirm(); added backdrop click to dismiss
 
+- [x] **Fix missing awaits in server shutdown** - [specs/new/fix-shutdown-missing-awaits.md](specs/new/fix-shutdown-missing-awaits.md)
+  - File: `apps/server/src/server.ts` (in `close()`)
+  - Issue: `nostr.stop()` and `peer.stop()` called without `await`, causing race conditions during shutdown
+  - Fix: Add `await` to both async stop() calls
+  - Status: **FIXED** - both calls now properly awaited
+
+- [x] **Scheduler graceful shutdown** - [specs/new/scheduler-graceful-shutdown.md](specs/new/scheduler-graceful-shutdown.md)
+  - Files: `packages/agent/src/task-scheduler.ts`, `packages/agent/src/workflow-scheduler.ts`
+  - Issue: `close()` methods don't wait for in-progress `checkWork()` to complete
+  - Fix: Add polling loop to wait for `isRunning` to become false with 30s timeout
+  - Status: **FIXED** - both schedulers now wait for in-progress work with timeout and warning
+
 ### P2 - Medium (Code Quality & Tests)
 
 - [x] **Fix compression error message** - [specs/fix-compression-error-message.md](specs/fix-compression-error-message.md)
@@ -194,6 +206,12 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
   - Fix: Change return type to include reason ('revoked', 'not_supported', 'failed'); update logging
   - Status: **FIXED** - changed return type from boolean to RevokeResult with reason; reasons: 'revoked', 'not_supported', or 'failed'; updated manager.ts to log appropriately based on reason; exported RevokeResult type from @app/connectors
 
+- [x] **Migrate schedule tool to updateWorkflowFields** - [specs/new/migrate-schedule-to-updateWorkflowFields.md](specs/new/migrate-schedule-to-updateWorkflowFields.md)
+  - File: `packages/agent/src/ai-tools/schedule.ts`
+  - Issue: Uses spread pattern with `updateWorkflow` instead of atomic `updateWorkflowFields`
+  - Fix: Replace spread pattern with direct `updateWorkflowFields()` call
+  - Status: **FIXED** - now uses `updateWorkflowFields(workflow.id, { cron, next_run_timestamp })`
+
 ### P3 - Low (Technical Debt & Cleanup)
 
 - [ ] **Remove prototyping migration code**
@@ -201,6 +219,18 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
   - Issue: Temporary prototyping code for migration should be removed before v1
   - Fix: Remove the marked lines after confirming no longer needed
   - Status: **NOT FIXED** - code still present
+
+- [ ] **Standardize React Query mutation error handling** - [specs/new/standardize-mutation-error-handling.md](specs/new/standardize-mutation-error-handling.md)
+  - Files: `apps/web/src/components/ArchivedPage.tsx`, `apps/web/src/components/WorkflowDetailPage.tsx`
+  - Issue: Inconsistent patterns - ArchivedPage uses `mutateAsync` with try/catch, WorkflowDetailPage uses `mutate` with callbacks
+  - Fix: Standardize on callback-based `mutate` pattern across codebase
+  - Status: **NOT FIXED** - patterns remain inconsistent
+
+- [ ] **Remove files.list from GDrive TRACKED_METHODS** - [specs/new/remove-files-list-from-tracked.md](specs/new/remove-files-list-from-tracked.md)
+  - File: `packages/connectors/src/google/gdrive.ts`
+  - Issue: Read-only `files.list` operation tracked alongside write operations, causing event noise
+  - Fix: Remove `files.list` from TRACKED_METHODS Set
+  - Status: **NOT FIXED** - files.list still in TRACKED_METHODS
 
 - [ ] **Enable skipped test suites**
   - Files:
@@ -220,10 +250,10 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
 | Priority | Count | Status |
 |----------|-------|--------|
 | P0 Critical | 6 | 6 complete |
-| P1 High | 10 | 9 complete |
-| P2 Medium | 13 | 10 complete (1 documented) |
-| P3 Low | 2 | 0 complete |
-| **Total** | **31** | **25 complete** |
+| P1 High | 12 | 11 complete |
+| P2 Medium | 14 | 11 complete (1 documented) |
+| P3 Low | 4 | 0 complete |
+| **Total** | **36** | **28 complete** |
 
 ---
 

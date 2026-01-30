@@ -141,9 +141,29 @@ export class WorkflowScheduler {
   }
 
   async close(): Promise<void> {
-    if (!this.isRunning) return;
+    // Set shutdown flag to prevent new work from starting
     this.isShuttingDown = true;
-    if (this.interval) clearInterval(this.interval);
+
+    // Clear interval to stop scheduling new checkWork calls
+    if (this.interval) {
+      clearInterval(this.interval);
+      this.interval = undefined;
+    }
+
+    // Wait for in-progress work to complete with timeout
+    const SHUTDOWN_TIMEOUT_MS = 30000; // 30 seconds
+    const POLL_INTERVAL_MS = 100;
+    const startTime = Date.now();
+
+    while (this.isRunning) {
+      if (Date.now() - startTime > SHUTDOWN_TIMEOUT_MS) {
+        this.debug("Warning: Shutdown timeout reached with work still in progress");
+        break;
+      }
+      await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
+    }
+
+    this.debug("Scheduler closed");
   }
 
   public start() {

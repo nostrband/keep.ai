@@ -2052,12 +2052,12 @@ export async function createServer(config: ServerConfig = {}) {
 
       // 3. Stop transports (nostr and http)
       debugServer("Stopping transports...");
-      nostr.stop();
+      await nostr.stop();
       http.stop();
 
       // 4. Stop the cr-sqlite peer
       debugServer("Stopping peer...");
-      peer.stop();
+      await peer.stop();
 
       // 5. Close the SimplePool
       debugServer("Closing nostr pool...");
