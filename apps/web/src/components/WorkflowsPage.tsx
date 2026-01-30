@@ -6,24 +6,35 @@ import { Button } from "../ui";
 import { WorkflowStatusBadge } from "./StatusBadge";
 import { getWorkflowTitle } from "../lib/workflowUtils";
 
+// Supported filter values (case-insensitive matching)
+const VALID_FILTERS = ["drafts"] as const;
+type ValidFilter = typeof VALID_FILTERS[number];
+
+function normalizeFilter(param: string | null): ValidFilter | null {
+  if (!param) return null;
+  const normalized = param.toLowerCase();
+  return VALID_FILTERS.includes(normalized as ValidFilter) ? (normalized as ValidFilter) : null;
+}
+
 export default function WorkflowsPage() {
   const { data: workflows = [], isLoading } = useWorkflows();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const filterParam = searchParams.get("filter");
+  const rawFilter = searchParams.get("filter");
+  const filter = normalizeFilter(rawFilter);
 
   // Filter workflows based on query parameter
   const filteredWorkflows = useMemo(() => {
-    if (filterParam === "drafts") {
+    if (filter === "drafts") {
       return workflows.filter((w) => w.status === "draft");
     }
     return workflows;
-  }, [workflows, filterParam]);
+  }, [workflows, filter]);
 
   // Determine page title based on filter
-  const pageTitle = filterParam === "drafts" ? "Drafts" : "Workflows";
+  const pageTitle = filter === "drafts" ? "Drafts" : "Workflows";
   const emptyMessage =
-    filterParam === "drafts" ? "No draft workflows found" : "No workflows found";
+    filter === "drafts" ? "No draft workflows found" : "No workflows found";
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -41,7 +52,7 @@ export default function WorkflowsPage() {
           >
             Create Workflow
           </Button>
-          {filterParam === "drafts" && (
+          {filter === "drafts" && (
             <Link
               to="/workflows"
               className="text-sm text-gray-500 hover:text-gray-700"

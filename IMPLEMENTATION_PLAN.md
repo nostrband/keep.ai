@@ -128,23 +128,23 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
   - Fix: Add `export` to constant; import in tests
   - Status: **FIXED** - constant exported from workflow-worker and imported in tests
 
-- [ ] **Fix maintainer tasks type safety** - [specs/fix-maintainer-tasks-type-safety.md](specs/fix-maintainer-tasks-type-safety.md)
+- [x] **Fix maintainer tasks type safety** - [specs/fix-maintainer-tasks-type-safety.md](specs/fix-maintainer-tasks-type-safety.md)
   - File: `apps/web/src/components/WorkflowDetailPage.tsx:497`
   - Issue: Uses `any` type in `maintainerTasks.map((task: any) => ...)`
   - Fix: Import `Task` from `@app/db`, use proper type
-  - Status: **NOT FIXED** - `(task: any)` still used, `Task` type not imported
+  - Status: **FIXED** - imported `Task` type, changed `(task: any)` to `(task: Task)`
 
-- [ ] **Extract draft activity summary default** - [specs/extract-draft-activity-summary-default.md](specs/extract-draft-activity-summary-default.md)
+- [x] **Extract draft activity summary default** - [specs/extract-draft-activity-summary-default.md](specs/extract-draft-activity-summary-default.md)
   - File: `apps/web/src/hooks/dbScriptReads.ts:293-299,304-310`
   - Issue: Duplicated fallback object in two locations
   - Fix: Extract to `DEFAULT_DRAFT_ACTIVITY_SUMMARY` constant
-  - Status: **NOT FIXED** - identical fallback object defined in two places
+  - Status: **FIXED** - extracted to shared constant used by both locations
 
-- [ ] **Improve workflows filter param handling** - [specs/improve-workflows-filter-param-handling.md](specs/improve-workflows-filter-param-handling.md)
+- [x] **Improve workflows filter param handling** - [specs/improve-workflows-filter-param-handling.md](specs/improve-workflows-filter-param-handling.md)
   - File: `apps/web/src/components/WorkflowsPage.tsx:13-21`
   - Issue: No case normalization, no validation, no feedback for invalid filters
   - Fix: Add `.toLowerCase()`, whitelist validation, user feedback
-  - Status: **NOT FIXED** - direct `filterParam === "drafts"` comparison
+  - Status: **FIXED** - added `normalizeFilter()` with case normalization and whitelist validation
 
 - [ ] **Add escalateToUser integration tests** - [specs/add-escalatetouser-integration-tests.md](specs/add-escalatetouser-integration-tests.md)
   - File: `packages/tests/src/maintainer-integration.test.ts`
@@ -191,9 +191,9 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
 |----------|-------|--------|
 | P0 Critical | 6 | 5 complete |
 | P1 High | 8 | 5 complete |
-| P2 Medium | 9 | 3 complete (1 documented) |
+| P2 Medium | 9 | 6 complete (1 documented) |
 | P3 Low | 2 | 0 complete |
-| **Total** | **25** | **13 complete** |
+| **Total** | **25** | **16 complete** |
 
 ---
 

@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
+import type { Task } from "@app/db";
 import {
   useWorkflow,
   useLatestScriptByWorkflowId,
@@ -494,7 +495,7 @@ export default function WorkflowDetailPage() {
               <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
                 <h2 className="text-lg font-semibold text-gray-900 mb-4">Auto-Fix History</h2>
                 <div className="space-y-3">
-                  {maintainerTasks.map((task: any) => (
+                  {maintainerTasks.map((task: Task) => (
                     <Link
                       key={task.id}
                       to={`/tasks/${task.id}`}

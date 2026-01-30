@@ -285,29 +285,25 @@ export function useAbandonedDrafts(thresholdDays: number = DRAFT_THRESHOLDS.ABAN
  *
  * @returns Query result containing draft activity summary
  */
+const DEFAULT_DRAFT_ACTIVITY_SUMMARY = {
+  totalDrafts: 0,
+  staleDrafts: 0,
+  abandonedDrafts: 0,
+  archivableDrafts: 0,
+  waitingForInput: 0,
+};
+
 export function useDraftActivitySummary() {
   const { api } = useDbQuery();
   return useQuery({
     queryKey: qk.draftActivitySummary(),
     queryFn: async () => {
-      if (!api) return {
-        totalDrafts: 0,
-        staleDrafts: 0,
-        abandonedDrafts: 0,
-        archivableDrafts: 0,
-        waitingForInput: 0,
-      };
+      if (!api) return DEFAULT_DRAFT_ACTIVITY_SUMMARY;
       try {
         const summary = await api.scriptStore.getDraftActivitySummary();
         return summary;
       } catch (error) {
-        return {
-          totalDrafts: 0,
-          staleDrafts: 0,
-          abandonedDrafts: 0,
-          archivableDrafts: 0,
-          waitingForInput: 0,
-        };
+        return DEFAULT_DRAFT_ACTIVITY_SUMMARY;
       }
     },
     meta: { tables: ["workflows", "scripts", "chat_messages", "tasks"] },
