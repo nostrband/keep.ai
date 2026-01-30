@@ -457,8 +457,9 @@ export const printSchema = (schema: Any): string => {
       break;
 
     case K.ZodNativeEnum:
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       result = `enum(${Object.values(
-        (schema as z.ZodNativeEnum<object>)._def.values
+        (schema as z.ZodNativeEnum<any>)._def.values
       ).join(", ")})`;
       break;
 

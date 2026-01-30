@@ -206,7 +206,11 @@ export async function registerConnectorRoutes(
         if (
           errorMessageLower.includes("unauthorized") ||
           errorMessageLower.includes("invalid_grant") ||
-          errorMessageLower.includes("token") ||
+          // Specific token patterns to avoid false positives like "token bucket rate limit"
+          errorMessageLower.includes("token expired") ||
+          errorMessageLower.includes("invalid token") ||
+          errorMessageLower.includes("token revoked") ||
+          errorMessageLower.includes("access token") ||
           errorMessageLower.includes("expired") ||
           errorMessageLower.includes("revoked") ||
           errorMessageLower.includes("invalid credentials")
@@ -216,7 +220,11 @@ export async function registerConnectorRoutes(
           errorMessageLower.includes("unavailable") ||
           errorMessageLower.includes("timeout") ||
           errorMessageLower.includes("econnrefused") ||
-          errorMessageLower.includes("service") ||
+          // Specific service patterns to avoid false positives like "Unknown service"
+          errorMessageLower.includes("service unavailable") ||
+          errorMessageLower.includes("service error") ||
+          errorMessageLower.includes("service down") ||
+          errorMessageLower.includes("503") ||
           errorMessageLower.includes("rate limit")
         ) {
           statusCode = 503; // Service unavailable

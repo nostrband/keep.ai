@@ -335,8 +335,8 @@ describe("Utility Tools", () => {
         expect(mockContext.onLog).toHaveBeenCalled();
         const loggedLine = (mockContext.onLog as any).mock.calls[0][0];
 
-        // Backslashes are passed through without escaping
-        expect(loggedLine).toContain("C:\\Users\\test\\file.txt");
+        // Backslashes are escaped to prevent ambiguity with quote escaping
+        expect(loggedLine).toContain("C:\\\\Users\\\\test\\\\file.txt");
       });
 
       it("should handle message containing double quotes", async () => {

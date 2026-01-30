@@ -16,14 +16,20 @@ Messages are timestamped and stored in run logs.`,
       line: z.string().describe("The message to log"),
     }),
     execute: async (input) => {
-      // Escape single quotes in the message to prevent malformed output
-      const escapedLine = input.line.replace(/'/g, "\\'");
+      // Crop input BEFORE escaping to ensure predictable 1000 char limit on original input
+      // and to avoid cutting escape sequences mid-way
+      const croppedInput = input.line.length > 1000
+        ? input.line.substring(0, 1000) + "..."
+        : input.line;
 
-      // Crop the line to 1000 chars max
-      const croppedLine =
-        escapedLine.length > 1000
-          ? "'" + escapedLine.substring(0, 1000) + "..."
-          : "'" + escapedLine + "'";
+      // Escape backslashes first, then single quotes
+      // Order matters: backslashes must be escaped first, otherwise the backslash
+      // added for quote escaping would itself get escaped
+      const escapedLine = croppedInput
+        .replace(/\\/g, "\\\\")
+        .replace(/'/g, "\\'");
+
+      const croppedLine = "'" + escapedLine + "'";
 
       // Get current ISO timestamp
       const timestamp = new Date().toISOString();

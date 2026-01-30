@@ -10,10 +10,8 @@
 import { useState, useEffect, useRef } from "react";
 import { Mail, HardDrive, Sheet, FileText, BookOpen, MoreVertical, Plus, RefreshCw, Unlink, Check, AlertCircle, Pencil } from "lucide-react";
 import { useConnections } from "../hooks/dbConnectionReads";
-import { useUpdateConnectionLabel } from "../hooks/dbWrites";
+import { useUpdateConnectionLabel, useDisconnectConnection } from "../hooks/dbWrites";
 import { useAutoHidingMessage } from "../hooks/useAutoHidingMessage";
-import { useQueryProvider } from "../QueryProviderEmbedded";
-import { notifyTablesChanged } from "../queryClient";
 import { API_ENDPOINT } from "../const";
 import { openUrl } from "../lib/url-utils";
 import {
@@ -330,7 +328,7 @@ function ServiceGroup({
 export default function ConnectionsSection() {
   const { data: connections = [], isLoading } = useConnections();
   const updateLabelMutation = useUpdateConnectionLabel();
-  const { api } = useQueryProvider();
+  const disconnectMutation = useDisconnectConnection(API_ENDPOINT);
   const [pendingService, setPendingService] = useState<string | null>(null);
   const [checkingConnections, setCheckingConnections] = useState<Set<string>>(new Set());
   const success = useAutoHidingMessage({ duration: 3000 });
@@ -393,31 +391,16 @@ export default function ConnectionsSection() {
     }
   };
 
-  const handleDisconnect = async (connectionId: string) => {
-    try {
-      setError(null);
-      const [service, accountId] = connectionId.split(":");
-
-      const response = await fetch(
-        `${API_ENDPOINT}/connectors/${service}/${encodeURIComponent(accountId)}`,
-        { method: "DELETE" }
-      );
-
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || "Failed to disconnect");
-      }
-
-      // Notify query system to invalidate connections data
-      // This ensures the UI updates immediately after disconnect
-      if (api) {
-        notifyTablesChanged(["connections"], true, api);
-      }
-
-      success.show("Account disconnected");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to disconnect");
-    }
+  const handleDisconnect = (connectionId: string) => {
+    setError(null);
+    disconnectMutation.mutate(connectionId, {
+      onSuccess: () => {
+        success.show("Account disconnected");
+      },
+      onError: (err) => {
+        setError(err instanceof Error ? err.message : "Failed to disconnect");
+      },
+    });
   };
 
   const handleReconnect = async (serviceId: string) => {

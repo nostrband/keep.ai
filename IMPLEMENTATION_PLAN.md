@@ -222,6 +222,40 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
   - Fix: Replace spread pattern with direct `updateWorkflowFields()` call
   - Status: **FIXED** - now uses `updateWorkflowFields(workflow.id, { cron, next_run_timestamp })`
 
+- [x] **Fix console-log backslash escaping** - [specs/new/console-log-backslash-escaping.md](specs/new/console-log-backslash-escaping.md)
+  - File: `packages/agent/src/tools/console-log.ts`
+  - Issue: Only single quotes escaped, backslashes not - creates ambiguity for `test\'`
+  - Fix: Escape backslashes first (`\\`), then quotes (`\'`)
+  - Status: **FIXED** - backslashes now escaped before quotes to prevent ambiguity
+
+- [x] **Crop before escaping in console-log** - [specs/new/console-log-crop-before-escape.md](specs/new/console-log-crop-before-escape.md)
+  - File: `packages/agent/src/tools/console-log.ts`
+  - Issue: 1000 char limit applied after escaping; may cut escape sequences and cause unexpected truncation
+  - Fix: Crop input before escaping
+  - Status: **FIXED** - input now cropped before escaping for predictable 1000 char limit
+
+- [x] **Fix overly broad "token" error classification** - [specs/new/connectors-error-classification-token.md](specs/new/connectors-error-classification-token.md)
+  - File: `apps/server/src/routes/connectors.ts:209`
+  - Issue: `includes("token")` too broad - incorrectly classifies "token bucket rate limit" as 401
+  - Fix: Use specific patterns: "token expired", "invalid token", "token revoked", "access token"
+  - Status: **FIXED** - now uses specific token patterns to avoid false positives
+
+- [x] **Fix overly broad "service" error classification** - [specs/new/connectors-error-classification-service.md](specs/new/connectors-error-classification-service.md)
+  - File: `apps/server/src/routes/connectors.ts:219`
+  - Issue: `includes("service")` too broad - incorrectly classifies many errors as 503
+  - Fix: Use specific patterns: "service unavailable", "service error", "service down", "503"
+  - Status: **FIXED** - now uses specific service patterns to avoid false positives
+
+- [x] **Extract disconnect mutation hook** - [specs/new/extract-disconnect-mutation-hook.md](specs/new/extract-disconnect-mutation-hook.md)
+  - Files: `apps/web/src/hooks/dbWrites.ts`, `apps/web/src/components/ConnectionsSection.tsx`
+  - Issue: Disconnect logic inline in component instead of mutation hook pattern
+  - Fix: Create `useDisconnectConnection` hook; refactor component to use it
+  - Status: **FIXED** - created `useDisconnectConnection` hook; component refactored to use it
+
+- [x] **Add onError callback to ArchivedPage** - [specs/new/archived-page-onerror-callback.md](specs/new/archived-page-onerror-callback.md)
+  - File: `apps/web/src/components/ArchivedPage.tsx`
+  - Status: **FIXED** - onError callback already present at lines 40-43
+
 ### P3 - Low (Technical Debt & Cleanup)
 
 - [x] **Remove prototyping migration code**
@@ -242,6 +276,18 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
   - Fix: Remove `files.list` from TRACKED_METHODS Set
   - Status: **FIXED** - files.list removed from TRACKED_METHODS; only write operations are now tracked
 
+- [x] **Fix cron format range validation** - [specs/new/cron-format-range-validation.md](specs/new/cron-format-range-validation.md)
+  - File: `apps/web/src/lib/formatCronSchedule.ts`
+  - Issue: Out-of-range values display impossible times (":75", "99:00")
+  - Fix: Add range validation (minutes 0-59, hours 0-23, etc.), fall back to raw cron
+  - Status: **FIXED** - added range validation for all numeric fields, falls back to raw cron if out of range
+
+- [x] **Fix cron format "every minute" check** - [specs/new/cron-format-every-minute-check.md](specs/new/cron-format-every-minute-check.md)
+  - File: `apps/web/src/lib/formatCronSchedule.ts`
+  - Issue: Check only verifies minute/hour wildcards; "* * 1 * *" incorrectly returns "Every minute"
+  - Fix: Verify all five fields are wildcards before returning "Every minute"
+  - Status: **FIXED** - now checks all five cron fields before returning "Every minute"
+
 - [ ] **Enable skipped test suites**
   - Files:
     - `packages/tests/src/exec-many-args-browser.test.ts` - entire suite skipped (requires IndexedDB)
@@ -261,9 +307,9 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
 |----------|-------|--------|
 | P0 Critical | 6 | 6 complete |
 | P1 High | 12 | 11 complete + 1 partial |
-| P2 Medium | 15 | 13 complete (1 documented) |
-| P3 Low | 4 | 3 complete |
-| **Total** | **37** | **33 complete + 1 partial** |
+| P2 Medium | 21 | 19 complete (1 documented) |
+| P3 Low | 6 | 5 complete |
+| **Total** | **45** | **41 complete + 1 partial** |
 
 ---
 
