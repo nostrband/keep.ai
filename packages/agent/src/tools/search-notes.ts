@@ -1,60 +1,56 @@
 import { z } from "zod";
-import { tool } from "ai";
 import { NoteStore } from "@app/db";
+import { defineReadOnlyTool, Tool } from "./types";
 
-export function makeSearchNotesTool(noteStore: NoteStore) {
-  return tool({
+const inputSchema = z.object({
+  keywords: z
+    .array(z.string())
+    .nullable()
+    .optional()
+    .describe("Array of keywords to search for in title and content (optional, case-insensitive)"),
+  tags: z
+    .array(z.string())
+    .nullable()
+    .optional()
+    .describe("Array of tags to filter by (optional, partial matches allowed, case-insensitive)"),
+  regexp: z
+    .string()
+    .nullable()
+    .optional()
+    .describe("Regular expression pattern to search in title and content (optional, case-insensitive)"),
+});
+
+const outputSchema = z.array(z.object({
+  id: z.string().describe("Unique note identifier"),
+  title: z.string().describe("Note title"),
+  tags: z.array(z.string()).describe("Array of tag strings"),
+  priority: z.enum(["low", "medium", "high"]).describe("Note priority level"),
+  created: z.string().describe("ISO timestamp when note was created"),
+  updated: z.string().describe("ISO timestamp when note was last updated"),
+  snippet: z.string().optional().describe("Content snippet if content matched the search"),
+}));
+
+type Input = z.infer<typeof inputSchema>;
+type Output = z.infer<typeof outputSchema>;
+
+/**
+ * Create the Memory.searchNotes tool.
+ * This is a read-only tool - can be used outside Items.withItem().
+ */
+export function makeSearchNotesTool(noteStore: NoteStore): Tool<Input, Output> {
+  return defineReadOnlyTool({
+    namespace: "Memory",
+    name: "searchNotes",
     description: `Search through notes using keywords, tags, or regular expressions.
 Returns note metadata (everything except content field) but includes content snippets when content matches.
 Results are ordered by updated time (most recent first).
-You can combine multiple search criteria - all must match for a note to be included.`,
-    inputSchema: z.union([
-      z.object({
-        keywords: z
-          .array(z.string())
-          .nullable()
-          .optional()
-          .describe(
-            "Array of keywords to search for in title and content (optional, case-insensitive)"
-          ),
-        tags: z
-          .array(z.string())
-          .nullable()
-          .optional()
-          .describe(
-            "Array of tags to filter by (optional, partial matches allowed, case-insensitive)"
-          ),
-        regexp: z
-          .string()
-          .nullable()
-          .optional()
-          .describe(
-            "Regular expression pattern to search in title and content (optional, case-insensitive), will use new RegExp(regexp, 'i') in JS to match"
-          ),
-      }),
-      z.string().min(1).describe("Search keywords, space-separated")
-    ]),
-    outputSchema: z.array(z.object({
-      id: z.string().describe("Unique note identifier"),
-      title: z.string().describe("Note title"),
-      tags: z.array(z.string()).describe("Array of tag strings"),
-      priority: z.enum(["low", "medium", "high"]).describe("Note priority level"),
-      created: z.string().describe("ISO timestamp when note was created"),
-      updated: z.string().describe("ISO timestamp when note was last updated"),
-      snippet: z.string().optional().describe("Content snippet if content matched the search"),
-    })),
-    execute: async (context) => {
-      let keywords: string[] | null | undefined;
-      let tags: string[] | null | undefined;
-      let regexp: string | null | undefined;
+You can combine multiple search criteria - all must match for a note to be included.
 
-      if (typeof context === 'string') {
-        keywords = context.split(/\s+/).filter(Boolean);
-        tags = undefined;
-        regexp = undefined;
-      } else {
-        ({ keywords, tags, regexp } = context);
-      }
+ℹ️ Not a mutation - can be used outside Items.withItem().`,
+    inputSchema,
+    outputSchema,
+    execute: async (input: Input): Promise<Output> => {
+      const { keywords, tags, regexp } = input || {};
 
       // Validate that at least one search criteria is provided
       if (!keywords?.length && !tags?.length && !regexp) {
@@ -80,8 +76,8 @@ You can combine multiple search criteria - all must match for a note to be inclu
         priority: note.priority,
         created: note.created,
         updated: note.updated,
-        snippet: note.snippet, // Content snippet if content matched
+        snippet: note.snippet,
       }));
     },
-  });
+  }) as Tool<Input, Output>;
 }
