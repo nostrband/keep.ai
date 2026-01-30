@@ -77,6 +77,8 @@ The Planner output is treated as **untrusted input**, and is validated before de
 
 Validated output is a **script** - versioned code artifact suitable for execution.
 
+Scripts versions have `major.minor` format, Planner always updates the major version and resets the minor version.
+
 **Placeholder:**
 Describe planner entry points, agent loop structure, and artifact storage.
 
@@ -121,8 +123,31 @@ The Executor must never:
 
 If execution cannot proceed safely, it must stop.
 
+---
+
+### Sandbox and tool wrappers
+
+Scripts run in a **fully sandboxed environment** with no direct access to external systems.
+
+All external operations — network calls, database access, file I/O, API calls — are performed through **host-managed tool wrappers**. Scripts cannot bypass this layer.
+
+Tool wrappers provide:
+
+* **Permission enforcement** — every operation is checked against allowed permissions (see Chapter 11)
+* **Mutation tracking** — side-effecting operations are recorded in the mutation ledger before execution (see Chapter 13)
+* **Reconciliation** — uncertain outcomes are detected and resolved through tool-specific reconciliation methods (see Chapter 13)
+* **Idempotency** — replay consults the ledger and returns cached results for applied mutations (see Chapter 14)
+* **Payload comparison** — tools may provide `comparePayload` to assess replay divergence (see Chapter 14)
+* **Logging** — all operations are recorded for observability and debugging
+
+This architecture ensures that:
+
+* the host runtime has complete visibility into script behavior
+* no mutations can occur without durable tracking
+* safety guarantees are enforced at the boundary, not trusted to script logic
+
 **Placeholder:**
-Document sandbox environment, limits, and worker mapping.
+Document sandbox environment details, resource limits, and worker mapping.
 
 ---
 
@@ -180,6 +205,33 @@ The Maintainer may **not**:
 
 Its output is either a fixed script, or a failure that's escalated to user for re-planning.
 
+Repaired scripts have their `minor` version number updated, the `major` version stays the same.
+
+---
+
+### Impact classification
+
+In addition to proposing a fix, the Maintainer must classify the **potential impact** of the bug that was fixed:
+
+* `safe` — the bug could not have affected external state (e.g., type errors, syntax issues, incorrect field access that would have failed before any mutation)
+* `potentially_impactful` — the bug pattern could have caused incorrect mutations before failing (e.g., control flow errors, read-after-write dependencies, invalid logic)
+
+The Maintainer is prompted to evaluate:
+
+* Could incorrect mutations have executed before the failure occurred?
+* Could control flow have diverged in a way that affected which mutations ran?
+* Could the bug have caused duplicate, skipped, or incorrect mutations?
+
+For `potentially_impactful` repairs:
+
+* auto-fix activation is blocked pending user review
+* the system shows items processed while the bug existed ("blast radius")
+* user inspects affected items, verifies external state if needed, and approves activation
+
+This classification does not detect actual damage — it surfaces uncertainty for user judgment. The Maintainer flags risk; the user decides whether to investigate or proceed.
+
+This aligns with the delegation contract: when autonomous repair may have hidden consequences, the user is informed before resuming execution.
+
 ---
 
 ### Validation and deployment
@@ -192,7 +244,7 @@ All LLM code proposals (Planner/Maintainer) are validated by the host runtime:
 * budget enforcement
 * LLM-reviewer/auditor calls
 
-Only validated repairs are accepted and executed.
+Only validated code is accepted and executed.
 
 **Placeholder:**
 Describe validation pipeline, replay harness, and versioning.
@@ -267,7 +319,7 @@ Contributions must preserve these invariants:
 * repair is gated and bounded
 * escalation is deterministic and auditable
 
-Any change that lets an LLM decide *whether* or *how* to proceed violates these invariants.
+Any change that increases LLM's ability to influence *whether* or *how* to proceed violates these invariants.
 
 ---
 

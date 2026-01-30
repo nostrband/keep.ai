@@ -215,8 +215,7 @@ Retries do not:
 
 If retries are exhausted, the failure is reclassified and re-routed.
 
-**Placeholder:**
-Document retry policies and idempotency mechanisms.
+See Chapter 15 for retry and backoff policy configuration.
 
 ---
 
@@ -241,8 +240,7 @@ Planner-generated scripts do **not** encode reconciliation logic.
 
 If reconciliation cannot deterministically establish outcome, the mutation is marked indeterminate and escalated.
 
-**Placeholder:**
-Describe mutation journaling and reconciliation workflow.
+See Chapter 13 for mutation ledger and reconciliation workflow.
 
 ---
 
@@ -256,12 +254,9 @@ Before invoking the Maintainer, the host runtime verifies:
 * intent constraints are satisfiable
 * permissions allow required operations
 * no indeterminate side-effect state exists
-* repair budgets (attempts, cost, time) remain
+* repair budgets (attempts, cost, time) remain (see Chapter 15)
 
 If any check fails, repair is forbidden and escalation is required.
-
-**Placeholder:**
-Describe repair eligibility gate and budgets.
 
 ---
 
@@ -302,7 +297,7 @@ Describe validation pipeline and replay harness.
 
 ## Repair limits and termination
 
-Autonomous repair is explicitly bounded.
+Autonomous repair is explicitly bounded (see Chapter 15 for policy configuration).
 
 The host runtime enforces:
 
