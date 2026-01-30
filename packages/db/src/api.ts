@@ -13,6 +13,7 @@ import { File, FileStore } from "./file-store";
 import { ScriptStore, Workflow } from "./script-store";
 import { NotificationStore } from "./notification-store";
 import { ExecutionLogStore } from "./execution-log-store";
+import { ItemStore } from "./item-store";
 
 export class KeepDbApi {
   public readonly db: KeepDb;
@@ -27,6 +28,7 @@ export class KeepDbApi {
   public readonly scriptStore: ScriptStore;
   public readonly notificationStore: NotificationStore;
   public readonly executionLogStore: ExecutionLogStore;
+  public readonly itemStore: ItemStore;
 
   constructor(db: KeepDb) {
     this.db = db;
@@ -41,6 +43,7 @@ export class KeepDbApi {
     this.scriptStore = new ScriptStore(db);
     this.notificationStore = new NotificationStore(db);
     this.executionLogStore = new ExecutionLogStore(db);
+    this.itemStore = new ItemStore(db);
   }
 
   async addMessage(input: {

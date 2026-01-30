@@ -49,5 +49,9 @@ export type { Notification, NotificationType } from "./notification-store";
 export { ExecutionLogStore } from "./execution-log-store";
 export type { ExecutionLog, ExecutionLogEventType, ExecutionLogRunType } from "./execution-log-store";
 
+// Item store (logical items infrastructure)
+export { ItemStore } from "./item-store";
+export type { Item, ItemStatus, ItemCreatedBy, ListItemsOptions } from "./item-store";
+
 // Api
 export * from "./api";

@@ -57,14 +57,18 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
 ### P1 - High (Core Features & Significant Fixes)
 
 - [ ] **Implement logical items infrastructure** - [specs/logical-items.md](specs/logical-items.md)
-  - Status: **NOT IMPLEMENTED** (major feature - no code exists)
-  - Components needed:
-    - [ ] `Items.withItem(id, title, handler)` API in sandbox
-    - [ ] Items database table with states (processing, done, failed, skipped)
-    - [ ] `Items.list()` tool for introspection
-    - [ ] Sandbox callback support (`wrapGuestCallback`, `awaitGuestPromise`)
-    - [ ] Tool wrapper refactor with `isReadOnly` metadata
-    - [ ] Mutation restrictions (writes only inside `withItem()`)
+  - Status: **PARTIALLY IMPLEMENTED** (core infrastructure complete, integration pending)
+  - Implemented:
+    - [x] Items database table (v35 migration) with states (processing, done, failed, skipped)
+    - [x] ItemStore for database operations
+    - [x] `Items.withItem(id, title, handler)` API in SandboxAPI
+    - [x] `Items.list` tool for introspection
+    - [x] Sandbox callback support (`wrapGuestCallback`, `awaitGuestPromise`)
+  - Remaining (not blocking):
+    - [ ] Tool interface refactor (migrate existing tools to new Tool interface with `isReadOnly` metadata)
+    - [ ] Mutation enforcement (currently withItem works but doesn't enforce mutation restrictions)
+    - [ ] Prompting changes (planner/maintainer prompts need updating)
+    - [ ] Tests for the new functionality
 
 - [x] **Fix tool always saves, check active for race** - [specs/fix-tool-always-save-check-active.md](specs/fix-tool-always-save-check-active.md)
   - File: `packages/agent/src/ai-tools/fix.ts`
@@ -256,10 +260,10 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
 | Priority | Count | Status |
 |----------|-------|--------|
 | P0 Critical | 6 | 6 complete |
-| P1 High | 12 | 11 complete |
+| P1 High | 12 | 11 complete + 1 partial |
 | P2 Medium | 15 | 13 complete (1 documented) |
 | P3 Low | 4 | 3 complete |
-| **Total** | **37** | **33 complete** |
+| **Total** | **37** | **33 complete + 1 partial** |
 
 ---
 

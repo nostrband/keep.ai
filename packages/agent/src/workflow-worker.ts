@@ -277,7 +277,7 @@ export class WorkflowWorker {
       );
 
       // Inits JS API in the sandbox
-      await this.createEnv(workflow, sandbox, abortController);
+      await this.createEnv(workflow, sandbox, scriptRunId, abortController);
 
       // Run the code
       const result = await sandbox.eval(script.code, {
@@ -712,7 +712,7 @@ export class WorkflowWorker {
     });
   }
 
-  private async createEnv(workflow: Workflow, sandbox: Sandbox, abortController?: AbortController) {
+  private async createEnv(workflow: Workflow, sandbox: Sandbox, scriptRunId: string, abortController?: AbortController) {
     // Create SandboxAPI directly without needing AgentEnv or dummy task
     const sandboxAPI = new SandboxAPI({
       api: this.api,
@@ -720,7 +720,8 @@ export class WorkflowWorker {
       getContext: () => sandbox.context!,
       userPath: this.userPath,
       connectionManager: this.connectionManager,
-      workflowId: workflow.id, // Enable pause checking during tool calls
+      workflowId: workflow.id, // Enable pause checking and item tracking
+      scriptRunId, // Enable item tracking
       abortController, // Enable fatal error abort for invalid input
     });
 

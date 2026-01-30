@@ -1,3 +1,6 @@
+// Tool types
+export { defineTool, defineReadOnlyTool } from "./types";
+export type { Tool, ReadOnlyTool, ItemStatus, ItemCreatedBy, ItemContext } from "./types";
 
 export { makeGetWeatherTool } from "./get-weather";
 export { makeCreateNoteTool } from "./create-note";
@@ -37,3 +40,4 @@ export { makeScriptHistoryTool } from "./script-history";
 export { makeListScriptRunsTool } from "./list-script-runs";
 export { makeGetScriptRunTool } from "./get-script-run";
 export { makeConsoleLogTool } from "./console-log";
+export { makeItemsListTool } from "./items-list";
