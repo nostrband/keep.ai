@@ -57,18 +57,18 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
 ### P1 - High (Core Features & Significant Fixes)
 
 - [ ] **Implement logical items infrastructure** - [specs/logical-items.md](specs/logical-items.md)
-  - Status: **PARTIALLY IMPLEMENTED** (core infrastructure complete, integration pending)
+  - Status: **PARTIALLY IMPLEMENTED** (core infrastructure complete with tests, integration pending)
   - Implemented:
     - [x] Items database table (v35 migration) with states (processing, done, failed, skipped)
     - [x] ItemStore for database operations
     - [x] `Items.withItem(id, title, handler)` API in SandboxAPI
     - [x] `Items.list` tool for introspection
     - [x] Sandbox callback support (`wrapGuestCallback`, `awaitGuestPromise`)
+    - [x] **Tests for ItemStore, Items.list, and sandbox callback functionality** (28 tests in `logical-items.test.ts`)
   - Remaining (not blocking):
     - [ ] Tool interface refactor (migrate existing tools to new Tool interface with `isReadOnly` metadata)
     - [ ] Mutation enforcement (currently withItem works but doesn't enforce mutation restrictions)
     - [ ] Prompting changes (planner/maintainer prompts need updating)
-    - [ ] Tests for the new functionality
 
 - [x] **Fix tool always saves, check active for race** - [specs/fix-tool-always-save-check-active.md](specs/fix-tool-always-save-check-active.md)
   - File: `packages/agent/src/ai-tools/fix.ts`
@@ -316,7 +316,7 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
 ## Notes
 
 - All items verified against source code on 2026-01-30
-- The `logical-items.md` spec is a major feature requiring multiple phases (no code exists)
+- The `logical-items.md` spec core infrastructure is implemented with 28 tests covering ItemStore, Items.list, and sandbox callback functionality
 - P0 items should be addressed first as they involve security and data integrity
 - Many P2 items are quick fixes that improve code quality
 - `fix-skipped-compression-tests` has documented reasons for skipped tests (zlib timing sensitivity); remains as technical debt

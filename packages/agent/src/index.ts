@@ -12,6 +12,7 @@ export {
   makeAudioExplainTool,
   makeAtobTool,
   makeConsoleLogTool,
+  makeItemsListTool,
 } from "./tools";
 
 // AI tools (planner/maintainer specific)
