@@ -54,6 +54,8 @@ export {
 export {
   TaskScheduler,
   type TaskSchedulerConfig,
+  selectTaskByPriority,
+  type TaskPriorityOptions,
 } from "./task-scheduler";
 
 export {
@@ -72,6 +74,9 @@ export {
   WorkflowWorker,
   type WorkflowWorkerConfig,
   MAX_FIX_ATTEMPTS,
+  escalateToUser,
+  type EscalateToUserOptions,
+  type EscalateToUserResult,
 } from "./workflow-worker";
 
 export {

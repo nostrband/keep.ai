@@ -1,9 +1,52 @@
 import debug from "debug";
-import { KeepDbApi, InboxItem } from "@app/db";
+import { KeepDbApi, InboxItem, Task } from "@app/db";
 import { TaskWorker } from "./task-worker";
 import { TaskExecutionSignal, TaskRetryState } from "./task-worker-signal";
 import { isValidEnv } from "./env";
 import type { ConnectionManager } from "@app/connectors";
+
+export interface TaskPriorityOptions {
+  /** Optional callback for logging skipped tasks */
+  onSkipped?: (taskId: string, workflowId: string) => void;
+}
+
+/**
+ * Selects the highest priority task from a list of tasks.
+ *
+ * Priority rules:
+ * 1. Priority order: planner > worker > maintainer
+ * 2. If both planner and maintainer exist for the SAME workflow,
+ *    the maintainer task is skipped (planner takes precedence to avoid stale fixes)
+ *
+ * @param tasks - Array of tasks to select from
+ * @param options - Optional configuration including callbacks
+ * @returns The highest priority task, or undefined if no tasks
+ */
+export function selectTaskByPriority(tasks: Task[], options?: TaskPriorityOptions): Task | undefined {
+  // 1. Find workflows that have planner tasks pending
+  const workflowsWithPlanner = new Set<string>();
+  for (const t of tasks) {
+    if (t.type === "planner" && t.workflow_id) {
+      workflowsWithPlanner.add(t.workflow_id);
+    }
+  }
+
+  // 2. Filter out maintainer tasks that conflict with planner tasks
+  const filteredTasks = tasks.filter((t) => {
+    if (t.type === "maintainer" && t.workflow_id && workflowsWithPlanner.has(t.workflow_id)) {
+      options?.onSkipped?.(t.id, t.workflow_id);
+      return false;
+    }
+    return true;
+  });
+
+  // 3. Apply priority order: planner > worker > maintainer
+  let task = filteredTasks.find((t) => t.type === "planner");
+  if (!task) task = filteredTasks.find((t) => t.type === "worker");
+  if (!task) task = filteredTasks.find((t) => t.type === "maintainer");
+
+  return task;
+}
 
 export interface TaskSchedulerConfig {
   api: KeepDbApi;
@@ -212,32 +255,12 @@ export class TaskScheduler {
       const tasks = availableTasks.sort((a, b) => a.timestamp - b.timestamp);
       this.debug("Pending tasks", tasks);
 
-      // Find highest-priority task with workflow conflict resolution:
-      // Priority order: planner > worker > maintainer
-      // Special rule: if both planner and maintainer exist for the SAME workflow,
-      // skip the maintainer task (planner takes precedence to avoid stale fixes)
-
-      // 1. Find workflows that have planner tasks pending
-      const workflowsWithPlanner = new Set<string>();
-      for (const t of tasks) {
-        if (t.type === "planner" && t.workflow_id) {
-          workflowsWithPlanner.add(t.workflow_id);
-        }
-      }
-
-      // 2. Filter out maintainer tasks that conflict with planner tasks
-      const filteredTasks = tasks.filter((t) => {
-        if (t.type === "maintainer" && t.workflow_id && workflowsWithPlanner.has(t.workflow_id)) {
-          this.debug(`Skipping maintainer task ${t.id} - planner exists for workflow ${t.workflow_id}`);
-          return false;
-        }
-        return true;
+      // Select highest priority task using the exported function
+      const task = selectTaskByPriority(tasks, {
+        onSkipped: (taskId, workflowId) => {
+          this.debug(`Skipping maintainer task ${taskId} - planner exists for workflow ${workflowId}`);
+        },
       });
-
-      // 3. Apply priority order: planner > worker > maintainer
-      let task = filteredTasks.find((t) => t.type === "planner");
-      if (!task) task = filteredTasks.find((t) => t.type === "worker");
-      if (!task) task = filteredTasks.find((t) => t.type === "maintainer");
 
       // Found anything?
       if (task) {

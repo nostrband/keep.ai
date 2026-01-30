@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { DBInterface, KeepDb, TaskStore, InboxStore, Task, InboxItem } from "@app/db";
 import { createDBNode } from "@app/node";
+import { selectTaskByPriority } from "@app/agent";
 
 /**
  * Tests for task scheduler priority logic.
@@ -10,8 +11,8 @@ import { createDBNode } from "@app/node";
  * 2. If both planner and maintainer tasks exist for the SAME workflow,
  *    the maintainer task is skipped (planner takes precedence to avoid stale fixes)
  *
- * These tests verify the logic directly using the database stores,
- * simulating what the scheduler would see.
+ * These tests verify the actual selectTaskByPriority function exported from
+ * the task-scheduler module, ensuring we're testing real production code.
  */
 
 /**
@@ -102,35 +103,6 @@ describe("Task Scheduler Priority", () => {
     handler_thread_id: "",
     handler_timestamp: "",
   });
-
-  /**
-   * Simulates the scheduler's priority selection logic.
-   * This is extracted from task-scheduler.ts processNextTask method.
-   */
-  function selectTaskByPriority(tasks: Task[]): Task | undefined {
-    // 1. Find workflows that have planner tasks pending
-    const workflowsWithPlanner = new Set<string>();
-    for (const t of tasks) {
-      if (t.type === "planner" && t.workflow_id) {
-        workflowsWithPlanner.add(t.workflow_id);
-      }
-    }
-
-    // 2. Filter out maintainer tasks that conflict with planner tasks
-    const filteredTasks = tasks.filter((t) => {
-      if (t.type === "maintainer" && t.workflow_id && workflowsWithPlanner.has(t.workflow_id)) {
-        return false;
-      }
-      return true;
-    });
-
-    // 3. Apply priority order: planner > worker > maintainer
-    let task = filteredTasks.find((t) => t.type === "planner");
-    if (!task) task = filteredTasks.find((t) => t.type === "worker");
-    if (!task) task = filteredTasks.find((t) => t.type === "maintainer");
-
-    return task;
-  }
 
   describe("Basic priority ordering", () => {
     it("should prioritize planner over worker", async () => {

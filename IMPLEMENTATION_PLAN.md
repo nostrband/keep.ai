@@ -108,6 +108,18 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
   - Fix: Add early validation after type check; fail fast with clear error message
   - Status: **FIXED** - early validation added at line 118, fails with clear "Maintainer task missing workflow_id" error
 
+- [ ] **Add null check in ArchivedPage restore logic** - [specs/new/archived-page-null-check.md](specs/new/archived-page-null-check.md)
+  - File: `apps/web/src/components/ArchivedPage.tsx`
+  - Issue: `workflows.find()` may return undefined; optional chaining silently defaults to "draft" with no error
+  - Fix: Add explicit null check; show error to user and abort restore if workflow not found
+  - Status: **NOT FIXED** - restore proceeds silently with potentially wrong state
+
+- [ ] **Replace window.confirm() with modal dialog** - [specs/new/replace-window-confirm-modal.md](specs/new/replace-window-confirm-modal.md)
+  - File: `apps/web/src/components/WorkflowDetailPage.tsx`
+  - Issue: Native `window.confirm()` blocks event loop, can't match design system, has accessibility issues
+  - Fix: Replace with purpose-built confirmation modal using app's existing UI components
+  - Status: **NOT FIXED** - still uses native `window.confirm()`
+
 ### P2 - Medium (Code Quality & Tests)
 
 - [x] **Fix compression error message** - [specs/fix-compression-error-message.md](specs/fix-compression-error-message.md)
@@ -146,11 +158,11 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
   - Fix: Add `.toLowerCase()`, whitelist validation, user feedback
   - Status: **FIXED** - added `normalizeFilter()` with case normalization and whitelist validation
 
-- [ ] **Add escalateToUser integration tests** - [specs/add-escalatetouser-integration-tests.md](specs/add-escalatetouser-integration-tests.md)
+- [x] **Add escalateToUser integration tests** - [specs/add-escalatetouser-integration-tests.md](specs/add-escalatetouser-integration-tests.md)
   - File: `packages/tests/src/maintainer-integration.test.ts`
   - Issue: Tests manually implement escalation logic instead of calling actual method
   - Fix: Call actual `escalateToUser()`, test message sending, error handling, logging
-  - Status: **NOT FIXED** - tests directly call store methods, not `escalateToUser()`
+  - Status: **FIXED** - `escalateToUser` function extracted to exported function for testability; tests now call actual `escalateToUser` from `@app/agent`; tests verify workflow status update, notification creation, and message sending
 
 - [ ] **Fix skipped compression tests** - [specs/fix-skipped-compression-tests.md](specs/fix-skipped-compression-tests.md)
   - File: `packages/tests/src/compression.test.ts:523,540`
@@ -158,11 +170,29 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
   - Fix: Find alternative testing approach (sync validation, timeout, or mock)
   - Status: **DOCUMENTED** - tests intentionally skipped with detailed comments explaining zlib stream timing issues
 
-- [ ] **Refactor task scheduler priority tests** - [specs/refactor-task-scheduler-priority-tests.md](specs/refactor-task-scheduler-priority-tests.md)
+- [x] **Refactor task scheduler priority tests** - [specs/refactor-task-scheduler-priority-tests.md](specs/refactor-task-scheduler-priority-tests.md)
   - Files: `packages/agent/src/task-scheduler.ts:216-241`, `packages/tests/src/task-scheduler-priority.test.ts:110-133`
   - Issue: Test duplicates production logic instead of testing actual code
   - Fix: Export priority selection as testable function; remove duplicate helper
-  - Status: **NOT FIXED** - test has `selectTaskByPriority()` helper duplicating production logic
+  - Status: **FIXED** - priority selection logic extracted to exported `selectTaskByPriority` function; tests now import and use the real function
+
+- [ ] **Add tests for POST endpoint failures** - [specs/new/transport-post-failure-tests.md](specs/new/transport-post-failure-tests.md)
+  - File: `packages/tests/src/transport-http.test.ts`
+  - Issue: Missing test coverage for POST endpoint error responses (500, timeout) in TransportClientHttp
+  - Fix: Add tests with mock server returning error responses; verify graceful error handling
+  - Status: **NOT FIXED** - no tests for /sync and /data POST endpoint failures
+
+- [ ] **Add client credentials to token revocation** - [specs/new/token-revocation-client-credentials.md](specs/new/token-revocation-client-credentials.md)
+  - File: `packages/auth/src/oauth.ts`
+  - Issue: Token revocation request only includes access token, missing client_id and client_secret
+  - Fix: Add client credentials to revocation request body, matching token exchange pattern
+  - Status: **NOT FIXED** - revocation request missing client credentials
+
+- [ ] **Clarify token revocation status return values** - [specs/new/revocation-status-clarity.md](specs/new/revocation-status-clarity.md)
+  - Files: `packages/auth/src/oauth.ts`, `packages/auth/src/manager.ts`
+  - Issue: Returns `true` when revoke URL not configured; logs misleadingly say "Token revoked"
+  - Fix: Change return type to include reason ('revoked', 'not_supported', 'failed'); update logging
+  - Status: **NOT FIXED** - boolean return makes logs misleading
 
 ### P3 - Low (Technical Debt & Cleanup)
 
@@ -190,10 +220,10 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
 | Priority | Count | Status |
 |----------|-------|--------|
 | P0 Critical | 6 | 6 complete |
-| P1 High | 8 | 7 complete |
-| P2 Medium | 9 | 6 complete (1 documented) |
+| P1 High | 10 | 7 complete |
+| P2 Medium | 13 | 8 complete (1 documented) |
 | P3 Low | 2 | 0 complete |
-| **Total** | **25** | **19 complete** |
+| **Total** | **31** | **21 complete** |
 
 ---
 
