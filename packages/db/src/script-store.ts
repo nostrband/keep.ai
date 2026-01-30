@@ -868,18 +868,21 @@ export class ScriptStore {
     const now = new Date();
 
     // Single query to get drafts with their last activity and related data
-    // Uses MAX() across all activity sources to find true most recent activity
-    // Note: COALESCE picks first non-null which is wrong - we need the max across all
+    // Uses CASE expression to find the maximum timestamp across all activity sources
     // Note: Uses chat_messages table per Spec 12
     const results = await this.db.db.execO<Record<string, unknown>>(
       `SELECT
         w.id, w.title, w.task_id, w.chat_id, w.timestamp, w.cron, w.events, w.status,
         w.next_run_timestamp, w.maintenance, w.maintenance_fix_count, w.active_script_id,
-        MAX(
-          COALESCE(MAX(cm.timestamp), w.timestamp),
-          COALESCE(MAX(s.timestamp), w.timestamp),
-          w.timestamp
-        ) as last_activity,
+        CASE
+          WHEN MAX(cm.timestamp) IS NOT NULL
+               AND MAX(cm.timestamp) > COALESCE(MAX(s.timestamp), w.timestamp)
+            THEN MAX(cm.timestamp)
+          WHEN MAX(s.timestamp) IS NOT NULL
+               AND MAX(s.timestamp) > w.timestamp
+            THEN MAX(s.timestamp)
+          ELSE w.timestamp
+        END as last_activity,
         MAX(s.id IS NOT NULL) as has_script,
         t.state as task_state
       FROM workflows w
@@ -950,17 +953,20 @@ export class ScriptStore {
     archiveThreshold.setDate(archiveThreshold.getDate() - DRAFT_THRESHOLDS.ARCHIVE_DAYS);
 
     // Get all drafts with their last activity in one query
-    // Uses MAX() across all activity sources to find true most recent activity
-    // Note: COALESCE picks first non-null which is wrong - we need the max across all
+    // Uses CASE expression to find the maximum timestamp across all activity sources
     // Note: Uses chat_messages table per Spec 12
     const results = await this.db.db.execO<Record<string, unknown>>(
       `SELECT
         w.id,
-        MAX(
-          COALESCE(MAX(cm.timestamp), w.timestamp),
-          COALESCE(MAX(s.timestamp), w.timestamp),
-          w.timestamp
-        ) as last_activity,
+        CASE
+          WHEN MAX(cm.timestamp) IS NOT NULL
+               AND MAX(cm.timestamp) > COALESCE(MAX(s.timestamp), w.timestamp)
+            THEN MAX(cm.timestamp)
+          WHEN MAX(s.timestamp) IS NOT NULL
+               AND MAX(s.timestamp) > w.timestamp
+            THEN MAX(s.timestamp)
+          ELSE w.timestamp
+        END as last_activity,
         t.state as task_state
       FROM workflows w
       LEFT JOIN chat_messages cm ON cm.chat_id = w.chat_id

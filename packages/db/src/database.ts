@@ -160,36 +160,6 @@ export class KeepDb implements CRSqliteDB {
           );
         }
 
-        // NOTE: we'll remove this after prototyping
-        // is over and we've figured out the final db structure
-        // and collapsed all migrations
-        if (newVersion === 7) {
-          // Import all records from crsql_changes in batches of 5000
-          // First count total records to know how many batches we need
-          const countResult = await db.execO<{ total: number }>(
-            `SELECT COUNT(*) as total FROM crsql_changes`
-          );
-
-          const totalRecords =
-            countResult && countResult.length > 0 ? countResult[0].total : 0;
-
-          if (totalRecords > 0) {
-            const batchSize = 5000;
-            const totalBatches = Math.ceil(totalRecords / batchSize);
-
-            for (let batch = 0; batch < totalBatches; batch++) {
-              const offset = batch * batchSize;
-
-              await db.exec(
-                `INSERT INTO crsql_change_history (\`table\`, pk, cid, val, col_version, db_version, site_id, cl, seq)
-         SELECT \`table\`, pk, cid, val, col_version, db_version, site_id, cl, seq
-         FROM crsql_changes LIMIT ? OFFSET ?`,
-                [batchSize, offset]
-              );
-            }
-          }
-        }
-
         debugDatabase(`Migration v${version} applied successfully`);
       } catch (error) {
         debugDatabase(`Migration v${version} failed:`, error);

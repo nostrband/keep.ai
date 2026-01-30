@@ -26,10 +26,10 @@ const SUPPORTED_METHODS = [
   "files.export",
 ] as const;
 
-// Methods that should trigger event tracking (write operations + list for auditing)
+// Methods that should trigger event tracking (write operations only)
 // Uses explicit Set membership instead of includes() to avoid false positives
+// Note: files.list excluded - read operations don't need audit tracking
 const TRACKED_METHODS = new Set<string>([
-  "files.list",
   "files.create",
   "files.update",
   "files.delete",

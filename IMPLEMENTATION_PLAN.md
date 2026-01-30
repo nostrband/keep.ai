@@ -188,11 +188,17 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
   - Fix: Export priority selection as testable function; remove duplicate helper
   - Status: **FIXED** - priority selection logic extracted to exported `selectTaskByPriority` function; tests now import and use the real function
 
-- [ ] **Add tests for POST endpoint failures** - [specs/new/transport-post-failure-tests.md](specs/new/transport-post-failure-tests.md)
-  - File: `packages/tests/src/transport-http.test.ts`
+- [x] **Add tests for POST endpoint failures** - [specs/new/transport-post-failure-tests.md](specs/new/transport-post-failure-tests.md)
+  - File: `packages/tests/src/transport-client-http.test.ts`
   - Issue: Missing test coverage for POST endpoint error responses (500, timeout) in TransportClientHttp
   - Fix: Add tests with mock server returning error responses; verify graceful error handling
-  - Status: **NOT FIXED** - no tests for /sync and /data POST endpoint failures
+  - Status: **FIXED** - added tests for 500, 503, and 400 responses from /sync and /data endpoints
+
+- [x] **Fix invalid nested aggregation in draft activity query** - [specs/new/fix-draft-activity-sql.md](specs/new/fix-draft-activity-sql.md)
+  - File: `packages/db/src/script-store.ts:878-882,959-963`
+  - Issue: Invalid nested `MAX(COALESCE(MAX(...), ...))` SQL syntax
+  - Fix: Replace with proper CASE expression to find maximum timestamp
+  - Status: **FIXED** - converted to CASE expression that correctly compares timestamps
 
 - [x] **Add client credentials to token revocation** - [specs/new/token-revocation-client-credentials.md](specs/new/token-revocation-client-credentials.md)
   - File: `packages/auth/src/oauth.ts`
@@ -214,23 +220,23 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
 
 ### P3 - Low (Technical Debt & Cleanup)
 
-- [ ] **Remove prototyping migration code**
-  - File: `packages/db/src/database.ts:163-165`
-  - Issue: Temporary prototyping code for migration should be removed before v1
-  - Fix: Remove the marked lines after confirming no longer needed
-  - Status: **NOT FIXED** - code still present
+- [x] **Remove prototyping migration code**
+  - File: `packages/db/src/database.ts:163-191`
+  - Issue: Temporary prototyping code for v7 migration should be removed before v1
+  - Fix: Remove the migration v7 data copy code (crsql_changes to crsql_change_history)
+  - Status: **FIXED** - removed temporary v7 migration code that copied crsql_changes data
 
-- [ ] **Standardize React Query mutation error handling** - [specs/new/standardize-mutation-error-handling.md](specs/new/standardize-mutation-error-handling.md)
+- [x] **Standardize React Query mutation error handling** - [specs/new/standardize-mutation-error-handling.md](specs/new/standardize-mutation-error-handling.md)
   - Files: `apps/web/src/components/ArchivedPage.tsx`, `apps/web/src/components/WorkflowDetailPage.tsx`
   - Issue: Inconsistent patterns - ArchivedPage uses `mutateAsync` with try/catch, WorkflowDetailPage uses `mutate` with callbacks
   - Fix: Standardize on callback-based `mutate` pattern across codebase
-  - Status: **NOT FIXED** - patterns remain inconsistent
+  - Status: **FIXED** - ArchivedPage now uses callback-based `mutate` pattern with onSuccess/onError
 
-- [ ] **Remove files.list from GDrive TRACKED_METHODS** - [specs/new/remove-files-list-from-tracked.md](specs/new/remove-files-list-from-tracked.md)
-  - File: `packages/connectors/src/google/gdrive.ts`
+- [x] **Remove files.list from GDrive TRACKED_METHODS** - [specs/new/remove-files-list-from-tracked.md](specs/new/remove-files-list-from-tracked.md)
+  - File: `packages/agent/src/tools/gdrive.ts`
   - Issue: Read-only `files.list` operation tracked alongside write operations, causing event noise
   - Fix: Remove `files.list` from TRACKED_METHODS Set
-  - Status: **NOT FIXED** - files.list still in TRACKED_METHODS
+  - Status: **FIXED** - files.list removed from TRACKED_METHODS; only write operations are now tracked
 
 - [ ] **Enable skipped test suites**
   - Files:
@@ -251,9 +257,9 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
 |----------|-------|--------|
 | P0 Critical | 6 | 6 complete |
 | P1 High | 12 | 11 complete |
-| P2 Medium | 14 | 11 complete (1 documented) |
-| P3 Low | 4 | 0 complete |
-| **Total** | **36** | **28 complete** |
+| P2 Medium | 15 | 13 complete (1 documented) |
+| P3 Low | 4 | 3 complete |
+| **Total** | **37** | **33 complete** |
 
 ---
 
