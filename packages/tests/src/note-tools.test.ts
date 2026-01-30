@@ -43,17 +43,6 @@ function createMockContext(): EvalContext {
   };
 }
 
-/**
- * Creates mock ToolCallOptions for testing.
- */
-function createToolCallOptions() {
-  return {
-    toolCallId: "test-call",
-    messages: [],
-    abortSignal: new AbortController().signal,
-  };
-}
-
 // Types for search/list results
 type NoteMetadata = {
   id: string;
@@ -100,9 +89,7 @@ describe("Note Tools", () => {
           content: "This is test content",
           tags: ["test", "example"],
           priority: "high",
-        },
-        createToolCallOptions()
-      );
+        });
 
       expect(result).toBe("test-note-1");
 
@@ -131,9 +118,7 @@ describe("Note Tools", () => {
           content: "Content here",
           tags: null,
           priority: null,
-        },
-        createToolCallOptions()
-      );
+        });
 
       const note = await noteStore.getNote("default-note");
       expect(note?.tags).toEqual([]);
@@ -151,9 +136,7 @@ describe("Note Tools", () => {
           content: "Content",
           tags: null,
           priority: null,
-        },
-        createToolCallOptions()
-      );
+        });
 
       // Empty string or generated ID both count as success
       expect(typeof result).toBe("string");
@@ -173,9 +156,7 @@ describe("Note Tools", () => {
             content: largeContent,
             tags: null,
             priority: null,
-          },
-          createToolCallOptions()
-        )
+          })
       ).rejects.toThrow("Note size exceeds 50KB limit");
     });
 
@@ -195,9 +176,7 @@ describe("Note Tools", () => {
             content: "Content",
             tags: null,
             priority: null,
-          },
-          createToolCallOptions()
-        )
+          })
       ).rejects.toThrow("Maximum number of notes (500) reached");
     });
   });
@@ -214,9 +193,7 @@ describe("Note Tools", () => {
           content: null,
           tags: null,
           priority: null,
-        },
-        createToolCallOptions()
-      );
+        });
 
       expect(result).toBe("update-test");
 
@@ -236,9 +213,7 @@ describe("Note Tools", () => {
           content: "Updated Content",
           tags: null,
           priority: null,
-        },
-        createToolCallOptions()
-      );
+        });
 
       const note = await noteStore.getNote("content-test");
       expect(note?.content).toBe("Updated Content");
@@ -255,9 +230,7 @@ describe("Note Tools", () => {
           content: null,
           tags: ["new", "tags"],
           priority: null,
-        },
-        createToolCallOptions()
-      );
+        });
 
       const note = await noteStore.getNote("tags-test");
       expect(note?.tags).toEqual(["new", "tags"]);
@@ -274,9 +247,7 @@ describe("Note Tools", () => {
           content: null,
           tags: null,
           priority: "high",
-        },
-        createToolCallOptions()
-      );
+        });
 
       const note = await noteStore.getNote("priority-test");
       expect(note?.priority).toBe("high");
@@ -294,9 +265,7 @@ describe("Note Tools", () => {
             content: null,
             tags: null,
             priority: null,
-          },
-          createToolCallOptions()
-        )
+          })
       ).rejects.toThrow("No updates provided");
     });
 
@@ -311,9 +280,7 @@ describe("Note Tools", () => {
             content: null,
             tags: null,
             priority: null,
-          },
-          createToolCallOptions()
-        )
+          })
       ).rejects.toThrow("Note not found");
     });
   });
@@ -417,10 +384,10 @@ describe("Note Tools", () => {
       expect(result).toHaveLength(2);
     });
 
-    it("should handle null/undefined input", async () => {
+    it("should handle empty object input", async () => {
       const listNotesTool = makeListNotesTool(noteStore);
 
-      const result = (await listNotesTool.execute!(null, createToolCallOptions())) as NoteMetadata[];
+      const result = (await listNotesTool.execute!({})) as NoteMetadata[];
 
       expect(result).toHaveLength(4);
     });
@@ -522,9 +489,7 @@ describe("Note Tools", () => {
 
       await expect(
         searchNotesTool.execute!(
-          { keywords: null, tags: null, regexp: null },
-          createToolCallOptions()
-        )
+          { keywords: null, tags: null, regexp: null })
       ).rejects.toThrow("At least one search criteria must be provided");
     });
 
@@ -532,9 +497,7 @@ describe("Note Tools", () => {
       const searchNotesTool = makeSearchNotesTool(noteStore);
 
       const result = (await searchNotesTool.execute!(
-        { keywords: ["pancakes"], tags: null, regexp: null },
-        createToolCallOptions()
-      )) as SearchResult[];
+        { keywords: ["pancakes"], tags: null, regexp: null })) as SearchResult[];
 
       expect(result).toHaveLength(1);
       expect(result[0].snippet).toBeDefined();

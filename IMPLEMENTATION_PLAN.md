@@ -56,8 +56,8 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
 
 ### P1 - High (Core Features & Significant Fixes)
 
-- [ ] **Implement logical items infrastructure** - [specs/logical-items.md](specs/logical-items.md)
-  - Status: **PARTIALLY IMPLEMENTED** (core infrastructure + mutation enforcement complete)
+- [x] **Implement logical items infrastructure** - [specs/logical-items.md](specs/logical-items.md)
+  - Status: **COMPLETE**
   - Implemented:
     - [x] Items database table (v35 migration) with states (processing, done, failed, skipped)
     - [x] ItemStore for database operations
@@ -86,9 +86,14 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
       - User tool (1): send
       - Console tool (1): log
       - Scripts tools (5): get, list, history, listRuns, getRun
-  - Remaining (not blocking):
-    - [ ] Prompting changes (planner/maintainer prompts need updating)
-    - [ ] Tests for mutation enforcement (integration tests)
+    - [x] **Prompting changes** - planner and maintainer prompts updated with Logical Items guidance
+      - Planner prompt (`agent-env.ts:463-527`): withItem usage, ID/title requirements, Items.list usage, 5 rules
+      - Maintainer prompt (`agent-env.ts:623-641`): ID modification constraints, what can/cannot be fixed, 5 rules
+    - [x] **Tests for mutation enforcement** - 14 new tests added to `logical-items.test.ts` (total: 42 tests)
+      - Tests for mutations outside withItem (aborts), Console.log exception, read-only tools allowed
+      - Tests for mutations inside withItem (allowed), blocking mutations on done items
+      - Tests for withItem validation (empty id/title, non-function handler, nested calls, workflow context)
+      - Tests for item state tracking (done on success, failed on error, unchanged for already-done items)
 
 - [x] **Fix tool always saves, check active for race** - [specs/fix-tool-always-save-check-active.md](specs/fix-tool-always-save-check-active.md)
   - File: `packages/agent/src/ai-tools/fix.ts`
@@ -332,17 +337,17 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
 | Priority | Count | Status |
 |----------|-------|--------|
 | P0 Critical | 6 | 6 complete |
-| P1 High | 12 | 11 complete + 1 partial |
+| P1 High | 12 | 12 complete |
 | P2 Medium | 21 | 19 complete (1 documented) |
 | P3 Low | 7 | 5 complete |
-| **Total** | **46** | **41 complete + 1 partial** |
+| **Total** | **46** | **42 complete** |
 
 ---
 
 ## Notes
 
 - All items verified against source code on 2026-01-30
-- The `logical-items.md` spec now has mutation enforcement implemented in SandboxAPI; 28 tests cover ItemStore, Items.list, and sandbox callback functionality
+- The `logical-items.md` spec is now **COMPLETE**: 42 tests cover ItemStore, Items.list, mutation enforcement, and withItem functionality
 - P0 items should be addressed first as they involve security and data integrity
 - Many P2 items are quick fixes that improve code quality
 - `fix-skipped-compression-tests` has documented reasons for skipped tests (zlib timing sensitivity); remains as technical debt
