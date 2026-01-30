@@ -7,4 +7,4 @@
 
 IMPORTANT: Plan only. Do NOT implement anything. Do NOT assume functionality is missing; confirm with code search first. Treat `packages/node` and `packages/browser` as the project's standard libraries for shared utilities and components for node/browser. Prefer consolidated, idiomatic implementations there over ad-hoc copies.
 
-ULTIMATE GOAL: We want to achieve a simple, lovable and complete v1 release of a local personal automation product with AI creating and maintaining the automations. Consider missing elements and plan accordingly. If an element is missing, search first to confirm it doesn't exist, then if needed author the specification at specs/FILENAME.md, also check `ideas/*` for ideas to consider when adding specs. If you create a new element then document the plan to implement it in @IMPLEMENTATION_PLAN.md using a subagent.
+ULTIMATE GOAL: We want to achieve a simple, lovable and complete v1 Keep.AI release - it's a local personal automation product with AI creating and maintaining the automations, with user only expressing intent and then fully delegating to the system. 
