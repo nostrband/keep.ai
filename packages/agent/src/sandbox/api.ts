@@ -123,6 +123,26 @@ export class SandboxAPI {
     }
   }
 
+  /**
+   * Enforce mutation restrictions - mutations must be inside Items.withItem().
+   * Called for non-read-only tool calls in workflow mode.
+   */
+  private enforceMutationRestrictions(ns: string, name: string): void {
+    // Mutations require active item scope
+    if (this.activeItem === null) {
+      const message = `${ns}.${name} is a mutation and must be called inside Items.withItem(). ` +
+        `Wrap your mutations in a withItem call to track progress.`;
+      return this.abortWithLogicError(message);
+    }
+
+    // Check if item is done - can't mutate completed items
+    if (this.activeItemIsDone) {
+      const message = `${ns}.${name}: cannot perform mutations on completed item "${this.activeItem.id}". ` +
+        `Check ctx.item.isDone before attempting mutations.`;
+      return this.abortWithLogicError(message);
+    }
+  }
+
   get tools() {
     return this.toolDocs;
   }
@@ -180,6 +200,19 @@ Example: await ${ns}.${name}(<input>)
             }
 
             throw logicError;
+          }
+        }
+
+        // Enforce mutation restrictions in workflow mode
+        // Mutations must be inside Items.withItem() to enable progress tracking
+        if (this.workflowId && tool.isReadOnly) {
+          const isReadOnly = tool.isReadOnly(validatedInput);
+          if (!isReadOnly) {
+            // This is a mutation - check if we're inside withItem scope
+            // Exception: Console.log is allowed outside withItem (it's for debugging)
+            if (ns !== 'Console' || name !== 'log') {
+              this.enforceMutationRestrictions(ns, name);
+            }
           }
         }
 

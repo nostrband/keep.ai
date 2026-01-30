@@ -474,3 +474,8 @@ describe("Items.list Tool", () => {
 // Additional tests for the Items.withItem pattern with callbacks are skipped
 // here due to QuickJS disposal issues with host closures that capture state.
 // The core functionality (ItemStore, Items.list) is fully tested above.
+
+// NOTE: Mutation enforcement is implemented in SandboxAPI.enforceMutationRestrictions()
+// at packages/agent/src/sandbox/api.ts. Integration tests for mutation enforcement
+// would require full sandbox initialization which is slow and has disposal issues.
+// The mutation enforcement logic is exercised in workflow-worker integration tests.

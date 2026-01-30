@@ -57,7 +57,7 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
 ### P1 - High (Core Features & Significant Fixes)
 
 - [ ] **Implement logical items infrastructure** - [specs/logical-items.md](specs/logical-items.md)
-  - Status: **PARTIALLY IMPLEMENTED** (core infrastructure + tool interface refactor complete)
+  - Status: **PARTIALLY IMPLEMENTED** (core infrastructure + mutation enforcement complete)
   - Implemented:
     - [x] Items database table (v35 migration) with states (processing, done, failed, skipped)
     - [x] ItemStore for database operations
@@ -66,6 +66,11 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
     - [x] Sandbox callback support (`wrapGuestCallback`, `awaitGuestPromise`)
     - [x] **Tests for ItemStore, Items.list, and sandbox callback functionality** (28 tests in `logical-items.test.ts`)
     - [x] Tool interface with `namespace`, `name`, `isReadOnly` metadata (`packages/agent/src/tools/types.ts`)
+    - [x] **Mutation enforcement in SandboxAPI** - mutations outside `Items.withItem()` now abort with LogicError
+      - Enforced in workflow mode only (when `workflowId` is set)
+      - Checks `tool.isReadOnly(params)` to determine if tool call is a mutation
+      - Exception: `Console.log` allowed outside `withItem` for debugging
+      - Mutations on completed items (`ctx.item.isDone=true`) also blocked
     - [x] **Tool interface refactor complete** - ALL tools now use new interface with namespace, name, isReadOnly metadata:
       - Memory tools (6): getNote, createNote, updateNote, deleteNote, listNotesMetadata, searchNotes
       - Files tools (4): read, save, list, search
@@ -82,9 +87,8 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
       - Console tool (1): log
       - Scripts tools (5): get, list, history, listRuns, getRun
   - Remaining (not blocking):
-    - [ ] ToolWrapper integration (replace SandboxAPI with ToolWrapper in workflow-worker)
-    - [ ] Mutation enforcement (ToolWrapper has code but not yet used)
     - [ ] Prompting changes (planner/maintainer prompts need updating)
+    - [ ] Tests for mutation enforcement (integration tests)
 
 - [x] **Fix tool always saves, check active for race** - [specs/fix-tool-always-save-check-active.md](specs/fix-tool-always-save-check-active.md)
   - File: `packages/agent/src/ai-tools/fix.ts`
@@ -304,6 +308,12 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
   - Fix: Verify all five fields are wildcards before returning "Every minute"
   - Status: **FIXED** - now checks all five cron fields before returning "Every minute"
 
+- [ ] **Move ClassifiedError to proto and use in connectors** - [specs/new/connectors-use-classified-errors.md](specs/new/connectors-use-classified-errors.md)
+  - Files: `packages/agent/src/errors.ts`, `packages/proto/src/`, `apps/server/src/routes/connectors.ts`, `packages/connectors/`
+  - Issue: Connectors use simple error types that don't integrate with agent's error classification; route handler uses fragile keyword matching
+  - Fix: Move `errors.ts` to `@app/proto`, have connectors throw ClassifiedError subclasses, use type checking in route handler
+  - Status: **NOT STARTED**
+
 - [ ] **Enable skipped test suites**
   - Files:
     - `packages/tests/src/exec-many-args-browser.test.ts` - entire suite skipped (requires IndexedDB)
@@ -324,15 +334,15 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
 | P0 Critical | 6 | 6 complete |
 | P1 High | 12 | 11 complete + 1 partial |
 | P2 Medium | 21 | 19 complete (1 documented) |
-| P3 Low | 6 | 5 complete |
-| **Total** | **45** | **41 complete + 1 partial** |
+| P3 Low | 7 | 5 complete |
+| **Total** | **46** | **41 complete + 1 partial** |
 
 ---
 
 ## Notes
 
 - All items verified against source code on 2026-01-30
-- The `logical-items.md` spec core infrastructure is implemented with 28 tests covering ItemStore, Items.list, and sandbox callback functionality
+- The `logical-items.md` spec now has mutation enforcement implemented in SandboxAPI; 28 tests cover ItemStore, Items.list, and sandbox callback functionality
 - P0 items should be addressed first as they involve security and data integrity
 - Many P2 items are quick fixes that improve code quality
 - `fix-skipped-compression-tests` has documented reasons for skipped tests (zlib timing sensitivity); remains as technical debt
