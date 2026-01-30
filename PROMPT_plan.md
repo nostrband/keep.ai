@@ -1,4 +1,4 @@
-0a. Study `specs/*` with up to 250 parallel Sonnet subagents to learn the application specifications. Ignore implemented specs in `specs/done/*`.
+0a. Study `specs/*` with up to 250 parallel Sonnet subagents to learn the application specifications. Ignore implemented specs in `specs/done/*` and in `specs/new/*`.
 0b. Study @IMPLEMENTATION_PLAN.md (if present) to understand the plan so far.
 0c. Study `packages/node` and `packages/browser` with up to 250 parallel Sonnet subagents to understand shared utilities & components per platform.
 0d. For reference, the application source code is in sub-packages in `packages/*`, more info in AGENTS.md.
