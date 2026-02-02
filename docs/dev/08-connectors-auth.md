@@ -1,4 +1,4 @@
-# Connectors and Authentication Model
+# 08. Connectors and Authentication Model
 
 This document describes how Keep.AI integrates with external services (“connectors”), how authentication is handled, and why the system is designed this way.
 

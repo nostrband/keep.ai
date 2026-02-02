@@ -4,9 +4,9 @@ This chapter defines configurable **host runtime policies** that govern retry be
 
 These policies are referenced by:
 
+* Chapter 06 (Execution Model) — run lifecycle and replay behavior
 * Chapter 09 (Failure Handling) — retry limits, repair budgets
 * Chapter 13 (Reconciliation) — reconciliation backoff and attempt limits
-* Chapter 14 (Idempotency) — replay and recovery behavior
 
 ---
 
@@ -24,7 +24,7 @@ Host policies do **not** govern:
 
 * intent or permission constraints (see Chapter 11)
 * failure classification logic (see Chapter 09)
-* mutation identity or ledger semantics (see Chapters 13, 14)
+* mutation identity or ledger semantics (see Chapters 05, 13)
 
 ---
 
