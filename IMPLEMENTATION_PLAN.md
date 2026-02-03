@@ -304,12 +304,12 @@ exec-02 (Deprecate Items) ✓ ─┼──────────┐           
 
 ### New Test Files Needed
 
-For exec-01 (Database stores - implementation verified via build+tests passing):
-- [ ] packages/tests/src/topic-store.test.ts (optional - basic CRUD works)
-- [ ] packages/tests/src/event-store.test.ts (optional - methods used by Topics API)
-- [ ] packages/tests/src/handler-run-store.test.ts (optional - methods work)
-- [ ] packages/tests/src/mutation-store.test.ts (optional - methods work)
-- [ ] packages/tests/src/handler-state-store.test.ts (optional - methods work)
+For exec-01 (Database stores):
+- [x] packages/tests/src/topic-store.test.ts - ✓ DONE (19 tests)
+- [x] packages/tests/src/event-store.test.ts - ✓ DONE (30 tests)
+- [x] packages/tests/src/handler-run-store.test.ts - ✓ DONE (26 tests)
+- [x] packages/tests/src/mutation-store.test.ts - ✓ DONE (28 tests)
+- [x] packages/tests/src/handler-state-store.test.ts - ✓ DONE (21 tests)
 
 For exec-03:
 - [ ] packages/tests/src/topics-api.test.ts
