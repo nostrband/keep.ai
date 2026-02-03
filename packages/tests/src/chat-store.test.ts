@@ -41,21 +41,6 @@ async function createChatsTable(db: DBInterface): Promise<void> {
   await db.exec(`CREATE INDEX IF NOT EXISTS idx_chats_workflow_id ON chats(workflow_id)`);
 }
 
-/**
- * Helper to create chat_events table for backwards compatibility tests.
- */
-async function createChatEventsTable(db: DBInterface): Promise<void> {
-  await db.exec(`
-    CREATE TABLE IF NOT EXISTS chat_events (
-      id TEXT PRIMARY KEY NOT NULL,
-      chat_id TEXT NOT NULL,
-      type TEXT NOT NULL,
-      timestamp TEXT NOT NULL,
-      content TEXT NOT NULL
-    )
-  `);
-  await db.exec(`CREATE INDEX IF NOT EXISTS idx_chat_events_chat_id ON chat_events(chat_id)`);
-}
 
 describe("ChatStore", () => {
   let db: DBInterface;
@@ -68,7 +53,6 @@ describe("ChatStore", () => {
     // Create tables manually instead of running full migrations
     await createChatMessagesTable(db);
     await createChatsTable(db);
-    await createChatEventsTable(db);
     chatStore = new ChatStore(keepDb);
   });
 

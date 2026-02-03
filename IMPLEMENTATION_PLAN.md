@@ -3,7 +3,7 @@
 This document tracks the implementation status of the new execution model refactor (exec-00 through exec-08) and other pending work items.
 
 **Last Updated:** 2026-02-03
-**Current Database Version:** v37
+**Current Database Version:** v38
 **Overall Progress:** 9/9 core specs implemented
 
 ---
@@ -136,7 +136,7 @@ exec-02 (Deprecate Items) ✓ ─┼──────────┐           
 - [x] Gmail-specific API endpoints in apps/server/src/server.ts - REMOVED
   - Removed deprecated Gmail-specific endpoints (/api/gmail/status, /api/gmail/connect, /api/gmail/callback, /api/gmail/check)
   - Generic connector endpoints at /api/connectors/* are now the only supported approach
-- [ ] `chat_events` table (replaced by chat_messages, notifications, execution_logs)
+- [x] `chat_events` table - REMOVED via migration v38
 - [x] `task_states` table - REMOVED via migration v37
 - [x] `resources` table - REMOVED via migration v37
 - [x] `chat_notifications` table - REMOVED via migration v37
@@ -145,6 +145,8 @@ exec-02 (Deprecate Items) ✓ ─┼──────────┐           
 - [ ] Task fields: `task`, `cron` (deprecated per Spec 10)
 
 **Note:** Migration v37 was created to drop the deprecated tables (`resources`, `task_states`, `chat_notifications`).
+
+**Note:** Migration v38 removed the `chat_events` table and the following deprecated ChatStore methods were removed: `getChatMessages`, `getChatEvents`, `saveChatMessages`, `saveChatEvent`, `countMessages`, `getLastChatActivity`, `getLastChatActivities`, `getChatFirstMessage`.
 
 ### FIXME Comments Requiring Attention
 
