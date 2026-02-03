@@ -14,6 +14,11 @@ import { ScriptStore, Workflow } from "./script-store";
 import { NotificationStore } from "./notification-store";
 import { ExecutionLogStore } from "./execution-log-store";
 import { ItemStore } from "./item-store";
+import { TopicStore } from "./topic-store";
+import { EventStore } from "./event-store";
+import { HandlerRunStore } from "./handler-run-store";
+import { MutationStore } from "./mutation-store";
+import { HandlerStateStore } from "./handler-state-store";
 
 export class KeepDbApi {
   public readonly db: KeepDb;
@@ -29,6 +34,11 @@ export class KeepDbApi {
   public readonly notificationStore: NotificationStore;
   public readonly executionLogStore: ExecutionLogStore;
   public readonly itemStore: ItemStore;
+  public readonly topicStore: TopicStore;
+  public readonly eventStore: EventStore;
+  public readonly handlerRunStore: HandlerRunStore;
+  public readonly mutationStore: MutationStore;
+  public readonly handlerStateStore: HandlerStateStore;
 
   constructor(db: KeepDb) {
     this.db = db;
@@ -44,6 +54,11 @@ export class KeepDbApi {
     this.notificationStore = new NotificationStore(db);
     this.executionLogStore = new ExecutionLogStore(db);
     this.itemStore = new ItemStore(db);
+    this.topicStore = new TopicStore(db);
+    this.eventStore = new EventStore(db);
+    this.handlerRunStore = new HandlerRunStore(db);
+    this.mutationStore = new MutationStore(db);
+    this.handlerStateStore = new HandlerStateStore(db);
   }
 
   async addMessage(input: {
