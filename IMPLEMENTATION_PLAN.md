@@ -142,7 +142,9 @@ exec-02 (Deprecate Items) ✓ ─┼──────────┐           
 - [x] `chat_notifications` table - REMOVED via migration v37
 - [x] AuthDialog component - REMOVED (was already just a re-export, now deleted)
 - [x] Deprecated task tools in packages/agent/src/tools/deprecated/ - REMOVED (directory deleted)
-- [ ] Task fields: `task`, `cron` (deprecated per Spec 10)
+- [x] Task fields: `task`, `cron` (deprecated per Spec 10) - COMPLETE
+  - Fields marked deprecated in task-store.ts (removed from Task interface, see Spec 10 comments)
+  - Database columns remain (SQLite cannot drop columns) but code no longer uses them
 
 **Note:** Migration v37 was created to drop the deprecated tables (`resources`, `task_states`, `chat_notifications`).
 
