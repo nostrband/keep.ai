@@ -17,7 +17,11 @@ export {
   makeTopicsPeekTool,
   makeTopicsGetByIdsTool,
   makeTopicsPublishTool,
+  // Tool definition helpers
+  defineTool,
+  defineReadOnlyTool,
 } from "./tools";
+export type { Tool, ReadOnlyTool } from "./tools";
 
 // AI tools (planner/maintainer specific)
 export {

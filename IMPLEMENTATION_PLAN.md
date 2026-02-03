@@ -312,13 +312,13 @@ For exec-01 (Database stores):
 - [x] packages/tests/src/handler-state-store.test.ts - ✓ DONE (21 tests)
 
 For exec-03:
-- [ ] packages/tests/src/topics-api.test.ts
+- [x] packages/tests/src/topics-api.test.ts - ✓ DONE (29 tests)
 
 For exec-04:
-- [ ] packages/tests/src/phase-tracking.test.ts
+- [x] packages/tests/src/phase-tracking.test.ts - ✓ DONE (48 tests)
 
 For exec-06:
-- [ ] packages/tests/src/handler-state-machine.test.ts
+- [x] packages/tests/src/handler-state-machine.test.ts - ✓ DONE (28 tests)
 
 For exec-07:
 - [ ] packages/tests/src/session-orchestration.test.ts
