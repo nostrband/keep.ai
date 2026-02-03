@@ -278,3 +278,15 @@ Priority 3 (Nice to Have):
 
 Overall: The commit delivers the stated improvements but has edge cases and
 security gaps that should be addressed before production use.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Null reference in restore) - created specs/new/archived-page-null-check.md
+- Issue #2 (Missing client credentials) - created specs/new/token-revocation-client-credentials.md
+- Issue #3 (Misleading revocation logs) - created specs/new/revocation-status-clarity.md
+- Issue #4 (Silent revocation failures) - skipped
+- Issue #5 (Race condition in smart restore) - skipped
+- Issue #6 (Window.confirm UX) - created specs/new/replace-window-confirm-modal.md
+- Issue #7 (Inconsistent error handling) - created specs/new/standardize-mutation-error-handling.md
+- Issue #8 (files.list in tracked) - created specs/new/remove-files-list-from-tracked.md

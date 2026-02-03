@@ -319,16 +319,16 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
   - Fix: Move `errors.ts` to `@app/proto`, have connectors throw ClassifiedError subclasses, use type checking in route handler
   - Status: **FIXED** - errors.ts moved to proto; connectors now import AuthError from proto; route handler uses isClassifiedError() type checking with fallback to keyword matching for legacy compatibility; agent re-exports from proto for backward compatibility
 
-- [ ] **Enable skipped test suites**
+- [ ] **Enable skipped test suites** (POST-V1)
   - Files:
-    - `packages/tests/src/exec-many-args-browser.test.ts` - entire suite skipped (requires IndexedDB)
-    - `packages/tests/src/nostr-transport.test.ts` - 2 tests skipped (requires WebSocket)
-    - `packages/tests/src/crsqlite-peer-new.test.ts` - entire sync suite skipped
-    - `packages/tests/src/file-transfer.test.ts` - real encryption test skipped
-    - `packages/tests/src/nostr-transport-sync.test.ts` - entire sync suite skipped
-  - Issue: Multiple test suites skipped due to environment requirements (IndexedDB, WebSocket)
-  - Fix: Add browser test runner support or mock implementations
-  - Status: **NOT FIXED** - suites remain skipped
+    - `packages/tests/src/exec-many-args-browser.test.ts` - entire suite skipped (requires browser env with WASM/IndexedDB)
+    - `packages/tests/src/nostr-transport.test.ts` - 2 tests skipped (requires real WebSocket to Nostr relays)
+    - `packages/tests/src/crsqlite-peer-new.test.ts` - entire suite skipped (requires full CR-SQLite sync protocol mock)
+    - `packages/tests/src/file-transfer.test.ts` - 1 test skipped (requires real Nostr relays for encryption test)
+    - `packages/tests/src/nostr-transport-sync.test.ts` - entire suite skipped (requires real Nostr relay infrastructure)
+  - Issue: Tests require infrastructure not available in Node.js: browser APIs (IndexedDB, WASM), real WebSocket connections, or comprehensive protocol mocks
+  - Complexity: HIGH to VERY HIGH - requires browser test runner or real relay infrastructure
+  - Status: **DEFERRED** - Not blocking v1; requires significant infrastructure investment
 
 ---
 
@@ -339,8 +339,8 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
 | P0 Critical | 6 | 6 complete |
 | P1 High | 12 | 12 complete |
 | P2 Medium | 21 | 19 complete (1 documented) |
-| P3 Low | 7 | 6 complete |
-| **Total** | **46** | **43 complete** |
+| P3 Low | 7 | 6 complete (1 deferred) |
+| **Total** | **46** | **43 complete (2 documented/deferred)** |
 
 ---
 
@@ -350,7 +350,8 @@ This plan tracks items to be implemented for a simple, lovable, and complete v1 
 - The `logical-items.md` spec is now **COMPLETE**: 42 tests cover ItemStore, Items.list, mutation enforcement, and withItem functionality
 - P0 items should be addressed first as they involve security and data integrity
 - Many P2 items are quick fixes that improve code quality
-- `fix-skipped-compression-tests` has documented reasons for skipped tests (zlib timing sensitivity); remains as technical debt
+- `fix-skipped-compression-tests` has documented reasons for skipped tests (zlib timing sensitivity); intentionally skipped
+- `Enable skipped test suites` deferred - requires browser test infrastructure or real Nostr relay connections; not blocking v1
 - P3 items are lower priority technical debt that can be addressed post-v1
 - FIXMEs exist in `packages/sync` (tx delivery reliability) and `StreamWriter` (bandwidth tuning) - not tracked in this plan
 - Various hardcoded values exist (retry timeouts, batch sizes, connection delays) - not tracked unless causing issues

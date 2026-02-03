@@ -119,3 +119,11 @@ class. The use of real Fastify servers instead of mocks is a good integration te
 approach that validates actual SSE behavior.
 
 VERDICT: APPROVED (with minor suggestions)
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Flaky wait() timers) - skipped (low severity)
+- Issue #2 (POST endpoint failure tests) - created specs/new/transport-post-failure-tests.md
+- Issue #3 (Non-obvious hex strings) - skipped (style)
+- Issue #4 (Backoff timing tests) - skipped (low severity)

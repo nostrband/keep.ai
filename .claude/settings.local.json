@@ -47,7 +47,8 @@
       "Bash(if grep -q \"ISSUE REVIEW\" \"$f\")",
       "Bash(if grep -q \"pending\" \"$f\")",
       "Bash(while read f)",
-      "Bash(do echo \"=== $f ===\" sed -n '/ISSUE REVIEW/,$p' \"$f\")"
+      "Bash(do echo \"=== $f ===\" sed -n '/ISSUE REVIEW/,$p' \"$f\")",
+      "Bash(basename:*)"
     ]
   }
 }
