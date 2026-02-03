@@ -1151,6 +1151,23 @@ export class ScriptStore {
   }
 
   /**
+   * Increment the handler run count for a script run (session).
+   * Called when a handler successfully commits.
+   *
+   * @param scriptRunId - The script run (session) ID
+   * @param tx - Optional transaction context
+   * @returns The new handler run count
+   */
+  async incrementHandlerCount(scriptRunId: string, tx?: DBInterface): Promise<number> {
+    const db = tx || this.db.db;
+    const result = await db.execO<{ handler_run_count: number }>(
+      `UPDATE script_runs SET handler_run_count = handler_run_count + 1 WHERE id = ? RETURNING handler_run_count`,
+      [scriptRunId]
+    );
+    return result && result.length > 0 ? result[0].handler_run_count : 0;
+  }
+
+  /**
    * Get all scripts for a workflow within a specific major version.
    * Used by maintainer to build changelog of prior minor versions.
    * Returns scripts ordered by minor_version descending (newest first).

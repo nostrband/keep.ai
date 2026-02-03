@@ -99,6 +99,27 @@ export { createWorkflowTools, createTaskTools, type ToolListConfig } from "./san
 // Workflow validation (exec-05)
 export { validateWorkflowScript, isWorkflowFormatScript, type WorkflowConfig, type ValidationResult } from "./workflow-validator";
 
+// Handler state machine (exec-06)
+export {
+  executeHandler,
+  isTerminal,
+  type HandlerResult,
+  type PrepareResult,
+  type HandlerExecutionContext,
+} from "./handler-state-machine";
+
+// Session orchestration (exec-07)
+export {
+  executeWorkflowSession,
+  executeWorkflowSessionIfIdle,
+  resumeIncompleteSessions,
+  canStartSession,
+  getSessionCost,
+  type SessionTrigger,
+  type SessionResult,
+  type SessionConfig,
+} from "./session-orchestration";
+
 /** @deprecated Use ToolWrapper from './sandbox/tool-wrapper' instead */
 export { SandboxAPI } from "./sandbox/api";
 

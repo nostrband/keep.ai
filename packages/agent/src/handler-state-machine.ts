@@ -1,0 +1,909 @@
+/**
+ * Handler State Machine (exec-06)
+ *
+ * Unified state machine for handler execution. Same code handles normal
+ * execution and restart recovery. Each phase transition is persisted to
+ * the database, enabling checkpoint-based recovery.
+ *
+ * See specs/exec-06-handler-state-machine.md for design details.
+ */
+
+import {
+  KeepDbApi,
+  HandlerRun,
+  HandlerRunPhase,
+  HandlerErrorType,
+  Mutation,
+  Workflow,
+  DBInterface,
+} from "@app/db";
+import {
+  ClassifiedError,
+  ensureClassified,
+  LogicError,
+  ErrorType,
+} from "./errors";
+import { initSandbox, Sandbox, EvalContext } from "./sandbox/sandbox";
+import { ToolWrapper, ExecutionPhase } from "./sandbox/tool-wrapper";
+import { createWorkflowTools } from "./sandbox/tool-lists";
+import { WorkflowConfig } from "./workflow-validator";
+import type { ConnectionManager } from "@app/connectors";
+import debug from "debug";
+
+const log = debug("handler-state-machine");
+
+// ============================================================================
+// Types
+// ============================================================================
+
+/**
+ * Result returned from executeHandler.
+ */
+export interface HandlerResult {
+  phase: HandlerRunPhase;
+  error?: string;
+  errorType?: HandlerErrorType | "";
+}
+
+/**
+ * Prepare result from consumer prepare phase.
+ */
+export interface PrepareResult {
+  /** Event reservations: array of { topic, ids } */
+  reservations: Array<{ topic: string; ids: string[] }>;
+  /** Optional data extracted during prepare */
+  data?: unknown;
+  /** Optional UI output */
+  ui?: unknown;
+}
+
+/**
+ * Context for handler execution.
+ */
+export interface HandlerExecutionContext {
+  api: KeepDbApi;
+  connectionManager?: ConnectionManager;
+  userPath?: string;
+  abortController?: AbortController;
+}
+
+// ============================================================================
+// Terminal State Check
+// ============================================================================
+
+/**
+ * Check if a phase is terminal (no more transitions possible).
+ */
+export function isTerminal(phase: HandlerRunPhase): boolean {
+  return ["committed", "suspended", "failed"].includes(phase);
+}
+
+// ============================================================================
+// Error Classification
+// ============================================================================
+
+/**
+ * Map ClassifiedError type to HandlerErrorType.
+ */
+function errorTypeToHandlerErrorType(type: ErrorType): HandlerErrorType {
+  switch (type) {
+    case "auth":
+      return "auth";
+    case "permission":
+      return "permission";
+    case "network":
+      return "network";
+    case "logic":
+      return "logic";
+    case "internal":
+      return "unknown";
+    default:
+      return "unknown";
+  }
+}
+
+/**
+ * Check if an error is a definite failure (vs potentially indeterminate).
+ * Used to decide mutation status when an error occurs during mutate phase.
+ */
+function isDefiniteFailure(error: ClassifiedError): boolean {
+  // Logic errors and permission errors are definite failures
+  // Network errors and auth errors might be indeterminate (external call may have succeeded)
+  return error.type === "logic" || error.type === "permission";
+}
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+/**
+ * Mark a handler run as failed with classified error.
+ */
+async function failRun(
+  api: KeepDbApi,
+  run: HandlerRun,
+  error: ClassifiedError
+): Promise<void> {
+  const errorType = errorTypeToHandlerErrorType(error.type);
+  await api.handlerRunStore.update(run.id, {
+    phase: "failed",
+    error: error.message,
+    error_type: errorType,
+    end_timestamp: new Date().toISOString(),
+  });
+  log(`Handler run ${run.id} failed: ${error.message} (${errorType})`);
+}
+
+/**
+ * Mark a handler run as suspended with reason.
+ */
+async function suspendRun(
+  api: KeepDbApi,
+  run: HandlerRun,
+  reason: string
+): Promise<void> {
+  await api.handlerRunStore.update(run.id, {
+    phase: "suspended",
+    error: reason,
+    end_timestamp: new Date().toISOString(),
+  });
+  log(`Handler run ${run.id} suspended: ${reason}`);
+}
+
+/**
+ * Save prepare result and reserve events atomically.
+ */
+async function savePrepareAndReserve(
+  api: KeepDbApi,
+  run: HandlerRun,
+  prepareResult: PrepareResult
+): Promise<void> {
+  await api.db.db.tx(async (tx: DBInterface) => {
+    // Save prepare result
+    await api.handlerRunStore.update(
+      run.id,
+      {
+        prepare_result: JSON.stringify(prepareResult),
+        phase: "prepared",
+      },
+      tx
+    );
+
+    // Reserve events
+    if (prepareResult.reservations && prepareResult.reservations.length > 0) {
+      await api.eventStore.reserveEvents(run.id, prepareResult.reservations, tx);
+    }
+  });
+  log(`Handler run ${run.id} prepared with ${prepareResult.reservations?.length || 0} reservations`);
+}
+
+/**
+ * Commit a producer run atomically.
+ * Updates handler state, marks run committed, increments handler count.
+ */
+async function commitProducer(
+  api: KeepDbApi,
+  run: HandlerRun,
+  newState: unknown
+): Promise<void> {
+  await api.db.db.tx(async (tx: DBInterface) => {
+    // Update handler state
+    if (newState !== undefined) {
+      await api.handlerStateStore.set(
+        run.workflow_id,
+        run.handler_name,
+        newState,
+        run.id,
+        tx
+      );
+    }
+
+    // Mark run committed
+    await api.handlerRunStore.update(
+      run.id,
+      {
+        phase: "committed",
+        output_state: JSON.stringify(newState),
+        end_timestamp: new Date().toISOString(),
+      },
+      tx
+    );
+
+    // Update session handler count
+    await api.scriptStore.incrementHandlerCount(run.script_run_id, tx);
+  });
+  log(`Handler run ${run.id} (producer) committed`);
+}
+
+/**
+ * Commit a consumer run atomically.
+ * Consumes reserved events, updates handler state, marks run committed, increments handler count.
+ */
+async function commitConsumer(
+  api: KeepDbApi,
+  run: HandlerRun,
+  newState: unknown
+): Promise<void> {
+  await api.db.db.tx(async (tx: DBInterface) => {
+    // Consume reserved events
+    await api.eventStore.consumeEvents(run.id, tx);
+
+    // Update handler state
+    if (newState !== undefined) {
+      await api.handlerStateStore.set(
+        run.workflow_id,
+        run.handler_name,
+        newState,
+        run.id,
+        tx
+      );
+    }
+
+    // Mark run committed
+    await api.handlerRunStore.update(
+      run.id,
+      {
+        phase: "committed",
+        output_state: JSON.stringify(newState),
+        end_timestamp: new Date().toISOString(),
+      },
+      tx
+    );
+
+    // Update session handler count
+    await api.scriptStore.incrementHandlerCount(run.script_run_id, tx);
+  });
+  log(`Handler run ${run.id} (consumer) committed`);
+}
+
+// ============================================================================
+// Sandbox Execution
+// ============================================================================
+
+/**
+ * Create sandbox environment for handler execution.
+ */
+async function createHandlerSandbox(
+  workflow: Workflow,
+  context: HandlerExecutionContext,
+  run: HandlerRun
+): Promise<{ sandbox: Sandbox; toolWrapper: ToolWrapper; logs: string[] }> {
+  const logs: string[] = [];
+
+  // Create sandbox with workflow timeout
+  const sandbox = await initSandbox({ timeoutMs: 300_000 });
+
+  // Create evaluation context
+  const evalContext: EvalContext = {
+    taskThreadId: "",
+    step: 0,
+    type: "workflow",
+    taskId: workflow.task_id,
+    scriptRunId: run.script_run_id,
+    cost: 0,
+    createEvent: async () => {
+      // Event creation handled via Topics.publish
+    },
+    onLog: async (line: string) => {
+      logs.push(line);
+    },
+  };
+  sandbox.context = evalContext;
+
+  // Create workflow tools
+  const tools = createWorkflowTools({
+    api: context.api,
+    getContext: () => sandbox.context!,
+    connectionManager: context.connectionManager,
+    userPath: context.userPath || "",
+    workflowId: workflow.id,
+    scriptRunId: run.script_run_id,
+    handlerRunId: run.id,
+  });
+
+  // Create tool wrapper
+  const toolWrapper = new ToolWrapper({
+    tools,
+    api: context.api,
+    getContext: () => sandbox.context!,
+    userPath: context.userPath,
+    connectionManager: context.connectionManager,
+    workflowId: workflow.id,
+    scriptRunId: run.script_run_id,
+    handlerRunId: run.id,
+    abortController: context.abortController,
+  });
+
+  // Inject tools into sandbox
+  const global = await toolWrapper.createGlobal();
+  sandbox.setGlobal(global);
+
+  return { sandbox, toolWrapper, logs };
+}
+
+// ============================================================================
+// Producer Phase Handlers
+// ============================================================================
+
+type PhaseHandler = (
+  api: KeepDbApi,
+  run: HandlerRun,
+  context: HandlerExecutionContext
+) => Promise<void>;
+
+const producerPhaseHandlers: Record<string, PhaseHandler> = {
+  /**
+   * pending → executing: Transition to executing phase.
+   */
+  pending: async (api: KeepDbApi, run: HandlerRun) => {
+    await api.handlerRunStore.updatePhase(run.id, "executing");
+    log(`Handler run ${run.id} (producer): pending → executing`);
+  },
+
+  /**
+   * executing: Execute producer handler code.
+   */
+  executing: async (
+    api: KeepDbApi,
+    run: HandlerRun,
+    context: HandlerExecutionContext
+  ) => {
+    const workflow = await api.scriptStore.getWorkflow(run.workflow_id);
+    if (!workflow) {
+      throw new LogicError(`Workflow ${run.workflow_id} not found`);
+    }
+
+    const script = workflow.active_script_id
+      ? await api.scriptStore.getScript(workflow.active_script_id)
+      : null;
+    if (!script) {
+      throw new LogicError(`No active script for workflow ${run.workflow_id}`);
+    }
+
+    const prevState = await api.handlerStateStore.get(
+      workflow.id,
+      run.handler_name
+    );
+
+    const { sandbox, toolWrapper, logs } = await createHandlerSandbox(
+      workflow,
+      context,
+      run
+    );
+
+    try {
+      // Set producer phase
+      toolWrapper.setPhase("producer");
+
+      // Inject state
+      sandbox.setGlobal({ __state__: prevState });
+
+      // Execute producer handler
+      const code = `
+${script.code}
+
+return await workflow.producers.${run.handler_name}.handler(__state__);
+`;
+      const result = await sandbox.eval(code, {
+        timeoutMs: 300_000,
+        signal: context.abortController?.signal,
+      });
+
+      if (!result.ok) {
+        // Check for classified error from context
+        const classifiedError =
+          sandbox.context?.classifiedError ||
+          new LogicError(result.error, { source: "producer.handler" });
+        await failRun(api, run, classifiedError);
+        return;
+      }
+
+      // Commit with new state
+      await commitProducer(api, run, result.result);
+
+      // Save logs if any
+      if (logs.length > 0) {
+        await api.handlerRunStore.update(run.id, { logs: JSON.stringify(logs) });
+      }
+    } catch (error) {
+      const classifiedError = ensureClassified(error, "producer.handler");
+      await failRun(api, run, classifiedError);
+    } finally {
+      sandbox.dispose();
+    }
+  },
+};
+
+// ============================================================================
+// Consumer Phase Handlers
+// ============================================================================
+
+const consumerPhaseHandlers: Record<string, PhaseHandler> = {
+  /**
+   * pending → preparing: Transition to preparing phase.
+   */
+  pending: async (api: KeepDbApi, run: HandlerRun) => {
+    await api.handlerRunStore.updatePhase(run.id, "preparing");
+    log(`Handler run ${run.id} (consumer): pending → preparing`);
+  },
+
+  /**
+   * preparing: Execute consumer prepare phase.
+   */
+  preparing: async (
+    api: KeepDbApi,
+    run: HandlerRun,
+    context: HandlerExecutionContext
+  ) => {
+    const workflow = await api.scriptStore.getWorkflow(run.workflow_id);
+    if (!workflow) {
+      throw new LogicError(`Workflow ${run.workflow_id} not found`);
+    }
+
+    const script = workflow.active_script_id
+      ? await api.scriptStore.getScript(workflow.active_script_id)
+      : null;
+    if (!script) {
+      throw new LogicError(`No active script for workflow ${run.workflow_id}`);
+    }
+
+    const prevState = await api.handlerStateStore.get(
+      workflow.id,
+      run.handler_name
+    );
+
+    const { sandbox, toolWrapper, logs } = await createHandlerSandbox(
+      workflow,
+      context,
+      run
+    );
+
+    try {
+      // Set prepare phase
+      toolWrapper.setPhase("prepare");
+
+      // Inject state
+      sandbox.setGlobal({ __state__: prevState });
+
+      // Execute prepare handler
+      const code = `
+${script.code}
+
+return await workflow.consumers.${run.handler_name}.prepare(__state__);
+`;
+      const result = await sandbox.eval(code, {
+        timeoutMs: 300_000,
+        signal: context.abortController?.signal,
+      });
+
+      if (!result.ok) {
+        const classifiedError =
+          sandbox.context?.classifiedError ||
+          new LogicError(result.error, { source: "consumer.prepare" });
+        await failRun(api, run, classifiedError);
+        return;
+      }
+
+      // Validate and save prepare result
+      const prepareResult = result.result as PrepareResult;
+      if (!prepareResult || !Array.isArray(prepareResult.reservations)) {
+        await failRun(
+          api,
+          run,
+          new LogicError(
+            "Consumer prepare must return { reservations: [...] }",
+            { source: "consumer.prepare" }
+          )
+        );
+        return;
+      }
+
+      await savePrepareAndReserve(api, run, prepareResult);
+
+      // Save logs if any
+      if (logs.length > 0) {
+        await api.handlerRunStore.update(run.id, { logs: JSON.stringify(logs) });
+      }
+    } catch (error) {
+      const classifiedError = ensureClassified(error, "consumer.prepare");
+      await failRun(api, run, classifiedError);
+    } finally {
+      sandbox.dispose();
+    }
+  },
+
+  /**
+   * prepared: Decide next phase based on reservations.
+   */
+  prepared: async (api: KeepDbApi, run: HandlerRun) => {
+    const prepareResult: PrepareResult = run.prepare_result
+      ? JSON.parse(run.prepare_result)
+      : { reservations: [] };
+
+    if (prepareResult.reservations.length === 0) {
+      // Nothing to process, skip to committed
+      log(`Handler run ${run.id} (consumer): prepared → committed (no reservations)`);
+      await commitConsumer(api, run, undefined);
+    } else {
+      // Has work to do, go to mutating
+      log(`Handler run ${run.id} (consumer): prepared → mutating`);
+      await api.handlerRunStore.updatePhase(run.id, "mutating");
+    }
+  },
+
+  /**
+   * mutating: Execute mutation or handle mutation status.
+   */
+  mutating: async (
+    api: KeepDbApi,
+    run: HandlerRun,
+    context: HandlerExecutionContext
+  ) => {
+    const mutation = await api.mutationStore.getByHandlerRunId(run.id);
+
+    if (!mutation || mutation.status === "pending") {
+      // Not started yet, execute mutate handler
+      await executeMutate(api, run, context);
+    } else if (mutation.status === "in_flight") {
+      // Crashed mid-mutation → indeterminate (no reconciliation)
+      await api.mutationStore.markIndeterminate(
+        mutation.id,
+        "Mutation was in_flight at restart - outcome uncertain"
+      );
+      await suspendRun(api, run, "indeterminate_mutation");
+    } else if (mutation.status === "applied") {
+      log(`Handler run ${run.id} (consumer): mutating → mutated`);
+      await api.handlerRunStore.updatePhase(run.id, "mutated");
+    } else if (mutation.status === "indeterminate") {
+      await suspendRun(api, run, "indeterminate_mutation");
+    } else if (mutation.status === "failed") {
+      await failRun(
+        api,
+        run,
+        new LogicError(mutation.error || "Mutation failed", {
+          source: "consumer.mutate",
+        })
+      );
+    }
+  },
+
+  /**
+   * mutated → emitting: Transition to emitting phase.
+   */
+  mutated: async (api: KeepDbApi, run: HandlerRun) => {
+    log(`Handler run ${run.id} (consumer): mutated → emitting`);
+    await api.handlerRunStore.updatePhase(run.id, "emitting");
+  },
+
+  /**
+   * emitting: Execute next handler or commit if no next handler.
+   */
+  emitting: async (
+    api: KeepDbApi,
+    run: HandlerRun,
+    context: HandlerExecutionContext
+  ) => {
+    const workflow = await api.scriptStore.getWorkflow(run.workflow_id);
+    if (!workflow) {
+      throw new LogicError(`Workflow ${run.workflow_id} not found`);
+    }
+
+    // Parse handler config to check for next handler
+    let config: WorkflowConfig | null = null;
+    if (workflow.handler_config) {
+      try {
+        config = JSON.parse(workflow.handler_config) as WorkflowConfig;
+      } catch {
+        // Invalid config, treat as no next handler
+      }
+    }
+
+    const hasNext = config?.consumers?.[run.handler_name]?.hasNext ?? false;
+
+    if (!hasNext) {
+      // No next handler, commit
+      log(`Handler run ${run.id} (consumer): emitting → committed (no next handler)`);
+      await commitConsumer(api, run, undefined);
+      return;
+    }
+
+    const script = workflow.active_script_id
+      ? await api.scriptStore.getScript(workflow.active_script_id)
+      : null;
+    if (!script) {
+      throw new LogicError(`No active script for workflow ${run.workflow_id}`);
+    }
+
+    const prepareResult: PrepareResult = run.prepare_result
+      ? JSON.parse(run.prepare_result)
+      : { reservations: [], data: undefined };
+
+    const mutation = await api.mutationStore.getByHandlerRunId(run.id);
+    const mutationResult = mutation
+      ? {
+          status: mutation.status,
+          result: mutation.result ? JSON.parse(mutation.result) : null,
+        }
+      : { status: "none" };
+
+    const { sandbox, toolWrapper, logs } = await createHandlerSandbox(
+      workflow,
+      context,
+      run
+    );
+
+    try {
+      // Set next phase
+      toolWrapper.setPhase("next");
+
+      // Inject prepared data and mutation result
+      sandbox.setGlobal({
+        __prepared__: prepareResult,
+        __mutationResult__: mutationResult,
+      });
+
+      // Execute next handler
+      const code = `
+${script.code}
+
+return await workflow.consumers.${run.handler_name}.next(__prepared__, __mutationResult__);
+`;
+      const result = await sandbox.eval(code, {
+        timeoutMs: 300_000,
+        signal: context.abortController?.signal,
+      });
+
+      if (!result.ok) {
+        const classifiedError =
+          sandbox.context?.classifiedError ||
+          new LogicError(result.error, { source: "consumer.next" });
+        await failRun(api, run, classifiedError);
+        return;
+      }
+
+      // Commit with new state
+      await commitConsumer(api, run, result.result);
+
+      // Save logs if any
+      if (logs.length > 0) {
+        await api.handlerRunStore.update(run.id, { logs: JSON.stringify(logs) });
+      }
+    } catch (error) {
+      const classifiedError = ensureClassified(error, "consumer.next");
+      await failRun(api, run, classifiedError);
+    } finally {
+      sandbox.dispose();
+    }
+  },
+};
+
+// ============================================================================
+// Mutation Execution
+// ============================================================================
+
+/**
+ * Execute the mutate phase of a consumer handler.
+ */
+async function executeMutate(
+  api: KeepDbApi,
+  run: HandlerRun,
+  context: HandlerExecutionContext
+): Promise<void> {
+  const workflow = await api.scriptStore.getWorkflow(run.workflow_id);
+  if (!workflow) {
+    throw new LogicError(`Workflow ${run.workflow_id} not found`);
+  }
+
+  // Parse handler config to check for mutate handler
+  let config: WorkflowConfig | null = null;
+  if (workflow.handler_config) {
+    try {
+      config = JSON.parse(workflow.handler_config) as WorkflowConfig;
+    } catch {
+      // Invalid config, treat as no mutate handler
+    }
+  }
+
+  const hasMutate = config?.consumers?.[run.handler_name]?.hasMutate ?? false;
+
+  if (!hasMutate) {
+    // No mutate handler, skip to mutated
+    log(`Handler run ${run.id} (consumer): mutating → mutated (no mutate handler)`);
+    await api.handlerRunStore.updatePhase(run.id, "mutated");
+    return;
+  }
+
+  const script = workflow.active_script_id
+    ? await api.scriptStore.getScript(workflow.active_script_id)
+    : null;
+  if (!script) {
+    throw new LogicError(`No active script for workflow ${run.workflow_id}`);
+  }
+
+  const prepareResult: PrepareResult = run.prepare_result
+    ? JSON.parse(run.prepare_result)
+    : { reservations: [], data: undefined };
+
+  // Create mutation record BEFORE executing
+  let mutation = await api.mutationStore.getByHandlerRunId(run.id);
+  if (!mutation) {
+    mutation = await api.mutationStore.create({
+      handler_run_id: run.id,
+      workflow_id: run.workflow_id,
+    });
+  }
+
+  const { sandbox, toolWrapper, logs } = await createHandlerSandbox(
+    workflow,
+    context,
+    run
+  );
+
+  try {
+    // Set mutate phase and current mutation
+    toolWrapper.setCurrentMutation(mutation);
+    toolWrapper.setPhase("mutate");
+
+    // Inject prepared data
+    sandbox.setGlobal({ __prepared__: prepareResult });
+
+    // Execute mutate handler
+    const code = `
+${script.code}
+
+return await workflow.consumers.${run.handler_name}.mutate(__prepared__);
+`;
+    const result = await sandbox.eval(code, {
+      timeoutMs: 300_000,
+      signal: context.abortController?.signal,
+    });
+
+    // Re-fetch mutation to get updated status
+    const updatedMutation = await api.mutationStore.get(mutation.id);
+
+    if (!result.ok) {
+      // Handle error based on mutation state
+      const classifiedError =
+        sandbox.context?.classifiedError ||
+        new LogicError(result.error, { source: "consumer.mutate" });
+
+      if (updatedMutation) {
+        if (isDefiniteFailure(classifiedError)) {
+          await api.mutationStore.markFailed(
+            updatedMutation.id,
+            classifiedError.message
+          );
+        } else if (updatedMutation.status === "in_flight") {
+          // Uncertain outcome
+          await api.mutationStore.markIndeterminate(
+            updatedMutation.id,
+            classifiedError.message
+          );
+        }
+      }
+      // State machine will read mutation status on next iteration
+      return;
+    }
+
+    // If mutation was executed (status is in_flight), mark as applied
+    if (updatedMutation && updatedMutation.status === "in_flight") {
+      await api.mutationStore.markApplied(
+        updatedMutation.id,
+        JSON.stringify(result.result)
+      );
+    } else if (updatedMutation && updatedMutation.status === "pending") {
+      // Mutate handler didn't call any mutation tool - mark as applied with null result
+      await api.mutationStore.markApplied(
+        updatedMutation.id,
+        JSON.stringify(null)
+      );
+    }
+
+    // Save logs if any
+    if (logs.length > 0) {
+      await api.handlerRunStore.update(run.id, { logs: JSON.stringify(logs) });
+    }
+    // State machine will read mutation status and transition
+  } catch (error) {
+    const classifiedError = ensureClassified(error, "consumer.mutate");
+    const updatedMutation = await api.mutationStore.get(mutation.id);
+
+    if (updatedMutation) {
+      if (isDefiniteFailure(classifiedError)) {
+        await api.mutationStore.markFailed(
+          updatedMutation.id,
+          classifiedError.message
+        );
+      } else if (updatedMutation.status === "in_flight") {
+        await api.mutationStore.markIndeterminate(
+          updatedMutation.id,
+          classifiedError.message
+        );
+      }
+    }
+    // State machine will read mutation status on next iteration
+  } finally {
+    sandbox.dispose();
+  }
+}
+
+// ============================================================================
+// Main Execution Loop
+// ============================================================================
+
+/**
+ * Execute a handler run through its state machine.
+ *
+ * This function is the core loop that handles both normal execution and
+ * restart recovery. It continuously reads fresh state from the database
+ * and processes the current phase until reaching a terminal state.
+ *
+ * @param handlerRunId - The handler run ID to execute
+ * @param context - Execution context with API and optional resources
+ * @returns The final handler result
+ */
+export async function executeHandler(
+  handlerRunId: string,
+  context: HandlerExecutionContext
+): Promise<HandlerResult> {
+  const { api } = context;
+
+  while (true) {
+    // Always read fresh state from DB
+    const run = await api.handlerRunStore.get(handlerRunId);
+
+    if (!run) {
+      return {
+        phase: "failed",
+        error: `Handler run ${handlerRunId} not found`,
+        errorType: "logic",
+      };
+    }
+
+    if (isTerminal(run.phase)) {
+      return {
+        phase: run.phase,
+        error: run.error || undefined,
+        errorType: run.error_type || undefined,
+      };
+    }
+
+    // Get the appropriate phase handlers based on handler type
+    const phaseHandlers =
+      run.handler_type === "producer"
+        ? producerPhaseHandlers
+        : consumerPhaseHandlers;
+
+    const handler = phaseHandlers[run.phase];
+    if (!handler) {
+      // Unknown phase - this shouldn't happen
+      await api.handlerRunStore.update(run.id, {
+        phase: "failed",
+        error: `Unknown phase: ${run.phase}`,
+        error_type: "logic",
+        end_timestamp: new Date().toISOString(),
+      });
+      return {
+        phase: "failed",
+        error: `Unknown phase: ${run.phase}`,
+        errorType: "logic",
+      };
+    }
+
+    // Execute the phase handler
+    try {
+      await handler(api, run, context);
+    } catch (error) {
+      // Unexpected error in phase handler itself
+      const classifiedError = ensureClassified(error, "handler-state-machine");
+      await failRun(api, run, classifiedError);
+      return {
+        phase: "failed",
+        error: classifiedError.message,
+        errorType: errorTypeToHandlerErrorType(classifiedError.type),
+      };
+    }
+
+    // Continue loop to read next state
+  }
+}

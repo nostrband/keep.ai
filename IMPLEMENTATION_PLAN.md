@@ -4,7 +4,7 @@ This document tracks the implementation status of the new execution model refact
 
 **Last Updated:** 2026-02-03
 **Current Database Version:** v36
-**Overall Progress:** 7/8 core specs implemented
+**Overall Progress:** 8/8 core specs implemented
 
 ---
 
@@ -141,19 +141,28 @@ The codebase is transitioning from an **Items-based execution model** (`Items.wi
 
 ### Phase C: Execution Engine (Sequential)
 
-- [ ] **[P3] exec-06: Handler State Machine** - [specs/exec-06-handler-state-machine.md](specs/exec-06-handler-state-machine.md)
+- [x] **[P3] exec-06: Handler State Machine** - [specs/exec-06-handler-state-machine.md](specs/exec-06-handler-state-machine.md)
   - Implement unified executeHandler() function
   - Producer state machine: pending → executing → committed|failed
   - Consumer state machine: pending → preparing → prepared → mutating → mutated → emitting → committed
   - Mutation handling with status tracking (pending, in_flight, applied, failed, indeterminate)
   - Crash recovery with checkpoint-based resume
   - Helper functions: failRun, suspendRun, savePrepareAndReserve, commitProducer, commitConsumer
-  - **Status:** NOT STARTED - 0% complete
-  - **Current State:** No handler-state-machine.ts file. No executeHandler function. WorkflowWorker has simple try/catch execution, not a state machine.
-  - **Dependencies:** exec-01 ✓ DONE, exec-04
-  - **Blocked by:** exec-04
+  - **Status:** COMPLETE - 100%
+  - **Current State:** Handler state machine fully implemented with producer and consumer phase transitions.
+  - **Implementation:**
+    - Created `packages/agent/src/handler-state-machine.ts` with `executeHandler()` function
+    - Producer phases: pending → executing → committed | failed
+    - Consumer phases: pending → preparing → prepared → mutating → mutated → emitting → committed
+    - Helper functions: `failRun()`, `suspendRun()`, `savePrepareAndReserve()`, `commitProducer()`, `commitConsumer()`
+    - Crash recovery with checkpoint-based resume using handler_runs table
+    - Mutation handling with complete status tracking
+    - Added `incrementHandlerCount()` method to `packages/db/src/script-store.ts`
+    - Exported executeHandler from `packages/agent/src/index.ts`
+  - **Dependencies:** exec-01 ✓ DONE, exec-04 ✓ DONE
+  - **Blocked by:** Nothing
 
-- [ ] **[P3] exec-07: Session Orchestration** - [specs/exec-07-session-orchestration.md](specs/exec-07-session-orchestration.md)
+- [x] **[P3] exec-07: Session Orchestration** - [specs/exec-07-session-orchestration.md](specs/exec-07-session-orchestration.md)
   - Implement executeWorkflowSession() orchestration function
   - Session container using script_runs with trigger types
   - Producer execution followed by consumer loop (max 100 iterations)
@@ -161,10 +170,19 @@ The codebase is transitioning from an **Items-based execution model** (`Items.wi
   - Session state functions: completeSession, failSession, suspendSession
   - Recovery: resumeIncompleteSessions (app startup), continueSession
   - Cost aggregation from handler runs
-  - **Status:** NOT STARTED - 0% complete
-  - **Current State:** No session-orchestration.ts file. WorkflowWorker.executeWorkflow() runs single scripts, not producer+consumer sessions.
-  - **Dependencies:** exec-06
-  - **Blocked by:** exec-06
+  - **Status:** COMPLETE - 100%
+  - **Current State:** Session orchestration fully implemented with producer/consumer execution and crash recovery.
+  - **Implementation:**
+    - Created `packages/agent/src/session-orchestration.ts` with `executeWorkflowSession()` function
+    - Session container using script_runs table with trigger types (schedule, webhook, manual)
+    - Producer execution followed by consumer loop with 100 iteration budget
+    - `findConsumerWithPendingWork()` for detecting next consumer with work
+    - Session state functions: `completeSession()`, `failSession()`, `suspendSession()`
+    - Recovery functions: `resumeIncompleteSessions()` for app startup, `continueSession()` for resuming
+    - Cost aggregation from handler_runs table
+    - Exported session orchestration functions from `packages/agent/src/index.ts`
+  - **Dependencies:** exec-06 ✓ DONE
+  - **Blocked by:** Nothing
 
 ### Phase D: LLM Integration
 
@@ -215,10 +233,10 @@ exec-02 (Deprecate Items) ✓ ─┼──────────┐           
                              ▼                                   │
                       exec-08 (Planner Prompts) ✓                │
                                                                  │
-                      exec-06 (Handler State Machine) ◄──────────┘
+                      exec-06 (Handler State Machine) ✓ ◄────────┘
                              │
                              ▼
-                      exec-07 (Session Orchestration)
+                      exec-07 (Session Orchestration) ✓
 ```
 
 ---
@@ -297,8 +315,8 @@ packages/db/src/handler-state-store.ts     # ✓ DONE - Persistent handler state
 packages/agent/src/tools/topics.ts         # ✓ DONE - Topics.peek, getByIds, publish
 packages/agent/src/sandbox/tool-lists.ts   # ✓ DONE - createWorkflowTools, createTaskTools
 packages/agent/src/workflow-validator.ts   # ✓ DONE - Script structure validation
-packages/agent/src/handler-state-machine.ts # executeHandler function
-packages/agent/src/session-orchestration.ts # executeWorkflowSession function
+packages/agent/src/handler-state-machine.ts # ✓ DONE - executeHandler function
+packages/agent/src/session-orchestration.ts # ✓ DONE - executeWorkflowSession function
 ```
 
 ## Files to Modify
@@ -314,8 +332,8 @@ packages/agent/src/sandbox/tool-wrapper.ts # ✓ DONE - Removed Items.withItem, 
 packages/agent/src/tools/index.ts          # ✓ DONE - Removed items-list, added topics
 packages/agent/src/workflow-worker.ts      # ✓ DONE - Uses ToolWrapper + createWorkflowTools
 packages/agent/src/task-worker.ts          # ✓ DONE - Uses ToolWrapper + createTaskTools
-packages/agent/src/index.ts                # ✓ DONE - Exports ToolWrapper, tool-lists, ExecutionPhase, OperationType
-packages/db/src/script-store.ts            # ✓ DONE - Added handler_config field, updateWorkflowFields support
+packages/agent/src/index.ts                # ✓ DONE - Exports ToolWrapper, tool-lists, ExecutionPhase, OperationType, executeHandler, session orchestration
+packages/db/src/script-store.ts            # ✓ DONE - Added handler_config field, updateWorkflowFields support, incrementHandlerCount method
 packages/agent/src/agent-env.ts            # ✓ DONE - Updated planner/maintainer prompts for workflow format
 packages/agent/src/ai-tools/save.ts        # ✓ DONE - Integrated validation
 packages/agent/src/ai-tools/fix.ts         # ✓ DONE - Integrated validation
