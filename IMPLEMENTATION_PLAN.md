@@ -10,15 +10,15 @@ This document tracks the implementation status of the new execution model refact
 
 ## Executive Summary
 
-The codebase is transitioning from an **Items-based execution model** (`Items.withItem()`) to a **Topics-based event-driven model** with structured producers/consumers and three-phase execution. This is a major architectural refactor affecting the agent, database, and workflow execution systems.
+> **COMPLETE** - The execution model refactor (exec-00 through exec-09) is fully implemented. Tagged as `v1.0.0-alpha.98`.
 
-**Current State:**
-- Old Items infrastructure is **deprecated and removed**
-- New Topics infrastructure: **exec-01 (Database Schema) COMPLETE**, **exec-03 (Topics API) COMPLETE**
-- Deprecation: **exec-02 (Deprecate Items) COMPLETE**
-- Tool migration: **exec-03a (Complete Tool Migration) COMPLETE**
-- Remaining specs (04-08) require sequential implementation
-- ToolWrapper is now **active** with phase tracking - SandboxAPI is deprecated
+The codebase has transitioned from an **Items-based execution model** (`Items.withItem()`) to a **Topics-based event-driven model** with structured producers/consumers and three-phase execution. This major architectural refactor affects the agent, database, and workflow execution systems.
+
+**Final State:**
+- All 9 core specs (exec-01 through exec-09) implemented and tested
+- Old Items infrastructure deprecated and removed
+- ToolWrapper active with phase tracking; SandboxAPI deprecated
+- Session orchestration integrated into WorkflowScheduler
 
 ---
 
@@ -27,206 +27,67 @@ The codebase is transitioning from an **Items-based execution model** (`Items.wi
 ### Phase A: Infrastructure (Parallel)
 
 - [x] **[P1] exec-01: Database Schema** - [specs/exec-01-database-schema.md](specs/exec-01-database-schema.md)
-  - Create migration v36.ts with new tables
-  - Tables needed: `topics`, `events`, `handler_runs`, `mutations`, `handler_state`
-  - Extend: `script_runs` (trigger, handler_run_count), `workflows` (handler_config, consumer_sleep_until)
-  - Create store classes: TopicStore, EventStore, HandlerRunStore, MutationStore, HandlerStateStore
-  - **Status:** COMPLETE - 100%
-  - **Implementation:**
-    - `packages/db/src/migrations/v36.ts` - All tables and schema extensions
-    - `packages/db/src/topic-store.ts` - TopicStore with CRUD, getOrCreate
-    - `packages/db/src/event-store.ts` - EventStore with peek, publish, reserve, consume, skip, release
-    - `packages/db/src/handler-run-store.ts` - HandlerRunStore with phase transitions, incomplete run queries
-    - `packages/db/src/mutation-store.ts` - MutationStore with status transitions, reconciliation tracking
-    - `packages/db/src/handler-state-store.ts` - HandlerStateStore with get/set per handler
-    - All stores exported in `index.ts` and registered in `api.ts`
-  - **Dependencies:** None
-  - **Blocked by:** Nothing
+  - Migration v36.ts with tables: `topics`, `events`, `handler_runs`, `mutations`, `handler_state`
+  - Store classes: TopicStore, EventStore, HandlerRunStore, MutationStore, HandlerStateStore
+  - **Status:** COMPLETE
 
 - [x] **[P1] exec-02: Deprecate Items** - [specs/exec-02-deprecate-items.md](specs/exec-02-deprecate-items.md)
-  - Remove Items.withItem() from SandboxAPI and ToolWrapper
-  - Remove Items.list tool (packages/agent/src/tools/items-list.ts)
-  - Remove activeItem/activeItemIsDone tracking
-  - Remove enforceMutationRestrictions() method
-  - Update prompts to remove "Logical Items" sections
-  - Deprecate ItemStore (keep for data preservation)
-  - Skip/remove logical-items.test.ts
-  - **Status:** COMPLETE - 100%
-  - **Implementation:**
-    - Removed `Items.withItem()` from SandboxAPI (`packages/agent/src/sandbox/api.ts`, lines 504-627)
-    - Removed `Items.withItem()` from ToolWrapper (`packages/agent/src/sandbox/tool-wrapper.ts`, lines 142-383)
-    - Removed `enforceMutationRestrictions()` method from both SandboxAPI and ToolWrapper
-    - Removed `activeItem` and `activeItemIsDone` tracking from both classes
-    - Removed Items.list tool export from `packages/agent/src/tools/index.ts`
-    - Deprecated ItemStore class and related types with @deprecated JSDoc in `packages/db/src/item-store.ts`
-    - Deprecated `packages/agent/src/tools/items-list.ts` tool file with @deprecated JSDoc
-    - Skipped tests for Items.list Tool and Mutation Enforcement in `packages/tests/src/logical-items.test.ts`
-  - **Dependencies:** None
-  - **Blocked by:** Nothing
-  - **Note:** Breaking change - existing workflows using Items.withItem() will need re-planning. Prompts still contain "Logical Items" documentation (to be removed in exec-08).
+  - Removed Items.withItem() from SandboxAPI and ToolWrapper
+  - Deprecated ItemStore (kept for data preservation)
+  - **Status:** COMPLETE
+  - **Note:** Breaking change - existing workflows using Items.withItem() need re-planning.
 
 ### Phase B: Sandbox Changes (Sequential)
 
 - [x] **[P2] exec-03: Topics API** - [specs/exec-03-topics-api.md](specs/exec-03-topics-api.md)
-  - Create packages/agent/src/tools/topics.ts
-  - Implement Topics.peek(), Topics.getByIds(), Topics.publish()
-  - Expose Topics namespace in sandbox (globalThis.Topics)
-  - **Status:** COMPLETE - 100%
-  - **Implementation:**
-    - Created `packages/agent/src/tools/topics.ts` with Topics.peek, Topics.getByIds, Topics.publish tools
-    - Exported Topics tools from `packages/agent/src/tools/index.ts`
-    - Added Topics namespace to SandboxAPI.createGlobal() in `packages/agent/src/sandbox/api.ts`
-    - Tools use EventStore from exec-01 for all operations
-    - Phase restrictions documented (to be enforced by exec-06 handler state machine)
-  - **Dependencies:** exec-01 (database schema) ✓ DONE
-  - **Blocked by:** Nothing (exec-01 is complete)
-  - **Note:** Phase enforcement is not yet implemented - will be added in exec-04 and exec-06.
+  - Topics.peek(), Topics.getByIds(), Topics.publish() in `packages/agent/src/tools/topics.ts`
+  - Topics namespace exposed in sandbox (globalThis.Topics)
+  - **Status:** COMPLETE
 
 - [x] **[P2] exec-03a: Complete Tool Migration** - [specs/exec-03a-complete-tool-migration.md](specs/exec-03a-complete-tool-migration.md)
-  - Create packages/agent/src/sandbox/tool-lists.ts with createWorkflowTools(), createTaskTools()
-  - Add phase tracking to ToolWrapper (setPhase, getPhase, checkPhaseAllowed)
-  - Remove Items.withItem from ToolWrapper
-  - Migrate WorkflowWorker and TaskWorker to use ToolWrapper
-  - Deprecate api.ts (keep for backwards compatibility)
-  - **Status:** COMPLETE - 100%
-  - **Implementation:**
-    - Created `packages/agent/src/sandbox/tool-lists.ts` with `createWorkflowTools()` and `createTaskTools()` functions
-    - Added phase tracking to ToolWrapper: `setPhase()`, `getPhase()`, `checkPhaseAllowed()` methods
-    - Added `ExecutionPhase` and `OperationType` types to ToolWrapper
-    - Updated WorkflowWorker to use ToolWrapper + createWorkflowTools
-    - Updated TaskWorker to use ToolWrapper + createTaskTools
-    - Added exports in `packages/agent/src/index.ts` for ToolWrapper, tool-lists, ExecutionPhase, OperationType
-    - SandboxAPI (`api.ts`) deprecated with @deprecated JSDoc (kept for backwards compatibility)
-  - **Dependencies:** exec-02 ✓ DONE, exec-03 ✓ DONE
-  - **Blocked by:** Nothing
+  - `packages/agent/src/sandbox/tool-lists.ts` with createWorkflowTools(), createTaskTools()
+  - Phase tracking added to ToolWrapper; WorkflowWorker and TaskWorker migrated
+  - SandboxAPI deprecated (kept for backwards compatibility)
+  - **Status:** COMPLETE
 
 - [x] **[P2] exec-04: Phase Tracking** - [specs/exec-04-phase-tracking.md](specs/exec-04-phase-tracking.md)
-  - Add phase state management to ToolWrapper (currentPhase, mutationExecuted, currentMutation)
-  - Implement phase restriction matrix enforcement
-  - Add global variable injection (__state__, __prepared__, __mutationResult__)
-  - Remove deprecated activeItem-based enforcement
-  - **Status:** COMPLETE - 100%
-  - **Current State:** ToolWrapper has full phase tracking with currentMutation support for the mutate phase.
-  - **Implementation:**
-    - Added `currentMutation: Mutation | null` tracking to ToolWrapper
-    - Added `setCurrentMutation()` method to set the mutation record for mutate phase
-    - Added `getCurrentMutation()` method for mutation tools to access the record
-    - Updated `setPhase()` to reset `currentMutation` when phase changes
-    - Phase restriction matrix and enforcement already existed from exec-03a
-    - Global variable injection (`__state__`, `__prepared__`, `__mutationResult__`) will be done by handler state machine (exec-06)
-  - **Files Modified:** `packages/agent/src/sandbox/tool-wrapper.ts` ✓ DONE
-  - **Dependencies:** exec-03a ✓ DONE
-  - **Blocked by:** Nothing
+  - Phase state management in ToolWrapper (currentPhase, mutationExecuted, currentMutation)
+  - Phase restriction matrix enforcement implemented
+  - **Status:** COMPLETE
 
 - [x] **[P3] exec-05: Script Validation** - [specs/exec-05-script-validation.md](specs/exec-05-script-validation.md)
-  - Create packages/agent/src/workflow-validator.ts
-  - Implement validateWorkflowScript() with zero-tool sandbox
-  - Extract WorkflowConfig from validated scripts
-  - Add WorkflowStore.updateHandlerConfig() method
-  - Integrate validation into save tool and fix tool
-  - **Status:** COMPLETE - 100%
-  - **Current State:** Workflow validation is fully implemented with zero-tool sandbox validation and handler_config persistence.
-  - **Implementation:**
-    - Created `packages/agent/src/workflow-validator.ts` with `validateWorkflowScript()` and `isWorkflowFormatScript()` functions
-    - Created zero-tool validation sandbox that throws errors for all tool calls
-    - Added `handler_config: string` field to Workflow interface in `packages/db/src/script-store.ts`
-    - Extended `updateWorkflowFields()` to support `handler_config` field
-    - Updated all workflow getters (getWorkflow, getWorkflowByTaskId, getWorkflowByChatId, listWorkflows) to include handler_config
-    - Integrated validation into save tool (`packages/agent/src/ai-tools/save.ts`) - validates on save and stores config
-    - Integrated validation into fix tool (`packages/agent/src/ai-tools/fix.ts`) - validates on fix and stores config
-    - Exported WorkflowConfig and ValidationResult types from agent package
-    - Updated test files to include handler_config column in table creation
-  - **Dependencies:** exec-04 ✓ DONE
-  - **Blocked by:** Nothing
+  - `packages/agent/src/workflow-validator.ts` with validateWorkflowScript() and zero-tool sandbox
+  - handler_config field added to Workflow; validation integrated into save and fix tools
+  - **Status:** COMPLETE
 
 ### Phase C: Execution Engine (Sequential)
 
 - [x] **[P3] exec-06: Handler State Machine** - [specs/exec-06-handler-state-machine.md](specs/exec-06-handler-state-machine.md)
-  - Implement unified executeHandler() function
-  - Producer state machine: pending → executing → committed|failed
-  - Consumer state machine: pending → preparing → prepared → mutating → mutated → emitting → committed
-  - Mutation handling with status tracking (pending, in_flight, applied, failed, indeterminate)
+  - `packages/agent/src/handler-state-machine.ts` with executeHandler() function
+  - Producer phases: pending -> executing -> committed|failed
+  - Consumer phases: pending -> preparing -> prepared -> mutating -> mutated -> emitting -> committed
   - Crash recovery with checkpoint-based resume
-  - Helper functions: failRun, suspendRun, savePrepareAndReserve, commitProducer, commitConsumer
-  - **Status:** COMPLETE - 100%
-  - **Current State:** Handler state machine fully implemented with producer and consumer phase transitions.
-  - **Implementation:**
-    - Created `packages/agent/src/handler-state-machine.ts` with `executeHandler()` function
-    - Producer phases: pending → executing → committed | failed
-    - Consumer phases: pending → preparing → prepared → mutating → mutated → emitting → committed
-    - Helper functions: `failRun()`, `suspendRun()`, `savePrepareAndReserve()`, `commitProducer()`, `commitConsumer()`
-    - Crash recovery with checkpoint-based resume using handler_runs table
-    - Mutation handling with complete status tracking
-    - Added `incrementHandlerCount()` method to `packages/db/src/script-store.ts`
-    - Exported executeHandler from `packages/agent/src/index.ts`
-  - **Dependencies:** exec-01 ✓ DONE, exec-04 ✓ DONE
-  - **Blocked by:** Nothing
+  - **Status:** COMPLETE
 
 - [x] **[P3] exec-07: Session Orchestration** - [specs/exec-07-session-orchestration.md](specs/exec-07-session-orchestration.md)
-  - Implement executeWorkflowSession() orchestration function
-  - Session container using script_runs with trigger types
+  - `packages/agent/src/session-orchestration.ts` with executeWorkflowSession() function
+  - Session container using script_runs with trigger types (schedule, webhook, manual)
   - Producer execution followed by consumer loop (max 100 iterations)
-  - findConsumerWithPendingWork() for work detection
-  - Session state functions: completeSession, failSession, suspendSession
-  - Recovery: resumeIncompleteSessions (app startup), continueSession
-  - Cost aggregation from handler runs
-  - **Status:** COMPLETE - 100%
-  - **Current State:** Session orchestration fully implemented with producer/consumer execution and crash recovery.
-  - **Implementation:**
-    - Created `packages/agent/src/session-orchestration.ts` with `executeWorkflowSession()` function
-    - Session container using script_runs table with trigger types (schedule, webhook, manual)
-    - Producer execution followed by consumer loop with 100 iteration budget
-    - `findConsumerWithPendingWork()` for detecting next consumer with work
-    - Session state functions: `completeSession()`, `failSession()`, `suspendSession()`
-    - Recovery functions: `resumeIncompleteSessions()` for app startup, `continueSession()` for resuming
-    - Cost aggregation from handler_runs table
-    - Exported session orchestration functions from `packages/agent/src/index.ts`
-  - **Dependencies:** exec-06 ✓ DONE
-  - **Blocked by:** Nothing
+  - Recovery functions: resumeIncompleteSessions(), continueSession()
+  - **Status:** COMPLETE
 
 ### Phase D: LLM Integration
 
 - [x] **[P4] exec-08: Planner Prompts** - [specs/exec-08-planner-prompts.md](specs/exec-08-planner-prompts.md)
-  - Update PLANNER_SYSTEM_PROMPT:
-    - Remove "Logical Items" section and Items.withItem() examples
-    - Add "Workflow Structure" section (topics, producers, consumers)
-    - Add "Phase Rules" section
-    - Add "Event Design" section (messageId, title guidelines)
-  - Update MAINTAINER_SYSTEM_PROMPT:
-    - Remove "Logical Item Constraints" section
-    - Add "Workflow Constraints" section
-  - Location: packages/agent/src/agent-env.ts
-  - **Status:** COMPLETE - 100%
-  - **Implementation:**
-    - Removed "Logical Items" section from PLANNER_SYSTEM_PROMPT
-    - Added "Workflow Structure" section explaining topics, producers, and consumers
-    - Added "Phase Rules" section with three-phase consumer execution (prepare → mutate → next)
-    - Added "Event Design" section with messageId uniqueness and title guidelines
-    - Added complete workflow example with topics, producer, and consumer
-    - Removed "Logical Item Constraints" section from MAINTAINER_SYSTEM_PROMPT
-    - Added "Workflow Constraints" section with phase rules and best practices
-  - **Files Modified:** `packages/agent/src/agent-env.ts` ✓ DONE
-  - **Dependencies:** exec-05 ✓ DONE
-  - **Blocked by:** Nothing
+  - Updated PLANNER_SYSTEM_PROMPT: removed "Logical Items", added "Workflow Structure", "Phase Rules", "Event Design"
+  - Updated MAINTAINER_SYSTEM_PROMPT: removed "Logical Item Constraints", added "Workflow Constraints"
+  - **Status:** COMPLETE
 
 - [x] **[P4] exec-09: Scheduler Integration** - [No spec file - integration work]
-  - Integrate executeWorkflowSession into WorkflowScheduler
-  - Add resumeIncompleteSessions() call on start()
-  - Add isNewFormatWorkflow() detection based on handler_config
-  - Add executeNewFormatWorkflow() for session-based execution
-  - Add handleSessionResult() for signal emission
-  - **Status:** COMPLETE - 100%
-  - **Implementation:**
-    - Modified `packages/agent/src/workflow-scheduler.ts`
-    - Added imports for session-orchestration and handler-state-machine types
-    - Made `start()` async and added `resumeIncompleteSessions()` call
-    - Added `createExecutionContext()` to build HandlerExecutionContext
-    - Added `isNewFormatWorkflow()` to detect new format via handler_config
-    - Added `executeNewFormatWorkflow()` to call executeWorkflowSessionIfIdle
-    - Added `handleSessionResult()` to emit signals based on session outcome
-    - In `processNextWorkflow()`, check workflow format and branch to appropriate execution path
-  - **Dependencies:** exec-07 ✓ DONE
-  - **Blocked by:** Nothing
+  - Integrated executeWorkflowSession into WorkflowScheduler
+  - Added resumeIncompleteSessions() call on start()
+  - New format detection via isNewFormatWorkflow() based on handler_config
+  - **Status:** COMPLETE
 
 ---
 
