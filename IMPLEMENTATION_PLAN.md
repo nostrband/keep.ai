@@ -4,7 +4,7 @@ This document tracks the implementation status of the new execution model refact
 
 **Last Updated:** 2026-02-03
 **Current Database Version:** v36
-**Overall Progress:** 4/8 core specs implemented
+**Overall Progress:** 5/8 core specs implemented
 
 ---
 
@@ -100,13 +100,21 @@ The codebase is transitioning from an **Items-based execution model** (`Items.wi
   - **Dependencies:** exec-02 ✓ DONE, exec-03 ✓ DONE
   - **Blocked by:** Nothing
 
-- [ ] **[P2] exec-04: Phase Tracking** - [specs/exec-04-phase-tracking.md](specs/exec-04-phase-tracking.md)
+- [x] **[P2] exec-04: Phase Tracking** - [specs/exec-04-phase-tracking.md](specs/exec-04-phase-tracking.md)
   - Add phase state management to ToolWrapper (currentPhase, mutationExecuted, currentMutation)
   - Implement phase restriction matrix enforcement
   - Add global variable injection (__state__, __prepared__, __mutationResult__)
   - Remove deprecated activeItem-based enforcement
-  - **Status:** NOT STARTED - 0% complete
-  - **Current State:** ToolWrapper now has basic phase tracking (setPhase, getPhase, checkPhaseAllowed from exec-03a). Needs phase restriction matrix enforcement and global variable injection.
+  - **Status:** COMPLETE - 100%
+  - **Current State:** ToolWrapper has full phase tracking with currentMutation support for the mutate phase.
+  - **Implementation:**
+    - Added `currentMutation: Mutation | null` tracking to ToolWrapper
+    - Added `setCurrentMutation()` method to set the mutation record for mutate phase
+    - Added `getCurrentMutation()` method for mutation tools to access the record
+    - Updated `setPhase()` to reset `currentMutation` when phase changes
+    - Phase restriction matrix and enforcement already existed from exec-03a
+    - Global variable injection (`__state__`, `__prepared__`, `__mutationResult__`) will be done by handler state machine (exec-06)
+  - **Files Modified:** `packages/agent/src/sandbox/tool-wrapper.ts` ✓ DONE
   - **Dependencies:** exec-03a ✓ DONE
   - **Blocked by:** Nothing
 
@@ -185,7 +193,7 @@ exec-02 (Deprecate Items) ✓ ─┼──────────┐           
                       exec-03a (Tool Migration) ✓                │
                              │                                   │
                              ▼                                   │
-                      exec-04 (Phase Tracking) ──────────────────┤
+                      exec-04 (Phase Tracking) ✓ ─────────────────┤
                              │                                   │
                              ▼                                   │
                       exec-05 (Script Validation)                │
@@ -288,7 +296,7 @@ packages/db/src/api.ts                     # ✓ DONE - Add new stores to KeepDb
 packages/db/src/item-store.ts              # ✓ DONE - Deprecated with @deprecated JSDoc
 packages/agent/src/tools/items-list.ts     # ✓ DONE - Deprecated with @deprecated JSDoc
 packages/agent/src/sandbox/api.ts          # ✓ DONE - Removed Items.withItem, added Topics, deprecated
-packages/agent/src/sandbox/tool-wrapper.ts # ✓ DONE - Removed Items.withItem, added phase tracking (setPhase, getPhase, checkPhaseAllowed)
+packages/agent/src/sandbox/tool-wrapper.ts # ✓ DONE - Removed Items.withItem, added phase tracking (setPhase, getPhase, checkPhaseAllowed), added currentMutation tracking (setCurrentMutation, getCurrentMutation)
 packages/agent/src/tools/index.ts          # ✓ DONE - Removed items-list, added topics
 packages/agent/src/workflow-worker.ts      # ✓ DONE - Uses ToolWrapper + createWorkflowTools
 packages/agent/src/task-worker.ts          # ✓ DONE - Uses ToolWrapper + createTaskTools

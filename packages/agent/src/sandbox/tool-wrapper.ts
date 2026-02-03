@@ -1,4 +1,4 @@
-import { KeepDbApi } from "@app/db";
+import { KeepDbApi, Mutation } from "@app/db";
 import { z, ZodFirstPartyTypeKind as K } from "zod";
 import { EvalContext, EvalGlobal } from "./sandbox";
 import debug from "debug";
@@ -93,6 +93,7 @@ export class ToolWrapper {
   // Phase tracking state (exec-03a/exec-04)
   private currentPhase: ExecutionPhase = null;
   private mutationExecuted: boolean = false;
+  private currentMutation: Mutation | null = null;
 
   constructor(config: ToolWrapperConfig) {
     this.tools = config.tools;
@@ -121,6 +122,7 @@ export class ToolWrapper {
   setPhase(phase: ExecutionPhase): void {
     this.currentPhase = phase;
     this.mutationExecuted = false;
+    this.currentMutation = null;
   }
 
   /**
@@ -128,6 +130,26 @@ export class ToolWrapper {
    */
   getPhase(): ExecutionPhase {
     return this.currentPhase;
+  }
+
+  /**
+   * Set the current mutation record for the mutate phase.
+   * Must be called before entering mutate phase to enable mutation tracking.
+   *
+   * @param mutation - The mutation record from the mutations table
+   */
+  setCurrentMutation(mutation: Mutation | null): void {
+    this.currentMutation = mutation;
+  }
+
+  /**
+   * Get the current mutation record.
+   * Used by mutation tools to record tool info before external calls.
+   *
+   * @returns The current mutation record, or null if not in mutate phase
+   */
+  getCurrentMutation(): Mutation | null {
+    return this.currentMutation;
   }
 
   /**
