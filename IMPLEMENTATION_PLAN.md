@@ -4,7 +4,7 @@ This document tracks the implementation status of the new execution model refact
 
 **Last Updated:** 2026-02-03
 **Current Database Version:** v36
-**Overall Progress:** 5/8 core specs implemented
+**Overall Progress:** 6/8 core specs implemented
 
 ---
 
@@ -118,16 +118,26 @@ The codebase is transitioning from an **Items-based execution model** (`Items.wi
   - **Dependencies:** exec-03a ✓ DONE
   - **Blocked by:** Nothing
 
-- [ ] **[P3] exec-05: Script Validation** - [specs/exec-05-script-validation.md](specs/exec-05-script-validation.md)
+- [x] **[P3] exec-05: Script Validation** - [specs/exec-05-script-validation.md](specs/exec-05-script-validation.md)
   - Create packages/agent/src/workflow-validator.ts
   - Implement validateWorkflowScript() with zero-tool sandbox
   - Extract WorkflowConfig from validated scripts
   - Add WorkflowStore.updateHandlerConfig() method
   - Integrate validation into save tool and fix tool
-  - **Status:** NOT STARTED - 0% complete
-  - **Current State:** No workflow-validator.ts file. No validation of workflow structure on save.
-  - **Dependencies:** exec-04
-  - **Blocked by:** exec-04
+  - **Status:** COMPLETE - 100%
+  - **Current State:** Workflow validation is fully implemented with zero-tool sandbox validation and handler_config persistence.
+  - **Implementation:**
+    - Created `packages/agent/src/workflow-validator.ts` with `validateWorkflowScript()` and `isWorkflowFormatScript()` functions
+    - Created zero-tool validation sandbox that throws errors for all tool calls
+    - Added `handler_config: string` field to Workflow interface in `packages/db/src/script-store.ts`
+    - Extended `updateWorkflowFields()` to support `handler_config` field
+    - Updated all workflow getters (getWorkflow, getWorkflowByTaskId, getWorkflowByChatId, listWorkflows) to include handler_config
+    - Integrated validation into save tool (`packages/agent/src/ai-tools/save.ts`) - validates on save and stores config
+    - Integrated validation into fix tool (`packages/agent/src/ai-tools/fix.ts`) - validates on fix and stores config
+    - Exported WorkflowConfig and ValidationResult types from agent package
+    - Updated test files to include handler_config column in table creation
+  - **Dependencies:** exec-04 ✓ DONE
+  - **Blocked by:** Nothing
 
 ### Phase C: Execution Engine (Sequential)
 
@@ -196,7 +206,7 @@ exec-02 (Deprecate Items) ✓ ─┼──────────┐           
                       exec-04 (Phase Tracking) ✓ ─────────────────┤
                              │                                   │
                              ▼                                   │
-                      exec-05 (Script Validation)                │
+                      exec-05 (Script Validation) ✓              │
                              │                                   │
                              ▼                                   │
                       exec-08 (Planner Prompts)                  │
@@ -282,7 +292,7 @@ packages/db/src/mutation-store.ts          # ✓ DONE - Mutation ledger
 packages/db/src/handler-state-store.ts     # ✓ DONE - Persistent handler state
 packages/agent/src/tools/topics.ts         # ✓ DONE - Topics.peek, getByIds, publish
 packages/agent/src/sandbox/tool-lists.ts   # ✓ DONE - createWorkflowTools, createTaskTools
-packages/agent/src/workflow-validator.ts   # Script structure validation
+packages/agent/src/workflow-validator.ts   # ✓ DONE - Script structure validation
 packages/agent/src/handler-state-machine.ts # executeHandler function
 packages/agent/src/session-orchestration.ts # executeWorkflowSession function
 ```
@@ -301,10 +311,10 @@ packages/agent/src/tools/index.ts          # ✓ DONE - Removed items-list, adde
 packages/agent/src/workflow-worker.ts      # ✓ DONE - Uses ToolWrapper + createWorkflowTools
 packages/agent/src/task-worker.ts          # ✓ DONE - Uses ToolWrapper + createTaskTools
 packages/agent/src/index.ts                # ✓ DONE - Exports ToolWrapper, tool-lists, ExecutionPhase, OperationType
-packages/db/src/script-store.ts            # Add updateHandlerConfig, workflow columns
+packages/db/src/script-store.ts            # ✓ DONE - Added handler_config field, updateWorkflowFields support
 packages/agent/src/agent-env.ts            # Update planner/maintainer prompts
-packages/agent/src/ai-tools/save.ts        # Integrate validation
-packages/agent/src/ai-tools/fix.ts         # Integrate validation
+packages/agent/src/ai-tools/save.ts        # ✓ DONE - Integrated validation
+packages/agent/src/ai-tools/fix.ts         # ✓ DONE - Integrated validation
 ```
 
 ---

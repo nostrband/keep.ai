@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { generateId, tool } from "ai";
 import { Script, ScriptStore } from "@app/db";
+import { validateWorkflowScript, isWorkflowFormatScript } from "../workflow-validator";
 
 const FixInfoSchema = z.object({
   code: z.string().describe("The complete fixed script code"),
@@ -43,6 +44,17 @@ export function makeFixTool(opts: {
 }) {
   return tool({
     execute: async (info: FixInfo): Promise<FixResult> => {
+      // Validate workflow script structure if it uses the new workflow format (exec-05)
+      // Old-format scripts (inline code) are not validated
+      let workflowConfig;
+      if (isWorkflowFormatScript(info.code)) {
+        const validation = await validateWorkflowScript(info.code);
+        if (!validation.valid) {
+          throw new Error(`Script validation failed: ${validation.error}`);
+        }
+        workflowConfig = validation.config;
+      }
+
       // Get workflow to find current active script
       const workflow = await opts.scriptStore.getWorkflow(opts.workflowId);
       if (!workflow) {
@@ -84,11 +96,16 @@ export function makeFixTool(opts: {
 
       if (shouldActivate) {
         // No race - make this fix the active script
-        await opts.scriptStore.updateWorkflowFields(opts.workflowId, {
+        // Also save handler_config if validation extracted it (exec-05)
+        const updates: { active_script_id: string; maintenance: boolean; next_run_timestamp: string; handler_config?: string } = {
           active_script_id: newScript.id,
           maintenance: false,
           next_run_timestamp: new Date().toISOString(),
-        });
+        };
+        if (workflowConfig) {
+          updates.handler_config = JSON.stringify(workflowConfig);
+        }
+        await opts.scriptStore.updateWorkflowFields(opts.workflowId, updates);
       } else {
         // Race detected - planner updated the script
         // Fix is saved but not activated; clear maintenance so planner's version runs

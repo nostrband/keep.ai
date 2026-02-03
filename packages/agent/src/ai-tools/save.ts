@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { generateId, tool } from "ai";
 import { Script, ScriptStore } from "@app/db";
+import { validateWorkflowScript, isWorkflowFormatScript } from "../workflow-validator";
 
 const SaveInfoSchema = z.object({
   code: z.string().describe("Script code to save"),
@@ -35,6 +36,17 @@ export function makeSaveTool(opts: {
 }) {
   return tool({
     execute: async (info: SaveInfo): Promise<SaveResult> => {
+      // Validate workflow script structure if it uses the new workflow format (exec-05)
+      // Old-format scripts (inline code) are not validated
+      if (isWorkflowFormatScript(info.code)) {
+        const validation = await validateWorkflowScript(info.code);
+        if (!validation.valid) {
+          throw new Error(`Script validation failed: ${validation.error}`);
+        }
+        // Config will be stored after script is saved
+        var workflowConfig = validation.config;
+      }
+
       const script = await opts.scriptStore.getLatestScriptByTaskId(
         opts.taskId
       );
@@ -82,23 +94,30 @@ export function makeSaveTool(opts: {
       // New script versions automatically become active
       // If workflow was draft (no script yet), transition to 'ready' (Spec 11)
       // Also update title if currently empty
+      // Also save handler_config if validation extracted it (exec-05)
       const shouldUpdateTitle = info.title && (!workflow.title || workflow.title.trim() === '');
 
       if (workflow.status === 'draft') {
-        const updates: { status: string; active_script_id: string; title?: string } = {
+        const updates: { status: string; active_script_id: string; title?: string; handler_config?: string } = {
           status: 'ready',
           active_script_id: newScript.id,
         };
         if (shouldUpdateTitle) {
           updates.title = info.title;
         }
+        if (workflowConfig) {
+          updates.handler_config = JSON.stringify(workflowConfig);
+        }
         await opts.scriptStore.updateWorkflowFields(workflow.id, updates);
       } else {
-        const updates: { active_script_id: string; title?: string } = {
+        const updates: { active_script_id: string; title?: string; handler_config?: string } = {
           active_script_id: newScript.id,
         };
         if (shouldUpdateTitle) {
           updates.title = info.title;
+        }
+        if (workflowConfig) {
+          updates.handler_config = JSON.stringify(workflowConfig);
         }
         await opts.scriptStore.updateWorkflowFields(workflow.id, updates);
       }

@@ -53,7 +53,8 @@ async function createFixToolTables(db: DBInterface): Promise<void> {
       next_run_timestamp TEXT NOT NULL DEFAULT '',
       maintenance INTEGER NOT NULL DEFAULT 0,
       maintenance_fix_count INTEGER NOT NULL DEFAULT 0,
-      active_script_id TEXT NOT NULL DEFAULT ''
+      active_script_id TEXT NOT NULL DEFAULT '',
+      handler_config TEXT NOT NULL DEFAULT ''
     )
   `);
   await db.exec(`CREATE INDEX IF NOT EXISTS idx_workflows_task_id ON workflows(task_id)`);
@@ -90,6 +91,7 @@ describe("Fix Tool", () => {
     maintenance: true,
     maintenance_fix_count: 1,
     active_script_id: "script-1",
+    handler_config: "",
     ...overrides,
   });
 

@@ -96,6 +96,9 @@ export { initSandbox } from "./sandbox/sandbox";
 export { ToolWrapper, type ToolWrapperConfig, type ExecutionPhase, type OperationType } from "./sandbox/tool-wrapper";
 export { createWorkflowTools, createTaskTools, type ToolListConfig } from "./sandbox/tool-lists";
 
+// Workflow validation (exec-05)
+export { validateWorkflowScript, isWorkflowFormatScript, type WorkflowConfig, type ValidationResult } from "./workflow-validator";
+
 /** @deprecated Use ToolWrapper from './sandbox/tool-wrapper' instead */
 export { SandboxAPI } from "./sandbox/api";
 
