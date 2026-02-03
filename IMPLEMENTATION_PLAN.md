@@ -10,14 +10,15 @@ This document tracks the implementation status of the new execution model refact
 
 ## Executive Summary
 
-> **COMPLETE** - The execution model refactor (exec-00 through exec-09) is fully implemented. Tagged as `v1.0.0-alpha.99`.
+> **COMPLETE** - The execution model refactor (exec-00 through exec-09) is fully implemented. Tagged as `v1.0.0-alpha.104`.
 
 The codebase has transitioned from an **Items-based execution model** (`Items.withItem()`) to a **Topics-based event-driven model** with structured producers/consumers and three-phase execution. This major architectural refactor affects the agent, database, and workflow execution systems.
 
 **Verification Status (2026-02-03):**
 - All tests pass: 875 tests total, 55 appropriately skipped
 - Build is clean with no errors
-- Codebase is stable at v1.0.0-alpha.99
+- Type-check passes with no errors
+- Codebase is stable at v1.0.0-alpha.104
 
 **Final State:**
 - All 9 core specs (exec-01 through exec-09) implemented and tested
@@ -155,12 +156,14 @@ exec-02 (Deprecate Items) ✓ ─┼──────────┐           
 - [ ] packages/sync/src/Peer.ts:788 - Transaction delivery reliability for change batches
 - [ ] packages/sync/src/nostr/stream/StreamWriter.ts:515 - Bandwidth threshold tuning
 
-### @ts-ignore Suppressions to Fix
+### @ts-ignore Suppressions (Third-Party Type Gaps)
 
-- apps/server/src/server.ts: lines 863, 2014
-- apps/web/src/db.ts: line 2
-- packages/agent/src/agent.ts: lines 277, 336, 359
-- packages/browser/src/startWorker.ts: line 74
+These suppressions are caused by incomplete type definitions in third-party libraries, not bugs in our code:
+
+- apps/server/src/server.ts: lines 863, 2014 - Fastify plugin type compatibility
+- apps/web/src/db.ts: line 2 - Vite WASM import with ?url query
+- packages/agent/src/agent.ts: lines 277, 336, 359 - AI SDK provider metadata types
+- packages/browser/src/startWorker.ts: line 74 - SharedWorker module option types
 
 ### Skipped Tests to Re-enable
 
