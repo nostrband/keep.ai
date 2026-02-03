@@ -12,6 +12,7 @@ export {
   makeAudioExplainTool,
   makeAtobTool,
   makeConsoleLogTool,
+  makeItemsListTool,
 } from "./tools";
 
 // AI tools (planner/maintainer specific)
@@ -54,6 +55,8 @@ export {
 export {
   TaskScheduler,
   type TaskSchedulerConfig,
+  selectTaskByPriority,
+  type TaskPriorityOptions,
 } from "./task-scheduler";
 
 export {
@@ -71,6 +74,10 @@ export {
 export {
   WorkflowWorker,
   type WorkflowWorkerConfig,
+  MAX_FIX_ATTEMPTS,
+  escalateToUser,
+  type EscalateToUserOptions,
+  type EscalateToUserResult,
 } from "./workflow-worker";
 
 export {

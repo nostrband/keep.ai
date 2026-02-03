@@ -22,7 +22,124 @@ import type { ConnectionManager } from "@app/connectors";
 
 // Maximum number of consecutive fix attempts before escalating to user (spec 09b)
 // After this many failed auto-fix attempts, the workflow is paused and user is notified.
-const MAX_FIX_ATTEMPTS = 3;
+export const MAX_FIX_ATTEMPTS = 3;
+
+/**
+ * Options for escalating a workflow to user attention.
+ */
+export interface EscalateToUserOptions {
+  workflow: Workflow;
+  scriptRunId: string;
+  error: ClassifiedError;
+  logs: string[];
+  fixAttempts: number;
+}
+
+/**
+ * Result of an escalation operation.
+ */
+export interface EscalateToUserResult {
+  success: boolean;
+  notificationCreated: boolean;
+  messageCreated: boolean;
+}
+
+/**
+ * Escalates a workflow to user after max fix attempts have been exceeded.
+ * This is an exported function for testability - WorkflowWorker calls this internally.
+ *
+ * This function:
+ * 1. Sets workflow status to "error" and clears maintenance
+ * 2. Resets fix count (gives user fresh attempts when re-enabled)
+ * 3. Creates an "escalated" notification
+ * 4. Sends a message to user's chat explaining the issue
+ *
+ * @param api - Database API for making changes
+ * @param options - Escalation options including workflow, error info, etc.
+ * @returns Result indicating what actions were taken
+ */
+export async function escalateToUser(
+  api: KeepDbApi,
+  options: EscalateToUserOptions
+): Promise<EscalateToUserResult> {
+  const { workflow, scriptRunId, error, logs, fixAttempts } = options;
+
+  const result: EscalateToUserResult = {
+    success: true,
+    notificationCreated: false,
+    messageCreated: false,
+  };
+
+  // 1. Set workflow to error status and reset fix count (gives user a fresh start)
+  await api.scriptStore.updateWorkflowFields(workflow.id, {
+    status: "error",
+    maintenance: false,
+    maintenance_fix_count: 0,
+  });
+
+  // 2. Create an "escalated" notification
+  try {
+    await api.notificationStore.saveNotification({
+      id: generateId(),
+      workflow_id: workflow.id,
+      type: "escalated",
+      payload: JSON.stringify({
+        script_run_id: scriptRunId,
+        error_type: error.type,
+        error_message: error.message,
+        fix_attempts: fixAttempts,
+        max_fix_attempts: MAX_FIX_ATTEMPTS,
+      }),
+      timestamp: new Date().toISOString(),
+      acknowledged_at: "",
+      resolved_at: "",
+      workflow_title: workflow.title,
+    });
+    result.notificationCreated = true;
+  } catch {
+    result.notificationCreated = false;
+  }
+
+  // 3. Send message to user's chat if we can find the task
+  if (workflow.task_id) {
+    try {
+      const task = await api.taskStore.getTask(workflow.task_id);
+      if (task?.chat_id) {
+        const recentLogs = logs.slice(-20).join("\n");
+        const escalationMessage = `**Automation Paused: Manual Intervention Required**
+
+I've tried to automatically fix this workflow ${fixAttempts} times, but the same issue keeps occurring. I've paused the automation to prevent further problems.
+
+**Error:** ${error.message}
+**Error Type:** ${error.type}
+
+**Recent Logs:**
+\`\`\`
+${recentLogs || "(no logs)"}
+\`\`\`
+
+**What you can do:**
+1. Review the error and logs above
+2. Check if there's a fundamental issue with the automation logic
+3. Update the script manually if needed
+4. Re-enable the automation when ready
+
+If you'd like me to try fixing it again, just ask and I'll give it another go with fresh context.`;
+
+        await api.addMessage({
+          chatId: task.chat_id,
+          content: escalationMessage,
+          role: "assistant",
+        });
+        result.messageCreated = true;
+      }
+    } catch {
+      result.messageCreated = false;
+    }
+  }
+
+  return result;
+}
 
 export interface WorkflowWorkerConfig {
   api: KeepDbApi;
@@ -160,7 +277,7 @@ export class WorkflowWorker {
       );
 
       // Inits JS API in the sandbox
-      await this.createEnv(workflow, sandbox, abortController);
+      await this.createEnv(workflow, sandbox, scriptRunId, abortController);
 
       // Run the code
       const result = await sandbox.eval(script.code, {
@@ -536,7 +653,7 @@ export class WorkflowWorker {
       this.debug(
         `Workflow ${workflow.id} has exceeded max fix attempts (${currentFixCount}/${MAX_FIX_ATTEMPTS}), escalating to user`
       );
-      await this.escalateToUser(workflow, script, scriptRunId, error, logs, currentFixCount);
+      await this.escalateToUserInternal(workflow, script, scriptRunId, error, logs, currentFixCount);
       return;
     }
 
@@ -562,98 +679,29 @@ export class WorkflowWorker {
   }
 
   /**
-   * Escalate a workflow to user after max fix attempts have been exceeded.
-   * This pauses the workflow and notifies the user that manual intervention is needed.
-   * Per spec 09b: "After N failed attempts, escalate to user and pause workflow"
+   * Internal wrapper for escalating a workflow to user.
+   * Delegates to the exported escalateToUser function and emits a signal.
    */
-  private async escalateToUser(
+  private async escalateToUserInternal(
     workflow: Workflow,
-    script: Script,
+    _script: Script,
     scriptRunId: string,
     error: ClassifiedError,
     logs: string[],
     fixAttempts: number
   ): Promise<void> {
-    // 1. Set workflow to error status and reset fix count (gives user a fresh start)
-    // Use updateWorkflowFields for atomic update to prevent overwriting concurrent changes
-    await this.api.scriptStore.updateWorkflowFields(workflow.id, {
-      status: "error",  // Changed from 'disabled' to 'error' (Spec 11)
-      maintenance: false, // Clear maintenance since we're not auto-fixing
-      maintenance_fix_count: 0, // Reset so user gets fresh fix attempts when re-enabled
+    // Use the exported function for the core escalation logic
+    const result = await escalateToUser(this.api, {
+      workflow,
+      scriptRunId,
+      error,
+      logs,
+      fixAttempts,
     });
-    this.debug(`Workflow ${workflow.id} set to error status due to repeated fix failures`);
 
-    // 2. Get the task and chat to notify user
-    if (!workflow.task_id) {
-      this.debug("No task_id for workflow, cannot notify user of escalation");
-      return;
-    }
+    this.debug(`Workflow ${workflow.id} escalated to user:`, result);
 
-    let task;
-    try {
-      task = await this.api.taskStore.getTask(workflow.task_id);
-    } catch (e) {
-      this.debug("Failed to get task for escalation:", e);
-      return;
-    }
-
-    // 3. Create a notification for the escalation (Spec 01)
-    try {
-      await this.api.notificationStore.saveNotification({
-        id: generateId(),
-        workflow_id: workflow.id,
-        type: 'escalated',
-        payload: JSON.stringify({
-          script_run_id: scriptRunId,
-          error_type: error.type,
-          error_message: error.message,
-          fix_attempts: fixAttempts,
-          max_fix_attempts: MAX_FIX_ATTEMPTS,
-        }),
-        timestamp: new Date().toISOString(),
-        acknowledged_at: '',
-        resolved_at: '',
-        workflow_title: workflow.title,
-      });
-    } catch (e) {
-      this.debug("Failed to save escalated notification:", e);
-    }
-
-    if (task.chat_id) {
-      // 4. Send a user-facing message explaining the escalation
-      const recentLogs = logs.slice(-20).join("\n");
-      const escalationMessage = `**Automation Paused: Manual Intervention Required**
-
-I've tried to automatically fix this workflow ${fixAttempts} times, but the same issue keeps occurring. I've paused the automation to prevent further problems.
-
-**Error:** ${error.message}
-**Error Type:** ${error.type}
-
-**Recent Logs:**
-\`\`\`
-${recentLogs || "(no logs)"}
-\`\`\`
-
-**What you can do:**
-1. Review the error and logs above
-2. Check if there's a fundamental issue with the automation logic
-3. Update the script manually if needed
-4. Re-enable the automation when ready
-
-If you'd like me to try fixing it again, just ask and I'll give it another go with fresh context.`;
-
-      try {
-        await this.api.addMessage({
-          chatId: task.chat_id,
-          content: escalationMessage,
-          role: "assistant",
-        });
-      } catch (e) {
-        this.debug("Failed to send escalation message:", e);
-      }
-    }
-
-    // 5. Emit a signal so scheduler knows this workflow needs attention
+    // Emit a signal so scheduler knows this workflow needs attention
     this.emitSignal({
       type: "needs_attention",
       workflowId: workflow.id,
@@ -664,7 +712,7 @@ If you'd like me to try fixing it again, just ask and I'll give it another go wi
     });
   }
 
-  private async createEnv(workflow: Workflow, sandbox: Sandbox, abortController?: AbortController) {
+  private async createEnv(workflow: Workflow, sandbox: Sandbox, scriptRunId: string, abortController?: AbortController) {
     // Create SandboxAPI directly without needing AgentEnv or dummy task
     const sandboxAPI = new SandboxAPI({
       api: this.api,
@@ -672,7 +720,8 @@ If you'd like me to try fixing it again, just ask and I'll give it another go wi
       getContext: () => sandbox.context!,
       userPath: this.userPath,
       connectionManager: this.connectionManager,
-      workflowId: workflow.id, // Enable pause checking during tool calls
+      workflowId: workflow.id, // Enable pause checking and item tracking
+      scriptRunId, // Enable item tracking
       abortController, // Enable fatal error abort for invalid input
     });
 

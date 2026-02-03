@@ -16,23 +16,12 @@ function createMockContext(): EvalContext {
   };
 }
 
-/**
- * Creates mock ToolCallOptions for testing.
- */
-function createToolCallOptions() {
-  return {
-    toolCallId: "test-call",
-    messages: [],
-    abortSignal: new AbortController().signal,
-  };
-}
-
 describe("Utility Tools", () => {
   describe("makeAtobTool", () => {
     it("should decode standard base64 string", async () => {
       const atobTool = makeAtobTool();
 
-      const result = await atobTool.execute!("SGVsbG8gV29ybGQ=", createToolCallOptions());
+      const result = await atobTool.execute!("SGVsbG8gV29ybGQ=");
 
       expect(result).toBe("Hello World");
     });
@@ -41,7 +30,7 @@ describe("Utility Tools", () => {
       const atobTool = makeAtobTool();
 
       // base64url uses - instead of + and _ instead of /
-      const result = await atobTool.execute!("SGVsbG8tV29ybGQ_", createToolCallOptions());
+      const result = await atobTool.execute!("SGVsbG8tV29ybGQ_");
 
       // The decoded result should work
       expect(typeof result).toBe("string");
@@ -51,7 +40,7 @@ describe("Utility Tools", () => {
       const atobTool = makeAtobTool();
 
       // "Hi" in base64 is "SGk=" but without padding would be "SGk"
-      const result = await atobTool.execute!("SGk", createToolCallOptions());
+      const result = await atobTool.execute!("SGk");
 
       expect(result).toBe("Hi");
     });
@@ -59,7 +48,7 @@ describe("Utility Tools", () => {
     it("should handle empty string", async () => {
       const atobTool = makeAtobTool();
 
-      const result = await atobTool.execute!("", createToolCallOptions());
+      const result = await atobTool.execute!("");
 
       expect(result).toBe("");
     });
@@ -67,7 +56,7 @@ describe("Utility Tools", () => {
     it("should handle whitespace in input", async () => {
       const atobTool = makeAtobTool();
 
-      const result = await atobTool.execute!("SGVs bG8g V29y bGQ=", createToolCallOptions());
+      const result = await atobTool.execute!("SGVs bG8g V29y bGQ=");
 
       expect(result).toBe("Hello World");
     });
@@ -75,14 +64,14 @@ describe("Utility Tools", () => {
     it("should throw error for invalid base64", async () => {
       const atobTool = makeAtobTool();
 
-      await expect(atobTool.execute!("!!!invalid!!!", createToolCallOptions())).rejects.toThrow();
+      await expect(atobTool.execute!("!!!invalid!!!")).rejects.toThrow();
     });
 
     it("should decode binary data", async () => {
       const atobTool = makeAtobTool();
 
       // Base64 for bytes [0, 255, 128]
-      const result = await atobTool.execute!("AP+A", createToolCallOptions());
+      const result = await atobTool.execute!("AP+A");
 
       expect((result as string).charCodeAt(0)).toBe(0);
       expect((result as string).charCodeAt(1)).toBe(255);
@@ -93,7 +82,7 @@ describe("Utility Tools", () => {
       const atobTool = makeAtobTool();
 
       // Standard base64 with + and / replaced with - and _
-      const result = await atobTool.execute!("YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXo", createToolCallOptions());
+      const result = await atobTool.execute!("YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXo");
 
       expect(result).toBe("abcdefghijklmnopqrstuvwxyz");
     });
@@ -113,9 +102,7 @@ describe("Utility Tools", () => {
         {
           type: "log",
           line: "Test message",
-        },
-        createToolCallOptions()
-      );
+        });
 
       expect(result).toEqual({ success: true });
       expect(mockContext.onLog).toHaveBeenCalled();
@@ -132,9 +119,7 @@ describe("Utility Tools", () => {
         {
           type: "warn",
           line: "Warning message",
-        },
-        createToolCallOptions()
-      );
+        });
 
       const loggedLine = (mockContext.onLog as any).mock.calls[0][0];
       expect(loggedLine).toContain("WARN:");
@@ -148,9 +133,7 @@ describe("Utility Tools", () => {
         {
           type: "error",
           line: "Error message",
-        },
-        createToolCallOptions()
-      );
+        });
 
       const loggedLine = (mockContext.onLog as any).mock.calls[0][0];
       expect(loggedLine).toContain("ERROR:");
@@ -164,9 +147,7 @@ describe("Utility Tools", () => {
         {
           type: "log",
           line: "Test",
-        },
-        createToolCallOptions()
-      );
+        });
 
       const loggedLine = (mockContext.onLog as any).mock.calls[0][0];
       // ISO timestamp format like [2024-01-15T10:30:00.000Z]
@@ -182,9 +163,7 @@ describe("Utility Tools", () => {
         {
           type: "log",
           line: longMessage,
-        },
-        createToolCallOptions()
-      );
+        });
 
       const loggedLine = (mockContext.onLog as any).mock.calls[0][0];
       // Should be truncated to ~1000 chars + "..." + formatting
@@ -199,9 +178,7 @@ describe("Utility Tools", () => {
         {
           type: "log",
           line: "",
-        },
-        createToolCallOptions()
-      );
+        });
 
       expect(result).toEqual({ success: true });
       expect(mockContext.onLog).toHaveBeenCalled();
@@ -217,9 +194,7 @@ describe("Utility Tools", () => {
           {
             type: "log",
             line: "It's a test with 'nested quotes'",
-          },
-          createToolCallOptions()
-        );
+          });
 
         expect(mockContext.onLog).toHaveBeenCalled();
         const loggedLine = (mockContext.onLog as any).mock.calls[0][0];
@@ -238,9 +213,7 @@ describe("Utility Tools", () => {
           {
             type: "log",
             line: "Line 1\nLine 2\nLine 3",
-          },
-          createToolCallOptions()
-        );
+          });
 
         expect(mockContext.onLog).toHaveBeenCalled();
         const loggedLine = (mockContext.onLog as any).mock.calls[0][0];
@@ -256,9 +229,7 @@ describe("Utility Tools", () => {
           {
             type: "log",
             line: "Column1\tColumn2\tColumn3",
-          },
-          createToolCallOptions()
-        );
+          });
 
         expect(mockContext.onLog).toHaveBeenCalled();
         const loggedLine = (mockContext.onLog as any).mock.calls[0][0];
@@ -274,9 +245,7 @@ describe("Utility Tools", () => {
           {
             type: "log",
             line: "Line 1\r\nLine 2",
-          },
-          createToolCallOptions()
-        );
+          });
 
         expect(mockContext.onLog).toHaveBeenCalled();
         const loggedLine = (mockContext.onLog as any).mock.calls[0][0];
@@ -292,9 +261,7 @@ describe("Utility Tools", () => {
           {
             type: "log",
             line: "Hello 世界 🌍 مرحبا",
-          },
-          createToolCallOptions()
-        );
+          });
 
         expect(mockContext.onLog).toHaveBeenCalled();
         const loggedLine = (mockContext.onLog as any).mock.calls[0][0];
@@ -310,9 +277,7 @@ describe("Utility Tools", () => {
           {
             type: "log",
             line: "Status: ✅ Success 🎉",
-          },
-          createToolCallOptions()
-        );
+          });
 
         expect(mockContext.onLog).toHaveBeenCalled();
         const loggedLine = (mockContext.onLog as any).mock.calls[0][0];
@@ -328,15 +293,13 @@ describe("Utility Tools", () => {
           {
             type: "log",
             line: "Path: C:\\Users\\test\\file.txt",
-          },
-          createToolCallOptions()
-        );
+          });
 
         expect(mockContext.onLog).toHaveBeenCalled();
         const loggedLine = (mockContext.onLog as any).mock.calls[0][0];
 
-        // Backslashes are passed through without escaping
-        expect(loggedLine).toContain("C:\\Users\\test\\file.txt");
+        // Backslashes are escaped to prevent ambiguity with quote escaping
+        expect(loggedLine).toContain("C:\\\\Users\\\\test\\\\file.txt");
       });
 
       it("should handle message containing double quotes", async () => {
@@ -346,9 +309,7 @@ describe("Utility Tools", () => {
           {
             type: "log",
             line: 'He said "hello" to me',
-          },
-          createToolCallOptions()
-        );
+          });
 
         expect(mockContext.onLog).toHaveBeenCalled();
         const loggedLine = (mockContext.onLog as any).mock.calls[0][0];
@@ -364,9 +325,7 @@ describe("Utility Tools", () => {
           {
             type: "log",
             line: "Before\0After",
-          },
-          createToolCallOptions()
-        );
+          });
 
         expect(mockContext.onLog).toHaveBeenCalled();
         const loggedLine = (mockContext.onLog as any).mock.calls[0][0];
@@ -382,9 +341,7 @@ describe("Utility Tools", () => {
           {
             type: "log",
             line: "!@#$%^&*()_+-=[]{}|;':\",./<>?`~",
-          },
-          createToolCallOptions()
-        );
+          });
 
         expect(mockContext.onLog).toHaveBeenCalled();
         const loggedLine = (mockContext.onLog as any).mock.calls[0][0];

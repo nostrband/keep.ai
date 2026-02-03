@@ -5,9 +5,19 @@
  */
 
 import createDebug from "debug";
+import { AuthError, NetworkError, classifyHttpError } from "@app/proto";
 import type { OAuthConfig, OAuthCredentials, TokenResponse } from "./types";
 
 const debug = createDebug("keep:connectors:oauth");
+
+/**
+ * Result of a token revocation attempt.
+ * Provides clear distinction between actual revocation and other outcomes.
+ */
+export type RevokeResult = {
+  success: boolean;
+  reason: "revoked" | "not_supported" | "failed";
+};
 
 export class OAuthHandler {
   constructor(
@@ -87,10 +97,12 @@ export class OAuthHandler {
     if (!response.ok) {
       const errorText = await response.text();
       debug("Token exchange failed: %s %s", response.status, errorText);
-      throw new OAuthError(
-        `Token exchange failed: ${response.status}`,
-        errorText
-      );
+      const errorCode = parseOAuthErrorCode(errorText);
+      const userMessage = getOAuthUserMessage(errorCode);
+      throw classifyHttpError(response.status, userMessage, {
+        source: "oauth.exchangeCode",
+        cause: new Error(`Token exchange failed: ${response.status} - ${errorText}`),
+      });
     }
 
     const data = (await response.json()) as TokenResponse;
@@ -133,10 +145,12 @@ export class OAuthHandler {
     if (!response.ok) {
       const errorText = await response.text();
       debug("Token refresh failed: %s %s", response.status, errorText);
-      throw new OAuthError(
-        `Token refresh failed: ${response.status}`,
-        errorText
-      );
+      const errorCode = parseOAuthErrorCode(errorText);
+      const userMessage = getOAuthUserMessage(errorCode);
+      throw classifyHttpError(response.status, userMessage, {
+        source: "oauth.refreshToken",
+        cause: new Error(`Token refresh failed: ${response.status} - ${errorText}`),
+      });
     }
 
     const data = (await response.json()) as TokenResponse;
@@ -146,14 +160,13 @@ export class OAuthHandler {
 
   /**
    * Revoke an access token at the OAuth provider.
-   * Returns true if revocation succeeded or was not needed.
-   * Returns false if revocation failed (token will remain valid at provider).
-   * Best-effort: failures don't throw, just return false.
+   * Returns result indicating what happened (revoked, not_supported, or failed).
+   * Best-effort: failures don't throw, just return { success: false, reason: "failed" }.
    */
-  async revokeToken(accessToken: string): Promise<boolean> {
+  async revokeToken(accessToken: string): Promise<RevokeResult> {
     if (!this.config.revokeUrl) {
       debug("No revoke URL configured, skipping token revocation");
-      return true; // Not an error, just not supported
+      return { success: true, reason: "not_supported" };
     }
 
     debug("Revoking access token");
@@ -163,9 +176,22 @@ export class OAuthHandler {
         token: accessToken,
       });
 
+      // Include client credentials matching the pattern used in exchangeCode
+      // For Basic auth (Notion), credentials go in header
+      // For standard OAuth2 (Google), credentials go in body
       const headers: Record<string, string> = {
         "Content-Type": "application/x-www-form-urlencoded",
       };
+
+      if (this.config.useBasicAuth) {
+        const basicAuth = Buffer.from(
+          `${this.clientId}:${this.clientSecret}`
+        ).toString("base64");
+        headers["Authorization"] = `Basic ${basicAuth}`;
+      } else {
+        body.set("client_id", this.clientId);
+        body.set("client_secret", this.clientSecret);
+      }
 
       const response = await fetch(this.config.revokeUrl, {
         method: "POST",
@@ -176,17 +202,17 @@ export class OAuthHandler {
       // Google returns 200 on success, even for already-revoked tokens
       if (response.ok) {
         debug("Token revocation successful");
-        return true;
+        return { success: true, reason: "revoked" };
       }
 
       // Non-2xx response - revocation failed but we should continue with disconnect
       const errorText = await response.text();
       debug("Token revocation failed: %s %s", response.status, errorText);
-      return false;
+      return { success: false, reason: "failed" };
     } catch (error) {
       // Network error - log and continue with disconnect
       debug("Token revocation error: %s", error);
-      return false;
+      return { success: false, reason: "failed" };
     }
   }
 }
@@ -266,8 +292,33 @@ const DEFAULT_OAUTH_ERROR_MESSAGE =
   "An authentication error occurred. Please try connecting again.";
 
 /**
+ * Parse OAuth error code from response body.
+ * @internal
+ */
+function parseOAuthErrorCode(responseBody: string): string | undefined {
+  try {
+    const data = JSON.parse(responseBody);
+    return data.error;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Get user-friendly message for OAuth error code.
+ * @internal
+ */
+function getOAuthUserMessage(errorCode: string | undefined): string {
+  if (errorCode && OAUTH_ERROR_MESSAGES[errorCode]) {
+    return OAUTH_ERROR_MESSAGES[errorCode];
+  }
+  return DEFAULT_OAUTH_ERROR_MESSAGE;
+}
+
+/**
  * OAuth-specific error with response details.
- * Stores error code for logging but provides sanitized messages for users.
+ * @deprecated Use ClassifiedError from @app/proto instead.
+ * Kept for backward compatibility with code that catches OAuthError.
  */
 export class OAuthError extends Error {
   public readonly errorCode?: string;

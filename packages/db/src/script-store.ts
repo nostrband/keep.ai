@@ -749,15 +749,11 @@ export class ScriptStore {
   }
 
   // Increment the maintenance fix count for a workflow (when entering maintenance mode)
+  // Uses RETURNING for atomicity - prevents TOCTOU race between UPDATE and SELECT
   async incrementMaintenanceFixCount(workflowId: string, tx?: DBInterface): Promise<number> {
     const db = tx || this.db.db;
-    await db.exec(
-      `UPDATE workflows SET maintenance_fix_count = maintenance_fix_count + 1 WHERE id = ?`,
-      [workflowId]
-    );
-    // Return the new count
-    const result = await (tx || this.db.db).execO<{ maintenance_fix_count: number }>(
-      `SELECT maintenance_fix_count FROM workflows WHERE id = ?`,
+    const result = await db.execO<{ maintenance_fix_count: number }>(
+      `UPDATE workflows SET maintenance_fix_count = maintenance_fix_count + 1 WHERE id = ? RETURNING maintenance_fix_count`,
       [workflowId]
     );
     return result && result.length > 0 ? result[0].maintenance_fix_count : 0;
@@ -872,18 +868,21 @@ export class ScriptStore {
     const now = new Date();
 
     // Single query to get drafts with their last activity and related data
-    // Uses MAX() across all activity sources to find true most recent activity
-    // Note: COALESCE picks first non-null which is wrong - we need the max across all
+    // Uses CASE expression to find the maximum timestamp across all activity sources
     // Note: Uses chat_messages table per Spec 12
     const results = await this.db.db.execO<Record<string, unknown>>(
       `SELECT
         w.id, w.title, w.task_id, w.chat_id, w.timestamp, w.cron, w.events, w.status,
         w.next_run_timestamp, w.maintenance, w.maintenance_fix_count, w.active_script_id,
-        MAX(
-          COALESCE(MAX(cm.timestamp), w.timestamp),
-          COALESCE(MAX(s.timestamp), w.timestamp),
-          w.timestamp
-        ) as last_activity,
+        CASE
+          WHEN MAX(cm.timestamp) IS NOT NULL
+               AND MAX(cm.timestamp) > COALESCE(MAX(s.timestamp), w.timestamp)
+            THEN MAX(cm.timestamp)
+          WHEN MAX(s.timestamp) IS NOT NULL
+               AND MAX(s.timestamp) > w.timestamp
+            THEN MAX(s.timestamp)
+          ELSE w.timestamp
+        END as last_activity,
         MAX(s.id IS NOT NULL) as has_script,
         t.state as task_state
       FROM workflows w
@@ -954,17 +953,20 @@ export class ScriptStore {
     archiveThreshold.setDate(archiveThreshold.getDate() - DRAFT_THRESHOLDS.ARCHIVE_DAYS);
 
     // Get all drafts with their last activity in one query
-    // Uses MAX() across all activity sources to find true most recent activity
-    // Note: COALESCE picks first non-null which is wrong - we need the max across all
+    // Uses CASE expression to find the maximum timestamp across all activity sources
     // Note: Uses chat_messages table per Spec 12
     const results = await this.db.db.execO<Record<string, unknown>>(
       `SELECT
         w.id,
-        MAX(
-          COALESCE(MAX(cm.timestamp), w.timestamp),
-          COALESCE(MAX(s.timestamp), w.timestamp),
-          w.timestamp
-        ) as last_activity,
+        CASE
+          WHEN MAX(cm.timestamp) IS NOT NULL
+               AND MAX(cm.timestamp) > COALESCE(MAX(s.timestamp), w.timestamp)
+            THEN MAX(cm.timestamp)
+          WHEN MAX(s.timestamp) IS NOT NULL
+               AND MAX(s.timestamp) > w.timestamp
+            THEN MAX(s.timestamp)
+          ELSE w.timestamp
+        END as last_activity,
         t.state as task_state
       FROM workflows w
       LEFT JOIN chat_messages cm ON cm.chat_id = w.chat_id
@@ -1003,10 +1005,9 @@ export class ScriptStore {
       }
 
       // Count archivable (30+ days), abandoned (7-30 days), and stale (3-7 days)
-      // Note: archivable is a subset of abandoned in terms of age, but we count separately
+      // Categories are mutually exclusive age brackets
       if (lastActivity < archiveTimestamp) {
         archivableDrafts++;
-        abandonedDrafts++; // Also counts as abandoned for backward compatibility
       } else if (lastActivity < abandonedTimestamp) {
         abandonedDrafts++;
       } else if (lastActivity < staleTimestamp) {

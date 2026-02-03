@@ -1,36 +1,52 @@
 import { z } from "zod";
-import { tool } from "ai";
 import { ScriptStore } from "@app/db";
 import { EvalContext } from "../sandbox/sandbox";
+import { defineReadOnlyTool, Tool } from "./types";
 
+const inputSchema = z
+  .object({
+    id: z
+      .string()
+      .optional()
+      .describe(
+        "Script ID (optional, defaults to latest script version for current task)"
+      ),
+  })
+  .optional()
+  .nullable();
+
+const outputSchema = z
+  .object({
+    id: z.string(),
+    task_id: z.string(),
+    version: z.string(), // Format: "major.minor" e.g., "2.1"
+    timestamp: z.string(),
+    code: z.string(),
+    change_comment: z.string(),
+  })
+  .nullable();
+
+type Input = z.infer<typeof inputSchema>;
+type Output = z.infer<typeof outputSchema>;
+
+/**
+ * Create the Scripts.get tool.
+ * This is a read-only tool - can be used outside Items.withItem().
+ * Only available during planning/maintenance.
+ */
 export function makeGetScriptTool(
   scriptStore: ScriptStore,
   getContext: () => EvalContext
-) {
-  return tool({
-    description:
-      "Get a script by ID, or get the latest script for current task if no ID provided",
-    inputSchema: z
-      .object({
-        id: z
-          .string()
-          .optional()
-          .describe(
-            "Script ID (optional, defaults to latest script version for current task)"
-          ),
-      })
-      .optional()
-      .nullable(),
-    outputSchema: z
-      .object({
-        id: z.string(),
-        task_id: z.string(),
-        version: z.string(), // Format: "major.minor" e.g., "2.1"
-        timestamp: z.string(),
-        code: z.string(),
-        change_comment: z.string(),
-      })
-      .nullable(),
+): Tool<Input, Output> {
+  return defineReadOnlyTool({
+    namespace: "Scripts",
+    name: "get",
+    description: `Get a script by ID, or get the latest script for current task if no ID provided.
+
+⚠️ This tool is only available during planning/maintenance. Do not use in production scripts.
+ℹ️ Not a mutation - can be used outside Items.withItem().`,
+    inputSchema,
+    outputSchema,
     execute: async (input) => {
       const id = input?.id;
 
@@ -70,5 +86,5 @@ export function makeGetScriptTool(
         change_comment: script.change_comment,
       };
     },
-  });
+  }) as Tool<Input, Output>;
 }

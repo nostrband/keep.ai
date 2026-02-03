@@ -43,17 +43,6 @@ function createMockContext(): EvalContext {
   };
 }
 
-/**
- * Creates mock ToolCallOptions for testing.
- */
-function createToolCallOptions() {
-  return {
-    toolCallId: "test-call",
-    messages: [],
-    abortSignal: new AbortController().signal,
-  };
-}
-
 // Types for search/list results
 type NoteMetadata = {
   id: string;
@@ -100,9 +89,7 @@ describe("Note Tools", () => {
           content: "This is test content",
           tags: ["test", "example"],
           priority: "high",
-        },
-        createToolCallOptions()
-      );
+        });
 
       expect(result).toBe("test-note-1");
 
@@ -131,9 +118,7 @@ describe("Note Tools", () => {
           content: "Content here",
           tags: null,
           priority: null,
-        },
-        createToolCallOptions()
-      );
+        });
 
       const note = await noteStore.getNote("default-note");
       expect(note?.tags).toEqual([]);
@@ -151,9 +136,7 @@ describe("Note Tools", () => {
           content: "Content",
           tags: null,
           priority: null,
-        },
-        createToolCallOptions()
-      );
+        });
 
       // Empty string or generated ID both count as success
       expect(typeof result).toBe("string");
@@ -173,9 +156,7 @@ describe("Note Tools", () => {
             content: largeContent,
             tags: null,
             priority: null,
-          },
-          createToolCallOptions()
-        )
+          })
       ).rejects.toThrow("Note size exceeds 50KB limit");
     });
 
@@ -195,9 +176,7 @@ describe("Note Tools", () => {
             content: "Content",
             tags: null,
             priority: null,
-          },
-          createToolCallOptions()
-        )
+          })
       ).rejects.toThrow("Maximum number of notes (500) reached");
     });
   });
@@ -214,9 +193,7 @@ describe("Note Tools", () => {
           content: null,
           tags: null,
           priority: null,
-        },
-        createToolCallOptions()
-      );
+        });
 
       expect(result).toBe("update-test");
 
@@ -236,9 +213,7 @@ describe("Note Tools", () => {
           content: "Updated Content",
           tags: null,
           priority: null,
-        },
-        createToolCallOptions()
-      );
+        });
 
       const note = await noteStore.getNote("content-test");
       expect(note?.content).toBe("Updated Content");
@@ -255,9 +230,7 @@ describe("Note Tools", () => {
           content: null,
           tags: ["new", "tags"],
           priority: null,
-        },
-        createToolCallOptions()
-      );
+        });
 
       const note = await noteStore.getNote("tags-test");
       expect(note?.tags).toEqual(["new", "tags"]);
@@ -274,9 +247,7 @@ describe("Note Tools", () => {
           content: null,
           tags: null,
           priority: "high",
-        },
-        createToolCallOptions()
-      );
+        });
 
       const note = await noteStore.getNote("priority-test");
       expect(note?.priority).toBe("high");
@@ -294,9 +265,7 @@ describe("Note Tools", () => {
             content: null,
             tags: null,
             priority: null,
-          },
-          createToolCallOptions()
-        )
+          })
       ).rejects.toThrow("No updates provided");
     });
 
@@ -311,9 +280,7 @@ describe("Note Tools", () => {
             content: null,
             tags: null,
             priority: null,
-          },
-          createToolCallOptions()
-        )
+          })
       ).rejects.toThrow("Note not found");
     });
   });
@@ -323,8 +290,8 @@ describe("Note Tools", () => {
       await noteStore.createNote("Title", "Content", [], "low", "delete-me");
       const deleteNoteTool = makeDeleteNoteTool(noteStore, () => mockContext);
 
-      // deleteNoteTool takes a string (the ID) as input
-      await deleteNoteTool.execute!("delete-me", createToolCallOptions());
+      // deleteNoteTool now takes an object with id
+      await deleteNoteTool.execute({ id: "delete-me" });
 
       const note = await noteStore.getNote("delete-me");
       expect(note).toBeNull();
@@ -333,13 +300,13 @@ describe("Note Tools", () => {
     it("should throw error for non-existent note", async () => {
       const deleteNoteTool = makeDeleteNoteTool(noteStore, () => mockContext);
 
-      await expect(deleteNoteTool.execute!("non-existent", createToolCallOptions())).rejects.toThrow("Note not found");
+      await expect(deleteNoteTool.execute({ id: "non-existent" })).rejects.toThrow("Note not found");
     });
 
     it("should throw error for empty id", async () => {
       const deleteNoteTool = makeDeleteNoteTool(noteStore, () => mockContext);
 
-      await expect(deleteNoteTool.execute!("", createToolCallOptions())).rejects.toThrow("Specify note id");
+      await expect(deleteNoteTool.execute({ id: "" })).rejects.toThrow("Specify note id");
     });
   });
 
@@ -348,8 +315,8 @@ describe("Note Tools", () => {
       await noteStore.createNote("My Title", "My Content", ["tag1"], "medium", "get-me");
       const getNoteTool = makeGetNoteTool(noteStore);
 
-      // getNoteTool takes a string (the ID) as input
-      const result = await getNoteTool.execute!("get-me", createToolCallOptions());
+      // getNoteTool now takes an object with id
+      const result = await getNoteTool.execute({ id: "get-me" });
 
       expect(result).toMatchObject({
         id: "get-me",
@@ -363,13 +330,13 @@ describe("Note Tools", () => {
     it("should throw error for non-existent note", async () => {
       const getNoteTool = makeGetNoteTool(noteStore);
 
-      await expect(getNoteTool.execute!("non-existent", createToolCallOptions())).rejects.toThrow("Note not found");
+      await expect(getNoteTool.execute({ id: "non-existent" })).rejects.toThrow("Note not found");
     });
 
     it("should throw error for empty id", async () => {
       const getNoteTool = makeGetNoteTool(noteStore);
 
-      await expect(getNoteTool.execute!("", createToolCallOptions())).rejects.toThrow("Param 'id' required");
+      await expect(getNoteTool.execute({ id: "" })).rejects.toThrow("Param 'id' required");
     });
   });
 
@@ -385,9 +352,8 @@ describe("Note Tools", () => {
     it("should list all notes with metadata", async () => {
       const listNotesTool = makeListNotesTool(noteStore);
 
-      const result = (await listNotesTool.execute!(
-        { priority: null, limit: null, offset: null },
-        createToolCallOptions()
+      const result = (await listNotesTool.execute(
+        { priority: null, limit: null, offset: null }
       )) as NoteMetadata[];
 
       expect(result).toHaveLength(4);
@@ -400,9 +366,8 @@ describe("Note Tools", () => {
     it("should filter notes by priority", async () => {
       const listNotesTool = makeListNotesTool(noteStore);
 
-      const result = (await listNotesTool.execute!(
-        { priority: "high", limit: null, offset: null },
-        createToolCallOptions()
+      const result = (await listNotesTool.execute(
+        { priority: "high", limit: null, offset: null }
       )) as NoteMetadata[];
 
       expect(result).toHaveLength(2);
@@ -412,18 +377,17 @@ describe("Note Tools", () => {
     it("should paginate results with limit and offset", async () => {
       const listNotesTool = makeListNotesTool(noteStore);
 
-      const result = (await listNotesTool.execute!(
-        { priority: null, limit: 2, offset: 1 },
-        createToolCallOptions()
+      const result = (await listNotesTool.execute(
+        { priority: null, limit: 2, offset: 1 }
       )) as NoteMetadata[];
 
       expect(result).toHaveLength(2);
     });
 
-    it("should handle null/undefined input", async () => {
+    it("should handle empty object input", async () => {
       const listNotesTool = makeListNotesTool(noteStore);
 
-      const result = (await listNotesTool.execute!(null, createToolCallOptions())) as NoteMetadata[];
+      const result = (await listNotesTool.execute!({})) as NoteMetadata[];
 
       expect(result).toHaveLength(4);
     });
@@ -439,9 +403,8 @@ describe("Note Tools", () => {
     it("should search notes by keyword", async () => {
       const searchNotesTool = makeSearchNotesTool(noteStore);
 
-      const result = (await searchNotesTool.execute!(
-        { keywords: ["eggs"], tags: null, regexp: null },
-        createToolCallOptions()
+      const result = (await searchNotesTool.execute(
+        { keywords: ["eggs"], tags: null, regexp: null }
       )) as SearchResult[];
 
       expect(result).toHaveLength(2);
@@ -449,12 +412,13 @@ describe("Note Tools", () => {
       expect(result.some((n) => n.id === "note-3")).toBe(true);
     });
 
-    it("should search notes by string input", async () => {
+    it("should search notes by multiple keywords", async () => {
       const searchNotesTool = makeSearchNotesTool(noteStore);
 
-      // The tool accepts a string that gets split into keywords
       // The search uses OR logic - any keyword match returns the note
-      const result = (await searchNotesTool.execute!("eggs milk", createToolCallOptions())) as SearchResult[];
+      const result = (await searchNotesTool.execute(
+        { keywords: ["eggs", "milk"], tags: null, regexp: null }
+      )) as SearchResult[];
 
       // Both note-1 (has "eggs" and "milk") and note-3 (has "eggs") should match
       expect(result).toHaveLength(2);
@@ -465,9 +429,8 @@ describe("Note Tools", () => {
     it("should search notes by tag", async () => {
       const searchNotesTool = makeSearchNotesTool(noteStore);
 
-      const result = (await searchNotesTool.execute!(
-        { keywords: null, tags: ["work"], regexp: null },
-        createToolCallOptions()
+      const result = (await searchNotesTool.execute(
+        { keywords: null, tags: ["work"], regexp: null }
       )) as SearchResult[];
 
       expect(result).toHaveLength(1);
@@ -477,9 +440,8 @@ describe("Note Tools", () => {
     it("should search notes by regex", async () => {
       const searchNotesTool = makeSearchNotesTool(noteStore);
 
-      const result = (await searchNotesTool.execute!(
-        { keywords: null, tags: null, regexp: "\\bFriday\\b" },
-        createToolCallOptions()
+      const result = (await searchNotesTool.execute(
+        { keywords: null, tags: null, regexp: "\\bFriday\\b" }
       )) as SearchResult[];
 
       expect(result).toHaveLength(1);
@@ -490,13 +452,12 @@ describe("Note Tools", () => {
       const searchNotesTool = makeSearchNotesTool(noteStore);
 
       // Search for notes with "eggs" in a cooking tag
-      const result = (await searchNotesTool.execute!(
+      const result = (await searchNotesTool.execute(
         {
           keywords: ["eggs"],
           tags: ["cooking"],
           regexp: null,
-        },
-        createToolCallOptions()
+        }
       )) as SearchResult[];
 
       expect(result).toHaveLength(1);
@@ -506,9 +467,8 @@ describe("Note Tools", () => {
     it("should return empty array when no matches", async () => {
       const searchNotesTool = makeSearchNotesTool(noteStore);
 
-      const result = (await searchNotesTool.execute!(
-        { keywords: ["xyz123"], tags: null, regexp: null },
-        createToolCallOptions()
+      const result = (await searchNotesTool.execute(
+        { keywords: ["xyz123"], tags: null, regexp: null }
       )) as SearchResult[];
 
       expect(result).toHaveLength(0);
@@ -518,9 +478,8 @@ describe("Note Tools", () => {
       const searchNotesTool = makeSearchNotesTool(noteStore);
 
       await expect(
-        searchNotesTool.execute!(
-          { keywords: null, tags: null, regexp: "[invalid" },
-          createToolCallOptions()
+        searchNotesTool.execute(
+          { keywords: null, tags: null, regexp: "[invalid" }
         )
       ).rejects.toThrow("Invalid regular expression");
     });
@@ -530,9 +489,7 @@ describe("Note Tools", () => {
 
       await expect(
         searchNotesTool.execute!(
-          { keywords: null, tags: null, regexp: null },
-          createToolCallOptions()
-        )
+          { keywords: null, tags: null, regexp: null })
       ).rejects.toThrow("At least one search criteria must be provided");
     });
 
@@ -540,9 +497,7 @@ describe("Note Tools", () => {
       const searchNotesTool = makeSearchNotesTool(noteStore);
 
       const result = (await searchNotesTool.execute!(
-        { keywords: ["pancakes"], tags: null, regexp: null },
-        createToolCallOptions()
-      )) as SearchResult[];
+        { keywords: ["pancakes"], tags: null, regexp: null })) as SearchResult[];
 
       expect(result).toHaveLength(1);
       expect(result[0].snippet).toBeDefined();

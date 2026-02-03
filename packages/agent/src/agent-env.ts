@@ -460,6 +460,74 @@ Do not use heuristics to interpret or extract data from free-form text,
 use Text.* tools for that. Use regexp for these cases only if 100% sure
 that input format will stay consistent.
 
+## Logical Items
+
+Scripts must process work in discrete logical items using \`Items.withItem()\`:
+
+\`\`\`javascript
+for (const email of emails) {
+  await Items.withItem(
+    \`email:\${email.id}\`,  // Stable ID based on external identifier
+    \`Email from \${email.from}: "\${email.subject}"\`,  // Human-readable title
+    async (ctx) => {
+      // Check if already processed
+      if (ctx.item.isDone) {
+        Console.log({ type: 'log', line: \`Skipping already processed: \${ctx.item.title}\` });
+        return;
+      }
+
+      // Process the item
+      await Gmail.api({ method: 'users.messages.modify', ... });
+    }
+  );
+}
+\`\`\`
+
+### Logical Item ID Requirements
+
+IDs must be:
+- **Stable**: Same entity → same ID every time
+- **Based on external identifiers**: Use \`email.id\`, \`invoice.number\`, etc.
+- **Independent of volatile data**: No timestamps, counters, or array indices
+
+Good: \`email:\${messageId}\`, \`invoice:\${invoiceNumber}\`, \`order:\${orderId}|item:\${lineItemId}\`
+Bad: \`email:\${index}\`, \`item-\${Date.now()}\`, \`record-\${hash(fullObject)}\`
+
+### Logical Item Title Requirements
+
+Titles must:
+- Include a stable external identifier
+- Include a human-recognizable descriptor
+- Describe what the item IS, not how it's processed
+
+Good: \`Email from alice@example.com: "Invoice December"\`
+Bad: \`Processing item\`, \`Email #5\`, \`Invoice updated at 2024-01-19\`
+
+### Checking Progress with Items.list
+
+Use Items.list to check processed items and resume from where you left off:
+
+\`\`\`javascript
+// Check if a specific item was already processed
+const existing = await Items.list({ logical_item_id: \`email:\${email.id}\` });
+if (existing.items.some(i => i.status === 'done')) {
+  Console.log({ type: 'log', line: \`Skipping \${email.id} - already done\` });
+  continue;
+}
+
+// Get count of completed items for progress reporting
+const progress = await Items.list({ status: 'done', limit: 1 });
+Console.log({ type: 'log', line: \`Processed \${progress.total} items so far\` });
+\`\`\`
+
+### Logical Items Rules
+
+1. All mutations MUST be inside Items.withItem() - mutations outside will abort the script
+2. Only ONE Items.withItem can be active at a time - no nesting or parallel withItem calls
+3. Always check ctx.item.isDone before mutations to skip already-completed items, attempting a mutation on a done item will abort the script
+4. Items must be independent - processing one must not depend on another's outcome
+5. Use Items.list to check progress or resume from a known position
+
 ## Input format
 - You'll be given script goal and other input from the user
 
@@ -551,6 +619,28 @@ Your fix MUST NOT:
 - Modify schedules, triggers, or metadata
 - Relax error handling in ways that hide problems
 - Change output and side-effect data formats
+
+## Logical Item Constraints
+
+When repairing scripts, you MUST NOT modify:
+- Logical item ID construction (the first argument to withItem)
+- The structure or components of item IDs
+
+You MAY modify:
+- Item titles (second argument) for better readability
+- Handler logic inside withItem
+- Control flow around withItem calls
+
+If a fix requires changing the logical item ID format, this is NOT a repair -
+it requires re-planning. Fail explicitly with: "Cannot repair: would change logical item identity" and explain why.
+
+### Logical Items Rules
+
+1. All mutations MUST be inside Items.withItem() - mutations outside will abort the script
+2. Only ONE Items.withItem can be active at a time - no nesting or parallel withItem calls
+3. Always check ctx.item.isDone before mutations to skip already-completed items, attempting a mutation on a done item will abort the script
+4. Items must be independent - processing one must not depend on another's outcome
+5. Use Items.list to check progress or resume from a known position
 
 ## If You Cannot Fix It
 

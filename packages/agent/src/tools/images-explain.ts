@@ -1,49 +1,64 @@
 import { z } from "zod";
-import { tool } from "ai";
 import { FileStore } from "@app/db";
 import { EvalContext } from "../sandbox/sandbox";
 import { getEnv } from "../env";
 import { fileUtils } from "@app/node";
 import debug from "debug";
 import { AuthError, LogicError, NetworkError, PermissionError, classifyHttpError, classifyGenericError, isClassifiedError, formatUsageForEvent } from "../errors";
+import { defineReadOnlyTool, Tool } from "./types";
 
 const debugImgExplain = debug("ImagesExplain");
 
+const inputSchema = z.object({
+  file_path: z
+    .string()
+    .min(1)
+    .describe("File path of the image to analyze"),
+  question: z
+    .string()
+    .min(1)
+    .max(2000)
+    .describe(
+      "Question or prompt about the image - what you want to know or understand about the image"
+    ),
+});
+
+const outputSchema = z.object({
+  explanation: z
+    .string()
+    .describe("AI-generated textual explanation or analysis of the image"),
+  file_info: z
+    .object({
+      id: z.string().describe("File ID"),
+      name: z.string().describe("Original filename"),
+      media_type: z.string().describe("MIME type of the image"),
+      size: z.number().describe("File size in bytes"),
+    })
+    .describe("Information about the analyzed image file"),
+});
+
+type Input = z.infer<typeof inputSchema>;
+type Output = z.infer<typeof outputSchema>;
+
+/**
+ * Create the Images.explain tool.
+ * This is a read-only tool - can be used outside Items.withItem().
+ */
 export function makeImagesExplainTool(
   fileStore: FileStore,
   userPath: string | undefined,
   getContext: () => EvalContext
-) {
-  return tool({
+): Tool<Input, Output> {
+  return defineReadOnlyTool({
+    namespace: "Images",
+    name: "explain",
     description: `Analyze and explain images using AI vision model.
 Takes an image file path/ID and a question about the image, uploads the image to an AI vision model and returns the textual explanation.
-Supports png, jpeg, webp and gif image formats.`,
-    inputSchema: z.object({
-      file_path: z
-        .string()
-        .min(1)
-        .describe("File path of the image to analyze"),
-      question: z
-        .string()
-        .min(1)
-        .max(2000)
-        .describe(
-          "Question or prompt about the image - what you want to know or understand about the image"
-        ),
-    }),
-    outputSchema: z.object({
-      explanation: z
-        .string()
-        .describe("AI-generated textual explanation or analysis of the image"),
-      file_info: z
-        .object({
-          id: z.string().describe("File ID"),
-          name: z.string().describe("Original filename"),
-          media_type: z.string().describe("MIME type of the image"),
-          size: z.number().describe("File size in bytes"),
-        })
-        .describe("Information about the analyzed image file"),
-    }),
+Supports png, jpeg, webp and gif image formats.
+
+ℹ️ Not a mutation - can be used outside Items.withItem().`,
+    inputSchema,
+    outputSchema,
     execute: async (input) => {
       const { file_path: file, question } = input;
 
@@ -218,5 +233,5 @@ Supports png, jpeg, webp and gif image formats.`,
         throw classifyGenericError(error instanceof Error ? error : new Error(String(error)), "Images.explain");
       }
     },
-  });
+  }) as Tool<Input, Output>;
 }

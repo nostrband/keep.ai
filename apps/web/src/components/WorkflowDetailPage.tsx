@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
+import type { Task } from "@app/db";
 import {
   useWorkflow,
   useLatestScriptByWorkflowId,
@@ -41,6 +42,7 @@ export default function WorkflowDetailPage() {
   const [isTestRunning, setIsTestRunning] = useState(false);
   const [showVersionHistory, setShowVersionHistory] = useState(false);
   const [diffVersions, setDiffVersions] = useState<{ oldId: string; newId: string } | null>(null);
+  const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
 
   const updateWorkflowMutation = useUpdateWorkflow();
   const activateMutation = useActivateScriptVersion();
@@ -184,13 +186,14 @@ export default function WorkflowDetailPage() {
     }
   };
 
-  const handleArchive = async () => {
+  const handleArchive = () => {
     if (!workflow) return;
+    setShowArchiveConfirm(true);
+  };
 
-    // Confirm before archiving (spec: add-archive-confirmation-dialog)
-    if (!window.confirm("Archive this workflow? You can restore it later from the Archived page.")) {
-      return;
-    }
+  const confirmArchive = () => {
+    if (!workflow) return;
+    setShowArchiveConfirm(false);
 
     updateWorkflowMutation.mutate({
       workflowId: workflow.id,
@@ -494,7 +497,7 @@ export default function WorkflowDetailPage() {
               <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
                 <h2 className="text-lg font-semibold text-gray-900 mb-4">Auto-Fix History</h2>
                 <div className="space-y-3">
-                  {maintainerTasks.map((task: any) => (
+                  {maintainerTasks.map((task: Task) => (
                     <Link
                       key={task.id}
                       to={`/tasks/${task.id}`}
@@ -720,6 +723,45 @@ export default function WorkflowDetailPage() {
           </div>
         )}
       </div>
+
+      {/* Archive Confirmation Modal */}
+      {showArchiveConfirm && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+          onClick={() => setShowArchiveConfirm(false)}
+        >
+          <div
+            className="bg-white rounded-lg p-6 max-w-md w-full mx-4 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-2 bg-amber-100 rounded-full">
+                <Archive className="w-5 h-5 text-amber-600" />
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900">Archive Workflow?</h3>
+            </div>
+            <p className="text-gray-600 mb-6">
+              This workflow will be moved to the archive. You can restore it later from the{" "}
+              <span className="font-medium">Archived</span> page.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <Button
+                variant="outline"
+                onClick={() => setShowArchiveConfirm(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={confirmArchive}
+                disabled={updateWorkflowMutation.isPending}
+                className="bg-amber-600 hover:bg-amber-700 text-white"
+              >
+                {updateWorkflowMutation.isPending ? "Archiving..." : "Archive"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

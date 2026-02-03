@@ -6,13 +6,13 @@
  */
 
 import { z } from "zod";
-import { tool } from "ai";
 import { EvalContext } from "../sandbox/sandbox";
 import debug from "debug";
 import { google } from "googleapis";
 import { AuthError, classifyGoogleApiError } from "../errors";
 import type { ConnectionManager } from "@app/connectors";
 import { getGoogleCredentials, createGoogleOAuthClient } from "./google-common";
+import { defineTool, Tool } from "./types";
 
 const debugDrive = debug("agent:gdrive");
 
@@ -26,15 +26,37 @@ const SUPPORTED_METHODS = [
   "files.export",
 ] as const;
 
-// Methods that should trigger event tracking (write operations + list for auditing)
-// Uses explicit Set membership instead of includes() to avoid false positives
-const TRACKED_METHODS = new Set<string>([
+// Read-only methods (can be used outside Items.withItem)
+const READ_METHODS = new Set<string>([
   "files.list",
+  "files.get",
+  "files.export",
+]);
+
+// Methods that should trigger event tracking (write operations only)
+// Uses explicit Set membership instead of includes() to avoid false positives
+// Note: files.list excluded - read operations don't need audit tracking
+const TRACKED_METHODS = new Set<string>([
   "files.create",
   "files.update",
   "files.delete",
   "files.copy",
 ]);
+
+const inputSchema = z.object({
+  method: z.enum(SUPPORTED_METHODS).describe("Google Drive API method to call"),
+  params: z
+    .any()
+    .optional()
+    .describe("Parameters to pass to the Google Drive API method"),
+  account: z
+    .string()
+    .describe(
+      "Email address of the Google Drive account to use (e.g., user@gmail.com)"
+    ),
+});
+
+type Input = z.infer<typeof inputSchema>;
 
 /**
  * Create Google Drive tool that uses ConnectionManager for credentials.
@@ -46,21 +68,17 @@ const TRACKED_METHODS = new Set<string>([
 export function makeGDriveTool(
   getContext: () => EvalContext,
   connectionManager: ConnectionManager
-) {
-  return tool({
-    description: `Access Google Drive API with various methods. Supported methods: ${SUPPORTED_METHODS.join(", ")}. Returns dynamic results based on the method used. Knowledge of param and output structure is expected from the assistant. REQUIRED: 'account' parameter must be the email address of the connected Google Drive account.`,
-    inputSchema: z.object({
-      method: z.enum(SUPPORTED_METHODS).describe("Google Drive API method to call"),
-      params: z
-        .any()
-        .optional()
-        .describe("Parameters to pass to the Google Drive API method"),
-      account: z
-        .string()
-        .describe(
-          "Email address of the Google Drive account to use (e.g., user@gmail.com)"
-        ),
-    }),
+): Tool<Input, unknown> {
+  return defineTool({
+    namespace: "GoogleDrive",
+    name: "api",
+    description: `Access Google Drive API with various methods. Supported methods: ${SUPPORTED_METHODS.join(", ")}. Returns dynamic results based on the method used. Knowledge of param and output structure is expected from the assistant. REQUIRED: 'account' parameter must be the email address of the connected Google Drive account.
+
+⚠️ MUTATION INFO:
+- Read methods (can use outside Items.withItem): files.list, files.get, files.export
+- Write methods (MUST use inside Items.withItem): files.create, files.update, files.delete, files.copy`,
+    inputSchema,
+    isReadOnly: (params) => READ_METHODS.has(params.method),
     execute: async (input) => {
       const { method, params = {}, account } = input;
 
@@ -140,5 +158,5 @@ export function makeGDriveTool(
         throw classified;
       }
     },
-  });
+  }) as Tool<Input, unknown>;
 }

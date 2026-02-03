@@ -114,10 +114,13 @@ export async function storeFileData(
       console.error("Error in detectBufferMime", e);
     }
 
-    // Refine using filename if result is generic
-    if (!mediaType && filename && filename !== "unknown") {
+    // Refine using filename if buffer detection returned generic fallback
+    if (mediaType === 'application/octet-stream' && filename && filename !== "unknown") {
       try {
-        mediaType = detectFilenameMime(filename, mediaType);
+        const filenameMime = detectFilenameMime(filename, mediaType);
+        if (filenameMime !== 'application/octet-stream') {
+          mediaType = filenameMime;
+        }
       } catch (e) {
         console.error("Error in detectFilenameMime", e);
       }

@@ -407,10 +407,9 @@ describe("fileUtils", () => {
       expect(result.media_type).toBe("image/png");
     });
 
-    it("should use content-based detection even when it returns octet-stream", async () => {
-      // Note: The current implementation only falls back to filename-based detection
-      // when detectBufferMime returns empty string, not when it returns application/octet-stream.
+    it("should fall back to filename-based detection when buffer detection returns octet-stream", async () => {
       // Plain text has no magic bytes, so detectBufferMime returns application/octet-stream.
+      // The filename extension should be used as fallback to get the correct MIME type.
       const textBuffer = Buffer.from("plain text content");
       const filename = "readme.txt";
 
@@ -421,8 +420,8 @@ describe("fileUtils", () => {
         mockFileStore
       );
 
-      // Content-based detection returns application/octet-stream for text
-      expect(result.media_type).toBe("application/octet-stream");
+      // Filename-based fallback correctly identifies text/plain
+      expect(result.media_type).toBe("text/plain");
     });
 
     it("should use provided summary", async () => {

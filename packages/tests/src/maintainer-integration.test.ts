@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { DBInterface, KeepDb, KeepDbApi, ScriptStore, Script, Workflow, Task, InboxStore, NotificationStore } from "@app/db";
 import { createDBNode } from "@app/node";
-import { makeFixTool, FixResult } from "@app/agent";
+import { makeFixTool, FixResult, MAX_FIX_ATTEMPTS, escalateToUser, LogicError } from "@app/agent";
 
 /**
  * Integration tests for the Maintainer Task Type flow.
@@ -127,6 +127,38 @@ async function createIntegrationTables(db: DBInterface): Promise<void> {
     )
   `);
   await db.exec(`CREATE INDEX IF NOT EXISTS idx_notifications_workflow_id ON notifications(workflow_id)`);
+
+  // Create chats table (needed for escalation message tests)
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS chats (
+      id TEXT PRIMARY KEY NOT NULL,
+      first_message_content TEXT NOT NULL DEFAULT '',
+      first_message_time TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT '',
+      updated_at TEXT NOT NULL DEFAULT '',
+      read_at TEXT NOT NULL DEFAULT '',
+      workflow_id TEXT NOT NULL DEFAULT '',
+      mode TEXT NOT NULL DEFAULT '',
+      autonomy_mode TEXT NOT NULL DEFAULT '',
+      summary TEXT NOT NULL DEFAULT '',
+      read_position TEXT NOT NULL DEFAULT ''
+    )
+  `);
+
+  // Create chat_messages table
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS chat_messages (
+      id TEXT PRIMARY KEY NOT NULL,
+      chat_id TEXT NOT NULL DEFAULT '',
+      role TEXT NOT NULL DEFAULT '',
+      content TEXT NOT NULL DEFAULT '',
+      timestamp TEXT NOT NULL DEFAULT '',
+      task_run_id TEXT NOT NULL DEFAULT '',
+      script_id TEXT NOT NULL DEFAULT '',
+      failed_script_run_id TEXT NOT NULL DEFAULT ''
+    )
+  `);
+  await db.exec(`CREATE INDEX IF NOT EXISTS idx_chat_messages_chat_id ON chat_messages(chat_id)`);
 }
 
 /**
@@ -299,7 +331,7 @@ describe("Maintainer Integration Tests", () => {
       const fixTool = makeFixTool({
         maintainerTaskId: maintenanceResult.maintainerTask.id,
         workflowId: workflow.id,
-        expectedMajorVersion: 1, // Maintainer started with major version 1
+        expectedScriptId: "script-1", // Maintainer was fixing script-1
         scriptStore: api.scriptStore,
       });
 
@@ -312,7 +344,7 @@ describe("Maintainer Integration Tests", () => {
       ) as FixResult;
 
       // 5. Verify fix was applied correctly
-      expect(fixResult.applied).toBe(true);
+      expect(fixResult.activated).toBe(true);
       expect(fixResult.script.major_version).toBe(1); // Same major version
       expect(fixResult.script.minor_version).toBe(1); // Incremented minor version
       expect(fixResult.script.code).toContain("if (response.data)"); // Fixed code
@@ -369,7 +401,7 @@ describe("Maintainer Integration Tests", () => {
       const fixTool = makeFixTool({
         maintainerTaskId: maintenanceResult.maintainerTask.id,
         workflowId: workflow.id,
-        expectedMajorVersion: 1, // Maintainer expected version 1
+        expectedScriptId: "script-1", // Maintainer was fixing script-1
         scriptStore: api.scriptStore,
       });
 
@@ -381,16 +413,24 @@ describe("Maintainer Integration Tests", () => {
         createToolCallOptions()
       ) as FixResult;
 
-      // Fix should NOT be applied due to race condition
-      expect(fixResult.applied).toBe(false);
-      expect(fixResult.script.major_version).toBe(2); // Returns current (planner's) script
+      // Fix should NOT be activated due to race condition, but IS saved
+      expect(fixResult.activated).toBe(false);
+      // The fix is saved based on the original script (v1), so major_version is 1
+      expect(fixResult.script.major_version).toBe(1);
+      expect(fixResult.script.minor_version).toBe(1); // Incremented from 0
+      expect(fixResult.script.code).toContain("maintainer fix for v1");
 
-      // Verify workflow still points to planner's script
+      // Verify workflow still points to planner's script (not the maintainer's fix)
       const dbWorkflow = await api.scriptStore.getWorkflow(workflow.id);
       expect(dbWorkflow?.active_script_id).toBe(plannerScript.id);
 
       // Verify maintenance flag is cleared (no longer in maintenance)
       expect(dbWorkflow?.maintenance).toBe(false);
+
+      // Verify the fix was saved (maintainer's work is preserved for history)
+      const savedFix = await api.scriptStore.getScript(fixResult.script.id);
+      expect(savedFix).not.toBeNull();
+      expect(savedFix?.code).toContain("maintainer fix for v1");
     });
 
     it("should allow multiple fix attempts with incrementing minor versions", async () => {
@@ -411,7 +451,7 @@ describe("Maintainer Integration Tests", () => {
       const fixTool1 = makeFixTool({
         maintainerTaskId: result1.maintainerTask.id,
         workflowId: workflow.id,
-        expectedMajorVersion: 2,
+        expectedScriptId: "script-1", // Original script
         scriptStore: api.scriptStore,
       });
 
@@ -420,7 +460,7 @@ describe("Maintainer Integration Tests", () => {
         createToolCallOptions()
       ) as FixResult;
 
-      expect(fix1.applied).toBe(true);
+      expect(fix1.activated).toBe(true);
       expect(fix1.script.minor_version).toBe(1);
 
       // Second maintenance cycle (fix 1 didn't work): 2.1 -> 2.2
@@ -434,7 +474,7 @@ describe("Maintainer Integration Tests", () => {
       const fixTool2 = makeFixTool({
         maintainerTaskId: result2.maintainerTask.id,
         workflowId: workflow.id,
-        expectedMajorVersion: 2,
+        expectedScriptId: fix1.script.id, // Now fixing the first fix
         scriptStore: api.scriptStore,
       });
 
@@ -443,7 +483,7 @@ describe("Maintainer Integration Tests", () => {
         createToolCallOptions()
       ) as FixResult;
 
-      expect(fix2.applied).toBe(true);
+      expect(fix2.activated).toBe(true);
       expect(fix2.script.minor_version).toBe(2);
 
       // Third maintenance cycle: 2.2 -> 2.3
@@ -457,7 +497,7 @@ describe("Maintainer Integration Tests", () => {
       const fixTool3 = makeFixTool({
         maintainerTaskId: result3.maintainerTask.id,
         workflowId: workflow.id,
-        expectedMajorVersion: 2,
+        expectedScriptId: fix2.script.id, // Now fixing the second fix
         scriptStore: api.scriptStore,
       });
 
@@ -466,7 +506,7 @@ describe("Maintainer Integration Tests", () => {
         createToolCallOptions()
       ) as FixResult;
 
-      expect(fix3.applied).toBe(true);
+      expect(fix3.activated).toBe(true);
       expect(fix3.script.minor_version).toBe(3);
 
       // Verify all scripts exist
@@ -494,13 +534,19 @@ describe("Maintainer Integration Tests", () => {
      */
     it("should escalate to user when fix count reaches max attempts", async () => {
       // Setup: Workflow that has already exceeded max fix attempts
+      // Use task without chat_id to focus on testing workflow update and notification
       const workflow = createWorkflow({
         maintenance: false,
-        maintenance_fix_count: 3, // Already at max (MAX_FIX_ATTEMPTS = 3)
+        maintenance_fix_count: MAX_FIX_ATTEMPTS, // Already at max
         status: "active",
+        task_id: "task-no-chat",
       });
       const script = createScript();
-      const task = createTask();
+      const task = createTask({
+        id: "task-no-chat",
+        chat_id: "", // No chat for this test
+        workflow_id: workflow.id,
+      });
 
       await api.scriptStore.addWorkflow(workflow);
       await api.scriptStore.addScript(script);
@@ -510,39 +556,23 @@ describe("Maintainer Integration Tests", () => {
       let dbWorkflow = await api.scriptStore.getWorkflow(workflow.id);
       expect(dbWorkflow?.maintenance_fix_count).toBe(3);
 
-      // Simulate what workflow-worker.enterMaintenanceMode does:
-      // It checks if currentFixCount >= MAX_FIX_ATTEMPTS BEFORE creating maintainer task
-      // If exceeded, it calls escalateToUser instead
-
-      // Here we directly test the escalation by calling the methods that escalateToUser calls
-
-      // 1. Set workflow to error status (as escalateToUser does)
-      await api.scriptStore.updateWorkflowFields(workflow.id, {
-        status: "error",
-        maintenance: false,
-        maintenance_fix_count: 0, // Reset for fresh start when user re-enables
+      // Call the actual escalateToUser function instead of manually implementing the logic
+      const error = new LogicError("Persistent logic error after 3 fix attempts");
+      const result = await escalateToUser(api, {
+        workflow: workflow,
+        scriptRunId: "script-run-fail",
+        error: error,
+        logs: ["Error log line 1", "Error log line 2"],
+        fixAttempts: MAX_FIX_ATTEMPTS,
       });
 
-      // 2. Create escalation notification
-      const notificationId = "notif-escalation-1";
-      await api.notificationStore.saveNotification({
-        id: notificationId,
-        workflow_id: workflow.id,
-        type: "escalated",
-        payload: JSON.stringify({
-          script_run_id: "script-run-fail",
-          error_type: "logic",
-          error_message: "Persistent logic error after 3 fix attempts",
-          fix_attempts: 3,
-          max_fix_attempts: 3,
-        }),
-        timestamp: new Date().toISOString(),
-        acknowledged_at: "",
-        resolved_at: "",
-        workflow_title: workflow.title,
-      });
+      // Verify the function result
+      expect(result.success).toBe(true);
+      expect(result.notificationCreated).toBe(true);
+      // Message should not be created since task has no chat_id
+      expect(result.messageCreated).toBe(false);
 
-      // Verify escalation results
+      // Verify escalation results in database
 
       // 1. Workflow status should be "error"
       dbWorkflow = await api.scriptStore.getWorkflow(workflow.id);
@@ -559,6 +589,135 @@ describe("Maintainer Integration Tests", () => {
       expect(payload.error_type).toBe("logic");
       expect(payload.fix_attempts).toBe(3);
       expect(payload.max_fix_attempts).toBe(3);
+    });
+
+    it("should send escalation message to user chat when chat_id is available", async () => {
+      // Setup: Workflow with task that has a chat_id
+      const chatId = "chat-escalation-test";
+      const workflow = createWorkflow({
+        maintenance: false,
+        maintenance_fix_count: MAX_FIX_ATTEMPTS,
+        status: "active",
+        task_id: "task-with-chat",
+      });
+      const task = createTask({
+        id: "task-with-chat",
+        chat_id: chatId,
+        workflow_id: workflow.id,
+      });
+
+      await api.scriptStore.addWorkflow(workflow);
+      await api.taskStore.addTask(task);
+
+      // Call escalateToUser with the actual function
+      const error = new LogicError("Script failed with invalid data");
+      const result = await escalateToUser(api, {
+        workflow: workflow,
+        scriptRunId: "script-run-with-message",
+        error: error,
+        logs: ["Log line 1", "Log line 2", "Error occurred"],
+        fixAttempts: MAX_FIX_ATTEMPTS,
+      });
+
+      // Verify success and message creation
+      expect(result.success).toBe(true);
+      expect(result.notificationCreated).toBe(true);
+      // Message creation should succeed since task has chat_id
+      expect(result.messageCreated).toBe(true);
+
+      // Verify message was saved to chat_messages table
+      const messages = await api.chatStore.getNewChatMessages({ chatId });
+      expect(messages.length).toBeGreaterThan(0);
+
+      // Verify the message contains escalation content
+      const escalationMsg = messages[0];
+      expect(escalationMsg.role).toBe("assistant");
+      const msgContent = JSON.parse(escalationMsg.content);
+      expect(msgContent.parts?.[0]?.text).toContain("Automation Paused");
+      expect(msgContent.parts?.[0]?.text).toContain("Script failed with invalid data");
+    });
+
+    it("should handle escalation gracefully when task has no chat_id", async () => {
+      // Setup: Workflow with task that has no chat_id
+      const workflow = createWorkflow({
+        maintenance: false,
+        maintenance_fix_count: MAX_FIX_ATTEMPTS,
+        status: "active",
+        task_id: "task-no-chat",
+      });
+      const task = createTask({
+        id: "task-no-chat",
+        chat_id: "", // No chat
+        workflow_id: workflow.id,
+      });
+
+      await api.scriptStore.addWorkflow(workflow);
+      await api.taskStore.addTask(task);
+
+      // Call escalateToUser
+      const error = new LogicError("Error without chat notification");
+      const result = await escalateToUser(api, {
+        workflow: workflow,
+        scriptRunId: "script-run-no-chat",
+        error: error,
+        logs: [],
+        fixAttempts: MAX_FIX_ATTEMPTS,
+      });
+
+      // Should still succeed overall
+      expect(result.success).toBe(true);
+      expect(result.notificationCreated).toBe(true);
+      // Message should NOT be created since there's no chat
+      expect(result.messageCreated).toBe(false);
+
+      // Workflow should still be set to error status
+      const dbWorkflow = await api.scriptStore.getWorkflow(workflow.id);
+      expect(dbWorkflow?.status).toBe("error");
+    });
+
+    it("should include recent logs in escalation message", async () => {
+      // Setup: Workflow with task and chat
+      const chatId = "chat-with-logs";
+      const workflow = createWorkflow({
+        maintenance: false,
+        maintenance_fix_count: MAX_FIX_ATTEMPTS,
+        status: "active",
+        task_id: "task-with-logs",
+      });
+      const task = createTask({
+        id: "task-with-logs",
+        chat_id: chatId,
+        workflow_id: workflow.id,
+      });
+
+      await api.scriptStore.addWorkflow(workflow);
+      await api.taskStore.addTask(task);
+
+      // Provide many log lines to test truncation (only last 20 should be included)
+      const manyLogs = Array.from({ length: 30 }, (_, i) => `Log line ${i + 1}`);
+
+      const error = new LogicError("Error with many logs");
+      await escalateToUser(api, {
+        workflow: workflow,
+        scriptRunId: "script-run-logs",
+        error: error,
+        logs: manyLogs,
+        fixAttempts: MAX_FIX_ATTEMPTS,
+      });
+
+      // Check message content from chat_messages table
+      const messages = await api.chatStore.getNewChatMessages({ chatId });
+      expect(messages.length).toBeGreaterThan(0);
+
+      const escalationMsg = messages[0];
+      const msgContent = JSON.parse(escalationMsg.content);
+      const messageText = msgContent.parts?.[0]?.text || "";
+
+      // Should contain last 20 log lines (11-30), not first ones
+      expect(messageText).toContain("Log line 30");
+      expect(messageText).toContain("Log line 11");
+      // Should NOT contain the first log lines (they were truncated)
+      expect(messageText).not.toContain("Log line 1\n");
     });
 
     it("should not create maintainer task when at max fix attempts", async () => {
@@ -587,7 +746,6 @@ describe("Maintainer Integration Tests", () => {
       // correct behavior would be to escalate, not create maintainer task
 
       // Simulate the guard logic:
-      const MAX_FIX_ATTEMPTS = 3;
       const shouldEscalate = workflow.maintenance_fix_count >= MAX_FIX_ATTEMPTS;
       expect(shouldEscalate).toBe(true);
 
@@ -650,13 +808,13 @@ describe("Maintainer Integration Tests", () => {
       const fixTool = makeFixTool({
         maintainerTaskId: result.maintainerTask.id,
         workflowId: workflow.id,
-        expectedMajorVersion: 1,
+        expectedScriptId: "script-1",
         scriptStore: api.scriptStore,
       });
-      await fixTool.execute!(
+      const fix1Result = await fixTool.execute!(
         { code: "// fix 1", comment: "Fix 1" },
         createToolCallOptions()
-      );
+      ) as FixResult;
 
       // Second fix attempt (fix 1 didn't work)
       result = await api.enterMaintenanceMode({
@@ -670,7 +828,7 @@ describe("Maintainer Integration Tests", () => {
       const fixTool2 = makeFixTool({
         maintainerTaskId: result.maintainerTask.id,
         workflowId: workflow.id,
-        expectedMajorVersion: 1,
+        expectedScriptId: fix1Result.script.id, // Use the previous fix's script id
         scriptStore: api.scriptStore,
       });
       await fixTool2.execute!(
@@ -692,7 +850,6 @@ describe("Maintainer Integration Tests", () => {
       expect(dbWorkflow?.maintenance_fix_count).toBe(3);
 
       // Now if we check the condition (as workflow-worker does):
-      const MAX_FIX_ATTEMPTS = 3;
       const shouldEscalate = dbWorkflow!.maintenance_fix_count >= MAX_FIX_ATTEMPTS;
       expect(shouldEscalate).toBe(true);
     });
@@ -764,7 +921,7 @@ describe("Maintainer Integration Tests", () => {
       const fixTool1 = makeFixTool({
         maintainerTaskId: result1.maintainerTask.id,
         workflowId: workflow.id,
-        expectedMajorVersion: 1,
+        expectedScriptId: "script-1",
         scriptStore: api.scriptStore,
       });
       await fixTool1.execute!(

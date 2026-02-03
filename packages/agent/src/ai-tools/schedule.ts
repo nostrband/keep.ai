@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { tool } from "ai";
-import { ScriptStore, Workflow } from "@app/db";
+import { ScriptStore } from "@app/db";
 import { Cron } from "croner";
 
 const ScheduleInfoSchema = z.object({
@@ -33,13 +33,11 @@ export function makeScheduleTool(opts: {
         throw new Error(`Workflow not found for task ${opts.taskId}`);
       }
 
-      // Update workflow cron field and next_run_timestamp
-      const updatedWorkflow: Workflow = {
-        ...workflow,
+      // Update workflow cron field and next_run_timestamp atomically
+      await opts.scriptStore.updateWorkflowFields(workflow.id, {
         cron: info.cron,
         next_run_timestamp: nextRunTimestamp,
-      };
-      await opts.scriptStore.updateWorkflow(updatedWorkflow);
+      });
 
       return { cron: info.cron };
     },

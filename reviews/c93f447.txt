@@ -271,3 +271,11 @@ const handleRestore = async (workflowId: string) => {
 | Archived page feedback | Good | Minor edge case |
 
 **Overall:** The commit addresses real bugs but introduces a critical SQL syntax issue that needs immediate attention. The other changes are solid improvements with minor code quality suggestions.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (SQL nested aggregation) - created specs/new/fix-draft-activity-sql.md
+- Issue #2 (Disconnect not using mutation hook) - created specs/new/extract-disconnect-mutation-hook.md
+- Issue #3 (Missing onError callback) - created specs/new/archived-page-onerror-callback.md
+- Issue #4 (Workflow not found edge case) - covered by specs/new/archived-page-null-check.md

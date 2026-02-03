@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { tool } from "ai";
 import { FileStore, type File } from "@app/db";
 import { EvalContext } from "../sandbox/sandbox";
 import { getEnv } from "../env";
@@ -9,55 +8,72 @@ import { detectBufferMime, mimeToExt } from "@app/node";
 import fs from "fs";
 import debug from "debug";
 import { AuthError, LogicError, NetworkError, PermissionError, classifyHttpError, classifyGenericError, isClassifiedError, formatUsageForEvent } from "../errors";
+import { defineTool, Tool } from "./types";
 
 const debugImg = debug("ImagesGenerate");
 
+const inputSchema = z.object({
+  prompt: z
+    .string()
+    .min(1)
+    .max(1000)
+    .describe("Textual description of the image to generate"),
+  file_prefix: z
+    .string()
+    .min(1)
+    .max(50)
+    .describe(
+      "Prefix to use for the filename of generated images, no spaces, filename-suitable symbols only"
+    ),
+  aspect_ratio: z
+    .string()
+    .optional()
+    .nullable()
+    .describe(
+      "Aspect ratio for the image (e.g., '16:9', '1:1', '4:3'). Defaults to '1:1' if not specified"
+    ),
+});
+
+const outputSchema = z.object({
+  images: z
+    .array(
+      z.object({
+        id: z.string().describe("File ID of the generated image"),
+        name: z.string().describe("Filename of the generated image"),
+        path: z.string().describe("Local file path"),
+        size: z.number().describe("File size in bytes"),
+        media_type: z.string().describe("MIME type of the image"),
+        summary: z.string().describe("Summary/description of the image"),
+        upload_time: z.string().describe("Generation timestamp"),
+      })
+    )
+    .describe("Array of generated image file records"),
+  reasoning: z.string().describe("Image model's reasoning"),
+});
+
+type Input = z.infer<typeof inputSchema>;
+type Output = z.infer<typeof outputSchema>;
+
+/**
+ * Create the Images.generate tool.
+ * This is a mutation (creates files) - must be called inside Items.withItem().
+ */
 export function makeImagesGenerateTool(
   fileStore: FileStore,
   userPath: string | undefined,
   getContext: () => EvalContext
-) {
-  return tool({
+): Tool<Input, Output> {
+  return defineTool({
+    namespace: "Images",
+    name: "generate",
     description: `Generate images using AI image generation model.
 Takes a textual prompt describing the desired image and an optional aspect ratio.
-Generates images and saves them to files. Returns information about the generated image files.`,
-    inputSchema: z.object({
-      prompt: z
-        .string()
-        .min(1)
-        .max(1000)
-        .describe("Textual description of the image to generate"),
-      file_prefix: z
-        .string()
-        .min(1)
-        .max(50)
-        .describe(
-          "Prefix to use for the filename of generated images, no spaces, filename-suitable symbols only"
-        ),
-      aspect_ratio: z
-        .string()
-        .optional()
-        .nullable()
-        .describe(
-          "Aspect ratio for the image (e.g., '16:9', '1:1', '4:3'). Defaults to '1:1' if not specified"
-        ),
-    }),
-    outputSchema: z.object({
-      images: z
-        .array(
-          z.object({
-            id: z.string().describe("File ID of the generated image"),
-            name: z.string().describe("Filename of the generated image"),
-            path: z.string().describe("Local file path"),
-            size: z.number().describe("File size in bytes"),
-            media_type: z.string().describe("MIME type of the image"),
-            summary: z.string().describe("Summary/description of the image"),
-            upload_time: z.string().describe("Generation timestamp"),
-          })
-        )
-        .describe("Array of generated image file records"),
-      reasoning: z.string().describe("Image model's reasoning"),
-    }),
+Generates images and saves them to files. Returns information about the generated image files.
+
+⚠️ MUTATION - must be called inside Items.withItem().`,
+    inputSchema,
+    outputSchema,
+    isReadOnly: () => false,
     execute: async (input) => {
       const { prompt, file_prefix, aspect_ratio = "1:1" } = input;
 
@@ -228,5 +244,5 @@ Generates images and saves them to files. Returns information about the generate
         throw classifyGenericError(error instanceof Error ? error : new Error(String(error)), "Images.generate");
       }
     },
-  });
+  }) as Tool<Input, Output>;
 }

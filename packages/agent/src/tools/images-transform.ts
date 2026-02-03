@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { tool } from "ai";
 import { FileStore, type File } from "@app/db";
 import { EvalContext } from "../sandbox/sandbox";
 import { getEnv } from "../env";
@@ -9,74 +8,91 @@ import { detectBufferMime, mimeToExt } from "@app/node";
 import fs from "fs";
 import debug from "debug";
 import { AuthError, LogicError, NetworkError, PermissionError, classifyHttpError, classifyGenericError, isClassifiedError, formatUsageForEvent } from "../errors";
+import { defineTool, Tool } from "./types";
 
 const debugImgTransform = debug("ImagesTransform");
 
+const inputSchema = z.object({
+  file_paths: z
+    .array(z.string().min(1))
+    .min(1)
+    .max(5)
+    .describe(
+      "Array of file paths of the input images to transform (1-5 images) - filename (without extension) will be used as ID to look up in database"
+    ),
+  prompt: z
+    .string()
+    .min(1)
+    .max(1000)
+    .describe(
+      "Textual description of the desired transformation or modification to apply to the image"
+    ),
+  file_prefix: z
+    .string()
+    .min(1)
+    .max(50)
+    .describe(
+      "Prefix to use for the filename of generated images, no spaces, filename-suitable symbols only"
+    ),
+  aspect_ratio: z
+    .string()
+    .optional()
+    .nullable()
+    .describe(
+      "Aspect ratio for the generated image (e.g., '16:9', '1:1', '4:3'). Defaults to '1:1' if not specified"
+    ),
+});
+
+const outputSchema = z.object({
+  images: z
+    .array(
+      z.object({
+        id: z.string().describe("File ID of the generated image"),
+        name: z.string().describe("Filename of the generated image"),
+        path: z.string().describe("Local file path"),
+        size: z.number().describe("File size in bytes"),
+        media_type: z.string().describe("MIME type of the image"),
+        summary: z.string().describe("Summary/description of the image"),
+        upload_time: z.string().describe("Generation timestamp"),
+      })
+    )
+    .describe("Array of generated image file records"),
+  source_files: z
+    .array(
+      z.object({
+        id: z.string().describe("Source file ID"),
+        name: z.string().describe("Source filename"),
+        media_type: z.string().describe("Source MIME type"),
+        size: z.number().describe("Source file size in bytes"),
+      })
+    )
+    .describe("Information about the source image files"),
+  reasoning: z.string().describe("Image model's reasoning"),
+});
+
+type Input = z.infer<typeof inputSchema>;
+type Output = z.infer<typeof outputSchema>;
+
+/**
+ * Create the Images.transform tool.
+ * This is a mutation (creates files) - must be called inside Items.withItem().
+ */
 export function makeImagesTransformTool(
   fileStore: FileStore,
   userPath: string | undefined,
   getContext: () => EvalContext
-) {
-  return tool({
+): Tool<Input, Output> {
+  return defineTool({
+    namespace: "Images",
+    name: "transform",
     description: `Transform/modify images using AI image generation model based on one or more input images.
 Takes existing image files (up to 5) and a textual prompt describing the desired transformation, then generates new images based on the inputs.
-Supports png, jpeg, webp and gif input formats. Returns information about the generated image files.`,
-    inputSchema: z.object({
-      file_paths: z
-        .array(z.string().min(1))
-        .min(1)
-        .max(5)
-        .describe(
-          "Array of file paths of the input images to transform (1-5 images) - filename (without extension) will be used as ID to look up in database"
-        ),
-      prompt: z
-        .string()
-        .min(1)
-        .max(1000)
-        .describe(
-          "Textual description of the desired transformation or modification to apply to the image"
-        ),
-      file_prefix: z
-        .string()
-        .min(1)
-        .max(50)
-        .describe(
-          "Prefix to use for the filename of generated images, no spaces, filename-suitable symbols only"
-        ),
-      aspect_ratio: z
-        .string()
-        .optional()
-        .nullable()
-        .describe(
-          "Aspect ratio for the generated image (e.g., '16:9', '1:1', '4:3'). Defaults to '1:1' if not specified"
-        ),
-    }),
-    outputSchema: z.object({
-      images: z
-        .array(
-          z.object({
-            id: z.string().describe("File ID of the generated image"),
-            name: z.string().describe("Filename of the generated image"),
-            path: z.string().describe("Local file path"),
-            size: z.number().describe("File size in bytes"),
-            media_type: z.string().describe("MIME type of the image"),
-            summary: z.string().describe("Summary/description of the image"),
-            upload_time: z.string().describe("Generation timestamp"),
-          })
-        )
-        .describe("Array of generated image file records"),
-      source_files: z
-        .array(
-          z.object({
-            id: z.string().describe("Source file ID"),
-            name: z.string().describe("Source filename"),
-            media_type: z.string().describe("Source MIME type"),
-            size: z.number().describe("Source file size in bytes"),
-          })
-        )
-        .describe("Information about the source image files"),
-      reasoning: z.string().describe("Image model's reasoning"),
-    }),
+Supports png, jpeg, webp and gif input formats. Returns information about the generated image files.
+
+⚠️ MUTATION - must be called inside Items.withItem().`,
+    inputSchema,
+    outputSchema,
+    isReadOnly: () => false,
     execute: async (input) => {
       const {
         file_paths: filePaths,
@@ -348,5 +364,5 @@ Supports png, jpeg, webp and gif input formats. Returns information about the ge
         throw classifyGenericError(error instanceof Error ? error : new Error(String(error)), "Images.transform");
       }
     },
-  });
+  }) as Tool<Input, Output>;
 }

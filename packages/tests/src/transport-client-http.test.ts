@@ -496,3 +496,238 @@ describe("TransportClientHttp without server", () => {
     transport.stop();
   });
 });
+
+describe("TransportClientHttp POST endpoint error handling", () => {
+  let server: FastifyInstance;
+  let serverUrl: string;
+  let serverState: MockServerState;
+  let transport: TransportClientHttp;
+
+  // Create server that returns 500 for POST endpoints
+  async function createErrorServer(
+    state: MockServerState,
+    options: { syncStatus?: number; dataStatus?: number } = {}
+  ): Promise<{ server: FastifyInstance; url: string }> {
+    const server = Fastify();
+
+    // SSE endpoint - works normally
+    server.get<{ Querystring: { peerId: string } }>(
+      "/stream",
+      async (request, reply) => {
+        const { peerId } = request.query;
+
+        if (!peerId) {
+          reply.status(400).send({ error: "Missing peerId" });
+          return;
+        }
+
+        reply.hijack();
+        reply.raw.writeHead(200, {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          Connection: "keep-alive",
+        });
+
+        state.connectedPeers.set(peerId, {
+          reply,
+          send: (msg: TransportMessage) => {
+            reply.raw.write(`data: ${JSON.stringify(msg)}\n\n`);
+          },
+        });
+
+        const connectMsg: TransportMessage = {
+          type: "connect",
+          peerId: "server-peer-id",
+        };
+        reply.raw.write(`data: ${JSON.stringify(connectMsg)}\n\n`);
+
+        if (state.onClientConnect) {
+          state.onClientConnect(peerId, reply);
+        }
+
+        request.raw.on("close", () => {
+          state.connectedPeers.delete(peerId);
+        });
+      }
+    );
+
+    // Sync endpoint - returns error status
+    server.post("/sync", async (request, reply) => {
+      const msg = request.body as TransportMessage;
+      state.receivedMessages.push(msg);
+
+      if (options.syncStatus && options.syncStatus >= 400) {
+        reply.status(options.syncStatus).send({ error: "Internal server error" });
+        return;
+      }
+
+      reply.send({ success: true });
+    });
+
+    // Data endpoint - returns error status
+    server.post("/data", async (request, reply) => {
+      const msg = request.body as TransportMessage;
+      state.receivedMessages.push(msg);
+
+      if (options.dataStatus && options.dataStatus >= 400) {
+        reply.status(options.dataStatus).send({ error: "Internal server error" });
+        return;
+      }
+
+      reply.send({ success: true });
+    });
+
+    const address = await server.listen({ port: 0, host: "127.0.0.1" });
+    return { server, url: address };
+  }
+
+  afterEach(async () => {
+    if (transport) {
+      transport.stop();
+    }
+    if (server) {
+      await server.close();
+    }
+  });
+
+  it("should handle 500 error from /sync endpoint gracefully", async () => {
+    serverState = {
+      connectedPeers: new Map(),
+      receivedMessages: [],
+    };
+
+    const mock = await createErrorServer(serverState, { syncStatus: 500 });
+    server = mock.server;
+    serverUrl = mock.url;
+    transport = new TransportClientHttp(serverUrl);
+
+    const callbacks: TransportCallbacks = {
+      onConnect: async () => {},
+      onSync: async () => {},
+      onReceive: async () => {},
+      onDisconnect: async () => {},
+    };
+
+    await transport.start({ localPeerId: "client-peer-id", ...callbacks });
+    await wait(100);
+
+    // Connection should be established
+    expect(transport.isSSEConnected()).toBe(true);
+    expect(transport.getRemotePeerId()).toBe("server-peer-id");
+
+    // Send sync - should not throw even with 500 response
+    const cursor = new Cursor();
+    cursor.peers.set("010203", 100);
+    await transport.sync("server-peer-id", cursor);
+    await wait(50);
+
+    // Verify request was made
+    expect(serverState.receivedMessages.length).toBe(1);
+    expect(serverState.receivedMessages[0].type).toBe("sync");
+
+    // Transport should still be connected and functional
+    expect(transport.isSSEConnected()).toBe(true);
+  });
+
+  it("should handle 500 error from /data endpoint gracefully", async () => {
+    serverState = {
+      connectedPeers: new Map(),
+      receivedMessages: [],
+    };
+
+    const mock = await createErrorServer(serverState, { dataStatus: 500 });
+    server = mock.server;
+    serverUrl = mock.url;
+    transport = new TransportClientHttp(serverUrl);
+
+    const callbacks: TransportCallbacks = {
+      onConnect: async () => {},
+      onSync: async () => {},
+      onReceive: async () => {},
+      onDisconnect: async () => {},
+    };
+
+    await transport.start({ localPeerId: "client-peer-id", ...callbacks });
+    await wait(100);
+
+    expect(transport.isSSEConnected()).toBe(true);
+
+    // Send data - should not throw even with 500 response
+    const message: PeerMessage = {
+      type: "changes",
+      data: [],
+    };
+    await transport.send("server-peer-id", "", message);
+    await wait(50);
+
+    // Verify request was made
+    expect(serverState.receivedMessages.length).toBe(1);
+    expect(serverState.receivedMessages[0].type).toBe("data");
+
+    // Transport should still be connected
+    expect(transport.isSSEConnected()).toBe(true);
+  });
+
+  it("should handle 503 service unavailable gracefully", async () => {
+    serverState = {
+      connectedPeers: new Map(),
+      receivedMessages: [],
+    };
+
+    const mock = await createErrorServer(serverState, { syncStatus: 503, dataStatus: 503 });
+    server = mock.server;
+    serverUrl = mock.url;
+    transport = new TransportClientHttp(serverUrl);
+
+    const callbacks: TransportCallbacks = {
+      onConnect: async () => {},
+      onSync: async () => {},
+      onReceive: async () => {},
+      onDisconnect: async () => {},
+    };
+
+    await transport.start({ localPeerId: "client-peer-id", ...callbacks });
+    await wait(100);
+
+    // Both operations should complete without throwing
+    await transport.sync("server-peer-id", new Cursor());
+    const message: PeerMessage = { type: "changes", data: [] };
+    await transport.send("server-peer-id", "", message);
+    await wait(50);
+
+    // Both requests were made
+    expect(serverState.receivedMessages.length).toBe(2);
+
+    // Transport remains functional
+    expect(transport.isSSEConnected()).toBe(true);
+  });
+
+  it("should handle 400 bad request gracefully", async () => {
+    serverState = {
+      connectedPeers: new Map(),
+      receivedMessages: [],
+    };
+
+    const mock = await createErrorServer(serverState, { syncStatus: 400 });
+    server = mock.server;
+    serverUrl = mock.url;
+    transport = new TransportClientHttp(serverUrl);
+
+    const callbacks: TransportCallbacks = {
+      onConnect: async () => {},
+      onSync: async () => {},
+      onReceive: async () => {},
+      onDisconnect: async () => {},
+    };
+
+    await transport.start({ localPeerId: "client-peer-id", ...callbacks });
+    await wait(100);
+
+    // Should not throw
+    await transport.sync("server-peer-id", new Cursor());
+    await wait(50);
+
+    expect(serverState.receivedMessages.length).toBe(1);
+    expect(transport.isSSEConnected()).toBe(true);
+  });
+});

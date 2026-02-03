@@ -1,38 +1,53 @@
 import { z } from "zod";
-import { tool } from "ai";
 import { EvalContext } from "../sandbox/sandbox";
 import { getEnv } from "../env";
 import { getTextModelName } from "../model";
 import debug from "debug";
 import { AuthError, LogicError, NetworkError, classifyHttpError, classifyGenericError, isClassifiedError, formatUsageForEvent } from "../errors";
+import { defineReadOnlyTool, Tool } from "./types";
 
 const debugTextClassify = debug("TextClassify");
 
-export function makeTextClassifyTool(getContext: () => EvalContext) {
-  return tool({
+const inputSchema = z.object({
+  text: z
+    .string()
+    .min(1)
+    .describe("Input text to analyze for classification"),
+  classes: z
+    .array(
+      z.object({
+        id: z.string().describe("Class identifier"),
+        description: z
+          .string()
+          .describe("Description of when this class should be selected"),
+      })
+    )
+    .min(1)
+    .describe("List of possible classes to choose from"),
+});
+
+const outputSchema = z.object({
+  class_id: z.string().describe("ID of the selected class"),
+});
+
+type Input = z.infer<typeof inputSchema>;
+type Output = z.infer<typeof outputSchema>;
+
+/**
+ * Create the Text.classify tool.
+ * This is a read-only tool - can be used outside Items.withItem().
+ */
+export function makeTextClassifyTool(getContext: () => EvalContext): Tool<Input, Output> {
+  return defineReadOnlyTool({
+    namespace: "Text",
+    name: "classify",
     description: `Classify text into one of several classes based on its content using AI.
 Takes input text and a list of possible classes (each with id and description), and returns the most appropriate class id.
-Uses temperature 0 and light reasoning for consistent classification decisions.`,
-    inputSchema: z.object({
-      text: z
-        .string()
-        .min(1)
-        .describe("Input text to analyze for classification"),
-      classes: z
-        .array(
-          z.object({
-            id: z.string().describe("Class identifier"),
-            description: z
-              .string()
-              .describe("Description of when this class should be selected"),
-          })
-        )
-        .min(1)
-        .describe("List of possible classes to choose from"),
-    }),
-    outputSchema: z.object({
-      class_id: z.string().describe("ID of the selected class"),
-    }),
+Uses temperature 0 and light reasoning for consistent classification decisions.
+
+ℹ️ Not a mutation - can be used outside Items.withItem().`,
+    inputSchema,
+    outputSchema,
     execute: async (input) => {
       const { text, classes } = input;
 
@@ -139,5 +154,5 @@ Otherwise, return ONLY the class id, nothing else.`;
         throw classifyGenericError(error instanceof Error ? error : new Error(String(error)), "Text.classify");
       }
     },
-  });
+  }) as Tool<Input, Output>;
 }

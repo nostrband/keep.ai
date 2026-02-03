@@ -230,3 +230,15 @@ Error Classification Pattern:
 
 Overall, these fixes address real bugs but reveal areas where more
 comprehensive validation would improve robustness.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Cron range validation) - created specs/new/cron-format-range-validation.md
+- Issue #2 (Every minute ambiguity) - created specs/new/cron-format-every-minute-check.md
+- Issue #3 (Backslash not escaped) - created specs/new/console-log-backslash-escaping.md
+- Issue #4 (Cropping breaks escapes) - created specs/new/console-log-crop-before-escape.md
+- Issue #5 (Token pattern too broad) - created specs/new/connectors-use-classified-errors.md
+- Issue #6 (Service pattern too broad) - covered by specs/new/connectors-use-classified-errors.md
+- Issue #7 (Missing 403 classification) - covered by specs/new/connectors-use-classified-errors.md
+- Issue #8 (Missing network patterns) - covered by specs/new/connectors-use-classified-errors.md

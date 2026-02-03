@@ -267,3 +267,37 @@ export function useUpdateConnectionLabel() {
     },
   });
 }
+
+/**
+ * Disconnect (remove) a connection.
+ * Calls the server API to delete credentials and database record.
+ */
+export function useDisconnectConnection(apiEndpoint: string) {
+  const { api } = useDbQuery();
+
+  return useMutation({
+    mutationFn: async (connectionId: string) => {
+      const [service, accountId] = connectionId.split(":");
+
+      const response = await fetch(
+        `${apiEndpoint}/connectors/${service}/${encodeURIComponent(accountId)}`,
+        { method: "DELETE" }
+      );
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || "Failed to disconnect");
+      }
+
+      return connectionId;
+    },
+    onSuccess: () => {
+      // Invalidate connection queries to get fresh data
+      queryClient.invalidateQueries({ queryKey: qk.allConnections() });
+
+      if (api) {
+        notifyTablesChanged(["connections"], true, api);
+      }
+    },
+  });
+}

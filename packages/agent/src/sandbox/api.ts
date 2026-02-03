@@ -1,4 +1,4 @@
-import { KeepDbApi, TaskType } from "@app/db";
+import { KeepDbApi, TaskType, ItemCreatedBy } from "@app/db";
 import {
   makeCreateNoteTool,
   makeDeleteNoteTool,
@@ -36,6 +36,8 @@ import {
   makeListScriptRunsTool,
   makeGetScriptRunTool,
   makeConsoleLogTool,
+  makeItemsListTool,
+  ItemContext,
 } from "../tools";
 import { z, ZodFirstPartyTypeKind as K } from "zod";
 import { EvalContext, EvalGlobal } from "./sandbox";
@@ -50,8 +52,12 @@ export interface SandboxAPIConfig {
   userPath?: string;
   /** Connection manager for OAuth-based tools (Gmail, etc.) */
   connectionManager?: ConnectionManager;
-  /** Workflow ID for pause checking. When set, tool calls will check if workflow is still active. */
+  /** Workflow ID for pause checking and item tracking. When set, tool calls will check if workflow is still active. */
   workflowId?: string;
+  /** Script run ID for item tracking. Used to record which run created/updated items. */
+  scriptRunId?: string;
+  /** Task run ID for item tracking. Used when in task mode (planner/maintainer). */
+  taskRunId?: string;
   /**
    * Abort controller for terminating script on fatal errors (workflow mode only).
    * When set along with workflowId, invalid input errors will abort execution immediately
@@ -72,9 +78,15 @@ export class SandboxAPI {
   private userPath?: string;
   private connectionManager?: ConnectionManager;
   private workflowId?: string;
+  private scriptRunId?: string;
+  private taskRunId?: string;
   private abortController?: AbortController;
   private debug = debug("SandboxAPI");
   private toolDocs = new Map<string, string>();
+
+  // Item tracking state for withItem scope enforcement
+  private activeItem: { id: string; title: string } | null = null;
+  private activeItemIsDone: boolean = false;
 
   constructor(config: SandboxAPIConfig) {
     this.api = config.api;
@@ -83,6 +95,8 @@ export class SandboxAPI {
     this.userPath = config.userPath;
     this.connectionManager = config.connectionManager;
     this.workflowId = config.workflowId;
+    this.scriptRunId = config.scriptRunId;
+    this.taskRunId = config.taskRunId;
     this.abortController = config.abortController;
   }
 
@@ -106,6 +120,26 @@ export class SandboxAPI {
       }
       // For database errors, log but don't block execution
       this.debug(`Error checking workflow status: ${error}`);
+    }
+  }
+
+  /**
+   * Enforce mutation restrictions - mutations must be inside Items.withItem().
+   * Called for non-read-only tool calls in workflow mode.
+   */
+  private enforceMutationRestrictions(ns: string, name: string): void {
+    // Mutations require active item scope
+    if (this.activeItem === null) {
+      const message = `${ns}.${name} is a mutation and must be called inside Items.withItem(). ` +
+        `Wrap your mutations in a withItem call to track progress.`;
+      return this.abortWithLogicError(message);
+    }
+
+    // Check if item is done - can't mutate completed items
+    if (this.activeItemIsDone) {
+      const message = `${ns}.${name}: cannot perform mutations on completed item "${this.activeItem.id}". ` +
+        `Check ctx.item.isDone before attempting mutations.`;
+      return this.abortWithLogicError(message);
     }
   }
 
@@ -166,6 +200,19 @@ Example: await ${ns}.${name}(<input>)
             }
 
             throw logicError;
+          }
+        }
+
+        // Enforce mutation restrictions in workflow mode
+        // Mutations must be inside Items.withItem() to enable progress tracking
+        if (this.workflowId && tool.isReadOnly) {
+          const isReadOnly = tool.isReadOnly(validatedInput);
+          if (!isReadOnly) {
+            // This is a mutation - check if we're inside withItem scope
+            // Exception: Console.log is allowed outside withItem (it's for debugging)
+            if (ns !== 'Console' || name !== 'log') {
+              this.enforceMutationRestrictions(ns, name);
+            }
           }
         }
 
@@ -442,10 +489,155 @@ Example: await ${ns}.${name}(<input>)
       makeGetScriptRunTool(this.api.scriptStore)
     );
 
+    // Items tools - logical items infrastructure
+    // Items.list for querying processed items
+    const itemsListTool = makeItemsListTool(
+      this.api.itemStore,
+      () => this.workflowId
+    );
+    addTool(global, "Items", "list", itemsListTool);
+
+    // Items.withItem - built-in function for processing items with state tracking
+    if (!("Items" in global)) {
+      global["Items"] = {};
+    }
+    (global["Items"] as Record<string, unknown>)["withItem"] = this.createWithItemFunction();
+
+    // Add documentation for Items.withItem
+    const withItemDoc = `===DESCRIPTION===
+Process work in a discrete logical item with automatic state tracking.
+
+All mutations MUST be called inside Items.withItem() - mutations outside will abort the script.
+
+Example:
+await Items.withItem(
+  'email:\${email.id}',  // Stable ID based on external identifier
+  'Email from \${email.from}: "\${email.subject}"',  // Human-readable title
+  async (ctx) => {
+    if (ctx.item.isDone) {
+      Console.log({ type: 'log', line: 'Skipping already processed item' });
+      return;
+    }
+    // Process the item
+    await Gmail.api({ method: 'users.messages.modify', ... });
+  }
+);
+
+===INPUT===
+{ id: string; title: string; handler: (ctx: ItemContext) => Promise<unknown> }
+
+===OUTPUT===
+unknown (result of handler)`;
+    toolDocs.set("Items.withItem", withItemDoc);
+
     // Store
     this.toolDocs = toolDocs;
 
     return global;
+  }
+
+  /**
+   * Create the Items.withItem function for processing items with state tracking.
+   */
+  private createWithItemFunction() {
+    return async (
+      logicalItemId: string,
+      title: string,
+      handler: (ctx: ItemContext) => Promise<unknown>
+    ): Promise<unknown> => {
+      // Validate inputs
+      if (typeof logicalItemId !== 'string' || !logicalItemId) {
+        return this.abortWithLogicError('Items.withItem: id must be a non-empty string');
+      }
+      if (typeof title !== 'string' || !title) {
+        return this.abortWithLogicError('Items.withItem: title must be a non-empty string');
+      }
+      if (typeof handler !== 'function') {
+        return this.abortWithLogicError('Items.withItem: handler must be a function');
+      }
+
+      // Check for nested/concurrent withItem
+      if (this.activeItem !== null) {
+        return this.abortWithLogicError(
+          `Items.withItem: cannot nest or run concurrent withItem calls. ` +
+          `Already processing item "${this.activeItem.id}". ` +
+          `Ensure withItem calls are sequential and not nested.`
+        );
+      }
+
+      // Get workflow context
+      const workflowId = this.workflowId;
+      if (!workflowId) {
+        return this.abortWithLogicError(
+          'Items.withItem: no workflow context. withItem requires a workflow.'
+        );
+      }
+
+      // Determine run ID and created_by
+      const runId = this.scriptRunId || this.taskRunId || '';
+      const createdBy: ItemCreatedBy = this.type === 'planner' || this.type === 'maintainer'
+        ? this.type
+        : 'workflow';
+
+      // Start item (creates or updates status to 'processing')
+      const item = await this.api.itemStore.startItem(
+        workflowId,
+        logicalItemId,
+        title,
+        createdBy,
+        runId
+      );
+
+      const isDone = item.status === 'done';
+
+      // Set active item state
+      this.activeItem = { id: logicalItemId, title };
+      this.activeItemIsDone = isDone;
+
+      // Create context for handler
+      const ctx: ItemContext = {
+        item: {
+          id: logicalItemId,
+          title,
+          isDone,
+        },
+      };
+
+      try {
+        // Execute handler
+        const result = await handler(ctx);
+
+        // Only update status if item wasn't already done
+        if (!isDone) {
+          await this.api.itemStore.setStatus(workflowId, logicalItemId, 'done', runId);
+        }
+
+        return result;
+      } catch (error) {
+        // Only update status if item wasn't already done
+        if (!isDone) {
+          await this.api.itemStore.setStatus(workflowId, logicalItemId, 'failed', runId);
+        }
+        throw error;
+      } finally {
+        this.activeItem = null;
+        this.activeItemIsDone = false;
+      }
+    };
+  }
+
+  /**
+   * Abort execution with a logic error.
+   */
+  private abortWithLogicError(message: string): never {
+    const error = new LogicError(message, { source: 'Items.withItem' });
+
+    if (this.abortController) {
+      this.getContext().classifiedError = error;
+      this.abortController.abort(message);
+    }
+
+    throw error;
   }
 }
 

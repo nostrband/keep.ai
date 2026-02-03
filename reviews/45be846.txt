@@ -282,3 +282,11 @@ await opts.scriptStore.updateWorkflowFields(workflow.id, {
 1. **Critical:** Add `await` to `nostr.stop()` and `peer.stop()`
 2. **Medium:** Enhance scheduler close() to wait for in-progress work
 3. **Low:** Migrate schedule.ts to updateWorkflowFields
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Missing await nostr.stop) - created specs/new/fix-shutdown-missing-awaits.md
+- Issue #2 (Missing await peer.stop) - covered by specs/new/fix-shutdown-missing-awaits.md
+- Issue #3 (Scheduler doesn't wait for work) - created specs/new/scheduler-graceful-shutdown.md
+- Issue #4 (Old updateWorkflow pattern) - created specs/new/migrate-schedule-to-updateWorkflowFields.md

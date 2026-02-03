@@ -1,51 +1,66 @@
 import { z } from "zod";
-import { tool } from "ai";
 import { FileStore } from "@app/db";
 import { EvalContext } from "../sandbox/sandbox";
 import { getEnv } from "../env";
 import { fileUtils } from "@app/node";
 import debug from "debug";
 import { AuthError, LogicError, NetworkError, PermissionError, classifyHttpError, classifyGenericError, isClassifiedError, formatUsageForEvent } from "../errors";
+import { defineReadOnlyTool, Tool } from "./types";
 
 const debugAudioExplain = debug("AudioExplain");
 
+const inputSchema = z.object({
+  file_path: z
+    .string()
+    .min(1)
+    .describe("File path of the audio file to analyze"),
+  prompt: z
+    .string()
+    .min(1)
+    .max(2000)
+    .describe(
+      "Question or prompt about the audio - what you want to know or understand about the audio content"
+    ),
+});
+
+const outputSchema = z.object({
+  explanation: z
+    .string()
+    .describe(
+      "AI-generated textual explanation or transcription of the audio"
+    ),
+  file_info: z
+    .object({
+      id: z.string().describe("File ID"),
+      name: z.string().describe("Original filename"),
+      media_type: z.string().describe("MIME type of the audio file"),
+      size: z.number().describe("File size in bytes"),
+    })
+    .describe("Information about the analyzed audio file"),
+});
+
+type Input = z.infer<typeof inputSchema>;
+type Output = z.infer<typeof outputSchema>;
+
+/**
+ * Create the Audio.explain tool.
+ * This is a read-only tool - can be used outside Items.withItem().
+ */
 export function makeAudioExplainTool(
   fileStore: FileStore,
   userPath: string | undefined,
   getContext: () => EvalContext
-) {
-  return tool({
+): Tool<Input, Output> {
+  return defineReadOnlyTool({
+    namespace: "Audio",
+    name: "explain",
     description: `Analyze and explain audio files using AI.
 Takes an audio file path/ID and a question about the audio, uploads the audio to an AI model and returns the textual explanation or transcription.
-Supports wav, mp3, mp4, mpeg, m4a, mpga, aac, flac, webm audio formats up to 10MB.`,
-    inputSchema: z.object({
-      file_path: z
-        .string()
-        .min(1)
-        .describe("File path of the audio file to analyze"),
-      prompt: z
-        .string()
-        .min(1)
-        .max(2000)
-        .describe(
-          "Question or prompt about the audio - what you want to know or understand about the audio content"
-        ),
-    }),
-    outputSchema: z.object({
-      explanation: z
-        .string()
-        .describe(
-          "AI-generated textual explanation or transcription of the audio"
-        ),
-      file_info: z
-        .object({
-          id: z.string().describe("File ID"),
-          name: z.string().describe("Original filename"),
-          media_type: z.string().describe("MIME type of the audio file"),
-          size: z.number().describe("File size in bytes"),
-        })
-        .describe("Information about the analyzed audio file"),
-    }),
+Supports wav, mp3, mp4, mpeg, m4a, mpga, aac, flac, webm audio formats up to 10MB.
+
+ℹ️ Not a mutation - can be used outside Items.withItem().`,
+    inputSchema,
+    outputSchema,
     execute: async (input) => {
       const { file_path: file, prompt } = input;
 
@@ -249,5 +264,5 @@ Supports wav, mp3, mp4, mpeg, m4a, mpga, aac, flac, webm audio formats up to 10M
         throw classifyGenericError(error instanceof Error ? error : new Error(String(error)), "Audio.explain");
       }
     },
-  });
+  }) as Tool<Input, Output>;
 }

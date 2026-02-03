@@ -18,21 +18,30 @@ export default function ArchivedPage() {
   // Filter to only archived workflows
   const archivedWorkflows = workflows.filter(w => w.status === "archived");
 
-  const handleRestore = async (workflowId: string) => {
-    try {
-      // Smart restore: "paused" if has scripts, "draft" if not (spec: smart-workflow-restore-status)
-      const workflow = workflows.find(w => w.id === workflowId);
-      const restoreStatus = workflow?.active_script_id ? "paused" : "draft";
+  const handleRestore = (workflowId: string) => {
+    // Smart restore: "paused" if has scripts, "draft" if not (spec: smart-workflow-restore-status)
+    const workflow = workflows.find(w => w.id === workflowId);
 
-      await updateWorkflowMutation.mutateAsync({
-        workflowId,
-        status: restoreStatus
-      });
-      success.show(`Workflow restored to ${restoreStatus}`);
-    } catch (err) {
-      console.error("Failed to restore workflow:", err);
-      error.show(err instanceof Error ? err.message : "Failed to restore workflow");
+    // Guard against workflow not found (race condition, stale cache, sync issue)
+    if (!workflow) {
+      error.show("Workflow not found. Try refreshing the page.");
+      return;
     }
+
+    const restoreStatus = workflow.active_script_id ? "paused" : "draft";
+
+    updateWorkflowMutation.mutate({
+      workflowId,
+      status: restoreStatus
+    }, {
+      onSuccess: () => {
+        success.show(`Workflow restored to ${restoreStatus}`);
+      },
+      onError: (err) => {
+        console.error("Failed to restore workflow:", err);
+        error.show(err instanceof Error ? err.message : "Failed to restore workflow");
+      },
+    });
   };
 
   const formatDate = (timestamp: string) => {

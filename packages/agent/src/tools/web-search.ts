@@ -1,73 +1,84 @@
 import { z } from "zod";
 import { Exa } from "exa-js";
-import { tool } from "ai";
 import { getEnv } from "../env";
 import debug from "debug";
 import { EvalContext } from "../sandbox/sandbox";
 import { AuthError, LogicError, classifyGenericError } from "../errors";
+import { defineReadOnlyTool, Tool } from "./types";
 
 const debugWebSearch = debug("agent:web-search");
 
-export function makeWebSearchTool(getContext: () => EvalContext) {
-  return tool({
-    description:
-      "Search the web using Exa API and get content from relevant web pages. Returns search results with full text content. Text content is usually cached, use live: true to get up to date results for time-sensitive data (prices, latest news, etc)",
-    inputSchema: z.union([
-      z.object({
-        query: z
-          .string()
-          .min(1)
-          .describe("The search query to find relevant web content"),
-        type: z
-          .enum(["neural", "keyword", "auto"])
-          .optional()
-          .default("auto")
-          .describe(
-            "Search type: 'neural' for semantic search, 'keyword' for exact matches, 'auto' for best results"
-          ),
-        numResults: z
-          .number()
-          .int()
-          .min(1)
-          .max(20)
-          .optional()
-          .default(5)
-          .describe("Number of search results to return (1-20, default: 5)"),
-        includeDomains: z
-          .array(z.string())
-          .optional()
-          .describe(
-            "Array of domains to include in search (e.g., ['reddit.com', 'stackoverflow.com'])"
-          ),
-        excludeDomains: z
-          .array(z.string())
-          .optional()
-          .describe("Array of domains to exclude from search"),
-        startPublishedDate: z
-          .string()
-          .optional()
-          .describe(
-            "Start date for content published date filter (ISO format: YYYY-MM-DD)"
-          ),
-        endPublishedDate: z
-          .string()
-          .optional()
-          .describe(
-            "End date for content published date filter (ISO format: YYYY-MM-DD)"
-          ),
-        live: z
-          .boolean()
-          .optional()
-          .default(false)
-          .describe(
-            "If true, ensures results are 100% up to date and not cached"
-          ),
-      }),
-      z
-        .string()
-        .min(1)
-        .describe("Search query string (shorthand for { query: string })"),
-    ]),
+const inputSchema = z.union([
+  z.object({
+    query: z
+      .string()
+      .min(1)
+      .describe("The search query to find relevant web content"),
+    type: z
+      .enum(["neural", "keyword", "auto"])
+      .optional()
+      .default("auto")
+      .describe(
+        "Search type: 'neural' for semantic search, 'keyword' for exact matches, 'auto' for best results"
+      ),
+    numResults: z
+      .number()
+      .int()
+      .min(1)
+      .max(20)
+      .optional()
+      .default(5)
+      .describe("Number of search results to return (1-20, default: 5)"),
+    includeDomains: z
+      .array(z.string())
+      .optional()
+      .describe(
+        "Array of domains to include in search (e.g., ['reddit.com', 'stackoverflow.com'])"
+      ),
+    excludeDomains: z
+      .array(z.string())
+      .optional()
+      .describe("Array of domains to exclude from search"),
+    startPublishedDate: z
+      .string()
+      .optional()
+      .describe(
+        "Start date for content published date filter (ISO format: YYYY-MM-DD)"
+      ),
+    endPublishedDate: z
+      .string()
+      .optional()
+      .describe(
+        "End date for content published date filter (ISO format: YYYY-MM-DD)"
+      ),
+    live: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe(
+        "If true, ensures results are 100% up to date and not cached"
+      ),
+  }),
+  z
+    .string()
+    .min(1)
+    .describe("Search query string (shorthand for { query: string })"),
+]);
+
+type Input = z.infer<typeof inputSchema>;
+
+/**
+ * Create the Web.search tool.
+ * This is a read-only tool - can be used outside Items.withItem().
+ */
+export function makeWebSearchTool(getContext: () => EvalContext): Tool<Input, unknown> {
+  return defineReadOnlyTool({
+    namespace: "Web",
+    name: "search",
+    description: `Search the web using Exa API and get content from relevant web pages. Returns search results with full text content. Text content is usually cached, use live: true to get up to date results for time-sensitive data (prices, latest news, etc).
+
+ℹ️ Not a mutation - can be used outside Items.withItem().`,
+    inputSchema,
     execute: async (context) => {
       let query: string;
       let type: "neural" | "keyword" | "auto" = "auto";
@@ -189,5 +200,5 @@ export function makeWebSearchTool(getContext: () => EvalContext) {
 
       return searchResult;
     },
-  });
+  }) as Tool<Input, unknown>;
 }

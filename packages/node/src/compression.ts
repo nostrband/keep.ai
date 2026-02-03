@@ -83,8 +83,8 @@ class NodeCompression {
     return this.maxResultSizeSafe();
   }
 
-  private maxResultSizeSafe() {
-    if (!this.maxResultSize) return this.maxResultSize;
+  private maxResultSizeSafe(): number | undefined {
+    if (!this.maxResultSize) return undefined;
     // Allow room for 1Kb trailer, crop to 64 from the bottom
     return Math.max(64, this.maxResultSize - 1024);
   }
@@ -271,7 +271,7 @@ class NodeCompressionInstance implements CompressionInstance {
     if (typeof chunk === "string" && this.binary)
       throw new Error("String input in binary mode");
     if (typeof chunk !== "string" && !this.binary)
-      throw new Error("Uint8Array input in binary mode");
+      throw new Error("Uint8Array input in string mode");
 
     // Convert string to Uint8Array if needed
     const inputData =
@@ -358,8 +358,8 @@ class NoCompression {
     return this.maxResultSizeSafe();
   }
 
-  private maxResultSizeSafe() {
-    if (!this.maxResultSize) return this.maxResultSize;
+  private maxResultSizeSafe(): number | undefined {
+    if (!this.maxResultSize) return undefined;
     return this.maxResultSize;
   }
 
@@ -433,7 +433,7 @@ class NoCompressionDecompressionInstance implements CompressionInstance {
     if (typeof chunk === "string" && this.binary)
       throw new Error("String input in binary mode");
     if (typeof chunk !== "string" && !this.binary)
-      throw new Error("Uint8Array input in binary mode");
+      throw new Error("Uint8Array input in string mode");
 
     // Convert string to Uint8Array if needed for internal processing
     const inputData =

@@ -18,7 +18,7 @@
 export * from "./types";
 
 // OAuth handler
-export { OAuthHandler, OAuthError, tokenResponseToCredentials } from "./oauth";
+export { OAuthHandler, OAuthError, tokenResponseToCredentials, type RevokeResult } from "./oauth";
 
 // Credential storage
 export { CredentialStore } from "./store";
@@ -33,6 +33,18 @@ export {
 
 // Connection manager
 export { ConnectionManager, AuthError } from "./manager";
+
+// Re-export error classification utilities from @app/proto for convenience
+export {
+  isClassifiedError,
+  ClassifiedError,
+  PermissionError,
+  NetworkError,
+  LogicError,
+  InternalError,
+  classifyHttpError,
+  type ErrorType,
+} from "@app/proto";
 
 // Database adapter
 export {

@@ -483,7 +483,16 @@ export class Sandbox {
     const functionName = name || "fn";
 
     return ctx.newFunction(functionName, (...argHandles) => {
-      const args = argHandles.map((handle) => ctx.dump(handle));
+      // Convert args, preserving functions as callable wrappers
+      const args = argHandles.map((handle) => {
+        const handleType = ctx.typeof(handle);
+        if (handleType === "function") {
+          // Wrap guest function as host-callable async function
+          return this.wrapGuestCallback(ctx, handle);
+        }
+        return ctx.dump(handle);
+      });
+
       let result: unknown;
 
       try {
@@ -528,6 +537,117 @@ export class Sandbox {
 
       return this.hostValueToHandle(ctx, result, `${functionName}:result`);
     });
+  }
+
+  /**
+   * Wrap a guest function handle as a host-callable async function.
+   * The returned function can be called from host code and will execute
+   * the guest function in the QuickJS context.
+   */
+  private wrapGuestCallback(
+    ctx: QuickJSContext,
+    fnHandle: QuickJSHandle
+  ): (...args: unknown[]) => Promise<unknown> {
+    // Keep a reference to dispose later
+    const ownedHandle = fnHandle.dup();
+
+    return async (...hostArgs: unknown[]): Promise<unknown> => {
+      this.#ensureAlive();
+
+      // Convert host args to guest handles
+      const argHandles = hostArgs.map((arg) =>
+        this.hostValueToHandle(ctx, arg, "callback-arg")
+      );
+
+      try {
+        // Call the guest function
+        const callResult = ctx.callFunction(ownedHandle, ctx.undefined, ...argHandles);
+
+        if ("error" in callResult && callResult.error) {
+          const errorValue = ctx.dump(callResult.error);
+          callResult.error.dispose();
+          throw new Error(String(errorValue));
+        }
+
+        const resultHandle = (callResult as { value: QuickJSHandle }).value;
+
+        // Check if result is a promise
+        const promiseState = ctx.getPromiseState(resultHandle);
+        if (promiseState.type === "pending") {
+          // Wait for promise to resolve using existing infrastructure
+          const resolved = await this.#awaitGuestPromise(resultHandle);
+          return resolved;
+        }
+
+        if (promiseState.type === "fulfilled" && !promiseState.notAPromise) {
+          try {
+            return ctx.dump(promiseState.value);
+          } finally {
+            promiseState.value.dispose();
+            resultHandle.dispose();
+          }
+        }
+
+        if (promiseState.type === "rejected") {
+          try {
+            const error = ctx.dump(promiseState.error);
+            throw new Error(String(error));
+          } finally {
+            promiseState.error.dispose();
+            resultHandle.dispose();
+          }
+        }
+
+        // Dump and return the result
+        const result = ctx.dump(resultHandle);
+        resultHandle.dispose();
+        return result;
+      } finally {
+        argHandles.forEach(h => h.dispose());
+      }
+    };
+  }
+
+  /**
+   * Await a guest promise handle, executing pending jobs until it settles.
+   */
+  async #awaitGuestPromise(promiseHandle: QuickJSHandle): Promise<unknown> {
+    const ctx = this.#ctx;
+
+    // Execute pending jobs until promise settles
+    while (true) {
+      const state = ctx.getPromiseState(promiseHandle);
+
+      if (state.type === "fulfilled") {
+        const result = ctx.dump(state.value);
+        state.value.dispose();
+        promiseHandle.dispose();
+        return result;
+      }
+
+      if (state.type === "rejected") {
+        const error = ctx.dump(state.error);
+        state.error.dispose();
+        promiseHandle.dispose();
+        throw new Error(String(error));
+      }
+
+      // Execute pending jobs
+      const execResult = this.#rt.executePendingJobs();
+      if ("error" in execResult && execResult.error) {
+        const errorVal = ctx.dump(execResult.error);
+        execResult.error.dispose();
+        promiseHandle.dispose();
+        throw new Error(String(errorVal));
+      }
+
+      // Check if we made progress
+      const jobCount = "value" in execResult ? execResult.value : 0;
+      if (jobCount === 0) {
+        // No more jobs to execute, yield to allow async operations to complete
+        await new Promise<void>(resolve => queueMicrotask(resolve));
+      }
+    }
   }
 }
 

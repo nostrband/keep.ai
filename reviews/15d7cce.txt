@@ -280,3 +280,10 @@ Add documentation explaining:
 1. **Medium:** Add backward-compatible inputSchema for get-script and list-script-runs
 2. **Medium:** Consider moving credential fetching inside try-catch for all Google tools (design decision)
 3. **Low:** Document ToolCallOptions usage for future development
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Breaking inputSchema changes) - skipped
+- Issue #2 (Credential fetching outside try-catch) - not an issue after investigation (getCredentials already throws AuthError and calls markError internally)
+- Issue #3 (ToolCallOptions not used) - skipped (enhancement opportunity, not a bug)

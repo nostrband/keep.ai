@@ -9,12 +9,12 @@
  */
 
 import { z } from "zod";
-import { tool } from "ai";
 import { Client } from "@notionhq/client";
 import debug from "debug";
 import { EvalContext } from "../sandbox/sandbox";
 import { AuthError, LogicError, classifyNotionError } from "../errors";
 import type { ConnectionManager, Connection, OAuthCredentials } from "@app/connectors";
+import { defineTool, Tool } from "./types";
 
 const debugNotion = debug("agent:notion");
 
@@ -30,6 +30,15 @@ const SUPPORTED_METHODS = [
 ] as const;
 
 type NotionMethod = (typeof SUPPORTED_METHODS)[number];
+
+// Read-only methods (can be used outside Items.withItem)
+const READ_METHODS = new Set<string>([
+  "databases.query",
+  "databases.retrieve",
+  "pages.retrieve",
+  "blocks.children.list",
+  "search",
+]);
 
 /**
  * Get credentials for Notion, with proper error handling.
@@ -67,6 +76,21 @@ async function getNotionCredentials(
   return connectionManager.getCredentials(connectionId);
 }
 
+const inputSchema = z.object({
+  method: z.enum(SUPPORTED_METHODS).describe("Notion API method to call"),
+  params: z
+    .any()
+    .optional()
+    .describe("Parameters to pass to the Notion API method"),
+  account: z
+    .string()
+    .describe(
+      "Workspace ID of the Notion workspace to use (from connected workspaces)"
+    ),
+});
+
+type Input = z.infer<typeof inputSchema>;
+
 /**
  * Create Notion tool that uses ConnectionManager for credentials.
  *
@@ -77,21 +101,17 @@ async function getNotionCredentials(
 export function makeNotionTool(
   getContext: () => EvalContext,
   connectionManager: ConnectionManager
-) {
-  return tool({
-    description: `Access Notion API with various methods. Supported methods: ${SUPPORTED_METHODS.join(", ")}. Returns dynamic results based on the method used. Knowledge of param and output structure is expected from the assistant. REQUIRED: 'account' parameter must be the workspace_id of the connected Notion workspace.`,
-    inputSchema: z.object({
-      method: z.enum(SUPPORTED_METHODS).describe("Notion API method to call"),
-      params: z
-        .any()
-        .optional()
-        .describe("Parameters to pass to the Notion API method"),
-      account: z
-        .string()
-        .describe(
-          "Workspace ID of the Notion workspace to use (from connected workspaces)"
-        ),
-    }),
+): Tool<Input, unknown> {
+  return defineTool({
+    namespace: "Notion",
+    name: "api",
+    description: `Access Notion API with various methods. Supported methods: ${SUPPORTED_METHODS.join(", ")}. Returns dynamic results based on the method used. Knowledge of param and output structure is expected from the assistant. REQUIRED: 'account' parameter must be the workspace_id of the connected Notion workspace.
+
+⚠️ MUTATION INFO:
+- Read methods (can use outside Items.withItem): databases.query, databases.retrieve, pages.retrieve, blocks.children.list, search
+- Write methods (MUST use inside Items.withItem): pages.create, pages.update, blocks.children.append`,
+    inputSchema,
+    isReadOnly: (params) => READ_METHODS.has(params.method),
     execute: async (input) => {
       const { method, params = {}, account } = input;
 
@@ -180,5 +200,5 @@ export function makeNotionTool(
         throw classified;
       }
     },
-  });
+  }) as Tool<Input, unknown>;
 }

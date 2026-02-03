@@ -116,6 +116,12 @@ export class TaskWorker {
       }
       const taskType: TaskType = task.type;
 
+      // Fail fast: maintainer tasks require workflow_id to load context
+      if (taskType === "maintainer" && !task.workflow_id) {
+        this.debug("Maintainer task missing workflow_id");
+        return this.finishTask(task, "Configuration error", "Maintainer task missing workflow_id");
+      }
+
       const { inboxItems, inbox: rawInbox } = await this.getInboxItems(taskType, task.id);
       let inbox = rawInbox;
       
@@ -537,18 +543,10 @@ export class TaskWorker {
     }
 
     if (!scriptRunId) {
-      this.debug("loadMaintainerContext: No scriptRunId found in inbox");
-      // Fall back to basic context if no scriptRunId
-      return {
-        workflowId,
-        expectedMajorVersion: activeScript.major_version,
-        scriptRunId: "",
-        error: { type: "unknown", message: "Script run ID not found in inbox" },
-        logs: "",
-        scriptCode: activeScript.code,
-        scriptVersion: formatVersion(activeScript.major_version, activeScript.minor_version),
-        changelog: [],
-      };
+      // Fail fast: don't attempt blind fixes without knowing which script run failed
+      // The planner may have updated the active script since the failure occurred
+      this.debug("loadMaintainerContext: No scriptRunId found in inbox - cannot determine failed script");
+      return undefined;
     }
 
     // 3. Load the failed script run
@@ -557,7 +555,7 @@ export class TaskWorker {
       this.debug("loadMaintainerContext: Script run not found", scriptRunId);
       return {
         workflowId,
-        expectedMajorVersion: activeScript.major_version,
+        expectedScriptId: activeScript.id,
         scriptRunId,
         error: { type: "unknown", message: "Script run not found" },
         logs: "",
@@ -579,22 +577,21 @@ export class TaskWorker {
     const changelog = priorScripts
       .filter(s => s.minor_version < scriptToUse.minor_version)
       .sort((a, b) => b.minor_version - a.minor_version) // newest first
-      .slice(0, 5) // limit to last 5 changes
       .map(s => ({
         version: formatVersion(s.major_version, s.minor_version),
         comment: s.change_comment || "",
       }));
 
-    // 6. Trim logs to last 50 lines to avoid context bloat
+    // 6. Trim logs to last 5000 chars for predictable context size
     const allLogs = scriptRun.logs || "";
-    const logLines = allLogs.split("\n");
-    const trimmedLogs = logLines.length > 50
-      ? logLines.slice(-50).join("\n")
+    const MAX_LOG_CHARS = 5000;
+    const trimmedLogs = allLogs.length > MAX_LOG_CHARS
+      ? "[truncated]\n" + allLogs.slice(-MAX_LOG_CHARS)
       : allLogs;
 
     return {
       workflowId,
-      expectedMajorVersion: scriptToUse.major_version,
+      expectedScriptId: scriptToUse.id,
       scriptRunId,
       error: {
         type: scriptRun.error_type || "unknown",
@@ -676,8 +673,8 @@ If you cannot fix this issue autonomously, explain why without calling the \`fix
     context: MaintainerContext,
     agent: ReplAgent
   ): Promise<void> {
-    // Check if fix tool was called by looking at agent history
-    const fixCalled = this.checkIfFixToolCalled(agent);
+    // Check if fix tool was called using the agent's callback-tracked flag
+    const fixCalled = agent.fixCalled;
     this.debug("Maintainer completion - fix called:", fixCalled);
 
     if (fixCalled) {
@@ -708,23 +705,6 @@ If you cannot fix this issue autonomously, explain why without calling the \`fix
       context.scriptRunId,
       explanation || "The maintainer was unable to automatically fix this issue."
     );
-  }
-
-  /**
-   * Check if the fix tool was called during the agent loop.
-   * Looks through agent history for tool parts with type 'tool-fix'.
-   */
-  private checkIfFixToolCalled(agent: ReplAgent): boolean {
-    for (const message of agent.history) {
-      if (message.role !== "assistant" || !message.parts) continue;
-      for (const part of message.parts) {
-        // The AI SDK uses `tool-${toolName}` format for tool parts
-        if (part.type === "tool-fix") {
-          return true;
-        }
-      }
-    }
-    return false;
   }
 
   /**
