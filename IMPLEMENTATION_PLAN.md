@@ -4,7 +4,7 @@ This document tracks the implementation status of the new execution model refact
 
 **Last Updated:** 2026-02-03
 **Current Database Version:** v36
-**Overall Progress:** 8/8 core specs implemented
+**Overall Progress:** 9/9 core specs implemented
 
 ---
 
@@ -209,6 +209,25 @@ The codebase is transitioning from an **Items-based execution model** (`Items.wi
   - **Dependencies:** exec-05 ✓ DONE
   - **Blocked by:** Nothing
 
+- [x] **[P4] exec-09: Scheduler Integration** - [No spec file - integration work]
+  - Integrate executeWorkflowSession into WorkflowScheduler
+  - Add resumeIncompleteSessions() call on start()
+  - Add isNewFormatWorkflow() detection based on handler_config
+  - Add executeNewFormatWorkflow() for session-based execution
+  - Add handleSessionResult() for signal emission
+  - **Status:** COMPLETE - 100%
+  - **Implementation:**
+    - Modified `packages/agent/src/workflow-scheduler.ts`
+    - Added imports for session-orchestration and handler-state-machine types
+    - Made `start()` async and added `resumeIncompleteSessions()` call
+    - Added `createExecutionContext()` to build HandlerExecutionContext
+    - Added `isNewFormatWorkflow()` to detect new format via handler_config
+    - Added `executeNewFormatWorkflow()` to call executeWorkflowSessionIfIdle
+    - Added `handleSessionResult()` to emit signals based on session outcome
+    - In `processNextWorkflow()`, check workflow format and branch to appropriate execution path
+  - **Dependencies:** exec-07 ✓ DONE
+  - **Blocked by:** Nothing
+
 ---
 
 ## Dependency Graph
@@ -237,6 +256,9 @@ exec-02 (Deprecate Items) ✓ ─┼──────────┐           
                              │
                              ▼
                       exec-07 (Session Orchestration) ✓
+                             │
+                             ▼
+                      exec-09 (Scheduler Integration) ✓
 ```
 
 ---
