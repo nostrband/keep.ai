@@ -12,7 +12,11 @@ export {
   makeAudioExplainTool,
   makeAtobTool,
   makeConsoleLogTool,
-  makeItemsListTool,
+  // makeItemsListTool removed (exec-02 - deprecated Items infrastructure)
+  // Topics API (exec-03)
+  makeTopicsPeekTool,
+  makeTopicsGetByIdsTool,
+  makeTopicsPublishTool,
 } from "./tools";
 
 // AI tools (planner/maintainer specific)

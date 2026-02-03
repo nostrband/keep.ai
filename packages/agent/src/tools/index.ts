@@ -1,6 +1,8 @@
 // Tool types
 export { defineTool, defineReadOnlyTool } from "./types";
-export type { Tool, ReadOnlyTool, ItemStatus, ItemCreatedBy, ItemContext } from "./types";
+export type { Tool, ReadOnlyTool } from "./types";
+
+// Note: ItemStatus, ItemCreatedBy, ItemContext removed (exec-02 - deprecated Items infrastructure)
 
 export { makeGetWeatherTool } from "./get-weather";
 export { makeCreateNoteTool } from "./create-note";
@@ -40,4 +42,7 @@ export { makeScriptHistoryTool } from "./script-history";
 export { makeListScriptRunsTool } from "./list-script-runs";
 export { makeGetScriptRunTool } from "./get-script-run";
 export { makeConsoleLogTool } from "./console-log";
-export { makeItemsListTool } from "./items-list";
+// Note: makeItemsListTool removed (exec-02 - deprecated Items infrastructure)
+
+// Topics API (exec-03 - event-driven execution model)
+export { makeTopicsPeekTool, makeTopicsGetByIdsTool, makeTopicsPublishTool } from "./topics";

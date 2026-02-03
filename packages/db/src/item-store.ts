@@ -9,16 +9,23 @@ import { DBInterface } from "./interfaces";
  * - done: Handler completed successfully
  * - failed: Handler threw an error
  * - skipped: User explicitly skipped (manual action)
+ *
+ * @deprecated This type is part of the deprecated Items infrastructure (exec-02).
+ * Use the new Topics-based event-driven execution model instead.
  */
 export type ItemStatus = 'processing' | 'done' | 'failed' | 'skipped';
 
 /**
  * Who created the item (for tracking purposes).
+ *
+ * @deprecated This type is part of the deprecated Items infrastructure (exec-02).
  */
 export type ItemCreatedBy = 'workflow' | 'planner' | 'maintainer';
 
 /**
  * Logical item record in the database.
+ *
+ * @deprecated This interface is part of the deprecated Items infrastructure (exec-02).
  */
 export interface Item {
   id: string;
@@ -36,6 +43,8 @@ export interface Item {
 
 /**
  * Options for listing items.
+ *
+ * @deprecated This interface is part of the deprecated Items infrastructure (exec-02).
  */
 export interface ListItemsOptions {
   /** Filter by item status */
@@ -49,8 +58,11 @@ export interface ListItemsOptions {
 /**
  * Store for managing logical items in workflows.
  *
- * Logical items are the fundamental unit of work in Keep.AI automations.
- * Scripts use Items.withItem() to process work in discrete, trackable units.
+ * @deprecated This class is part of the deprecated Items infrastructure (exec-02).
+ * The items table is kept for data preservation, but ItemStore should not be used
+ * for new code. Use the new Topics-based event-driven execution model instead.
+ *
+ * See specs/exec-02-deprecate-items.md for details.
  */
 export class ItemStore {
   private db: KeepDb;

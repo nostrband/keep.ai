@@ -1,3 +1,8 @@
+/**
+ * @deprecated This tool is part of the deprecated Items infrastructure (exec-02).
+ * Use the new Topics-based event-driven execution model instead.
+ * See specs/exec-02-deprecate-items.md for details.
+ */
 import { z } from "zod";
 import { defineReadOnlyTool, Tool } from "./types";
 import { ItemStore, ItemStatus } from "@app/db";

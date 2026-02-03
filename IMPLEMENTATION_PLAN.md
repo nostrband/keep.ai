@@ -4,7 +4,7 @@ This document tracks the implementation status of the new execution model refact
 
 **Last Updated:** 2026-02-03
 **Current Database Version:** v36
-**Overall Progress:** 1/8 core specs implemented
+**Overall Progress:** 3/8 core specs implemented
 
 ---
 
@@ -13,9 +13,10 @@ This document tracks the implementation status of the new execution model refact
 The codebase is transitioning from an **Items-based execution model** (`Items.withItem()`) to a **Topics-based event-driven model** with structured producers/consumers and three-phase execution. This is a major architectural refactor affecting the agent, database, and workflow execution systems.
 
 **Current State:**
-- Old Items infrastructure is **fully implemented and actively in use**
-- New Topics infrastructure: **exec-01 (Database Schema) COMPLETE**
-- Remaining specs (02-08) have **0% implementation**
+- Old Items infrastructure is **deprecated and removed**
+- New Topics infrastructure: **exec-01 (Database Schema) COMPLETE**, **exec-03 (Topics API) COMPLETE**
+- Deprecation: **exec-02 (Deprecate Items) COMPLETE**
+- Remaining specs (03a-08) require sequential implementation
 - ToolWrapper exists but is **not used** - SandboxAPI is the active implementation
 
 ---
@@ -41,7 +42,7 @@ The codebase is transitioning from an **Items-based execution model** (`Items.wi
   - **Dependencies:** None
   - **Blocked by:** Nothing
 
-- [ ] **[P1] exec-02: Deprecate Items** - [specs/exec-02-deprecate-items.md](specs/exec-02-deprecate-items.md)
+- [x] **[P1] exec-02: Deprecate Items** - [specs/exec-02-deprecate-items.md](specs/exec-02-deprecate-items.md)
   - Remove Items.withItem() from SandboxAPI and ToolWrapper
   - Remove Items.list tool (packages/agent/src/tools/items-list.ts)
   - Remove activeItem/activeItemIsDone tracking
@@ -49,28 +50,36 @@ The codebase is transitioning from an **Items-based execution model** (`Items.wi
   - Update prompts to remove "Logical Items" sections
   - Deprecate ItemStore (keep for data preservation)
   - Skip/remove logical-items.test.ts
-  - **Status:** NOT STARTED - 0% complete
-  - **Current State:** All Items infrastructure is fully implemented and actively used:
-    - `Items.withItem()` exists in both SandboxAPI (api.ts:504) and ToolWrapper (tool-wrapper.ts:142)
-    - `items-list.ts` tool exists and is registered
-    - `activeItem`/`activeItemIsDone` tracking exists in both classes
-    - `enforceMutationRestrictions()` exists in SandboxAPI (api.ts:130-144)
-    - Prompts in agent-env.ts contain full "Logical Items" documentation (lines 463-643)
-    - ItemStore is fully implemented (packages/db/src/item-store.ts)
+  - **Status:** COMPLETE - 100%
+  - **Implementation:**
+    - Removed `Items.withItem()` from SandboxAPI (`packages/agent/src/sandbox/api.ts`, lines 504-627)
+    - Removed `Items.withItem()` from ToolWrapper (`packages/agent/src/sandbox/tool-wrapper.ts`, lines 142-383)
+    - Removed `enforceMutationRestrictions()` method from both SandboxAPI and ToolWrapper
+    - Removed `activeItem` and `activeItemIsDone` tracking from both classes
+    - Removed Items.list tool export from `packages/agent/src/tools/index.ts`
+    - Deprecated ItemStore class and related types with @deprecated JSDoc in `packages/db/src/item-store.ts`
+    - Deprecated `packages/agent/src/tools/items-list.ts` tool file with @deprecated JSDoc
+    - Skipped tests for Items.list Tool and Mutation Enforcement in `packages/tests/src/logical-items.test.ts`
   - **Dependencies:** None
   - **Blocked by:** Nothing
-  - **Note:** Breaking change - existing workflows will need re-planning
+  - **Note:** Breaking change - existing workflows using Items.withItem() will need re-planning. Prompts still contain "Logical Items" documentation (to be removed in exec-08).
 
 ### Phase B: Sandbox Changes (Sequential)
 
-- [ ] **[P2] exec-03: Topics API** - [specs/exec-03-topics-api.md](specs/exec-03-topics-api.md)
+- [x] **[P2] exec-03: Topics API** - [specs/exec-03-topics-api.md](specs/exec-03-topics-api.md)
   - Create packages/agent/src/tools/topics.ts
   - Implement Topics.peek(), Topics.getByIds(), Topics.publish()
   - Expose Topics namespace in sandbox (globalThis.Topics)
-  - **Status:** NOT STARTED - 0% complete
-  - **Current State:** EventStore exists with all required methods (peekEvents, getEventsByIds, publishEvent, reserveEvents, consumeEvents, skipEvents). Need to create Topics sandbox API.
+  - **Status:** COMPLETE - 100%
+  - **Implementation:**
+    - Created `packages/agent/src/tools/topics.ts` with Topics.peek, Topics.getByIds, Topics.publish tools
+    - Exported Topics tools from `packages/agent/src/tools/index.ts`
+    - Added Topics namespace to SandboxAPI.createGlobal() in `packages/agent/src/sandbox/api.ts`
+    - Tools use EventStore from exec-01 for all operations
+    - Phase restrictions documented (to be enforced by exec-06 handler state machine)
   - **Dependencies:** exec-01 (database schema) ✓ DONE
   - **Blocked by:** Nothing (exec-01 is complete)
+  - **Note:** Phase enforcement is not yet implemented - will be added in exec-04 and exec-06.
 
 - [ ] **[P2] exec-03a: Complete Tool Migration** - [specs/exec-03a-complete-tool-migration.md](specs/exec-03a-complete-tool-migration.md)
   - Create packages/agent/src/sandbox/tool-lists.ts with createWorkflowTools(), createTaskTools()
@@ -83,10 +92,10 @@ The codebase is transitioning from an **Items-based execution model** (`Items.wi
     - `tool-wrapper.ts` EXISTS but is NOT USED by any worker
     - `api.ts` (SandboxAPI) IS ACTIVELY USED by WorkflowWorker (line 717)
     - `tool-lists.ts` does NOT EXIST
-    - ToolWrapper has Items.withItem() but NO phase tracking methods
+    - ToolWrapper has NO phase tracking methods (Items.withItem already removed in exec-02)
     - WorkflowWorker creates SandboxAPI directly, not ToolWrapper
-  - **Dependencies:** exec-02, exec-03
-  - **Blocked by:** exec-02, exec-03
+  - **Dependencies:** exec-02 ✓ DONE, exec-03 ✓ DONE
+  - **Blocked by:** Nothing
 
 - [ ] **[P2] exec-04: Phase Tracking** - [specs/exec-04-phase-tracking.md](specs/exec-04-phase-tracking.md)
   - Add phase state management to ToolWrapper (currentPhase, mutationExecuted, currentMutation)
@@ -260,7 +269,7 @@ packages/db/src/event-store.ts             # ✓ DONE - Event CRUD + status tran
 packages/db/src/handler-run-store.ts       # ✓ DONE - Handler run tracking
 packages/db/src/mutation-store.ts          # ✓ DONE - Mutation ledger
 packages/db/src/handler-state-store.ts     # ✓ DONE - Persistent handler state
-packages/agent/src/tools/topics.ts         # Topics.peek, getByIds, publish
+packages/agent/src/tools/topics.ts         # ✓ DONE - Topics.peek, getByIds, publish
 packages/agent/src/sandbox/tool-lists.ts   # createWorkflowTools, createTaskTools
 packages/agent/src/workflow-validator.ts   # Script structure validation
 packages/agent/src/handler-state-machine.ts # executeHandler function
@@ -273,15 +282,17 @@ packages/agent/src/session-orchestration.ts # executeWorkflowSession function
 packages/db/src/database.ts                # ✓ DONE - Register v36 migration
 packages/db/src/index.ts                   # ✓ DONE - Export new stores
 packages/db/src/api.ts                     # ✓ DONE - Add new stores to KeepDbApi
+packages/db/src/item-store.ts              # ✓ DONE - Deprecated with @deprecated JSDoc
+packages/agent/src/tools/items-list.ts     # ✓ DONE - Deprecated with @deprecated JSDoc
+packages/agent/src/sandbox/api.ts          # ✓ DONE - Removed Items.withItem, added Topics
+packages/agent/src/sandbox/tool-wrapper.ts # ✓ DONE - Removed Items.withItem | TODO: Add phase tracking
+packages/agent/src/tools/index.ts          # ✓ DONE - Removed items-list, added topics
 packages/db/src/script-store.ts            # Add updateHandlerConfig, workflow columns
-packages/agent/src/sandbox/api.ts          # Mark deprecated, remove Items
-packages/agent/src/sandbox/tool-wrapper.ts # Add phase tracking, remove Items
 packages/agent/src/workflow-worker.ts      # Use ToolWrapper, session orchestration
 packages/agent/src/task-worker.ts          # Use ToolWrapper
 packages/agent/src/agent-env.ts            # Update planner/maintainer prompts
 packages/agent/src/ai-tools/save.ts        # Integrate validation
 packages/agent/src/ai-tools/fix.ts         # Integrate validation
-packages/agent/src/tools/index.ts          # Remove items-list, add topics
 ```
 
 ---
@@ -289,7 +300,7 @@ packages/agent/src/tools/index.ts          # Remove items-list, add topics
 ## Risk Assessment
 
 **High Risk:**
-- Breaking change for existing workflows using Items.withItem()
+- Breaking change for existing workflows using Items.withItem() - **COMPLETED in exec-02**
 - All existing workflows will need to be re-planned after migration
 - Users should be warned before deployment
 

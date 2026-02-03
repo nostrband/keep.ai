@@ -1,7 +1,15 @@
+/**
+ * @deprecated This test file tests the deprecated Items infrastructure (exec-02).
+ * These tests are skipped as Items.withItem() and Items.list have been removed.
+ * The items table is kept for data preservation but the API is no longer available.
+ *
+ * Use the new Topics-based event-driven execution model instead.
+ * See specs/exec-02-deprecate-items.md for details.
+ */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { DBInterface, KeepDb, ItemStore } from "@app/db";
 import { createDBNode } from "@app/node";
-import { makeItemsListTool } from "@app/agent";
+// makeItemsListTool removed (exec-02)
 
 /**
  * Helper to create items table without full migration system.
@@ -292,7 +300,8 @@ describe("ItemStore", () => {
   });
 });
 
-describe("Items.list Tool", () => {
+// Skip Items.list Tool tests - tool removed in exec-02
+describe.skip("Items.list Tool", () => {
   let db: DBInterface;
   let keepDb: KeepDb;
   let itemStore: ItemStore;
@@ -475,7 +484,9 @@ describe("Items.list Tool", () => {
 // here due to QuickJS disposal issues with host closures that capture state.
 // The core functionality (ItemStore, Items.list) is fully tested above.
 
-describe("Mutation Enforcement", () => {
+// Skip Mutation Enforcement tests - Items.withItem removed in exec-02
+// Phase-based restrictions will be tested in exec-04 (phase-tracking.test.ts)
+describe.skip("Mutation Enforcement", () => {
   // Tests for SandboxAPI.enforceMutationRestrictions()
   // These test the enforcement logic at the SandboxAPI level without full QuickJS sandbox
 
