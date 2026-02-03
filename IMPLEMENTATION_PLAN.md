@@ -321,7 +321,7 @@ For exec-06:
 - [x] packages/tests/src/handler-state-machine.test.ts - ✓ DONE (28 tests)
 
 For exec-07:
-- [ ] packages/tests/src/session-orchestration.test.ts
+- [x] packages/tests/src/session-orchestration.test.ts - ✓ DONE (25 tests)
 
 ---
 
