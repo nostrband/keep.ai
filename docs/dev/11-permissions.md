@@ -185,7 +185,7 @@ They exist to:
 If a script attempts an action outside its envelope:
 
 * The action is blocked
-* The run fails safely
+* The execution aborts immediately
 * A notification explains what permission is missing
 
 The user may:
@@ -209,9 +209,9 @@ Best-effort constraints from the Intent Spec are displayed separately and labele
 
 ## Repair constraints
 
-* Repairs cannot request new permissions
+* Repairs cannot request new permissions, Maintainer sessions get a copy of script's current permission envelope
 * Repairs that require expanded authority must fail and escalate
-* This keeps the authority envelope stable
+* This keeps the authority envelope stable and not gameable by an unattended LLM
 
 ---
 

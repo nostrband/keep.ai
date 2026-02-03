@@ -4,6 +4,8 @@ This document describes how Keep.AI detects failures, classifies them, attempts 
 
 Failure handling is a **first-class system concern**, not an afterthought.
 
+This chapter applies to the execution model defined in Chapter 06. Failures occur within **consumer runs** processing **events**. Escalation pauses the run and may affect reserved events. See Chapter 06 for run lifecycle and Chapter 13 for mutation-specific failure handling.
+
 ---
 
 ## Core principle
@@ -335,7 +337,7 @@ LLM output does not resume execution.
 Only explicit human action can unblock the automation.
 
 **Placeholder:**
-Map escalation events to UX and resume mechanics.
+Map escalation events to UX and resume mechanics. See Chapter 07 for run-level actions (Try again, It didn't happen, Skip).
 
 ---
 

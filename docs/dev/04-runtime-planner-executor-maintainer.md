@@ -134,10 +134,11 @@ All external operations — network calls, database access, file I/O, API calls 
 Tool wrappers provide:
 
 * **Permission enforcement** — every operation is checked against allowed permissions (see Chapter 11)
+* **Phase enforcement** — operations are restricted by execution phase (e.g., mutations only in `mutate`, publishing only in `next`); see Chapter 06
 * **Mutation tracking** — side-effecting operations are recorded in the mutation ledger before execution (see Chapter 13)
+* **Mutation terminal enforcement** — mutation calls are terminal; host takes over after mutation starts (see Chapter 06)
 * **Reconciliation** — uncertain outcomes are detected and resolved through tool-specific reconciliation methods (see Chapter 13)
-* **Idempotency** — replay consults the ledger and returns cached results for applied mutations (see Chapter 14)
-* **Payload comparison** — tools may provide `comparePayload` to assess replay divergence (see Chapter 14)
+* **Idempotency** — replay consults the ledger and returns cached results for applied mutations (see Chapter 06, "Replay Semantics" and Chapter 13)
 * **Logging** — all operations are recorded for observability and debugging
 
 This architecture ensures that:
@@ -287,6 +288,36 @@ Only explicit human action can resume the automation.
 
 **Placeholder:**
 Map escalation to notification system and resume semantics.
+
+---
+
+## LLM Code Generation Constraints
+
+The Planner and Maintainer generate scripts that must conform to the execution model (Chapter 06). This section specifies what the LLMs must produce.
+
+### Planner Constraints
+
+The Planner must:
+
+* Choose stable `messageId` formats derived from external identifiers
+* Generate meaningful event `title` values (see Chapter 06, "Event Titles")
+* Structure consumers with clear prepare/mutate/next separation
+* Ensure reservation patterns match intended processing granularity
+* Place mutation call as the **last operation** in `mutate`
+* Handle all `mutationResult` statuses in `next`
+
+### Maintainer Constraints
+
+Repairs are bounded. The Maintainer:
+
+* **May** fix control flow, tool usage, payload construction
+* **May not** change `messageId` generation logic
+* **May not** change reservation patterns
+* **May not** alter which events a consumer processes
+
+If a fix requires changing event identity or reservation structure, Maintainer must fail and escalate to re-planning.
+
+These constraints ensure that repairs remain backward-compatible and do not alter the fundamental structure of what the workflow processes.
 
 ---
 
