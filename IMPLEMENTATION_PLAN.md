@@ -133,8 +133,9 @@ exec-02 (Deprecate Items) ✓ ─┼──────────┐           
 
 ### Deprecated Code to Remove (After Migration)
 
-- [ ] Gmail-specific API endpoints in apps/server/src/server.ts (lines 1209-1581)
-  - Use generic connector endpoints instead
+- [x] Gmail-specific API endpoints in apps/server/src/server.ts - REMOVED
+  - Removed deprecated Gmail-specific endpoints (/api/gmail/status, /api/gmail/connect, /api/gmail/callback, /api/gmail/check)
+  - Generic connector endpoints at /api/connectors/* are now the only supported approach
 - [ ] `chat_events` table (replaced by chat_messages, notifications, execution_logs)
 - [ ] `task_states` table (no longer used)
 - [ ] `resources` table (never implemented)
