@@ -4,7 +4,7 @@ This document tracks the implementation status of the new execution model refact
 
 **Last Updated:** 2026-02-03
 **Current Database Version:** v36
-**Overall Progress:** 3/8 core specs implemented
+**Overall Progress:** 4/8 core specs implemented
 
 ---
 
@@ -16,8 +16,9 @@ The codebase is transitioning from an **Items-based execution model** (`Items.wi
 - Old Items infrastructure is **deprecated and removed**
 - New Topics infrastructure: **exec-01 (Database Schema) COMPLETE**, **exec-03 (Topics API) COMPLETE**
 - Deprecation: **exec-02 (Deprecate Items) COMPLETE**
-- Remaining specs (03a-08) require sequential implementation
-- ToolWrapper exists but is **not used** - SandboxAPI is the active implementation
+- Tool migration: **exec-03a (Complete Tool Migration) COMPLETE**
+- Remaining specs (04-08) require sequential implementation
+- ToolWrapper is now **active** with phase tracking - SandboxAPI is deprecated
 
 ---
 
@@ -81,19 +82,21 @@ The codebase is transitioning from an **Items-based execution model** (`Items.wi
   - **Blocked by:** Nothing (exec-01 is complete)
   - **Note:** Phase enforcement is not yet implemented - will be added in exec-04 and exec-06.
 
-- [ ] **[P2] exec-03a: Complete Tool Migration** - [specs/exec-03a-complete-tool-migration.md](specs/exec-03a-complete-tool-migration.md)
+- [x] **[P2] exec-03a: Complete Tool Migration** - [specs/exec-03a-complete-tool-migration.md](specs/exec-03a-complete-tool-migration.md)
   - Create packages/agent/src/sandbox/tool-lists.ts with createWorkflowTools(), createTaskTools()
   - Add phase tracking to ToolWrapper (setPhase, getPhase, checkPhaseAllowed)
   - Remove Items.withItem from ToolWrapper
   - Migrate WorkflowWorker and TaskWorker to use ToolWrapper
   - Deprecate api.ts (keep for backwards compatibility)
-  - **Status:** NOT STARTED - 0% complete (ToolWrapper exists but is completely unused)
-  - **Current State:**
-    - `tool-wrapper.ts` EXISTS but is NOT USED by any worker
-    - `api.ts` (SandboxAPI) IS ACTIVELY USED by WorkflowWorker (line 717)
-    - `tool-lists.ts` does NOT EXIST
-    - ToolWrapper has NO phase tracking methods (Items.withItem already removed in exec-02)
-    - WorkflowWorker creates SandboxAPI directly, not ToolWrapper
+  - **Status:** COMPLETE - 100%
+  - **Implementation:**
+    - Created `packages/agent/src/sandbox/tool-lists.ts` with `createWorkflowTools()` and `createTaskTools()` functions
+    - Added phase tracking to ToolWrapper: `setPhase()`, `getPhase()`, `checkPhaseAllowed()` methods
+    - Added `ExecutionPhase` and `OperationType` types to ToolWrapper
+    - Updated WorkflowWorker to use ToolWrapper + createWorkflowTools
+    - Updated TaskWorker to use ToolWrapper + createTaskTools
+    - Added exports in `packages/agent/src/index.ts` for ToolWrapper, tool-lists, ExecutionPhase, OperationType
+    - SandboxAPI (`api.ts`) deprecated with @deprecated JSDoc (kept for backwards compatibility)
   - **Dependencies:** exec-02 ✓ DONE, exec-03 ✓ DONE
   - **Blocked by:** Nothing
 
@@ -103,9 +106,9 @@ The codebase is transitioning from an **Items-based execution model** (`Items.wi
   - Add global variable injection (__state__, __prepared__, __mutationResult__)
   - Remove deprecated activeItem-based enforcement
   - **Status:** NOT STARTED - 0% complete
-  - **Current State:** No phase tracking implementation exists anywhere in the codebase. No setPhase, getPhase, or checkPhaseAllowed methods.
-  - **Dependencies:** exec-03a
-  - **Blocked by:** exec-03a
+  - **Current State:** ToolWrapper now has basic phase tracking (setPhase, getPhase, checkPhaseAllowed from exec-03a). Needs phase restriction matrix enforcement and global variable injection.
+  - **Dependencies:** exec-03a ✓ DONE
+  - **Blocked by:** Nothing
 
 - [ ] **[P3] exec-05: Script Validation** - [specs/exec-05-script-validation.md](specs/exec-05-script-validation.md)
   - Create packages/agent/src/workflow-validator.ts
@@ -171,15 +174,15 @@ The codebase is transitioning from an **Items-based execution model** (`Items.wi
 ## Dependency Graph
 
 ```
-exec-01 (DB Schema) ─────────┬──────────────────────────────────┐
+exec-01 (DB Schema) ✓ ───────┬──────────────────────────────────┐
                              │                                   │
-exec-02 (Deprecate Items) ───┼──────────┐                        │
+exec-02 (Deprecate Items) ✓ ─┼──────────┐                        │
                              │          │                        │
                              ▼          │                        │
-                      exec-03 (Topics)  │                        │
+                      exec-03 (Topics) ✓│                        │
                              │          │                        │
                              ▼          ▼                        │
-                      exec-03a (Tool Migration)                  │
+                      exec-03a (Tool Migration) ✓                │
                              │                                   │
                              ▼                                   │
                       exec-04 (Phase Tracking) ──────────────────┤
@@ -270,7 +273,7 @@ packages/db/src/handler-run-store.ts       # ✓ DONE - Handler run tracking
 packages/db/src/mutation-store.ts          # ✓ DONE - Mutation ledger
 packages/db/src/handler-state-store.ts     # ✓ DONE - Persistent handler state
 packages/agent/src/tools/topics.ts         # ✓ DONE - Topics.peek, getByIds, publish
-packages/agent/src/sandbox/tool-lists.ts   # createWorkflowTools, createTaskTools
+packages/agent/src/sandbox/tool-lists.ts   # ✓ DONE - createWorkflowTools, createTaskTools
 packages/agent/src/workflow-validator.ts   # Script structure validation
 packages/agent/src/handler-state-machine.ts # executeHandler function
 packages/agent/src/session-orchestration.ts # executeWorkflowSession function
@@ -284,12 +287,13 @@ packages/db/src/index.ts                   # ✓ DONE - Export new stores
 packages/db/src/api.ts                     # ✓ DONE - Add new stores to KeepDbApi
 packages/db/src/item-store.ts              # ✓ DONE - Deprecated with @deprecated JSDoc
 packages/agent/src/tools/items-list.ts     # ✓ DONE - Deprecated with @deprecated JSDoc
-packages/agent/src/sandbox/api.ts          # ✓ DONE - Removed Items.withItem, added Topics
-packages/agent/src/sandbox/tool-wrapper.ts # ✓ DONE - Removed Items.withItem | TODO: Add phase tracking
+packages/agent/src/sandbox/api.ts          # ✓ DONE - Removed Items.withItem, added Topics, deprecated
+packages/agent/src/sandbox/tool-wrapper.ts # ✓ DONE - Removed Items.withItem, added phase tracking (setPhase, getPhase, checkPhaseAllowed)
 packages/agent/src/tools/index.ts          # ✓ DONE - Removed items-list, added topics
+packages/agent/src/workflow-worker.ts      # ✓ DONE - Uses ToolWrapper + createWorkflowTools
+packages/agent/src/task-worker.ts          # ✓ DONE - Uses ToolWrapper + createTaskTools
+packages/agent/src/index.ts                # ✓ DONE - Exports ToolWrapper, tool-lists, ExecutionPhase, OperationType
 packages/db/src/script-store.ts            # Add updateHandlerConfig, workflow columns
-packages/agent/src/workflow-worker.ts      # Use ToolWrapper, session orchestration
-packages/agent/src/task-worker.ts          # Use ToolWrapper
 packages/agent/src/agent-env.ts            # Update planner/maintainer prompts
 packages/agent/src/ai-tools/save.ts        # Integrate validation
 packages/agent/src/ai-tools/fix.ts         # Integrate validation

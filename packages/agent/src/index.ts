@@ -92,6 +92,11 @@ export {
 
 export { initSandbox } from "./sandbox/sandbox";
 
+// Sandbox tool management (exec-03a)
+export { ToolWrapper, type ToolWrapperConfig, type ExecutionPhase, type OperationType } from "./sandbox/tool-wrapper";
+export { createWorkflowTools, createTaskTools, type ToolListConfig } from "./sandbox/tool-lists";
+
+/** @deprecated Use ToolWrapper from './sandbox/tool-wrapper' instead */
 export { SandboxAPI } from "./sandbox/api";
 
 export { AgentEnv as ReplEnv } from "./agent-env";

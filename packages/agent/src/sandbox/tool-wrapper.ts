@@ -1,4 +1,4 @@
-import { KeepDbApi, TaskType } from "@app/db";
+import { KeepDbApi } from "@app/db";
 import { z, ZodFirstPartyTypeKind as K } from "zod";
 import { EvalContext, EvalGlobal } from "./sandbox";
 import debug from "debug";
@@ -7,10 +7,27 @@ import type { ConnectionManager } from "@app/connectors";
 import { Tool } from "../tools/types";
 
 type Any = z.ZodTypeAny;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnyTool = Tool<any, any>;
+
+/**
+ * Execution phases for the handler state machine.
+ * - producer: Producer handlers that emit events to topics
+ * - prepare: Consumer prepare phase - peek topics and select work
+ * - mutate: Consumer mutate phase - execute single external mutation
+ * - next: Consumer next phase - emit downstream events
+ * - null: Not in handler execution (e.g., task mode)
+ */
+export type ExecutionPhase = 'producer' | 'prepare' | 'mutate' | 'next' | null;
+
+/**
+ * Operation types for phase restriction checks.
+ */
+export type OperationType = 'read' | 'mutate' | 'topic_peek' | 'topic_publish';
 
 export interface ToolWrapperConfig {
   /** Array of tools to register */
-  tools: Tool[];
+  tools: AnyTool[];
   /** Database API */
   api: KeepDbApi;
   /** Function to get current execution context */
@@ -23,6 +40,8 @@ export interface ToolWrapperConfig {
   workflowId?: string;
   /** Script run ID for tracking */
   scriptRunId?: string;
+  /** Handler run ID for mutation tracking (exec-04) */
+  handlerRunId?: string;
   /** Task run ID for tracking */
   taskRunId?: string;
   /** Task type (planner/maintainer) */
@@ -35,29 +54,45 @@ export interface ToolWrapperConfig {
 }
 
 /**
+ * Phase restriction matrix.
+ * Defines which operations are allowed in each execution phase.
+ */
+const PHASE_RESTRICTIONS: Record<Exclude<ExecutionPhase, null>, Record<OperationType, boolean>> = {
+  producer: { read: true, mutate: false, topic_peek: false, topic_publish: true },
+  prepare:  { read: true, mutate: false, topic_peek: true, topic_publish: false },
+  mutate:   { read: false, mutate: true, topic_peek: false, topic_publish: false },
+  next:     { read: false, mutate: false, topic_peek: false, topic_publish: true },
+};
+
+/**
  * ToolWrapper creates the JavaScript API that gets injected into the sandbox.
  *
  * It provides:
  * - Tool registration with input/output validation
  * - Workflow pause checking
- * - Phase-based access control (to be added in exec-04)
+ * - Phase-based access control for handler execution (exec-03a/exec-04)
  *
  * Note: Items.withItem() has been removed (exec-02). Use the new Topics-based
  * event-driven execution model instead.
  */
 export class ToolWrapper {
-  private tools: Tool[];
+  private tools: AnyTool[];
   private api: KeepDbApi;
   private getContext: () => EvalContext;
   private userPath?: string;
   private connectionManager?: ConnectionManager;
   private workflowId?: string;
   private scriptRunId?: string;
+  private handlerRunId?: string;
   private taskRunId?: string;
   private taskType?: 'planner' | 'maintainer';
   private abortController?: AbortController;
   private debug = debug("ToolWrapper");
   private toolDocs = new Map<string, string>();
+
+  // Phase tracking state (exec-03a/exec-04)
+  private currentPhase: ExecutionPhase = null;
+  private mutationExecuted: boolean = false;
 
   constructor(config: ToolWrapperConfig) {
     this.tools = config.tools;
@@ -67,9 +102,87 @@ export class ToolWrapper {
     this.connectionManager = config.connectionManager;
     this.workflowId = config.workflowId;
     this.scriptRunId = config.scriptRunId;
+    this.handlerRunId = config.handlerRunId;
     this.taskRunId = config.taskRunId;
     this.taskType = config.taskType;
     this.abortController = config.abortController;
+  }
+
+  // ============================================================================
+  // Phase Tracking Methods (exec-03a/exec-04)
+  // ============================================================================
+
+  /**
+   * Set the current execution phase.
+   * Resets mutation tracking when phase changes.
+   *
+   * @param phase - The new execution phase, or null to exit handler execution
+   */
+  setPhase(phase: ExecutionPhase): void {
+    this.currentPhase = phase;
+    this.mutationExecuted = false;
+  }
+
+  /**
+   * Get the current execution phase.
+   */
+  getPhase(): ExecutionPhase {
+    return this.currentPhase;
+  }
+
+  /**
+   * Check if an operation is allowed in the current phase.
+   * Throws LogicError if the operation is not allowed.
+   *
+   * When phase is null (task mode), all operations are allowed.
+   *
+   * @param operation - The operation type to check
+   * @throws LogicError if operation not allowed in current phase
+   */
+  checkPhaseAllowed(operation: OperationType): void {
+    // Skip phase check if not in handler execution (e.g., task mode)
+    if (this.currentPhase === null) {
+      return;
+    }
+
+    const allowed = PHASE_RESTRICTIONS[this.currentPhase][operation];
+    if (!allowed) {
+      throw new LogicError(
+        `Operation '${operation}' not allowed in '${this.currentPhase}' phase`,
+        { source: 'ToolWrapper' }
+      );
+    }
+
+    // Enforce single mutation per mutate phase
+    if (operation === 'mutate') {
+      if (this.mutationExecuted) {
+        throw new LogicError(
+          'Only one mutation allowed per mutate phase',
+          { source: 'ToolWrapper' }
+        );
+      }
+      this.mutationExecuted = true;
+    }
+  }
+
+  /**
+   * Determine the operation type for a tool call.
+   * Topics tools have special operation types; other tools are read or mutate.
+   */
+  private getOperationType(tool: AnyTool, validatedInput: unknown): OperationType {
+    // Topics tools have special operation types
+    if (tool.namespace === 'Topics') {
+      if (tool.name === 'peek' || tool.name === 'getByIds') {
+        return 'topic_peek';
+      }
+      if (tool.name === 'publish') {
+        return 'topic_publish';
+      }
+    }
+
+    // For other tools, check if read-only
+    const isReadOnly = tool.isReadOnly?.(validatedInput) ?? false;
+    return isReadOnly ? 'read' : 'mutate';
   }
 
   /**
@@ -134,7 +247,7 @@ Example: await ${ns}.${name}(<input>)
     }
 
     // Note: Items.withItem has been removed (exec-02).
-    // Topics API will be added in exec-03.
+    // Topics API is available via tool-lists.ts (exec-03).
 
     // Add getDocs helper
     global["getDocs"] = (name: string) => {
@@ -156,7 +269,7 @@ Example: await ${ns}.${name}(<input>)
   /**
    * Wrap a tool with validation and mutation enforcement.
    */
-  private wrapTool(tool: Tool, doc: string) {
+  private wrapTool(tool: AnyTool, doc: string) {
     const ns = tool.namespace;
     const name = tool.name;
 
@@ -186,8 +299,10 @@ Example: await ${ns}.${name}(<input>)
         }
       }
 
-      // Note: Mutation restrictions via Items.withItem() have been removed (exec-02)
-      // Phase-based restrictions will be added in exec-04
+      // Check phase restrictions (exec-03a/exec-04)
+      // In handler execution mode (currentPhase != null), enforces operation restrictions
+      const operationType = this.getOperationType(tool, validatedInput);
+      this.checkPhaseAllowed(operationType);
 
       // Execute the tool
       let result: unknown;

@@ -9,7 +9,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { DBInterface, KeepDb, ItemStore } from "@app/db";
 import { createDBNode } from "@app/node";
-// makeItemsListTool removed (exec-02)
+
+// makeItemsListTool removed (exec-02) - stub for skipped tests type-checking
+// eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars
+function makeItemsListTool(_itemStore: ItemStore, _getWorkflowId: () => string | undefined): any {
+  throw new Error("makeItemsListTool removed in exec-02");
+}
 
 /**
  * Helper to create items table without full migration system.
@@ -457,8 +462,8 @@ describe.skip("Items.list Tool", () => {
       expect(page2.items).toHaveLength(50);
 
       // Ensure different items
-      const page1Ids = new Set(page1.items.map(i => i.logical_item_id));
-      const page2Ids = new Set(page2.items.map(i => i.logical_item_id));
+      const page1Ids = new Set(page1.items.map((i: { logical_item_id: string }) => i.logical_item_id));
+      const page2Ids = new Set(page2.items.map((i: { logical_item_id: string }) => i.logical_item_id));
       const overlap = [...page1Ids].filter(id => page2Ids.has(id));
       expect(overlap).toHaveLength(0);
     });

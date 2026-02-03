@@ -2,7 +2,8 @@ import { generateId } from "ai";
 import { initSandbox, Sandbox } from "./sandbox/sandbox";
 import debug from "debug";
 import { KeepDbApi, Workflow, Script, DBInterface } from "@app/db";
-import { SandboxAPI } from "./sandbox/api";
+import { ToolWrapper } from "./sandbox/tool-wrapper";
+import { createWorkflowTools } from "./sandbox/tool-lists";
 import { fileUtils } from "@app/node";
 import { ERROR_BAD_REQUEST, ERROR_PAYMENT_REQUIRED } from "./agent";
 import { WorkflowSignalHandler } from "./workflow-worker-signal";
@@ -713,21 +714,31 @@ export class WorkflowWorker {
   }
 
   private async createEnv(workflow: Workflow, sandbox: Sandbox, scriptRunId: string, abortController?: AbortController) {
-    // Create SandboxAPI directly without needing AgentEnv or dummy task
-    const sandboxAPI = new SandboxAPI({
+    // Create tool array for workflow execution (exec-03a)
+    const tools = createWorkflowTools({
       api: this.api,
-      type: "workflow",
+      getContext: () => sandbox.context!,
+      connectionManager: this.connectionManager,
+      userPath: this.userPath,
+      workflowId: workflow.id,
+      scriptRunId,
+    });
+
+    // Create ToolWrapper for sandbox API injection
+    const toolWrapper = new ToolWrapper({
+      tools,
+      api: this.api,
       getContext: () => sandbox.context!,
       userPath: this.userPath,
       connectionManager: this.connectionManager,
-      workflowId: workflow.id, // Enable pause checking and item tracking
-      scriptRunId, // Enable item tracking
+      workflowId: workflow.id, // Enable pause checking
+      scriptRunId,
       abortController, // Enable fatal error abort for invalid input
     });
 
-    sandbox.setGlobal(await sandboxAPI.createGlobal());
+    sandbox.setGlobal(await toolWrapper.createGlobal());
 
-    return sandboxAPI;
+    return toolWrapper;
   }
 
   private async createSandbox(

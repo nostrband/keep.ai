@@ -18,7 +18,8 @@ import {
 } from "@app/db";
 import { AgentTask, MaintainerContext, StepOutput, StepReason } from "./agent-types";
 import { AgentEnv } from "./agent-env";
-import { SandboxAPI } from "./sandbox/api";
+import { ToolWrapper } from "./sandbox/tool-wrapper";
+import { createTaskTools } from "./sandbox/tool-lists";
 import { fileUtils } from "@app/node";
 import { ERROR_BAD_REQUEST, ERROR_PAYMENT_REQUIRED } from "./agent";
 import { TaskSignalHandler } from "./task-worker-signal";
@@ -912,16 +913,28 @@ If you'd like me to try a different approach, just let me know!`;
   }
 
   private async createEnv(taskType: TaskType, task: Task, sandbox: Sandbox) {
-    // Create SandboxAPI for the JS sandbox
-    const sandboxAPI = new SandboxAPI({
+    // Create tool array for task execution (exec-03a)
+    // Tasks get all workflow tools plus Scripts.* introspection tools
+    const tools = createTaskTools({
       api: this.api,
-      type: taskType,
+      getContext: () => sandbox.context!,
+      connectionManager: this.connectionManager,
+      userPath: this.userPath,
+      // Note: Tasks don't have workflowId/scriptRunId - they operate outside workflow context
+    });
+
+    // Create ToolWrapper for sandbox API injection
+    const toolWrapper = new ToolWrapper({
+      tools,
+      api: this.api,
       getContext: () => sandbox.context!,
       userPath: this.userPath,
       connectionManager: this.connectionManager,
+      // Note: No phase tracking for tasks - they operate outside handler execution
+      taskType: taskType === 'planner' || taskType === 'maintainer' ? taskType : undefined,
     });
 
-    sandbox.setGlobal(await sandboxAPI.createGlobal());
+    sandbox.setGlobal(await toolWrapper.createGlobal());
 
     // Get user's autonomy preference for agent behavior
     // Fallback to 'ai_decides' if DB query fails - autonomy mode is a preference, not critical
@@ -943,7 +956,7 @@ If you'd like me to try a different approach, just let me know!`;
       this.api,
       taskType,
       task,
-      sandboxAPI.tools,
+      toolWrapper.docs,  // Use toolWrapper.docs instead of sandboxAPI.tools
       this.userPath,
       autonomyMode,
       connections,
