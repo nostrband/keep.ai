@@ -4,7 +4,7 @@ This document tracks the implementation status of the new execution model refact
 
 **Last Updated:** 2026-02-03
 **Current Database Version:** v36
-**Overall Progress:** 6/8 core specs implemented
+**Overall Progress:** 7/8 core specs implemented
 
 ---
 
@@ -168,7 +168,7 @@ The codebase is transitioning from an **Items-based execution model** (`Items.wi
 
 ### Phase D: LLM Integration
 
-- [ ] **[P4] exec-08: Planner Prompts** - [specs/exec-08-planner-prompts.md](specs/exec-08-planner-prompts.md)
+- [x] **[P4] exec-08: Planner Prompts** - [specs/exec-08-planner-prompts.md](specs/exec-08-planner-prompts.md)
   - Update PLANNER_SYSTEM_PROMPT:
     - Remove "Logical Items" section and Items.withItem() examples
     - Add "Workflow Structure" section (topics, producers, consumers)
@@ -178,14 +178,18 @@ The codebase is transitioning from an **Items-based execution model** (`Items.wi
     - Remove "Logical Item Constraints" section
     - Add "Workflow Constraints" section
   - Location: packages/agent/src/agent-env.ts
-  - **Status:** NOT STARTED - 0% complete
-  - **Current State:** Prompts still contain full "Logical Items" documentation:
-    - PLANNER_SYSTEM_PROMPT has "Logical Items" section (lines 463-521)
-    - PLANNER_SYSTEM_PROMPT has "Logical Items Rules" (lines 523-529)
-    - MAINTAINER_SYSTEM_PROMPT has "Logical Item Constraints" (lines 623-643)
-    - No mention of topics, producers, consumers, or phases
-  - **Dependencies:** exec-05
-  - **Blocked by:** exec-05
+  - **Status:** COMPLETE - 100%
+  - **Implementation:**
+    - Removed "Logical Items" section from PLANNER_SYSTEM_PROMPT
+    - Added "Workflow Structure" section explaining topics, producers, and consumers
+    - Added "Phase Rules" section with three-phase consumer execution (prepare → mutate → next)
+    - Added "Event Design" section with messageId uniqueness and title guidelines
+    - Added complete workflow example with topics, producer, and consumer
+    - Removed "Logical Item Constraints" section from MAINTAINER_SYSTEM_PROMPT
+    - Added "Workflow Constraints" section with phase rules and best practices
+  - **Files Modified:** `packages/agent/src/agent-env.ts` ✓ DONE
+  - **Dependencies:** exec-05 ✓ DONE
+  - **Blocked by:** Nothing
 
 ---
 
@@ -209,7 +213,7 @@ exec-02 (Deprecate Items) ✓ ─┼──────────┐           
                       exec-05 (Script Validation) ✓              │
                              │                                   │
                              ▼                                   │
-                      exec-08 (Planner Prompts)                  │
+                      exec-08 (Planner Prompts) ✓                │
                                                                  │
                       exec-06 (Handler State Machine) ◄──────────┘
                              │
@@ -312,7 +316,7 @@ packages/agent/src/workflow-worker.ts      # ✓ DONE - Uses ToolWrapper + creat
 packages/agent/src/task-worker.ts          # ✓ DONE - Uses ToolWrapper + createTaskTools
 packages/agent/src/index.ts                # ✓ DONE - Exports ToolWrapper, tool-lists, ExecutionPhase, OperationType
 packages/db/src/script-store.ts            # ✓ DONE - Added handler_config field, updateWorkflowFields support
-packages/agent/src/agent-env.ts            # Update planner/maintainer prompts
+packages/agent/src/agent-env.ts            # ✓ DONE - Updated planner/maintainer prompts for workflow format
 packages/agent/src/ai-tools/save.ts        # ✓ DONE - Integrated validation
 packages/agent/src/ai-tools/fix.ts         # ✓ DONE - Integrated validation
 ```

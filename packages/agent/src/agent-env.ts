@@ -460,73 +460,188 @@ Do not use heuristics to interpret or extract data from free-form text,
 use Text.* tools for that. Use regexp for these cases only if 100% sure
 that input format will stay consistent.
 
-## Logical Items
+## Workflow Structure
 
-Scripts must process work in discrete logical items using \`Items.withItem()\`:
+Scripts must define a \`workflow\` object with this structure:
 
+### Topics
+Declare internal event streams:
 \`\`\`javascript
-for (const email of emails) {
-  await Items.withItem(
-    \`email:\${email.id}\`,  // Stable ID based on external identifier
-    \`Email from \${email.from}: "\${email.subject}"\`,  // Human-readable title
-    async (ctx) => {
-      // Check if already processed
-      if (ctx.item.isDone) {
-        Console.log({ type: 'log', line: \`Skipping already processed: \${ctx.item.title}\` });
-        return;
-      }
-
-      // Process the item
-      await Gmail.api({ method: 'users.messages.modify', ... });
-    }
-  );
+topics: {
+  "topic.name": {},
 }
 \`\`\`
 
-### Logical Item ID Requirements
+### Producers
+Poll external systems and publish events:
+\`\`\`javascript
+producers: {
+  producerName: {
+    schedule: { interval: "5m" },  // or { cron: "0 * * * *" }
+    handler: async (state) => {
+      // 1. Read from external system
+      // 2. Publish events with Topics.publish()
+      // 3. Return new state (cursor, timestamp, etc.)
+    }
+  }
+}
+\`\`\`
 
-IDs must be:
-- **Stable**: Same entity → same ID every time
-- **Based on external identifiers**: Use \`email.id\`, \`invoice.number\`, etc.
-- **Independent of volatile data**: No timestamps, counters, or array indices
+### Consumers
+Process events in three phases:
+\`\`\`javascript
+consumers: {
+  consumerName: {
+    subscribe: ["topic.name"],
 
-Good: \`email:\${messageId}\`, \`invoice:\${invoiceNumber}\`, \`order:\${orderId}|item:\${lineItemId}\`
-Bad: \`email:\${index}\`, \`item-\${Date.now()}\`, \`record-\${hash(fullObject)}\`
+    // Phase 1: Select inputs (read-only)
+    prepare: async (state) => {
+      const events = await Topics.peek({ topic: "topic.name" });
+      if (events.length === 0) return { reservations: [], data: {} };
+      return {
+        reservations: [{ topic: "topic.name", ids: [events[0].messageId] }],
+        data: { /* computed from events */ },
+      };
+    },
 
-### Logical Item Title Requirements
+    // Phase 2: Perform ONE mutation (optional)
+    mutate: async (prepared) => {
+      await ExternalService.api({ /* use prepared.data */ });
+    },
 
-Titles must:
-- Include a stable external identifier
-- Include a human-recognizable descriptor
-- Describe what the item IS, not how it's processed
+    // Phase 3: Publish downstream events (optional)
+    next: async (prepared, mutationResult) => {
+      if (mutationResult.status === 'applied') {
+        await Topics.publish({ topic: "downstream.topic", event: { /* ... */ } });
+      }
+    },
+  }
+}
+\`\`\`
+
+### Complete Workflow Example
+
+\`\`\`javascript
+const workflow = {
+  topics: {
+    "email.received": {},
+    "row.created": {},
+  },
+
+  producers: {
+    pollEmail: {
+      schedule: { interval: "5m" },
+      handler: async (state) => {
+        const emails = await Gmail.api({
+          method: 'users.messages.list',
+          userId: 'me',
+          q: \`after:\${state?.lastCheck || '1d'}\`,
+        });
+
+        for (const email of emails.messages || []) {
+          const details = await Gmail.api({
+            method: 'users.messages.get',
+            userId: 'me',
+            id: email.id,
+          });
+
+          await Topics.publish({
+            topic: "email.received",
+            event: {
+              messageId: email.id,
+              title: \`Email from \${details.from}: "\${details.subject}"\`,
+              payload: { id: email.id, from: details.from, subject: details.subject },
+            },
+          });
+        }
+
+        return { lastCheck: new Date().toISOString() };
+      }
+    }
+  },
+
+  consumers: {
+    processEmail: {
+      subscribe: ["email.received"],
+
+      prepare: async (state) => {
+        const pending = await Topics.peek({ topic: "email.received", limit: 1 });
+        if (pending.length === 0) return { reservations: [], data: {} };
+        const event = pending[0];
+        return {
+          reservations: [{ topic: "email.received", ids: [event.messageId] }],
+          data: { emailId: event.payload.id, from: event.payload.from, subject: event.payload.subject },
+        };
+      },
+
+      mutate: async (prepared) => {
+        await GoogleSheets.api({
+          method: 'spreadsheets.values.append',
+          spreadsheetId: 'SPREADSHEET_ID',
+          range: 'Sheet1!A:C',
+          valueInputOption: 'USER_ENTERED',
+          requestBody: {
+            values: [[prepared.data.from, prepared.data.subject, new Date().toISOString()]],
+          },
+        });
+      },
+
+      next: async (prepared, mutationResult) => {
+        if (mutationResult.status === 'applied') {
+          await Topics.publish({
+            topic: "row.created",
+            event: {
+              messageId: \`row:\${prepared.data.emailId}\`,
+              title: \`Row created for email from \${prepared.data.from}\`,
+              payload: { emailId: prepared.data.emailId },
+            },
+          });
+        }
+      },
+    }
+  }
+};
+\`\`\`
+
+## Phase Rules
+
+### Producer Phase
+- CAN: Read external systems, publish to topics
+- CANNOT: Mutate external systems, peek topics
+
+### Prepare Phase
+- CAN: Read external systems, peek subscribed topics
+- CANNOT: Mutate external systems, publish to topics
+- MUST: Return { reservations, data }
+
+### Mutate Phase
+- CAN: Perform ONE external mutation
+- CANNOT: Read external systems, peek/publish topics
+- NOTE: Mutation is terminal - no code after the mutation call
+
+### Next Phase
+- CAN: Publish to topics
+- CANNOT: Read/mutate external systems, peek topics
+
+## Event Design
+
+Events need stable identifiers and descriptive titles:
+
+### messageId
+- Must be stable and unique within topic
+- Based on external identifier (email ID, row ID, etc.)
+- Used for idempotent publishing (duplicates ignored)
+
+Good: \`email.id\`, \`\`row:\${invoice.id}\`\`
+Bad: \`uuid()\`, \`Date.now()\`
+
+### title
+- Human-readable description
+- Include identifying information
+- Shown in UI for observability
 
 Good: \`Email from alice@example.com: "Invoice December"\`
-Bad: \`Processing item\`, \`Email #5\`, \`Invoice updated at 2024-01-19\`
-
-### Checking Progress with Items.list
-
-Use Items.list to check processed items and resume from where you left off:
-
-\`\`\`javascript
-// Check if a specific item was already processed
-const existing = await Items.list({ logical_item_id: \`email:\${email.id}\` });
-if (existing.items.some(i => i.status === 'done')) {
-  Console.log({ type: 'log', line: \`Skipping \${email.id} - already done\` });
-  continue;
-}
-
-// Get count of completed items for progress reporting
-const progress = await Items.list({ status: 'done', limit: 1 });
-Console.log({ type: 'log', line: \`Processed \${progress.total} items so far\` });
-\`\`\`
-
-### Logical Items Rules
-
-1. All mutations MUST be inside Items.withItem() - mutations outside will abort the script
-2. Only ONE Items.withItem can be active at a time - no nesting or parallel withItem calls
-3. Always check ctx.item.isDone before mutations to skip already-completed items, attempting a mutation on a done item will abort the script
-4. Items must be independent - processing one must not depend on another's outcome
-5. Use Items.list to check progress or resume from a known position
+Bad: \`Processing item\`, \`Email #5\`
 
 ## Input format
 - You'll be given script goal and other input from the user
@@ -620,27 +735,28 @@ Your fix MUST NOT:
 - Relax error handling in ways that hide problems
 - Change output and side-effect data formats
 
-## Logical Item Constraints
+## Workflow Constraints
 
-When repairing scripts, you MUST NOT modify:
-- Logical item ID construction (the first argument to withItem)
-- The structure or components of item IDs
+When fixing workflow scripts:
 
-You MAY modify:
-- Item titles (second argument) for better readability
-- Handler logic inside withItem
-- Control flow around withItem calls
+### Can Modify
+- Handler logic (prepare/mutate/next implementation)
+- Data transformation and filtering
+- Error handling within handlers
+- State structure
 
-If a fix requires changing the logical item ID format, this is NOT a repair -
-it requires re-planning. Fail explicitly with: "Cannot repair: would change logical item identity" and explain why.
+### Cannot Modify
+- Topic names (would break event routing)
+- Consumer subscriptions (architectural change)
+- Producer schedules (user expectation)
+- Phase structure (prepare/mutate/next order)
 
-### Logical Items Rules
+### Must Preserve
+- Event messageId generation logic (for idempotency)
+- Reservation structure in prepare
+- Single mutation per mutate phase
 
-1. All mutations MUST be inside Items.withItem() - mutations outside will abort the script
-2. Only ONE Items.withItem can be active at a time - no nesting or parallel withItem calls
-3. Always check ctx.item.isDone before mutations to skip already-completed items, attempting a mutation on a done item will abort the script
-4. Items must be independent - processing one must not depend on another's outcome
-5. Use Items.list to check progress or resume from a known position
+If fix requires changing topic names or subscriptions, fail explicitly and explain why re-planning is needed.
 
 ## If You Cannot Fix It
 
