@@ -3,7 +3,7 @@
 This document tracks the implementation status of the new execution model refactor (exec-00 through exec-08) and other pending work items.
 
 **Last Updated:** 2026-02-03
-**Current Database Version:** v36
+**Current Database Version:** v37
 **Overall Progress:** 9/9 core specs implemented
 
 ---
@@ -137,12 +137,14 @@ exec-02 (Deprecate Items) ✓ ─┼──────────┐           
   - Removed deprecated Gmail-specific endpoints (/api/gmail/status, /api/gmail/connect, /api/gmail/callback, /api/gmail/check)
   - Generic connector endpoints at /api/connectors/* are now the only supported approach
 - [ ] `chat_events` table (replaced by chat_messages, notifications, execution_logs)
-- [ ] `task_states` table (no longer used)
-- [ ] `resources` table (never implemented)
-- [ ] `chat_notifications` table (per Spec 07)
-- [ ] AuthDialog component (use AuthPopup)
-- [ ] Deprecated task tools in packages/agent/src/tools/deprecated/
+- [x] `task_states` table - REMOVED via migration v37
+- [x] `resources` table - REMOVED via migration v37
+- [x] `chat_notifications` table - REMOVED via migration v37
+- [x] AuthDialog component - REMOVED (was already just a re-export, now deleted)
+- [x] Deprecated task tools in packages/agent/src/tools/deprecated/ - REMOVED (directory deleted)
 - [ ] Task fields: `task`, `cron` (deprecated per Spec 10)
+
+**Note:** Migration v37 was created to drop the deprecated tables (`resources`, `task_states`, `chat_notifications`).
 
 ### FIXME Comments Requiring Attention
 
