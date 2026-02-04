@@ -18,7 +18,7 @@ import {
   createRetryRun,
 } from "./handler-state-machine";
 import { WorkflowConfig } from "./workflow-validator";
-import { ensureClassified } from "./errors";
+import { getRunStatusForError } from "./failure-handling";
 import debug from "debug";
 
 const log = debug("session-orchestration");
@@ -386,7 +386,8 @@ export async function executeWorkflowSession(
     await completeSession(api, session);
     return { status: "completed", sessionId };
   } catch (error) {
-    const classifiedError = ensureClassified(error, "session-orchestration");
+    // Use getRunStatusForError instead of ensureClassified (per exec-12)
+    const { error: classifiedError } = getRunStatusForError(error, "session-orchestration");
     await failSession(api, session, classifiedError.message, classifiedError.type);
     return {
       status: "failed",

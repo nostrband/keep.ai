@@ -232,7 +232,11 @@ export function classifyFileError(
 }
 
 /**
- * Classify a generic error based on its message and type
+ * Classify a generic error based on its message and type.
+ *
+ * @deprecated Do not use. This function uses unreliable pattern matching on error messages.
+ * Connectors must throw ClassifiedError explicitly. Unclassified errors should be treated
+ * as InternalError (bug in our code). Use getRunStatusForError() from failure-handling.ts instead.
  *
  * @param err The original error
  * @param source The tool or component that produced the error
@@ -286,7 +290,14 @@ export function classifyGenericError(
 }
 
 /**
- * Wrap an error in a ClassifiedError if it isn't already classified
+ * Wrap an error in a ClassifiedError if it isn't already classified.
+ *
+ * @deprecated Do not use. This function falls back to pattern matching via classifyGenericError.
+ * Use getRunStatusForError() from failure-handling.ts instead, which treats unclassified
+ * errors as InternalError (bug in our code) rather than LogicError.
+ *
+ * Per exec-12 spec: If a connector or tool throws an unclassified error, that's a bug
+ * in our code that needs fixing, not a script bug that auto-fix should handle.
  *
  * @param err The error to wrap
  * @param source The tool or component that produced the error
@@ -304,8 +315,12 @@ export function ensureClassified(err: unknown, source?: string): ClassifiedError
     return classifyGenericError(err, source);
   }
 
-  // Convert non-Error to LogicError
-  return new LogicError(String(err), { source });
+  // Convert non-Error to InternalError (changed from LogicError per exec-12)
+  // Non-Error thrown from internal code is a bug
+  return new InternalError(
+    `Unclassified non-Error thrown${source ? ` in ${source}` : ''}: ${String(err)}`,
+    { source }
+  );
 }
 
 /**

@@ -23,10 +23,10 @@ import {
 } from "@app/db";
 import {
   ClassifiedError,
-  ensureClassified,
   LogicError,
   ErrorType,
 } from "./errors";
+import { getRunStatusForError, isDefiniteFailure } from "./failure-handling";
 import { initSandbox, Sandbox, EvalContext } from "./sandbox/sandbox";
 import { ToolWrapper, ExecutionPhase } from "./sandbox/tool-wrapper";
 import { createWorkflowTools } from "./sandbox/tool-lists";
@@ -151,15 +151,7 @@ function errorTypeToRunStatus(type: ErrorType): RunStatus {
   }
 }
 
-/**
- * Check if an error is a definite failure (vs potentially indeterminate).
- * Used to decide mutation status when an error occurs during mutate phase.
- */
-function isDefiniteFailure(error: ClassifiedError): boolean {
-  // Logic errors and permission errors are definite failures
-  // Network errors and auth errors might be indeterminate (external call may have succeeded)
-  return error.type === "logic" || error.type === "permission";
-}
+// isDefiniteFailure is now imported from failure-handling.ts
 
 // ============================================================================
 // Phase Reset Rules (exec-10)
@@ -617,7 +609,8 @@ return await workflow.producers.${run.handler_name}.handler(__state__);
         await api.handlerRunStore.update(run.id, { logs: JSON.stringify(logs) });
       }
     } catch (error) {
-      const classifiedError = ensureClassified(error, "producer.handler");
+      // Use getRunStatusForError instead of ensureClassified (per exec-12)
+      const { error: classifiedError } = getRunStatusForError(error, "producer.handler");
       await failRun(api, run, classifiedError);
     } finally {
       sandbox.dispose();
@@ -716,7 +709,8 @@ return await workflow.consumers.${run.handler_name}.prepare(__state__);
         await api.handlerRunStore.update(run.id, { logs: JSON.stringify(logs) });
       }
     } catch (error) {
-      const classifiedError = ensureClassified(error, "consumer.prepare");
+      // Use getRunStatusForError instead of ensureClassified (per exec-12)
+      const { error: classifiedError } = getRunStatusForError(error, "consumer.prepare");
       await failRun(api, run, classifiedError);
     } finally {
       sandbox.dispose();
@@ -880,7 +874,8 @@ return await workflow.consumers.${run.handler_name}.next(__prepared__, __mutatio
         await api.handlerRunStore.update(run.id, { logs: JSON.stringify(logs) });
       }
     } catch (error) {
-      const classifiedError = ensureClassified(error, "consumer.next");
+      // Use getRunStatusForError instead of ensureClassified (per exec-12)
+      const { error: classifiedError } = getRunStatusForError(error, "consumer.next");
       await failRun(api, run, classifiedError);
     } finally {
       sandbox.dispose();
@@ -1016,7 +1011,8 @@ return await workflow.consumers.${run.handler_name}.mutate(__prepared__);
     }
     // State machine will read mutation status and transition
   } catch (error) {
-    const classifiedError = ensureClassified(error, "consumer.mutate");
+    // Use getRunStatusForError instead of ensureClassified (per exec-12)
+    const { error: classifiedError } = getRunStatusForError(error, "consumer.mutate");
     const updatedMutation = await api.mutationStore.get(mutation.id);
 
     if (updatedMutation) {
@@ -1110,11 +1106,12 @@ export async function executeHandler(
       await handler(api, run, context);
     } catch (error) {
       // Unexpected error in phase handler itself
-      const classifiedError = ensureClassified(error, "handler-state-machine");
+      // Use getRunStatusForError instead of ensureClassified (per exec-12)
+      const { status, error: classifiedError } = getRunStatusForError(error, "handler-state-machine");
       await failRun(api, run, classifiedError);
       return {
         phase: run.phase,
-        status: errorTypeToRunStatus(classifiedError.type),
+        status,
         error: classifiedError.message,
         errorType: errorTypeToHandlerErrorType(classifiedError.type),
       };

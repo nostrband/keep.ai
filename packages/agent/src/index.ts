@@ -142,13 +142,23 @@ export {
   isWorkflowPausedError,
   classifyHttpError,
   classifyFileError,
-  classifyGenericError,
   classifyGoogleApiError,
-  ensureClassified,
   formatUsageForEvent,
   type ErrorType,
   type EventUsageData,
+  /** @deprecated Use getRunStatusForError from failure-handling instead */
+  classifyGenericError,
+  /** @deprecated Use getRunStatusForError from failure-handling instead */
+  ensureClassified,
 } from "./errors";
+
+// Failure handling (exec-12)
+export {
+  errorTypeToRunStatus,
+  getRunStatusForError,
+  isDefiniteFailure,
+  type ClassifiedResult,
+} from "./failure-handling";
 
 export type {
   Sandbox,
