@@ -1,0 +1,39 @@
+COMMIT: 78f97d4
+TITLE: Merge branch 'main' of https://github.com/nostrband/keep.ai into main
+DATE: 2026-02-03 13:08:52 +0100
+AUTHOR: Claude Agent
+
+== SUMMARY ==
+
+This is a merge commit that combines the local branch with the remote main branch.
+The commit itself doesn't introduce new code - it resolves any differences between
+the local and remote branches.
+
+The merge brings in 153 files with significant changes from the remote, including:
+- New execution model specs (logical items, tool migration)
+- Tool migration to ToolWrapper pattern
+- Error classification moved to @app/proto
+- Transport client tests
+- Various bug fixes and code quality improvements
+- New review files
+
+== CHANGES ==
+
+Merge commits don't have their own diff - they combine existing commits. The changes
+brought in from remote include work across multiple areas:
+- packages/agent/src/sandbox/tool-wrapper.ts (new ToolWrapper infrastructure)
+- packages/agent/src/tools/* (tool migrations to new interface)
+- packages/db/src/item-store.ts (new ItemStore for logical items)
+- packages/proto/src/errors.ts (ClassifiedError moved here)
+- Many spec files in specs/done/ and specs/new/
+
+== ISSUE REVIEW ==
+
+No issues identified. This is a standard merge commit with no merge conflicts apparent.
+
+The merge combines ongoing work on the execution model refactor with local changes,
+which is expected during parallel development.
+
+== PROPOSALS ==
+
+None. Merge commits are routine operations for synchronizing branches.

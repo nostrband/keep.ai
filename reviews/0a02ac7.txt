@@ -1,0 +1,156 @@
+COMMIT REVIEW: 0a02ac7
+
+Title: Add tests for logical items infrastructure (P1)
+Date: Fri Jan 30 16:10:02 2026 +0100
+
+=============================================================================
+CHANGES SUMMARY
+=============================================================================
+
+This commit adds comprehensive test coverage for the logical items
+infrastructure, specifically:
+
+1. **New Test File** (`packages/tests/src/logical-items.test.ts`, 520 lines):
+   - Complete test suite for ItemStore class
+   - Complete test suite for Items.list tool
+   - Uses in-memory SQLite database via createDBNode(":memory:")
+
+2. **Package Export** (`packages/agent/src/index.ts`):
+   - Exports makeItemsListTool for use in tests
+
+3. **Documentation** (`IMPLEMENTATION_PLAN.md`):
+   - Updates status from "PARTIALLY IMPLEMENTED" to include test coverage
+   - Removes "Tests for the new functionality" from Remaining items
+   - Notes 28 tests covering ItemStore, Items.list, and sandbox callback
+
+=============================================================================
+DETAILED ANALYSIS
+=============================================================================
+
+**ItemStore Tests (describe blocks: getItem, startItem, setStatus, listItems,
+countByStatus)**:
+
+- Tests CRUD operations correctly
+- Tests the intelligent retry logic: done items remain unchanged,
+  failed/skipped items reset to processing
+- Tests different created_by values (workflow, planner, maintainer)
+- Tests pagination with limit/offset
+- Tests status filtering
+- Tests countByStatus aggregation
+
+**Items.list Tool Tests (describe blocks: basic functionality, filtering,
+pagination)**:
+
+- Tests workflow context requirement (throws without context)
+- Tests empty workflow handling
+- Tests result structure validation
+- Tests status filtering
+- Tests logical_item_id filtering
+- Tests combined filters
+- Tests pagination with default limit of 100
+- Tests has_more calculation
+
+=============================================================================
+POTENTIAL ISSUES
+=============================================================================
+
+**ISSUE 1: Unused helper function** [LOW - Fixed in next commit]
+Severity: Low
+Location: packages/tests/src/logical-items.test.ts:28-35
+
+The createToolCallOptions() helper is defined but actually is problematic:
+```typescript
+function createToolCallOptions() {
+  return {
+    toolCallId: "test-call",
+    messages: [],
+    abortSignal: new AbortController().signal,
+  };
+}
+```
+
+The tests pass this as a second argument to tool.execute(), but looking at the
+Tool interface (commit 461e200), execute() only takes a single input argument.
+This will cause TypeScript errors.
+
+Resolution: Fixed in commit e292239 which removes this helper and fixes all
+tool.execute() calls to pass only the input argument.
+
+---
+
+**ISSUE 2: Test isolation assumes items table schema** [MINOR]
+Severity: Minor (test code only)
+Location: packages/tests/src/logical-items.test.ts:10-24
+
+The test creates the items table manually with createItemsTable() helper rather
+than using the actual migration system. This duplicates the schema definition
+and could drift from the real schema over time.
+
+Proposal: Consider importing or reusing the v35 migration logic, or at minimum
+add a comment referencing v35 migration as the source of truth:
+```typescript
+// Schema mirrors packages/db/src/migrations/v35.ts - items table
+```
+
+---
+
+**ISSUE 3: Missing edge case tests** [MINOR]
+Severity: Minor
+Location: packages/tests/src/logical-items.test.ts
+
+Several edge cases are not tested:
+- Concurrent startItem calls for same workflow_id + logical_item_id
+- Very long titles (close to max length)
+- Invalid status values (should be caught by TypeScript/Zod)
+- Database transaction rollback scenarios
+
+Proposal: Add edge case tests for concurrent operations and boundary conditions.
+Given the ItemStore has a non-atomic read-then-write in startItem(), concurrency
+tests could reveal race conditions.
+
+---
+
+**ISSUE 4: Test comment about sandbox callback tests is vague** [MINOR]
+Severity: Minor
+Location: packages/tests/src/logical-items.test.ts:516-520
+
+The comment at the end mentions:
+```typescript
+// NOTE: Sandbox callback tests are covered in sandbox.test.ts.
+// The wrapGuestCallback implementation is tested there via host callbacks.
+// Additional tests for the Items.withItem pattern with callbacks are skipped
+// here due to QuickJS disposal issues with host closures that capture state.
+```
+
+This mentions "QuickJS disposal issues" which is a known problem but doesn't
+document what specific issues or where to find more context.
+
+Proposal: Reference a specific issue tracker item or IMPLEMENTATION_PLAN.md
+section that tracks the QuickJS disposal issues.
+
+=============================================================================
+PROPOSALS
+=============================================================================
+
+1. **Add schema source comment** (Low effort)
+   Add a comment in createItemsTable() referencing the v35 migration as the
+   canonical schema definition.
+
+2. **Track QuickJS disposal issue** (Medium effort)
+   Document the QuickJS disposal issue in IMPLEMENTATION_PLAN.md or create a
+   spec for fixing it.
+
+3. **Add concurrency tests** (Higher effort, optional)
+   Add tests that exercise concurrent startItem calls to verify race condition
+   behavior (or document expected behavior under concurrency).
+
+=============================================================================
+OVERALL ASSESSMENT
+=============================================================================
+
+This is a well-structured test commit that significantly improves test coverage
+for the logical items infrastructure. The tests cover the main happy paths and
+important retry logic. The TypeScript errors with tool.execute() calls were
+immediately fixed in the follow-up commit e292239.
+
+Quality: Good (minor issues only)

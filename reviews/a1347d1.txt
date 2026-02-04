@@ -1,0 +1,169 @@
+COMMIT REVIEW: a1347d1 - Move ClassifiedError to proto package and use in connectors
+
+================================================================================
+CHANGES SUMMARY
+================================================================================
+
+This commit moves the error classification system from @app/agent to @app/proto
+and updates the connectors package to use ClassifiedError for improved error
+handling reliability.
+
+Files changed (12 total):
+- IMPLEMENTATION_PLAN.md - Mark task as complete
+- apps/server/src/routes/connectors.ts - Use type-based error classification
+- package-lock.json - Dependency updates
+- packages/agent/src/errors.ts - Replace implementation with re-exports
+- packages/connectors/package.json - Add @app/proto dependency
+- packages/connectors/src/index.ts - Re-export error utilities
+- packages/connectors/src/manager.ts - Use ClassifiedError from proto
+- packages/connectors/src/oauth.ts - Throw ClassifiedError instead of OAuthError
+- packages/proto/package.json - Add @types/node dependency
+- packages/proto/src/errors.ts - NEW: Canonical error implementation
+- packages/proto/src/index.ts - Export errors module
+- packages/proto/tsconfig.json - Add node types
+
+Key architectural changes:
+1. Error classification system now lives in @app/proto (shared package)
+2. Connectors throw ClassifiedError subclasses (AuthError, NetworkError, etc.)
+3. Route handler uses type-based switch statement with keyword fallback
+4. Agent package re-exports from proto for backward compatibility
+
+================================================================================
+ISSUES FOUND
+================================================================================
+
+ISSUE 1: Mixed instanceof and .type checks (MEDIUM)
+-----------------------------------------------
+Location: apps/server/src/routes/connectors.ts vs packages/connectors/src/manager.ts
+
+The codebase uses two different patterns for error type checking:
+
+Pattern A (connectors.ts route handler):
+```typescript
+if (isClassifiedError(error)) {
+  switch (error.type) {  // Uses .type property
+    case 'auth': statusCode = 401; break;
+```
+
+Pattern B (manager.ts):
+```typescript
+if (err instanceof OAuthError) {  // Uses instanceof
+```
+
+Risk: instanceof checks can fail if errors cross module boundaries or are
+serialized/deserialized. The inconsistent patterns make code harder to maintain.
+
+ISSUE 2: OAuthError deprecated but still caught (LOW)
+--------------------------------------------------
+Location: packages/connectors/src/manager.ts:289-298
+
+The OAuthError is marked @deprecated in oauth.ts but manager.ts still catches it:
+```typescript
+if (err instanceof OAuthError) {
+  // Legacy OAuthError (should no longer be thrown but kept for safety)
+```
+
+Risk: Creates confusion about whether OAuthError is still used. New developers
+might use the deprecated class.
+
+ISSUE 3: Keyword fallback in route handler (LOW)
+---------------------------------------------
+Location: apps/server/src/routes/connectors.ts:225-251
+
+Extensive keyword matching still exists as fallback:
+```typescript
+if (errorMessageLower.includes("unauthorized") ||
+    errorMessageLower.includes("invalid_grant") || ...)
+```
+
+Risk: This is dead code if all errors are properly classified. Hard to maintain
+and could mask issues where errors aren't being properly classified.
+
+ISSUE 4: AuthError constructor signature change (LOW)
+--------------------------------------------------
+Location: packages/proto/src/errors.ts vs original agent errors
+
+The new AuthError in proto adds an `errorCode` optional parameter:
+```typescript
+constructor(message: string, options?: { cause?: Error; source?: string; errorCode?: string })
+```
+
+However, existing code in manager.ts still uses the old signature without
+source or errorCode. This works but doesn't leverage the new capabilities.
+
+================================================================================
+PROPOSALS
+================================================================================
+
+PROPOSAL 1: Standardize on type-based error checking
+----------------------------------------------------
+Priority: Low-Medium
+
+Recommendation: Update all error checks to use the .type property pattern
+instead of instanceof. This is more robust when errors cross boundaries.
+
+Before:
+```typescript
+if (err instanceof AuthError) { ... }
+```
+
+After:
+```typescript
+if (isClassifiedError(err) && err.type === 'auth') { ... }
+// Or use the isErrorType helper:
+if (isErrorType(err, 'auth')) { ... }
+```
+
+PROPOSAL 2: Add deprecation notice to OAuthError exports
+--------------------------------------------------------
+Priority: Low
+
+Add @deprecated JSDoc to the export in connectors/src/index.ts and oauth.ts
+exports. Consider removing the catch block in manager.ts once confirmed all
+OAuthError usages are gone.
+
+PROPOSAL 3: Monitor keyword fallback usage
+------------------------------------------
+Priority: Low
+
+Add logging/telemetry when the keyword fallback path is hit to determine if
+it's still needed. If never hit in production, consider removing it.
+
+PROPOSAL 4: Populate source field consistently
+----------------------------------------------
+Priority: Low
+
+Update existing AuthError throws to include the source field:
+```typescript
+// Before
+throw new AuthError(`No credentials for ${connectionId}`);
+
+// After
+throw new AuthError(`No credentials for ${connectionId}`, {
+  source: "ConnectionManager.getCredentials"
+});
+```
+
+================================================================================
+OVERALL ASSESSMENT
+================================================================================
+
+Rating: GOOD
+Type: Architectural refactoring
+Risk: Low
+
+This is a well-executed refactoring that improves error handling reliability
+by moving from fragile keyword matching to type-based classification. The key
+improvements are:
+
+1. Error classification is now in a shared package (@app/proto)
+2. Type-based error routing is more reliable than string matching
+3. Backward compatibility is maintained via re-exports
+4. OAuth errors now throw proper ClassifiedError subclasses
+
+The issues identified are minor and don't affect correctness. The fallback
+keyword matching is intentional for legacy compatibility and can be removed
+later once confidence is gained that all errors are properly classified.
+
+The commit message accurately describes the changes and the implementation
+matches the described goals.

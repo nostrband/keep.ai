@@ -1,0 +1,196 @@
+COMMIT REVIEW: 7b0db94 - Implement exec-01: Database schema for execution model
+================================================================================
+
+SUMMARY OF CHANGES
+------------------
+This commit implements the database foundation for the new event-driven
+execution model. It adds 5 new tables and 5 new store classes to support
+topics, events, handler runs, mutations, and handler state.
+
+New Tables (v36 migration):
+- topics: Topic definitions within workflows (event streams)
+- events: Events in topic streams with status tracking (pending/reserved/consumed/skipped)
+- handler_runs: Granular handler execution records with phase tracking
+- mutations: Mutation ledger for tracking external side effects
+- handler_state: Persistent state per handler
+
+Extended Tables:
+- script_runs: Added trigger, handler_run_count columns
+- workflows: Added handler_config, consumer_sleep_until columns
+
+New Store Classes:
+- TopicStore: CRUD + getOrCreate for topics
+- EventStore: peek, publish, reserve, consume, skip, release
+- HandlerRunStore: phase transitions, incomplete run queries
+- MutationStore: status transitions, reconciliation tracking
+- HandlerStateStore: get/set state per handler
+
+Also reorganizes specs: moved completed specs to specs/done/, moved exec
+specs from specs/new/ to specs/.
+
+FILES CHANGED
+-------------
+- IMPLEMENTATION_PLAN.md (updated with exec spec progress)
+- packages/db/src/api.ts (+15 lines - adds new stores)
+- packages/db/src/database.ts (+2 lines - adds v36 migration)
+- packages/db/src/event-store.ts (+419 lines - new file)
+- packages/db/src/handler-run-store.ts (+353 lines - new file)
+- packages/db/src/handler-state-store.ts (+180 lines - new file)
+- packages/db/src/index.ts (+20 lines - exports new stores)
+- packages/db/src/migrations/v36.ts (+151 lines - new file)
+- packages/db/src/mutation-store.ts (+398 lines - new file)
+- packages/db/src/topic-store.ts (+186 lines - new file)
+- 33 spec files moved to specs/done/
+
+ISSUES FOUND
+------------
+
+### ISSUE 1: Timestamp Type Inconsistency (Low Severity)
+Location: packages/db/src/migrations/v36.ts
+
+The events table uses INTEGER timestamps (Unix ms):
+  created_at INTEGER NOT NULL DEFAULT 0
+  updated_at INTEGER NOT NULL DEFAULT 0
+
+But handler_runs table uses TEXT timestamps (ISO strings):
+  start_timestamp TEXT NOT NULL DEFAULT ''
+  end_timestamp TEXT NOT NULL DEFAULT ''
+
+Impact: Makes cross-table time-based queries less intuitive and potentially
+less performant. INTEGER is more efficient for comparisons/sorting.
+
+Proposal: Align on INTEGER timestamps for handler_runs table to match the
+events table and the pattern used in the newer stores (item-store.ts uses
+INTEGER).
+
+
+### ISSUE 2: Race Condition in reserveEvents (Medium Severity)
+Location: packages/db/src/event-store.ts:253-285
+
+The reserveEvents method has a check-then-act pattern that is vulnerable to
+race conditions when multiple handler runs try to reserve the same events:
+
+```typescript
+// Get topic ID (separate query)
+const topicResults = await db.execO<Record<string, unknown>>(
+  `SELECT e.topic_id FROM events e ...`
+);
+// Later: UPDATE events SET status = 'reserved' WHERE status = 'pending'
+```
+
+The WHERE clause `status = 'pending'` provides some protection, but:
+1. Multiple handlers can both see events as 'pending' and both attempt update
+2. The UPDATE returns no indication of affected rows
+3. No feedback if a handler fails to reserve expected events
+
+Impact: In concurrent scenarios, handlers may silently fail to reserve events
+they expected to process.
+
+Proposal:
+1. Always wrap reserveEvents calls in a transaction (the method accepts tx param)
+2. Add return value indicating number of events actually reserved
+3. Consider using SELECT FOR UPDATE pattern if SQLite supports it in WAL mode
+
+
+### ISSUE 3: MutationStore.create() Throws on Duplicate (Low Severity)
+Location: packages/db/src/mutation-store.ts:134-168, migrations/v36.ts:98
+
+The mutations table has `handler_run_id TEXT NOT NULL DEFAULT '' UNIQUE`, and
+MutationStore.create() doesn't check for existing records before INSERT.
+
+If called twice with the same handler_run_id, it will throw a SQLite
+UNIQUE constraint violation.
+
+Current mitigation: The handler-state-machine.ts checks for existing mutation
+before creating:
+```typescript
+let mutation = await api.mutationStore.getByHandlerRunId(run.id);
+if (!mutation) {
+  mutation = await api.mutationStore.create({...});
+}
+```
+
+Impact: Safe in current usage but error-prone for future modifications.
+
+Proposal: Either:
+1. Add check-before-create logic to MutationStore.create() (like EventStore.publishEvent)
+2. Document requirement that callers MUST check for existing mutations first
+
+
+### ISSUE 4: UNIQUE Constraint Style Inconsistency (Very Low Severity)
+Location: packages/db/src/migrations/v36.ts:98
+
+The mutations table uses column-level UNIQUE constraint:
+  handler_run_id TEXT NOT NULL DEFAULT '' UNIQUE
+
+All other unique constraints in the codebase use table-level:
+  UNIQUE(workflow_id, name)
+
+Impact: Minor inconsistency in style. Both work correctly.
+
+Proposal: Change to table-level for pattern consistency:
+  handler_run_id TEXT NOT NULL DEFAULT '',
+  UNIQUE(handler_run_id)
+
+
+### ISSUE 5: Missing Composite Index (Low Severity)
+Location: packages/db/src/migrations/v36.ts:116-119
+
+The mutations table has separate indexes on workflow_id and status, but if
+queries commonly filter by (workflow_id, status) together, a composite index
+would be more efficient.
+
+Current indexes:
+  idx_mutations_workflow (workflow_id)
+  idx_mutations_status (status)
+
+Proposal: Consider adding if query patterns warrant:
+  CREATE INDEX idx_mutations_workflow_status ON mutations(workflow_id, status)
+
+
+### ISSUE 6: Unused handlerRunId Parameter in peekEvents (Very Low Severity)
+Location: packages/db/src/event-store.ts:114-135
+
+The makeTopicsPeekTool (in topics.ts) passes getHandlerRunId but the peek
+execute function never uses it. This is harmless but slightly misleading.
+
+Impact: None - the parameter is unused.
+
+Proposal: Either remove the unused parameter from makeTopicsPeekTool or
+document why it's passed for future use.
+
+
+### ISSUE 7: Missing Index on handler_state Lookup (Low Severity)
+Location: packages/db/src/migrations/v36.ts:133
+
+Only indexes workflow_id, but queries typically lookup by both workflow_id
+AND handler_name (which have a UNIQUE constraint).
+
+Impact: The UNIQUE constraint creates an implicit index, so queries will
+still be efficient. Minor documentation/clarity issue.
+
+Proposal: No change needed - UNIQUE constraint provides implicit index.
+
+
+POSITIVE OBSERVATIONS
+---------------------
+1. Migration follows all CRSQLite patterns correctly (crsql_as_crr,
+   crsql_begin_alter/commit_alter, DEFAULT values on NOT NULL columns)
+2. All stores consistently use the tx parameter pattern for transaction support
+3. Proper null handling with `if (!results || results.length === 0) return null`
+4. Safe JSON parsing with try-catch and fallback in mapRowToEvent/mapRowToHandlerState
+5. Index naming follows codebase conventions (idx_tablename_column)
+6. Comprehensive store methods cover all anticipated operations
+7. Good use of TypeScript for type safety (HandlerRunPhase, MutationStatus, etc.)
+
+VERDICT
+-------
+Overall, this is a well-structured commit implementing a solid database
+foundation for the new execution model. The stores follow established
+codebase patterns consistently. The race condition in reserveEvents is the
+main concern but is mitigated by transaction usage in the calling code.
+
+Critical Issues: 0
+Medium Issues: 1 (reserveEvents race condition)
+Low Issues: 4
+Very Low Issues: 2

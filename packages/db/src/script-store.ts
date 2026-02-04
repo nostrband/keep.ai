@@ -81,6 +81,7 @@ export interface Workflow {
   maintenance: boolean;
   maintenance_fix_count: number;  // Tracks consecutive fix attempts in maintenance mode
   active_script_id: string;       // ID of the script version that should execute when workflow runs
+  handler_config: string;         // JSON WorkflowConfig from exec-05 validation (topics, producers, consumers)
 }
 
 export class ScriptStore {
@@ -619,7 +620,7 @@ export class ScriptStore {
   // Get a workflow by ID
   async getWorkflow(id: string): Promise<Workflow | null> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, title, task_id, chat_id, timestamp, cron, events, status, next_run_timestamp, maintenance, maintenance_fix_count, active_script_id
+      `SELECT id, title, task_id, chat_id, timestamp, cron, events, status, next_run_timestamp, maintenance, maintenance_fix_count, active_script_id, handler_config
        FROM workflows
        WHERE id = ?`,
       [id]
@@ -643,13 +644,14 @@ export class ScriptStore {
       maintenance: Boolean(row.maintenance),
       maintenance_fix_count: (row.maintenance_fix_count as number) || 0,
       active_script_id: (row.active_script_id as string) || '',
+      handler_config: (row.handler_config as string) || '',
     };
   }
 
   // Get workflow by task_id
   async getWorkflowByTaskId(task_id: string): Promise<Workflow | null> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, title, task_id, chat_id, timestamp, cron, events, status, next_run_timestamp, maintenance, maintenance_fix_count, active_script_id
+      `SELECT id, title, task_id, chat_id, timestamp, cron, events, status, next_run_timestamp, maintenance, maintenance_fix_count, active_script_id, handler_config
        FROM workflows
        WHERE task_id = ?
        LIMIT 1`,
@@ -674,13 +676,14 @@ export class ScriptStore {
       maintenance: Boolean(row.maintenance),
       maintenance_fix_count: (row.maintenance_fix_count as number) || 0,
       active_script_id: (row.active_script_id as string) || '',
+      handler_config: (row.handler_config as string) || '',
     };
   }
 
   // Get workflow by chat_id (Spec 09)
   async getWorkflowByChatId(chat_id: string): Promise<Workflow | null> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, title, task_id, chat_id, timestamp, cron, events, status, next_run_timestamp, maintenance, maintenance_fix_count, active_script_id
+      `SELECT id, title, task_id, chat_id, timestamp, cron, events, status, next_run_timestamp, maintenance, maintenance_fix_count, active_script_id, handler_config
        FROM workflows
        WHERE chat_id = ?
        LIMIT 1`,
@@ -705,6 +708,7 @@ export class ScriptStore {
       maintenance: Boolean(row.maintenance),
       maintenance_fix_count: (row.maintenance_fix_count as number) || 0,
       active_script_id: (row.active_script_id as string) || '',
+      handler_config: (row.handler_config as string) || '',
     };
   }
 
@@ -714,7 +718,7 @@ export class ScriptStore {
     offset: number = 0
   ): Promise<Workflow[]> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, title, task_id, chat_id, timestamp, cron, events, status, next_run_timestamp, maintenance, maintenance_fix_count, active_script_id
+      `SELECT id, title, task_id, chat_id, timestamp, cron, events, status, next_run_timestamp, maintenance, maintenance_fix_count, active_script_id, handler_config
        FROM workflows
        ORDER BY timestamp DESC
        LIMIT ? OFFSET ?`,
@@ -736,6 +740,7 @@ export class ScriptStore {
       maintenance: Boolean(row.maintenance),
       maintenance_fix_count: (row.maintenance_fix_count as number) || 0,
       active_script_id: (row.active_script_id as string) || '',
+      handler_config: (row.handler_config as string) || '',
     }));
   }
 
@@ -773,7 +778,7 @@ export class ScriptStore {
   // Note: timestamp is NOT included - it's the creation timestamp and should never be updated
   async updateWorkflowFields(
     workflowId: string,
-    fields: Partial<Pick<Workflow, 'next_run_timestamp' | 'status' | 'cron' | 'maintenance' | 'maintenance_fix_count' | 'active_script_id' | 'title'>>,
+    fields: Partial<Pick<Workflow, 'next_run_timestamp' | 'status' | 'cron' | 'maintenance' | 'maintenance_fix_count' | 'active_script_id' | 'title' | 'handler_config'>>,
     tx?: DBInterface
   ): Promise<void> {
     const db = tx || this.db.db;
@@ -808,6 +813,10 @@ export class ScriptStore {
     if (fields.title !== undefined) {
       setClauses.push('title = ?');
       values.push(fields.title);
+    }
+    if (fields.handler_config !== undefined) {
+      setClauses.push('handler_config = ?');
+      values.push(fields.handler_config);
     }
 
     if (setClauses.length === 0) return;
@@ -912,6 +921,7 @@ export class ScriptStore {
         maintenance: Boolean(row.maintenance),
         maintenance_fix_count: (row.maintenance_fix_count as number) || 0,
         active_script_id: (row.active_script_id as string) || '',
+        handler_config: (row.handler_config as string) || '',
       };
 
       const lastActivity = row.last_activity as string;
@@ -1138,6 +1148,23 @@ export class ScriptStore {
       summary: row.summary as string,
       diagram: row.diagram as string,
     };
+  }
+
+  /**
+   * Increment the handler run count for a script run (session).
+   * Called when a handler successfully commits.
+   *
+   * @param scriptRunId - The script run (session) ID
+   * @param tx - Optional transaction context
+   * @returns The new handler run count
+   */
+  async incrementHandlerCount(scriptRunId: string, tx?: DBInterface): Promise<number> {
+    const db = tx || this.db.db;
+    const result = await db.execO<{ handler_run_count: number }>(
+      `UPDATE script_runs SET handler_run_count = handler_run_count + 1 WHERE id = ? RETURNING handler_run_count`,
+      [scriptRunId]
+    );
+    return result && result.length > 0 ? result[0].handler_run_count : 0;
   }
 
   /**

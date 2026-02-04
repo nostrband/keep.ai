@@ -1,0 +1,100 @@
+COMMIT REVIEW: a92aac2
+=======================
+Implement exec-05: Script validation for workflow structure
+
+SUMMARY OF CHANGES
+------------------
+This commit implements workflow script validation (exec-05) which validates the
+structure of workflow scripts when they are saved or fixed. Key changes:
+
+1. NEW FILE: packages/agent/src/workflow-validator.ts
+   - validateWorkflowScript() function that runs scripts in a zero-tool sandbox
+   - isWorkflowFormatScript() heuristic to detect new-format workflow scripts
+   - Extracts WorkflowConfig (topics, producers, consumers) for storage
+
+2. MODIFIED: packages/agent/src/ai-tools/save.ts
+   - Validates new-format scripts before saving
+   - Stores handler_config JSON when validation passes
+
+3. MODIFIED: packages/agent/src/ai-tools/fix.ts
+   - Validates fixed scripts before saving
+   - Stores handler_config JSON when validation passes
+
+4. MODIFIED: packages/db/src/script-store.ts
+   - Added handler_config field to Workflow interface
+   - Extended updateWorkflowFields() to support handler_config
+   - Updated all workflow getters to include handler_config column
+
+5. MODIFIED: packages/agent/src/index.ts
+   - Exports validateWorkflowScript, isWorkflowFormatScript, WorkflowConfig, ValidationResult
+
+6. MODIFIED: packages/db/src/api.ts
+   - Initializes handler_config: "" when creating new workflows
+
+7. MODIFIED: Test files (api.test.ts, fix-tool.test.ts, maintainer-integration.test.ts,
+   save-tool.test.ts, script-store.test.ts)
+   - Added handler_config column to test table schemas
+
+ISSUES FOUND
+------------
+
+ISSUE 1 (MEDIUM): Variable declaration inconsistency in save.ts
+Location: packages/agent/src/ai-tools/save.ts line 47
+Problem: Uses `var` instead of `let`:
+  var workflowConfig = validation.config;
+Contrast: fix.ts line 49 correctly uses `let workflowConfig;`
+Risk: Inconsistent with codebase conventions and potential scoping issues if refactored.
+Proposal: Change `var` to `let` for consistency.
+
+ISSUE 2 (HIGH): Missing dedicated test coverage for workflow-validator.ts
+Location: packages/tests/src/
+Problem: No dedicated test file for the validation functionality. Only existing tests
+were updated to include handler_config in table schemas.
+Missing test cases:
+- Valid workflow script extraction
+- Invalid workflow scripts (missing handler, missing prepare, etc.)
+- Error message formatting
+- Tool call detection during validation
+- isWorkflowFormatScript() edge cases
+Proposal: Create packages/tests/src/workflow-validator.test.ts with comprehensive tests.
+
+ISSUE 3 (LOW): Topic declaration validation not implemented
+Location: packages/agent/src/workflow-validator.ts VALIDATION_CODE
+Problem: The spec (exec-05-script-validation.md) mentions:
+  "All subscribed topics should be declared in `topics` (warning, not error)"
+However, the implementation does NOT validate this. A consumer can subscribe to
+a topic not declared in workflow.topics without any warning.
+Proposal: Either implement the validation or update spec to clarify this is deferred.
+
+ISSUE 4 (LOW): Heuristic detection regex may miss edge cases
+Location: packages/agent/src/workflow-validator.ts lines 258-262
+Problem: The isWorkflowFormatScript() regex:
+  /(?:const|let|var)\s+workflow\s*=\s*\{/
+Won't detect:
+- Parenthesized: const workflow = ({...})
+- Multi-line: const workflow =\n{
+- Function result: const workflow = createWorkflow()
+Risk: Low for typical scripts, but edge cases could bypass validation.
+Proposal: Document limitation or expand regex.
+
+ISSUE 5 (LOW): Error extraction fragility
+Location: packages/agent/src/workflow-validator.ts lines 231-245
+Problem: Error message extraction relies on regex patterns that may not match all
+QuickJS error formats. If format changes, errors could be less readable.
+Proposal: Test with actual QuickJS errors and add fallback logging.
+
+POSITIVE OBSERVATIONS
+---------------------
++ Migration properly adds handler_config column (v36.ts)
++ All workflow getters consistently include handler_config
++ updateWorkflowFields() properly supports handler_config
++ Exports are correctly added to package index
++ Zero-tool sandbox approach is elegant and prevents side effects
++ Validation integrated at save/fix points ensures consistency
+
+RECOMMENDATIONS (PRIORITY ORDER)
+--------------------------------
+1. HIGH: Create workflow-validator.test.ts with comprehensive tests
+2. MEDIUM: Change `var` to `let` in save.ts line 47
+3. LOW: Document "old-format scripts not validated" behavior
+4. LOW: Consider implementing topic declaration validation

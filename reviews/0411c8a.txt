@@ -1,0 +1,245 @@
+COMMIT: 0411c8a7c1c5d8b3a38c9be04602bae5f1bd13ca
+AUTHOR: Claude Agent <claude@anthropic.com>
+DATE: Tue Feb 3 13:07:03 2026 +0100
+SUBJECT: Split spec 06 to 3 parts
+
+================================================================================
+CHANGES SUMMARY
+================================================================================
+
+This commit reorganizes the execution model documentation with major structural
+changes:
+
+1. SPLIT CHAPTER 06 INTO THREE FILES:
+   - `docs/dev/06-execution-model.md` - Condensed overview (~74% smaller)
+   - `docs/dev/06a-topics-and-handlers.md` - NEW: Topics, producers, consumers
+   - `docs/dev/06b-consumer-lifecycle.md` - NEW: Three-phase model details
+
+2. DELETED TWO CHAPTERS:
+   - `docs/dev/12-logical-items.md` - 480 lines deleted
+   - `docs/dev/14-idempotency.md` - 330 lines deleted
+
+NET CHANGE: 603 additions, 1346 deletions = -743 lines
+
+================================================================================
+DETAILED CHANGES
+================================================================================
+
+06-execution-model.md (condensed):
+- Removed detailed Topics section → moved to 06a
+- Removed detailed Producers section → moved to 06a
+- Removed detailed Consumers section → moved to 06a
+- Removed Consumer Execution Model details → moved to 06b
+- Removed Phase 1/2/3 detailed specifications → moved to 06b
+- Removed Run Lifecycle state diagram → moved to 06b
+- Removed Replay Semantics Summary → moved to 06b
+- Removed Commit Semantics → moved to 06b
+- Removed Workflow Declaration Shape example → moved to 06a
+- Added new "Consumer Three-Phase Model" summary table
+- Added new "Limitations (v1)" section with staleness discussion
+- Added new "Related Chapters" cross-references
+- Minor editorial improvements (removed "defined in this chapter")
+
+06a-topics-and-handlers.md (NEW):
+- Event Schema definition
+- Event Titles requirements
+- Event Lifecycle states
+- Topic Properties
+- Producer rules and state management
+- Producer replay semantics
+- Consumer subscriptions and run identity
+- Consumer execution model overview (refers to 06b)
+- Consumer state management
+- Complete workflow declaration example
+
+06b-consumer-lifecycle.md (NEW):
+- Detailed three-phase model (prepare/mutate/next)
+- Phase 1: prepare - purpose, signature, allowed/forbidden operations
+- PrepareResult schema
+- Reservations semantics
+- Empty reservations handling
+- Phase 2: mutate - purpose, signature, terminal mutation concept
+- Host-owned execution
+- When mutate re-executes
+- Phase 3: next - purpose, signature, mutationResult types
+- State return semantics
+- Always executes rule
+- Run Lifecycle state diagram (moved from 06)
+- Replay Semantics Summary table
+- Commit Semantics
+
+12-logical-items.md (DELETED):
+- Defined "logical item" as unit of work
+- Item scope (`withItem`) API
+- Item ledger schema
+- Item state lifecycle
+- Attempts and reprocessing
+- Namespace and version boundaries
+- User actions on items
+- Logical item ID stability requirements
+- LLM agent constraints for item IDs
+- Titles and observability requirements
+
+14-idempotency.md (DELETED):
+- Handler execution semantics
+- Mutation identity computation
+- Idempotent replay model
+- Cached results handling
+- Payload mismatch detection
+- Failure handling inside items
+- Guarantees and non-goals
+
+================================================================================
+POTENTIAL ISSUES
+================================================================================
+
+1. ORPHANED REFERENCE TO DELETED CHAPTER 12
+   Severity: Medium (documentation inconsistency)
+
+   File: specs/done/logical-items.md (line 3)
+   ```
+   This spec covers the implementation of logical items infrastructure for
+   Keep.AI, based on docs/dev/12-logical-items.md.
+   ```
+
+   The referenced file `docs/dev/12-logical-items.md` no longer exists. The spec
+   file references a deleted document.
+
+2. CONCEPTUAL GAP: LOGICAL ITEMS VS TOPICS
+   Severity: Medium-High (architectural clarity)
+
+   The old execution model had TWO distinct concepts:
+   - **Logical Items** (Chapter 12): Unit of work, `withItem()` API, item ledger
+   - **Topics/Events** (Chapter 06): Event streams, producers/consumers
+
+   After this commit:
+   - Topics/Events remain fully documented in 06a
+   - Logical Items documentation is DELETED
+
+   However, `specs/done/logical-items.md` (unchanged) still describes the
+   implementation of logical items with `withItem()` API, item ledger, etc.
+
+   Questions:
+   a) Are logical items being replaced by topics/events in the new execution model?
+   b) If so, does the implementation in `specs/done/logical-items.md` need updating?
+   c) If logical items are deprecated, what replaces the `withItem()` API?
+
+3. CONCEPTUAL GAP: IDEMPOTENCY
+   Severity: Medium (architectural clarity)
+
+   Chapter 14 (idempotency) is deleted entirely. The new documentation mentions:
+   - "Idempotency: replay returns cached results, no duplicate mutations" (06:211)
+   - Event publishing is "idempotent by messageId" (06a, 06b)
+
+   But the detailed idempotency model (mutation identity, cached results, payload
+   mismatch handling) is no longer documented. Is this:
+   a) Moved elsewhere?
+   b) Deemed implementation detail?
+   c) No longer applicable under the new topics-based model?
+
+4. POTENTIAL STALE CROSS-REFERENCES
+   Severity: Low-Medium
+
+   Other documents may reference deleted chapters. A grep for "Chapter 12" and
+   "Chapter 14" found no remaining references in docs/dev/, but specs/ may have
+   references.
+
+5. MISSING NEWLINE AT END OF 06-execution-model.md
+   Severity: Trivial (styling)
+
+   The diff shows the file likely ends without a trailing newline.
+
+================================================================================
+ANALYSIS
+================================================================================
+
+This commit appears to be part of a significant architectural shift in the
+execution model:
+
+OLD MODEL (Chapters 06, 12, 14):
+- Logical items as the fundamental unit of work
+- `withItem()` API for scripts to process items
+- Item ledger tracking per-item state
+- Mutation identity tied to logical items
+- Idempotency based on item + mutation identity
+
+NEW MODEL (Chapters 06, 06a, 06b):
+- Topics/Events as the fundamental abstraction
+- Producers poll external systems, emit events
+- Consumers subscribe to topics, process events
+- Three-phase model (prepare/mutate/next)
+- Reservations bind events to consumer runs
+- Idempotency via messageId on events
+
+The split of Chapter 06 into 06/06a/06b is well-organized:
+- 06: High-level concepts and guarantees
+- 06a: Data structures (topics, events, handlers)
+- 06b: Execution semantics (consumer lifecycle)
+
+The deletion of Chapters 12 and 14 suggests logical items are being superseded
+by the topics/events model. Events with reservations provide similar semantics:
+- Event = Logical Item (unit of work)
+- Reservation = Item scope (binds inputs to run)
+- Consumer commit = Item completion
+- messageId = Logical item ID (for deduplication)
+
+================================================================================
+PROPOSALS
+================================================================================
+
+1. UPDATE specs/done/logical-items.md
+   Either:
+   a) Add a deprecation notice at top pointing to new execution model
+   b) Move to specs/done/deprecated/
+   c) Update to reflect how logical items map to the new topics model
+
+   Effort: Low
+
+2. ADD MIGRATION GUIDE
+   If existing code uses `withItem()` API, document how to migrate to the new
+   topics-based model. This could be a section in 06-execution-model.md or a
+   separate migration doc.
+
+   Effort: Medium
+
+3. VERIFY ALL CROSS-REFERENCES
+   Search entire codebase for:
+   - "Chapter 12"
+   - "Chapter 14"
+   - "12-logical-items"
+   - "14-idempotency"
+   - "withItem"
+   - "logical item"
+
+   Update or remove stale references.
+
+   Effort: Low-Medium
+
+4. ADD TRAILING NEWLINES
+   Add newline at end of modified/created files.
+
+   Effort: Trivial
+
+5. CLARIFY IDEMPOTENCY IN NEW MODEL
+   Add a brief section to 06b explaining how idempotency works in the new model:
+   - messageId prevents duplicate event processing
+   - Reservations prevent duplicate mutations
+   - Mutation ledger (Chapter 13) tracks outcomes
+
+   Effort: Low
+
+================================================================================
+OVERALL ASSESSMENT
+================================================================================
+
+This is a significant documentation refactoring that:
+1. ✓ Improves readability by splitting a large chapter into focused parts
+2. ✓ Modernizes the execution model around topics/events
+3. ⚠ Leaves some inconsistencies with the old logical items implementation spec
+4. ⚠ Removes idempotency documentation without explicit replacement
+
+The structural changes are good. The main concern is ensuring consistency between
+the new documentation and the existing implementation specs in specs/done/.
+
+Recommendation: Review whether the implementation in specs/done/logical-items.md
+aligns with the new execution model, and update accordingly.

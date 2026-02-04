@@ -1,0 +1,154 @@
+COMMIT REVIEW: e01842f
+=======================
+Title: Drop deprecated chat_events table and associated code
+Author: Artur Briugeman (Co-Authored-By: Claude Opus 4.5)
+Date: 2026-02-03
+
+SUMMARY OF CHANGES
+------------------
+This commit completes the removal of the deprecated chat_events table by:
+
+1. Removing 8 deprecated ChatStore methods (~252 lines):
+   - getChatMessages() - Retrieved messages from chat_events
+   - getChatEvents() - Retrieved all events (messages + agent events)
+   - saveChatMessages() - Saved messages to chat_events
+   - saveChatEvent() - Saved individual events to chat_events
+   - countMessages() - Counted messages in chat_events
+   - getLastChatActivity() - Got last activity timestamp
+   - getLastChatActivities() - Batch version for multiple chats
+   - getChatFirstMessage() - Got first message for chat preview
+
+2. Creating migration v38 to drop the chat_events table:
+   - Properly undoes CRR before dropping
+   - Drops both indexes (chat_id, timestamp)
+   - Drops the table
+
+3. Removing test helper for chat_events from chat-store.test.ts
+
+4. Updating IMPLEMENTATION_PLAN.md:
+   - Database version updated from v37 to v38
+   - chat_events marked as REMOVED
+
+FILES CHANGED
+-------------
+- IMPLEMENTATION_PLAN.md (+5/-2)
+- packages/db/src/chat-store.ts (-251 lines)
+- packages/db/src/database.ts (+2 lines - registers v38 migration)
+- packages/db/src/migrations/v38.ts (NEW, +38 lines)
+- packages/tests/src/chat-store.test.ts (-16 lines)
+
+Net change: -222 lines of deprecated code removed
+
+DETAILED ANALYSIS
+-----------------
+
+### Migration v38 Implementation
+
+The migration correctly follows the CRR table drop pattern:
+
+```typescript
+// 1. Undo CRR tracking
+await tx.exec("SELECT crsql_as_crr_undo('chat_events')");
+
+// 2. Drop indexes
+await tx.exec(`DROP INDEX IF EXISTS idx_chat_events_chat_id`);
+await tx.exec(`DROP INDEX IF EXISTS idx_chat_events_timestamp`);
+
+// 3. Drop table
+await tx.exec(`DROP TABLE IF EXISTS chat_events`);
+```
+
+The migration includes excellent documentation explaining the table history and
+the replacement tables that now handle this functionality.
+
+### Replacement Tables (Verified as Active)
+
+The chat_events table was replaced by three purpose-specific tables per Spec 12:
+
+1. **chat_messages** (v30): User-visible conversation messages
+   - File: packages/db/src/chat-store.ts (still has these methods)
+   - Methods: saveChatMessage(), getNewChatMessages()
+   - Tested: packages/tests/src/chat-store.test.ts (23KB of tests)
+
+2. **notifications** (v30): Actionable items requiring user attention
+   - File: packages/db/src/notification-store.ts
+   - Used by: NotificationsPage, NotificationBell, useNotifications hooks
+   - Tested: packages/tests/src/notification-store.test.ts (14KB of tests)
+
+3. **execution_logs** (v30): Tool calls and debugging data
+   - File: packages/db/src/execution-log-store.ts
+   - Used by: task-worker, workflow-worker
+   - Tested: packages/tests/src/execution-log-store.test.ts (14KB of tests)
+
+### Code Removal Quality
+
+The removed methods were substantial (252 lines) but all functionality has been
+migrated to the replacement stores. Key observations:
+
+1. Removed import of `ChatEvent` type from @app/proto (no longer needed)
+2. Removed debug logger import (was only used by removed methods)
+3. The remaining ChatStore class still provides:
+   - Chat CRUD operations (createChat, getChat, updateChat, deleteChat)
+   - Chat listing operations (listChats, listChatsByWorkflowId)
+   - chat_messages table operations (saveChatMessage, getNewChatMessages)
+
+### Test Cleanup
+
+The test file correctly removed:
+- createChatEventsTable() helper function
+- Call to create the table in beforeEach()
+
+This ensures tests no longer depend on the dropped table.
+
+POTENTIAL ISSUES
+----------------
+
+### Issue 1: Migration Data Loss Warning (INFORMATIONAL)
+
+The commit message notes that data was migrated from chat_events to the new
+tables in v30. However, any data added to chat_events AFTER v30 but BEFORE v38
+would be lost when the table is dropped.
+
+**Analysis:** This is unlikely to be an issue because:
+1. Code was updated in v30 to use the new tables
+2. The deprecated methods were only kept for backwards compatibility
+3. No active code paths write to chat_events since v30
+
+**Verdict:** Acceptable - proper migration path was followed.
+
+### Issue 2: No Remaining References Verified (PASSED)
+
+Comprehensive search confirms:
+- Zero references to chat_events in application code
+- Zero references to the 8 removed methods
+- All replacement tables are actively used
+- Tests updated to not depend on chat_events
+
+VERIFICATION STATUS
+-------------------
+[x] chat_events table - No active code references found
+[x] getChatMessages() - No callers found
+[x] getChatEvents() - No callers found
+[x] saveChatMessages() - No callers found
+[x] saveChatEvent() - No callers found
+[x] countMessages() - No callers found
+[x] getLastChatActivity() - No callers found
+[x] getLastChatActivities() - No callers found
+[x] getChatFirstMessage() - No callers found
+[x] Replacement tables verified as active (chat_messages, notifications, execution_logs)
+[x] CRR undo pattern correct
+[x] Both indexes dropped before table
+[x] Tests updated
+
+VERDICT
+-------
+APPROVED - Excellent cleanup of deprecated functionality. The migration is
+properly implemented, all code references have been removed, and the replacement
+architecture (three purpose-specific tables) is well-tested and actively used.
+
+The commit message provides good context about the migration history and clearly
+documents what the replacement tables are responsible for.
+
+RECOMMENDATIONS
+---------------
+None - this is a clean, well-documented removal of deprecated code.

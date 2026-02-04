@@ -1,0 +1,86 @@
+COMMIT: 6c7f6df0219042dbe6371419f1ee8492b9f35466
+AUTHOR: Claude Agent <claude@anthropic.com>
+DATE: Fri Jan 30 13:32:25 2026 +0100
+SUBJECT: Remove 'specs/new' from plan prompt
+
+================================================================================
+CHANGES SUMMARY
+================================================================================
+
+This commit modifies PROMPT_plan.md to add `specs/new/*` to the ignore list when
+studying specifications.
+
+Before:
+> 0a. Study `specs/*` with up to 250 parallel Sonnet subagents to learn the
+> application specifications. Ignore implemented specs in `specs/done/*`.
+
+After:
+> 0a. Study `specs/*` with up to 250 parallel Sonnet subagents to learn the
+> application specifications. Ignore implemented specs in `specs/done/*` and
+> in `specs/new/*`.
+
+The change instructs planning agents to ignore both:
+- `specs/done/*` - already implemented specs
+- `specs/new/*` - apparently new/draft specs that shouldn't be studied yet
+
+================================================================================
+POTENTIAL ISSUES
+================================================================================
+
+1. UNCLEAR SEMANTICS OF specs/new/*
+   Severity: Low (documentation gap)
+
+   The commit adds `specs/new/*` to the ignore list but doesn't explain what
+   this directory represents. Currently `specs/new/` exists but is empty.
+
+   Possible interpretations:
+   a) Work-in-progress specs not yet ready for implementation
+   b) Specs for future versions beyond v1
+   c) Placeholder for a different workflow
+
+   Without documentation, future developers/agents may not understand why this
+   directory should be ignored or what should go there.
+
+2. COMMIT MESSAGE SLIGHTLY MISLEADING
+   Severity: Trivial
+
+   The commit message says "Remove 'specs/new' from plan prompt" but technically
+   it's adding specs/new/* to the IGNORE list, not removing a reference to it.
+   The net effect is that specs/new is now excluded from consideration.
+
+================================================================================
+PROPOSALS
+================================================================================
+
+1. ADD README TO specs/new/
+   Create a brief README.md in `specs/new/` explaining what this directory is
+   for and why specs there should not be studied by planning agents.
+
+   Example content:
+   ```
+   # New/Draft Specifications
+
+   This directory contains work-in-progress specifications that are not yet
+   ready for implementation. Planning agents should ignore this directory.
+
+   Specs move to `specs/` when ready for implementation.
+   Specs move to `specs/done/` when fully implemented.
+   ```
+
+   Effort: Trivial
+
+================================================================================
+OVERALL ASSESSMENT
+================================================================================
+
+This is a simple, low-risk change that extends the ignore pattern for the
+planning agent. The change is consistent with the previous commit (787d1cf)
+which simplified the planning prompt.
+
+Together, these two commits (787d1cf and 6c7f6df) appear to be part of a
+coherent effort to:
+1. Simplify agent instructions
+2. Freeze scope for v1 by not having agents consider new specs
+3. Focus agents on implementing existing specs rather than creating new ones
+
+No bugs or critical issues identified.

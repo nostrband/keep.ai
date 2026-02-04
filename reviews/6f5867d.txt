@@ -1,0 +1,159 @@
+COMMIT REVIEW: 6f5867d
+=======================
+Title: Mark Spec 10 task field deprecation as complete
+Author: Artur Briugeman (Co-Authored-By: Claude Opus 4.5)
+Date: 2026-02-03
+
+SUMMARY OF CHANGES
+------------------
+This commit updates IMPLEMENTATION_PLAN.md to mark the Task fields deprecation
+(Spec 10) as complete. It documents that:
+
+1. The `task` and `cron` fields in the tasks table are deprecated
+2. Fields are removed from Task interface with Spec 10 comments
+3. Database columns remain (SQLite cannot drop columns) but code no longer uses them
+
+FILES CHANGED
+-------------
+- IMPLEMENTATION_PLAN.md (+3/-1)
+
+Net change: +2 lines (documentation update only)
+
+DETAILED ANALYSIS
+-----------------
+
+### Task Interface Definition
+
+File: packages/db/src/task-store.ts (lines 26-40)
+
+```typescript
+export interface Task {
+  id: string;
+  timestamp: number;
+  // task: string;      // DEPRECATED: See Spec 10
+  reply: string;
+  error: string;
+  state: string;
+  thread_id: string;
+  type: string;
+  title: string;
+  // cron: string;      // DEPRECATED: See Spec 10
+  chat_id: string;
+  workflow_id: string;  // Direct link to workflow (Spec 10)
+  asks: string;         // Moved from task_states (Spec 10)
+}
+```
+
+The deprecated fields are properly:
+1. Commented out in the interface (not just marked @deprecated)
+2. Include clear "DEPRECATED: See Spec 10" annotations
+3. Replaced by new fields (workflow_id, asks) that serve the same purpose
+
+### Database Schema
+
+File: packages/db/src/migrations/v1.ts
+
+The original columns remain in the database:
+```sql
+task TEXT NOT NULL DEFAULT '',    -- DEPRECATED: never used
+cron TEXT NOT NULL DEFAULT '',    -- DEPRECATED: workflows have their own cron
+```
+
+This is correct because SQLite does not support `ALTER TABLE ... DROP COLUMN`
+(at least not without significant workarounds). The columns are simply ignored
+by the application code.
+
+### Code Usage Verification
+
+Comprehensive search confirms:
+- Zero references to `task.task` (the deprecated task field)
+- Zero references to `task.cron` (the deprecated cron field)
+- Only legitimate `task` references are to the Task object variable itself
+- All SQL queries in TaskStore (addTask, listTasks, getTask, etc.) correctly
+  exclude these fields from SELECT and INSERT statements
+
+### Migration History (Spec 10)
+
+| Version | Change |
+|---------|--------|
+| v1      | Created tasks table with task and cron fields |
+| v31     | Added workflow_id and asks columns (Spec 10) |
+| v32     | Migrated data from task_states to tasks.asks |
+| v37     | Dropped task_states table entirely |
+| 6f5867d | Documentation: marked deprecation complete |
+
+The migration path is clean:
+1. New fields added (v31)
+2. Data migrated (v32)
+3. Old table dropped (v37)
+4. Documentation updated (this commit)
+
+POTENTIAL ISSUES
+----------------
+
+### Issue 1: SQLite Column Bloat (LOW, ACCEPTABLE)
+
+The deprecated columns remain in the database, consuming minimal space per row:
+- `task TEXT DEFAULT ''` - empty string = 1 byte
+- `cron TEXT DEFAULT ''` - empty string = 1 byte
+
+**Impact:** Negligible storage overhead (~2 bytes per task row)
+
+**Analysis:** This is the standard approach for SQLite since it doesn't support
+column removal. The alternative (recreating the table) would be complex and
+risky for a synced (CRR) table.
+
+**Verdict:** Acceptable trade-off.
+
+### Issue 2: Potential for Accidental Usage (LOW)
+
+A developer could accidentally query or write to these columns since they still
+exist in the database.
+
+**Mitigation:**
+1. Columns are commented out in the Task interface (TypeScript will error)
+2. Clear "DEPRECATED" comments in both interface and migration files
+3. All store methods exclude these fields
+
+**Verdict:** Adequate safeguards in place.
+
+VERIFICATION STATUS
+-------------------
+[x] Task interface - `task` and `cron` fields commented out with Spec 10 notes
+[x] TaskStore methods - All SQL queries exclude deprecated fields
+[x] task-worker.ts - Uses asks field (not task_states)
+[x] api.ts - Creates tasks with workflow_id and asks
+[x] No code references to task.task or task.cron found
+[x] Documentation in v1.ts marks columns as deprecated
+
+VERDICT
+-------
+APPROVED - This is a documentation update that correctly reflects the current
+state of the codebase. The Spec 10 deprecation has been properly implemented
+across all relevant files:
+
+1. Task interface updated (deprecated fields commented out)
+2. Database migrations complete (v31, v32, v37)
+3. All code paths use the new fields (workflow_id, asks)
+4. Documentation now accurately reflects completion status
+
+RECOMMENDATIONS
+---------------
+None - this commit correctly documents completed work.
+
+HISTORICAL CONTEXT
+------------------
+Spec 10 introduced a cleaner model for task management:
+
+Before (deprecated):
+- tasks.task: Legacy field that was never actually used
+- tasks.cron: Scheduling was done here, now workflows have their own cron
+- task_states: Separate table for storing task asks/state
+
+After (current):
+- tasks.workflow_id: Direct link between tasks and workflows
+- tasks.asks: User questions stored directly on task (from task_states)
+- workflows.cron: Scheduling is now on the workflow entity itself
+
+This simplifies the data model and eliminates unnecessary joins between
+tasks and task_states for frequently accessed data like asks.

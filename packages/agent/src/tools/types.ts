@@ -61,16 +61,19 @@ export function defineReadOnlyTool<TInput, TOutput>(
 
 /**
  * Item status for the logical items system.
+ * @deprecated This type is part of the deprecated Items infrastructure (exec-02).
  */
 export type ItemStatus = 'processing' | 'done' | 'failed' | 'skipped';
 
 /**
  * Who created the item (for tracking purposes).
+ * @deprecated This type is part of the deprecated Items infrastructure (exec-02).
  */
 export type ItemCreatedBy = 'workflow' | 'planner' | 'maintainer';
 
 /**
  * Context passed to withItem handler.
+ * @deprecated This interface is part of the deprecated Items infrastructure (exec-02).
  */
 export interface ItemContext {
   item: {

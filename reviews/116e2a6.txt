@@ -1,0 +1,61 @@
+COMMIT REVIEW: 116e2a6 - Update IMPLEMENTATION_PLAN.md with tool migration progress
+
+================================================================================
+CHANGES SUMMARY
+================================================================================
+
+This commit updates IMPLEMENTATION_PLAN.md to document the progress of the
+logical items infrastructure implementation, specifically the tool migration
+to the new Tool interface.
+
+Files changed:
+- IMPLEMENTATION_PLAN.md (7 insertions, 3 deletions)
+
+Key changes:
+1. Updated status from "core infrastructure complete with tests, integration pending"
+   to "core infrastructure + Memory/Files tools migrated, more tools pending"
+
+2. Added completed items:
+   - Memory tools migrated (getNote, createNote, updateNote, deleteNote,
+     listNotesMetadata, searchNotes)
+   - Files tools migrated (read, save, list, search)
+   - Tool interface with `namespace`, `name`, `isReadOnly` metadata
+
+3. Updated remaining items:
+   - Changed "Tool interface refactor" to be more specific about remaining tools
+     (Web, Gmail, GDrive, Images, Text, etc.)
+   - Added "ToolWrapper integration" as new remaining item
+   - Clarified mutation enforcement status
+
+================================================================================
+ISSUES FOUND
+================================================================================
+
+NO ISSUES FOUND
+
+This is a documentation-only commit that accurately reflects the state of the
+codebase. The documented changes are verified by the actual implementation:
+- Memory tools are in packages/agent/src/tools/ (get-note.ts, create-note.ts,
+  update-note.ts, delete-note.ts, list-notes.ts, search-notes.ts)
+- Files tools are in packages/agent/src/tools/ (read-file.ts, save-file.ts,
+  list-files.ts, search-files.ts)
+- Tool interface is defined in packages/agent/src/tools/types.ts with the
+  mentioned properties
+
+================================================================================
+PROPOSALS
+================================================================================
+
+None required - the commit is a clean documentation update.
+
+================================================================================
+OVERALL ASSESSMENT
+================================================================================
+
+Rating: GOOD
+Type: Documentation update
+Risk: None
+
+This is a straightforward documentation commit that keeps the implementation
+plan in sync with actual code changes. The documentation accurately reflects
+the migration progress and provides clear next steps.

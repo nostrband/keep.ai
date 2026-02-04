@@ -1,0 +1,195 @@
+COMMIT: ae0e400
+TITLE: New impl specs for new execution model
+DATE: 2026-02-03 15:30:39 +0100
+AUTHOR: Claude Agent
+
+== SUMMARY ==
+
+This commit adds a comprehensive set of specification documents for refactoring the
+Keep.AI execution model from free-form scripts with Items.withItem() to structured
+workflows with topics, producers, consumers, and three-phase execution.
+
+10 new spec files were added in specs/new/:
+- exec-00-overview.md - Overview and implementation order
+- exec-01-database-schema.md - New tables (topics, events, handler_runs, mutations, handler_state)
+- exec-02-deprecate-items.md - Remove Items.withItem, Items.list, ItemStore
+- exec-03-topics-api.md - Topics.peek, Topics.publish, Topics.getByIds
+- exec-03a-complete-tool-migration.md - Complete api.ts → ToolWrapper migration
+- exec-04-phase-tracking.md - Phase enforcement in sandbox
+- exec-05-script-validation.md - Validate workflow structure on save/fix
+- exec-06-handler-state-machine.md - Unified state machine for handler execution
+- exec-07-session-orchestration.md - Session-based execution
+- exec-08-planner-prompts.md - Update prompts for new script format
+
+Also added "Bash(git log:*)" permission to .claude/settings.local.json.
+
+== CHANGES ==
+
+The specs define a complete refactoring of the execution model:
+
+1. **New Database Schema (exec-01):**
+   - `topics` - Topic definitions per workflow
+   - `events` - Events in topic streams with status tracking
+   - `handler_runs` - Granular handler execution records with phase tracking
+   - `mutations` - Mutation ledger for crash recovery
+   - `handler_state` - Persistent state per handler
+   - Extensions to `script_runs` (trigger, handler_run_count) and `workflows` (handler_config, consumer_sleep_until)
+
+2. **Deprecation (exec-02):**
+   - Remove Items.withItem(), Items.list, activeItem tracking
+   - Remove enforceMutationRestrictions()
+   - Keep items table for data preservation
+
+3. **Topics API (exec-03):**
+   - Topics.peek() - Get pending events (prepare phase only)
+   - Topics.getByIds() - Get events by ID (prepare phase only)
+   - Topics.publish() - Publish events (producer/next phase only)
+
+4. **Tool Migration (exec-03a):**
+   - Create tool-lists.ts with createWorkflowTools() and createTaskTools()
+   - Add phase tracking to ToolWrapper
+   - Update workers to use ToolWrapper
+
+5. **Phase Tracking (exec-04):**
+   - Four phases: producer, prepare, mutate, next
+   - Operation restrictions per phase
+   - Single mutation enforcement per mutate phase
+
+6. **Script Validation (exec-05):**
+   - Validate workflow object structure
+   - Extract handler config on save/fix
+   - Zero-tool sandbox for validation
+
+7. **Handler State Machine (exec-06):**
+   - Producer: pending → executing → committed | failed
+   - Consumer: pending → preparing → prepared → mutating → mutated → emitting → committed
+   - Crash recovery via DB state
+
+8. **Session Orchestration (exec-07):**
+   - Session-based execution using script_runs
+   - Run producers, then loop consumers until work exhausted or budget exceeded
+   - Single-threaded constraint per workflow
+   - Crash recovery via resumeIncompleteSessions()
+
+9. **Planner Prompts (exec-08):**
+   - Remove Items.withItem() examples
+   - Add workflow structure documentation
+   - Add phase rules and event design guidelines
+
+== ISSUE REVIEW ==
+
+### Issue 1: exec-01 Missing NOT NULL on CRR Tables
+**Severity:** Medium
+**Location:** specs/new/exec-01-database-schema.md (multiple tables)
+
+The AGENTS.md states: "cr-sqlite requires all NOT NULL columns in CRR tables to have
+DEFAULT values". The spec shows tables being created with `SELECT crsql_as_crr('tablename')`
+but several columns lack DEFAULT values:
+- `topics.workflow_id`, `topics.name`, `topics.created_at`
+- `events.topic_id`, `events.workflow_id`, `events.message_id`, `events.title`, etc.
+- Similar issues in handler_runs, mutations, handler_state
+
+**Impact:** Migrations will fail or CRR sync will break for these tables.
+
+### Issue 2: exec-03a Assumes Non-Existent Tool Signatures
+**Severity:** Low
+**Location:** specs/new/exec-03a-complete-tool-migration.md:519-598
+
+The spec shows imports and factory function calls like `makeConsoleLogTool(getContext)`
+but the actual tool implementations may have different signatures. For example, the
+spec shows `makeGmailApiTool(connectionManager, getContext)` but the actual tool
+might have a different signature.
+
+**Impact:** Implementation will need to verify actual tool signatures.
+
+### Issue 3: exec-04 References ToolWrapper in Two Locations
+**Severity:** Low
+**Location:** specs/new/exec-04-phase-tracking.md:9
+
+The spec says "Note: This spec builds on exec-03a which switches workers to use
+ToolWrapper" but then at line 891 references "In `packages/agent/src/sandbox/api.ts`"
+for adding phase state to "class ToolWrapper". The file path should be tool-wrapper.ts,
+not api.ts.
+
+**Impact:** Minor confusion during implementation.
+
+### Issue 4: exec-05 Zero-Tool Sandbox May Be Insufficient
+**Severity:** Medium
+**Location:** specs/new/exec-05-script-validation.md:191-199
+
+The zero-tool sandbox uses Proxy to stub all tools, but this doesn't cover all
+potential issues:
+- Side effects from top-level code execution (console.log, etc.)
+- Infinite loops or excessive computation during validation
+- Memory exhaustion from large data structures
+
+**Impact:** Validation might allow problematic scripts or block valid ones.
+
+### Issue 5: exec-06 Missing Mutation Status Handling
+**Severity:** Medium
+**Location:** specs/new/exec-06-handler-state-machine.md:91-98 (mutating phase)
+
+The mutating phase handler checks for mutation.status being 'pending', 'in_flight',
+'applied', 'indeterminate', or 'failed', but doesn't handle 'needs_reconcile' status
+which is listed in the mutations table schema in exec-01.
+
+**Impact:** Handler runs with 'needs_reconcile' mutations will be stuck.
+
+### Issue 6: exec-07 Missing Error Classification
+**Severity:** Low
+**Location:** specs/new/exec-07-session-orchestration.md:68
+
+The catch block calls `classifyError(error)` but doesn't specify how this maps to
+the error_type field in handler_runs. The current error classification system uses
+types like 'auth', 'permission', 'network', 'logic' but the session code just stores
+error.message.
+
+**Impact:** Error classification may be inconsistent with existing patterns.
+
+### Issue 7: exec-08 Incomplete Prompt Update
+**Severity:** Low
+**Location:** specs/new/exec-08-planner-prompts.md
+
+The spec shows what to add and remove but doesn't show the full context of where
+these sections fit in the existing prompts. The current agent-env.ts has complex
+prompts with many sections.
+
+**Impact:** Implementer may miss integration points.
+
+== PROPOSALS ==
+
+### Proposal 1: Add DEFAULT Values to All CRR Columns
+For each table in exec-01, ensure all NOT NULL columns have DEFAULT values:
+```sql
+CREATE TABLE topics (
+  id TEXT PRIMARY KEY DEFAULT '',
+  workflow_id TEXT NOT NULL DEFAULT '',
+  name TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL DEFAULT 0,
+  ...
+);
+```
+
+### Proposal 2: Verify Tool Signatures Before Implementation
+Before implementing exec-03a, audit all existing tool files to document their
+actual signatures and update the spec accordingly.
+
+### Proposal 3: Clarify File Path in exec-04
+Change "packages/agent/src/sandbox/api.ts" to "packages/agent/src/sandbox/tool-wrapper.ts"
+in the implementation section of exec-04.
+
+### Proposal 4: Add Timeout to Validation Sandbox
+In exec-05, explicitly set a short timeout (e.g., 5000ms as mentioned) and memory
+limit for the validation sandbox to prevent runaway scripts.
+
+### Proposal 5: Handle needs_reconcile Status
+In exec-06, add handling for 'needs_reconcile' status:
+```typescript
+} else if (mutation.status === 'needs_reconcile') {
+  await suspendRun(run, 'needs_reconciliation');
+}
+```
+
+### Proposal 6: Use Existing classifyError Pattern
+In exec-07, reuse the existing `classifyError()` function from @app/proto or
+@app/agent that returns ClassifiedError with proper type field.

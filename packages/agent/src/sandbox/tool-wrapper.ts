@@ -1,16 +1,33 @@
-import { KeepDbApi, TaskType, ItemStatus, ItemCreatedBy } from "@app/db";
+import { KeepDbApi, Mutation } from "@app/db";
 import { z, ZodFirstPartyTypeKind as K } from "zod";
 import { EvalContext, EvalGlobal } from "./sandbox";
 import debug from "debug";
 import { ClassifiedError, isClassifiedError, LogicError, WorkflowPausedError } from "../errors";
 import type { ConnectionManager } from "@app/connectors";
-import { Tool, ItemContext } from "../tools/types";
+import { Tool } from "../tools/types";
 
 type Any = z.ZodTypeAny;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnyTool = Tool<any, any>;
+
+/**
+ * Execution phases for the handler state machine.
+ * - producer: Producer handlers that emit events to topics
+ * - prepare: Consumer prepare phase - peek topics and select work
+ * - mutate: Consumer mutate phase - execute single external mutation
+ * - next: Consumer next phase - emit downstream events
+ * - null: Not in handler execution (e.g., task mode)
+ */
+export type ExecutionPhase = 'producer' | 'prepare' | 'mutate' | 'next' | null;
+
+/**
+ * Operation types for phase restriction checks.
+ */
+export type OperationType = 'read' | 'mutate' | 'topic_peek' | 'topic_publish';
 
 export interface ToolWrapperConfig {
   /** Array of tools to register */
-  tools: Tool[];
+  tools: AnyTool[];
   /** Database API */
   api: KeepDbApi;
   /** Function to get current execution context */
@@ -23,6 +40,8 @@ export interface ToolWrapperConfig {
   workflowId?: string;
   /** Script run ID for tracking */
   scriptRunId?: string;
+  /** Handler run ID for mutation tracking (exec-04) */
+  handlerRunId?: string;
   /** Task run ID for tracking */
   taskRunId?: string;
   /** Task type (planner/maintainer) */
@@ -35,31 +54,46 @@ export interface ToolWrapperConfig {
 }
 
 /**
+ * Phase restriction matrix.
+ * Defines which operations are allowed in each execution phase.
+ */
+const PHASE_RESTRICTIONS: Record<Exclude<ExecutionPhase, null>, Record<OperationType, boolean>> = {
+  producer: { read: true, mutate: false, topic_peek: false, topic_publish: true },
+  prepare:  { read: true, mutate: false, topic_peek: true, topic_publish: false },
+  mutate:   { read: false, mutate: true, topic_peek: false, topic_publish: false },
+  next:     { read: false, mutate: false, topic_peek: false, topic_publish: true },
+};
+
+/**
  * ToolWrapper creates the JavaScript API that gets injected into the sandbox.
  *
  * It provides:
  * - Tool registration with input/output validation
- * - Items.withItem() for logical item tracking
- * - Mutation enforcement (mutations only inside withItem)
  * - Workflow pause checking
+ * - Phase-based access control for handler execution (exec-03a/exec-04)
+ *
+ * Note: Items.withItem() has been removed (exec-02). Use the new Topics-based
+ * event-driven execution model instead.
  */
 export class ToolWrapper {
-  private tools: Tool[];
+  private tools: AnyTool[];
   private api: KeepDbApi;
   private getContext: () => EvalContext;
   private userPath?: string;
   private connectionManager?: ConnectionManager;
   private workflowId?: string;
   private scriptRunId?: string;
+  private handlerRunId?: string;
   private taskRunId?: string;
   private taskType?: 'planner' | 'maintainer';
   private abortController?: AbortController;
   private debug = debug("ToolWrapper");
   private toolDocs = new Map<string, string>();
 
-  // Item tracking state
-  private activeItem: { id: string; title: string } | null = null;
-  private activeItemIsDone: boolean = false;
+  // Phase tracking state (exec-03a/exec-04)
+  private currentPhase: ExecutionPhase = null;
+  private mutationExecuted: boolean = false;
+  private currentMutation: Mutation | null = null;
 
   constructor(config: ToolWrapperConfig) {
     this.tools = config.tools;
@@ -69,9 +103,108 @@ export class ToolWrapper {
     this.connectionManager = config.connectionManager;
     this.workflowId = config.workflowId;
     this.scriptRunId = config.scriptRunId;
+    this.handlerRunId = config.handlerRunId;
     this.taskRunId = config.taskRunId;
     this.taskType = config.taskType;
     this.abortController = config.abortController;
+  }
+
+  // ============================================================================
+  // Phase Tracking Methods (exec-03a/exec-04)
+  // ============================================================================
+
+  /**
+   * Set the current execution phase.
+   * Resets mutation tracking when phase changes.
+   *
+   * @param phase - The new execution phase, or null to exit handler execution
+   */
+  setPhase(phase: ExecutionPhase): void {
+    this.currentPhase = phase;
+    this.mutationExecuted = false;
+    this.currentMutation = null;
+  }
+
+  /**
+   * Get the current execution phase.
+   */
+  getPhase(): ExecutionPhase {
+    return this.currentPhase;
+  }
+
+  /**
+   * Set the current mutation record for the mutate phase.
+   * Must be called before entering mutate phase to enable mutation tracking.
+   *
+   * @param mutation - The mutation record from the mutations table
+   */
+  setCurrentMutation(mutation: Mutation | null): void {
+    this.currentMutation = mutation;
+  }
+
+  /**
+   * Get the current mutation record.
+   * Used by mutation tools to record tool info before external calls.
+   *
+   * @returns The current mutation record, or null if not in mutate phase
+   */
+  getCurrentMutation(): Mutation | null {
+    return this.currentMutation;
+  }
+
+  /**
+   * Check if an operation is allowed in the current phase.
+   * Throws LogicError if the operation is not allowed.
+   *
+   * When phase is null (task mode), all operations are allowed.
+   *
+   * @param operation - The operation type to check
+   * @throws LogicError if operation not allowed in current phase
+   */
+  checkPhaseAllowed(operation: OperationType): void {
+    // Skip phase check if not in handler execution (e.g., task mode)
+    if (this.currentPhase === null) {
+      return;
+    }
+
+    const allowed = PHASE_RESTRICTIONS[this.currentPhase][operation];
+    if (!allowed) {
+      throw new LogicError(
+        `Operation '${operation}' not allowed in '${this.currentPhase}' phase`,
+        { source: 'ToolWrapper' }
+      );
+    }
+
+    // Enforce single mutation per mutate phase
+    if (operation === 'mutate') {
+      if (this.mutationExecuted) {
+        throw new LogicError(
+          'Only one mutation allowed per mutate phase',
+          { source: 'ToolWrapper' }
+        );
+      }
+      this.mutationExecuted = true;
+    }
+  }
+
+  /**
+   * Determine the operation type for a tool call.
+   * Topics tools have special operation types; other tools are read or mutate.
+   */
+  private getOperationType(tool: AnyTool, validatedInput: unknown): OperationType {
+    // Topics tools have special operation types
+    if (tool.namespace === 'Topics') {
+      if (tool.name === 'peek' || tool.name === 'getByIds') {
+        return 'topic_peek';
+      }
+      if (tool.name === 'publish') {
+        return 'topic_publish';
+      }
+    }
+
+    // For other tools, check if read-only
+    const isReadOnly = tool.isReadOnly?.(validatedInput) ?? false;
+    return isReadOnly ? 'read' : 'mutate';
   }
 
   /**
@@ -135,39 +268,8 @@ Example: await ${ns}.${name}(<input>)
       toolDocs.set(`${ns}.${name}`, doc);
     }
 
-    // Add built-in Items.withItem
-    if (!("Items" in global)) {
-      global["Items"] = {};
-    }
-    (global["Items"] as Record<string, unknown>)["withItem"] = this.createWithItemFunction();
-
-    // Add documentation for Items.withItem
-    const withItemDoc = `===DESCRIPTION===
-Process work in a discrete logical item with automatic state tracking.
-
-All mutations MUST be called inside Items.withItem() - mutations outside will abort the script.
-
-Example:
-await Items.withItem(
-  'email:\${email.id}',  // Stable ID based on external identifier
-  'Email from \${email.from}: "\${email.subject}"',  // Human-readable title
-  async (ctx) => {
-    if (ctx.item.isDone) {
-      Console.log({ type: 'log', line: 'Skipping already processed item' });
-      return;
-    }
-    // Process the item
-    await Gmail.api({ method: 'users.messages.modify', ... });
-  }
-);
-
-===INPUT===
-{ id: string; title: string; handler: (ctx: ItemContext) => Promise<unknown> }
-
-===OUTPUT===
-unknown (result of handler)`;
-    docs["Items.withItem"] = withItemDoc;
-    toolDocs.set("Items.withItem", withItemDoc);
+    // Note: Items.withItem has been removed (exec-02).
+    // Topics API is available via tool-lists.ts (exec-03).
 
     // Add getDocs helper
     global["getDocs"] = (name: string) => {
@@ -189,7 +291,7 @@ unknown (result of handler)`;
   /**
    * Wrap a tool with validation and mutation enforcement.
    */
-  private wrapTool(tool: Tool, doc: string) {
+  private wrapTool(tool: AnyTool, doc: string) {
     const ns = tool.namespace;
     const name = tool.name;
 
@@ -219,12 +321,10 @@ unknown (result of handler)`;
         }
       }
 
-      // Check mutation restrictions
-      const isReadOnly = tool.isReadOnly?.(validatedInput) ?? false;
-
-      if (!isReadOnly) {
-        this.enforceMutationRestrictions(tool);
-      }
+      // Check phase restrictions (exec-03a/exec-04)
+      // In handler execution mode (currentPhase != null), enforces operation restrictions
+      const operationType = this.getOperationType(tool, validatedInput);
+      this.checkPhaseAllowed(operationType);
 
       // Execute the tool
       let result: unknown;
@@ -266,134 +366,6 @@ unknown (result of handler)`;
 
       return result;
     };
-  }
-
-  /**
-   * Enforce mutation restrictions - mutations must be inside withItem.
-   */
-  private enforceMutationRestrictions(tool: Tool) {
-    // Skip enforcement for Console.log (allowed outside withItem)
-    if (tool.namespace === 'Console' && tool.name === 'log') {
-      return;
-    }
-
-    // Mutations require active item scope
-    if (this.activeItem === null) {
-      this.abortWithLogicError(
-        `${tool.namespace}.${tool.name} is a mutation and must be called inside Items.withItem(). ` +
-        `Wrap your mutations in a withItem call to track progress.`
-      );
-    }
-
-    // Check if item is done
-    if (this.activeItemIsDone) {
-      this.abortWithLogicError(
-        `${tool.namespace}.${tool.name}: cannot perform mutations on completed item "${this.activeItem!.id}". ` +
-        `Check ctx.item.isDone before attempting mutations.`
-      );
-    }
-  }
-
-  /**
-   * Create the Items.withItem function.
-   */
-  private createWithItemFunction() {
-    return async (
-      logicalItemId: string,
-      title: string,
-      handler: (ctx: ItemContext) => Promise<unknown>
-    ): Promise<unknown> => {
-      // Validate inputs
-      if (typeof logicalItemId !== 'string' || !logicalItemId) {
-        return this.abortWithLogicError('Items.withItem: id must be a non-empty string');
-      }
-      if (typeof title !== 'string' || !title) {
-        return this.abortWithLogicError('Items.withItem: title must be a non-empty string');
-      }
-      if (typeof handler !== 'function') {
-        return this.abortWithLogicError('Items.withItem: handler must be a function');
-      }
-
-      // Check for nested/concurrent withItem
-      if (this.activeItem !== null) {
-        return this.abortWithLogicError(
-          `Items.withItem: cannot nest or run concurrent withItem calls. ` +
-          `Already processing item "${this.activeItem.id}". ` +
-          `Ensure withItem calls are sequential and not nested.`
-        );
-      }
-
-      // Get workflow context
-      const workflowId = this.workflowId;
-      if (!workflowId) {
-        return this.abortWithLogicError(
-          'Items.withItem: no workflow context. withItem requires a workflow.'
-        );
-      }
-
-      // Determine run ID and created_by
-      const runId = this.scriptRunId || this.taskRunId || '';
-      const createdBy: ItemCreatedBy = this.taskType || 'workflow';
-
-      // Start item (creates or updates status to 'processing')
-      const item = await this.api.itemStore.startItem(
-        workflowId,
-        logicalItemId,
-        title,
-        createdBy,
-        runId
-      );
-
-      const isDone = item.status === 'done';
-
-      // Set active item state
-      this.activeItem = { id: logicalItemId, title };
-      this.activeItemIsDone = isDone;
-
-      // Create context for handler
-      const ctx: ItemContext = {
-        item: {
-          id: logicalItemId,
-          title,
-          isDone,
-        },
-      };
-
-      try {
-        // Execute handler
-        const result = await handler(ctx);
-
-        // Only update status if item wasn't already done
-        if (!isDone) {
-          await this.api.itemStore.setStatus(workflowId, logicalItemId, 'done', runId);
-        }
-
-        return result;
-      } catch (error) {
-        // Only update status if item wasn't already done
-        if (!isDone) {
-          await this.api.itemStore.setStatus(workflowId, logicalItemId, 'failed', runId);
-        }
-        throw error;
-      } finally {
-        this.activeItem = null;
-        this.activeItemIsDone = false;
-      }
-    };
-  }
-
-  /**
-   * Abort execution with a logic error.
-   */
-  private abortWithLogicError(message: string): never {
-    const error = new LogicError(message, { source: 'Items.withItem' });
-
-    if (this.abortController) {
-      this.getContext().classifiedError = error;
-      this.abortController.abort(message);
-    }
-
-    throw error;
   }
 }
 

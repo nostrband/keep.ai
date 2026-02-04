@@ -1,10 +1,16 @@
 import debug from "debug";
-import { KeepDbApi } from "@app/db";
+import { KeepDbApi, Workflow } from "@app/db";
 import { WorkflowWorker } from "./workflow-worker";
 import { WorkflowExecutionSignal, WorkflowRetryState } from "./workflow-worker-signal";
 import { isValidEnv } from "./env";
 import { Cron } from "croner";
 import type { ConnectionManager } from "@app/connectors";
+import {
+  executeWorkflowSessionIfIdle,
+  resumeIncompleteSessions,
+  type SessionResult,
+} from "./session-orchestration";
+import type { HandlerExecutionContext } from "./handler-state-machine";
 
 export interface WorkflowSchedulerConfig {
   api: KeepDbApi;
@@ -166,12 +172,50 @@ export class WorkflowScheduler {
     this.debug("Scheduler closed");
   }
 
-  public start() {
+  public async start(): Promise<void> {
     if (this.interval) return;
+
+    // Resume any incomplete sessions from app restart (exec-07)
+    try {
+      await this.resumeIncompleteSessions();
+    } catch (e) {
+      this.debug("Error resuming incomplete sessions:", e);
+    }
+
     this.interval = setInterval(() => this.checkWork(), 10000);
 
     // check immediately
     this.checkWork();
+  }
+
+  /**
+   * Resume incomplete workflow sessions on startup.
+   * Called automatically by start().
+   */
+  private async resumeIncompleteSessions(): Promise<void> {
+    const context = this.createExecutionContext();
+    this.debug("Resuming incomplete sessions...");
+    await resumeIncompleteSessions(context);
+    this.debug("Incomplete sessions resumed");
+  }
+
+  /**
+   * Create the execution context needed for session-based workflow execution.
+   */
+  private createExecutionContext(): HandlerExecutionContext {
+    return {
+      api: this.api,
+      connectionManager: this.connectionManager,
+      userPath: this.userPath,
+    };
+  }
+
+  /**
+   * Check if a workflow uses the new format (exec-07).
+   * New-format workflows have a handler_config set from validation (exec-05).
+   */
+  private isNewFormatWorkflow(workflow: Workflow): boolean {
+    return !!workflow.handler_config && workflow.handler_config.trim() !== '';
   }
 
   public async checkWork(): Promise<void> {
@@ -292,13 +336,20 @@ export class WorkflowScheduler {
         );
 
         try {
-          // Pass retry info to worker if this is a retry
-          await this.worker.executeWorkflow(
-            workflow,
-            retryState?.originalRunId || '',
-            retryState?.retryCount || 0
-          );
-          
+          // Check if this is a new-format workflow (exec-07)
+          if (this.isNewFormatWorkflow(workflow)) {
+            // Use session-based execution for new-format workflows
+            await this.executeNewFormatWorkflow(workflow);
+          } else {
+            // Use legacy worker execution for old-format workflows
+            // Pass retry info to worker if this is a retry
+            await this.worker.executeWorkflow(
+              workflow,
+              retryState?.originalRunId || '',
+              retryState?.retryCount || 0
+            );
+          }
+
           // After execution, calculate and update next_run_timestamp from cron if available
           // Use updateWorkflowFields to only update specific fields atomically,
           // preventing concurrent updates (e.g., user pause) from being overwritten
@@ -347,6 +398,76 @@ export class WorkflowScheduler {
     } catch (err) {
       this.debug("processNextWorkflow error:", err);
       return false;
+    }
+  }
+
+  /**
+   * Execute a new-format workflow using session orchestration (exec-07).
+   * This uses the executeWorkflowSessionIfIdle function which enforces
+   * single-threaded execution (only one session per workflow at a time).
+   */
+  private async executeNewFormatWorkflow(workflow: Workflow): Promise<void> {
+    this.debug(`Executing new-format workflow ${workflow.id} via session orchestration`);
+
+    const context = this.createExecutionContext();
+    const result = await executeWorkflowSessionIfIdle(
+      workflow,
+      'schedule', // Scheduler-triggered workflows are always 'schedule' trigger
+      context
+    );
+
+    if (result === null) {
+      // Another session is already active, skip this trigger
+      this.debug(`Skipped workflow ${workflow.id}: another session is active`);
+      return;
+    }
+
+    // Handle session result by emitting appropriate signals
+    this.handleSessionResult(workflow.id, result);
+  }
+
+  /**
+   * Handle the result of a session execution and emit appropriate signals.
+   */
+  private handleSessionResult(workflowId: string, result: SessionResult): void {
+    switch (result.status) {
+      case 'completed':
+        this.debug(`Session ${result.sessionId} completed for workflow ${workflowId}`);
+        // Clear any retry state and signal success
+        this.workflowRetryState.delete(workflowId);
+        // Signal success to scheduler (same as old-format completion)
+        if (this.worker['onSignal']) {
+          this.worker['onSignal']({
+            type: 'done',
+            workflowId,
+            timestamp: Date.now(),
+            scriptRunId: result.sessionId,
+          });
+        }
+        break;
+
+      case 'suspended':
+        this.debug(`Session ${result.sessionId} suspended for workflow ${workflowId}: ${result.reason}`);
+        // Workflow was paused (status already set by session-orchestration)
+        // Clear retry state - user needs to manually resume
+        this.workflowRetryState.delete(workflowId);
+        break;
+
+      case 'failed':
+        this.debug(`Session ${result.sessionId} failed for workflow ${workflowId}: ${result.error}`);
+        // Session-orchestration already set workflow status to 'error'
+        // Signal that user needs attention
+        if (this.worker['onSignal']) {
+          this.worker['onSignal']({
+            type: 'needs_attention',
+            workflowId,
+            timestamp: Date.now(),
+            error: result.error || 'Session failed',
+            errorType: 'logic',
+            scriptRunId: result.sessionId,
+          });
+        }
+        break;
     }
   }
 }

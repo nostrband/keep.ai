@@ -1,0 +1,206 @@
+COMMIT REVIEW: 3196cac - Implement exec-02 and exec-03: Deprecate Items, add Topics API
+========================================================================================
+
+SUMMARY OF CHANGES
+------------------
+This commit implements two related specs:
+
+exec-02: Deprecate Items Infrastructure
+- Remove Items.withItem() from SandboxAPI and ToolWrapper
+- Remove enforceMutationRestrictions() method
+- Remove activeItem/activeItemIsDone tracking
+- Remove Items.list tool export
+- Add @deprecated JSDoc to ItemStore, items-list.ts, and related types
+- Skip logical-items.test.ts tests for removed functionality
+
+exec-03: Topics Global API
+- Create packages/agent/src/tools/topics.ts with:
+  - Topics.peek: Get pending events from a topic (prepare phase)
+  - Topics.getByIds: Get events by messageIds (prepare phase)
+  - Topics.publish: Publish event to topic (producer/next phase)
+- Add Topics tools to SandboxAPI.createGlobal()
+- Export new tools from tools/index.ts and agent index.ts
+- Phase restrictions documented (enforced by exec-06)
+
+This is a breaking change for existing workflows using Items.withItem().
+
+FILES CHANGED
+-------------
+- IMPLEMENTATION_PLAN.md (+61 lines - updated progress)
+- packages/agent/src/index.ts (+6/-1 lines)
+- packages/agent/src/sandbox/api.ts (+233/-391 lines - major refactor)
+- packages/agent/src/sandbox/tool-wrapper.ts (+185/-391 lines - major refactor)
+- packages/agent/src/tools/index.ts (+9/-1 lines)
+- packages/agent/src/tools/items-list.ts (+5 lines - deprecation notice)
+- packages/agent/src/tools/topics.ts (+242 lines - new file)
+- packages/agent/src/tools/types.ts (+3 lines)
+- packages/db/src/item-store.ts (+16/-1 lines - deprecation notices)
+- packages/tests/src/logical-items.test.ts (+17/-1 lines - skipped tests)
+
+ISSUES FOUND
+------------
+
+### ISSUE 1: Topics.peek Has Unused getHandlerRunId Parameter (Very Low Severity)
+Location: packages/agent/src/tools/topics.ts:52-86
+
+makeTopicsPeekTool accepts getHandlerRunId parameter but never uses it:
+
+```typescript
+export function makeTopicsPeekTool(
+  eventStore: EventStore,
+  getWorkflowId: () => string | undefined,
+  getHandlerRunId: () => string | undefined  // <-- unused
+): Tool<PeekInput, PeekOutput> {
+  // ...
+  execute: async (input: PeekInput): Promise<PeekOutput> => {
+    const workflowId = getWorkflowId();
+    // getHandlerRunId is never called in execute function
+```
+
+In contrast, Topics.getByIds only takes getWorkflowId (correctly).
+
+Impact: No functional impact, just misleading signature.
+
+Proposal: Remove getHandlerRunId parameter from makeTopicsPeekTool since it's
+not used for read-only peek operations.
+
+
+### ISSUE 2: SandboxAPI Still Used in CLI Commands (Medium Severity)
+Location: apps/cli/src/commands/sandbox.ts, apps/cli/src/commands/agent.ts
+
+While SandboxAPI is deprecated with @deprecated JSDoc, it's still actively
+used in 2 CLI commands:
+- apps/cli/src/commands/sandbox.ts (lines 71-72)
+- apps/cli/src/commands/agent.ts (lines 171-176)
+
+The deprecation is documented but migration is incomplete.
+
+Impact: CLI users will continue using deprecated API until migrated.
+
+Proposal: Create follow-up task to migrate CLI commands to use ToolWrapper
+with createTaskTools/createWorkflowTools.
+
+
+### ISSUE 3: Phase Restrictions Not Yet Enforced (Low Severity)
+Location: packages/agent/src/sandbox/api.ts:189-190
+
+The code has comments stating phase restrictions will be enforced by exec-06
+(handler state machine), but at this commit point, there's no enforcement:
+
+```typescript
+// Note: Mutation restrictions via Items.withItem() have been removed (exec-02)
+// Phase-based restrictions will be enforced by ToolWrapper in the new execution model
+```
+
+The Topics tools are available but can be called in any phase.
+
+Impact: Transitional state - phases will be enforced in a later commit
+(833afae implements this in exec-03a).
+
+Proposal: None - this is expected transitional behavior.
+
+
+### ISSUE 4: Missing Error Context in Topics Tool Errors (Very Low Severity)
+Location: packages/agent/src/tools/topics.ts:78, 123, 203
+
+All three Topics tools throw simple Error objects on missing workflow context:
+
+```typescript
+if (!workflowId) {
+  throw new Error("Topics.peek requires a workflow context");
+}
+```
+
+Other tools in the codebase sometimes use ClassifiedError for better error
+handling and observability.
+
+Impact: Errors are still informative, just less structured.
+
+Proposal: Consider using LogicError or ClassifiedError for consistency with
+other error handling patterns in the agent package.
+
+
+### ISSUE 5: SandboxAPI Deprecation Notice Missing in Index Export (Very Low Severity)
+Location: packages/agent/src/index.ts:128
+
+SandboxAPI is exported from index without a deprecation notice at the export
+site (only at the class definition):
+
+```typescript
+export { SandboxAPI } from "./sandbox/api";
+```
+
+Impact: Developers importing SandboxAPI may not see deprecation warning
+depending on their IDE/tooling setup.
+
+Proposal: Add comment at export:
+```typescript
+/** @deprecated Use ToolWrapper instead */
+export { SandboxAPI } from "./sandbox/api";
+```
+
+
+### ISSUE 6: Skipped Tests Left in Place (Informational)
+Location: packages/tests/src/logical-items.test.ts
+
+Tests are skipped with describe.skip() rather than deleted:
+- Items.list Tool (line 309)
+- Mutation Enforcement (line 494)
+
+Impact: Adds noise to test output and codebase. However, keeping them
+provides documentation of what was removed.
+
+Proposal: Either delete the skipped tests entirely or add clear comments
+explaining why they're kept for historical reference.
+
+
+POSITIVE OBSERVATIONS
+---------------------
+1. Clean separation between deprecated Items API and new Topics API
+2. Topics tools are well-documented with clear examples in descriptions
+3. Topics.publish correctly implements idempotency by messageId
+4. Proper deprecation notices with @deprecated JSDoc throughout
+5. Commit message clearly marks this as a breaking change
+6. Consistent use of zod schemas for input/output validation
+7. Topics.getByIds correctly omits handlerRunId since it's read-only
+8. Removal of enforceMutationRestrictions is clean - no stray references
+
+ARCHITECTURE NOTES
+------------------
+The Topics API implements a pub/sub pattern for internal event streams:
+
+Topics.peek (read-only):
+  - Used in prepare phase to select work
+  - Returns pending events without changing their status
+
+Topics.getByIds (read-only):
+  - Used in prepare phase to retrieve specific events
+  - Lookup by messageId within a topic
+
+Topics.publish (write):
+  - Used in producer or next phase
+  - Creates events with idempotent messageId handling
+  - Tracks created_by_run_id for audit trail
+
+This replaces the previous Items.withItem() approach which had:
+- Single item at a time processing
+- Automatic done/failed status updates
+- Mutation enforcement within item scope
+
+The new model allows:
+- Batch event processing
+- Explicit phase-based restrictions
+- More granular handler execution tracking
+
+VERDICT
+-------
+This commit is a well-executed deprecation and feature replacement. The
+removal of Items infrastructure is complete, and the Topics API provides
+a cleaner, more flexible alternative. The main concern is the incomplete
+migration of CLI commands, which should be tracked as follow-up work.
+
+Critical Issues: 0
+Medium Issues: 1 (CLI migration incomplete)
+Low Issues: 1
+Very Low Issues: 3
+Informational: 1

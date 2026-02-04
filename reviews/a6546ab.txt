@@ -1,0 +1,195 @@
+COMMIT REVIEW: a6546ab
+=======================
+
+Commit: a6546abfb2c1529f10aeca991fd963f5b54dbd09
+Author: Artur Briugeman
+Date: Fri Jan 30 15:11:59 2026 +0100
+Title: Improve OAuth token revocation security and clarity (P2)
+
+FILES CHANGED:
+- IMPLEMENTATION_PLAN.md (+6, -6)
+- packages/connectors/src/index.ts (+1, -1)
+- packages/connectors/src/manager.ts (+4, -2)
+- packages/connectors/src/oauth.ts (+28, -9)
+
+================================================================================
+CHANGE SUMMARY
+================================================================================
+
+1. oauth.ts - Add Client Credentials to Revocation Request
+   - Added RevokeResult type: { success: boolean; reason: "revoked" | "not_supported" | "failed" }
+   - Changed revokeToken return type from boolean to RevokeResult
+   - Added client_id/client_secret to revocation body (standard OAuth) or Basic auth header
+   - Uses same pattern as exchangeCode for consistency
+
+2. manager.ts - Update to Handle RevokeResult
+   - Changed from boolean check to result.reason check
+   - Different log messages for each outcome: revoked, not_supported, failed
+
+3. index.ts - Export RevokeResult Type
+   - Added type export for consumers of @app/connectors
+
+================================================================================
+VERIFICATION RESULTS
+================================================================================
+
+CLIENT CREDENTIAL PATTERN - VERIFIED ✓
+
+The revokeToken implementation correctly matches the exchangeCode pattern:
+
+exchangeCode (lines 69-89):
+  const body = new URLSearchParams({ code, redirect_uri, grant_type });
+  if (this.config.useBasicAuth) {
+    headers["Authorization"] = `Basic ${basicAuth}`;
+  } else {
+    body.set("client_id", this.clientId);
+    body.set("client_secret", this.clientSecret);
+  }
+
+revokeToken (lines 175-194):
+  const body = new URLSearchParams({ token: accessToken });
+  if (this.config.useBasicAuth) {
+    headers["Authorization"] = `Basic ${basicAuth}`;
+  } else {
+    body.set("client_id", this.clientId);
+    body.set("client_secret", this.clientSecret);
+  }
+
+Status: Perfect consistency across all OAuth operations.
+
+
+OAUTH PROVIDERS - VERIFIED ✓
+
+Google (4 services: gmail, gdrive, gsheets, gdocs):
+- Has revokeUrl: https://oauth2.googleapis.com/revoke
+- Uses standard OAuth2 (no Basic auth)
+- Will send client credentials in request body
+
+Notion:
+- No revokeUrl defined (optional field)
+- Uses Basic auth: useBasicAuth: true
+- Will gracefully skip revocation (returns not_supported)
+- Per spec: "Notion access tokens don't expire"
+
+
+CALLER ANALYSIS - VERIFIED ✓
+
+Only one caller of revokeToken() exists:
+File: packages/connectors/src/manager.ts:366-373
+
+  const result = await handler.revokeToken(creds.accessToken);
+  if (result.reason === "revoked") {
+    debug("Token revoked at provider for %s", connectionId);
+  } else if (result.reason === "not_supported") {
+    debug("Token revocation not supported for %s", connectionId);
+  } else {
+    debug("Token revocation failed for %s (continuing with local cleanup)", connectionId);
+  }
+
+Status: Properly updated to handle all three reason values.
+
+
+TYPE EXPORT - VERIFIED ✓
+
+1. Defined: packages/connectors/src/oauth.ts (lines 13-20)
+2. Re-exported: packages/connectors/src/index.ts (line 21)
+3. Compiled: packages/connectors/dist/index.d.ts (line 571)
+
+Status: Type is properly exported for consumers.
+
+================================================================================
+POTENTIAL ISSUES
+================================================================================
+
+ISSUE 1: RevokeResult Type Has Redundant success Field (LOW)
+------------------------------------------------------------
+File: packages/connectors/src/oauth.ts:17-20
+
+The RevokeResult type has both success and reason fields:
+  export type RevokeResult = {
+    success: boolean;
+    reason: "revoked" | "not_supported" | "failed";
+  };
+
+The success field is redundant because:
+- reason === "revoked" implies success === true
+- reason === "not_supported" implies success === true (not an error)
+- reason === "failed" implies success === false
+
+Looking at the actual usage in manager.ts (lines 366-373), only the reason
+field is checked, not success. The success field is never used.
+
+PROPOSAL:
+Either remove the success field entirely, or document its purpose:
+  // If keeping success: document that it means "safe to proceed with disconnect"
+  // not_supported is success=true because we can still proceed
+
+Current implementation is not wrong, just has unused data.
+
+
+ISSUE 2: Security Consideration for Future Providers (INFORMATIONAL)
+--------------------------------------------------------------------
+File: packages/connectors/src/oauth.ts:193
+
+For non-Basic-auth providers, client_secret is sent in the request body:
+  body.set("client_secret", this.clientSecret);
+
+This is correct per OAuth2 spec and Google's documentation. However:
+- Some poorly-configured OAuth providers may log request bodies
+- Basic auth is generally preferred when supported
+
+Current providers are safe:
+- Google: Documented to accept body params
+- Notion: Uses Basic auth
+
+PROPOSAL:
+When adding new OAuth providers, document the security consideration:
+- Verify provider doesn't log request bodies
+- Prefer Basic auth when provider supports it
+
+
+ISSUE 3: No Unit Tests for RevokeResult Paths (LOW)
+---------------------------------------------------
+File: packages/connectors/src/oauth.ts
+
+The revokeToken function now has three distinct paths:
+1. No revokeUrl -> { success: true, reason: "not_supported" }
+2. Successful revocation -> { success: true, reason: "revoked" }
+3. Failed revocation -> { success: false, reason: "failed" }
+
+No unit tests verify these paths. The function relies on external HTTP calls.
+
+PROPOSAL:
+Add unit tests mocking fetch to verify:
+- Returns not_supported when no revokeUrl configured
+- Returns revoked on HTTP 200
+- Returns failed on HTTP error or network error
+
+================================================================================
+POSITIVE FINDINGS
+================================================================================
+
+1. Pattern consistency - Matches exchangeCode and refreshToken patterns
+2. Type safety - RevokeResult type properly defined and exported
+3. Error handling - Best-effort pattern, continues with disconnect on failure
+4. Provider coverage - Handles Google (revocation) and Notion (no revocation)
+5. Logging clarity - Different debug messages for each outcome
+6. Backwards compatibility - Only internal caller properly updated
+7. No secrets logged - Debug statements only log operation names and status codes
+8. Security sanitization - getAuthUrl() sanitizes clientId in logs
+
+================================================================================
+VERDICT
+================================================================================
+
+This commit is well-implemented. The OAuth token revocation now:
+1. Correctly includes client credentials per OAuth2 spec
+2. Provides clear result types distinguishing between outcomes
+3. Follows established patterns in the codebase
+
+The main considerations are:
+- Unused success field in RevokeResult (minor, not wrong)
+- Future provider security consideration (informational)
+- No unit tests for the new paths (low priority)
+
+Code quality is high. Ready for production.

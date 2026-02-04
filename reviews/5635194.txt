@@ -1,0 +1,181 @@
+COMMIT REVIEW: 5635194
+======================
+Title: Refine new execution model
+Author: Claude Agent
+Date: 2026-02-02
+
+SUMMARY OF CHANGES
+------------------
+This commit significantly refines and expands the execution model documentation,
+replacing the original 05-execution-model.md with a more comprehensive version and
+adding several new chapters:
+
+1. **Restructured Execution Model**:
+   - Deleted docs/dev/05-execution-model.md (moved content)
+   - Created docs/dev/06-execution-model.md (683 lines, expanded version)
+   - Created docs/dev/07-workflow-operations.md (user-facing operations)
+   - Renamed 07-connectors-auth.md → 08-connectors-auth.md
+
+2. **New Draft Chapters Added**:
+   - docs/dev/16-scheduling.md (Draft - handler scheduling)
+   - docs/dev/17-event-management-ux.md (Draft - event UI patterns)
+   - docs/dev/20-roadmap.md (v2 feature roadmap)
+
+3. **Updated Existing Chapters**:
+   - 04-runtime-planner-executor-maintainer.md: Added LLM code generation constraints
+   - 09-failure-repair.md: Added Chapter 06/07 cross-references
+   - 13-reconciliation.md: Major updates to align with new execution model
+   - 15-host-policies.md: Updated chapter references
+
+DETAILED ANALYSIS
+-----------------
+
+**Execution Model (06-execution-model.md)**:
+The refined model includes significant enhancements:
+
+- **Handler Isolation**: Clarifies that each producer/consumer runs in isolated
+  execution context with no shared in-memory state
+- **Producer State Management**: Changed from KV store to functional return values
+  (state received as param, returned after execution)
+- **Consumer State**: Consumers also use functional state via `next` phase return
+- **Event Titles**: Emphasized as a "delegation interface" with clear requirements
+- **Handler Signatures**: Explicit signatures for prepare(ctx, state),
+  mutate(ctx, prepared), next(ctx, prepared, mutationResult)
+- **mutationResult Discriminated Union**: Clear typing with applied/none/skipped
+- **Run Lifecycle State Machine**: Added Mermaid diagram for run states
+- **Replay Semantics Table**: Clear table showing what can relaunch and side effects
+- **Internal vs External Infrastructure**: Clear distinction between Topics
+  (atomic, no reconciliation) and external tools (network uncertainty)
+
+**LLM Code Generation Constraints (04-runtime-planner-executor-maintainer.md)**:
+Added explicit constraints for Planner and Maintainer:
+- Planner must choose stable messageId formats, structure prepare/mutate/next
+- Maintainer may NOT change messageId logic, reservation patterns, or event identity
+- If fix requires changing event identity → must escalate to re-planning
+
+**Reconciliation Updates (13-reconciliation.md)**:
+Aligned with new execution model:
+- Changed from "sequential execution invariant" to "one mutation per run"
+- Emphasizes mutation is terminal - host takes over execution
+- Ledger now keyed by run identifier (not mutation identity)
+- Added §13.8 "When mutate re-executes"
+- Added §13.11 "Integration with execution model" with attempt tracking
+
+**Scheduling (16-scheduling.md) - Draft**:
+Defines when handlers are invoked:
+- Producers: interval or cron schedule
+- Consumers: run when pending events exist
+- Backoff strategy for empty reservations (sleep until new event or timeout)
+- Single-threaded workflow constraint enforcement
+
+**Event Management UX (17-event-management-ux.md) - Draft**:
+Defines user-facing event management:
+- Event-centric view (topics → events → details)
+- Status indicators (pending/consumed/skipped)
+- Only "skip" action in v1 (no reprocess/edit/delete)
+- Stale event warnings (7-day default threshold)
+- Blocked run action prompts
+
+**v2 Roadmap (20-roadmap.md)**:
+Documents deferred features:
+- Workflow-scoped KV store
+- Event reprocessing with attempt tracking
+- Major version reprocessing workflows
+- Event ID compatibility handling
+- LLM-assisted external state repair (notable feature proposal)
+
+POTENTIAL ISSUES
+----------------
+
+1. **Chapter Numbering Gap**:
+   - 05-execution-model.md was deleted (became 06)
+   - No 05-xxx.md exists now, creating a gap
+   - SEVERITY: Very Low (cosmetic)
+   - PROPOSAL: Either renumber chapters or add a placeholder 05.
+
+2. **Logical Items Documentation Now Orphaned**:
+   - 12-logical-items.md from commit 782539e defined logical items with withItem()
+   - New 06-execution-model.md uses Topics/Events with different patterns
+   - 14-idempotency.md still references Chapter 12 extensively
+   - These concepts need reconciliation or deprecation
+   - SEVERITY: Medium (documentation inconsistency)
+   - PROPOSAL: Either:
+     a) Update 12-logical-items.md to explain relationship to Topics/Events, or
+     b) Mark 12-logical-items.md as superseded and update 14-idempotency.md refs
+
+3. **Reconciliation Chapter Still References Chapter 14**:
+   - §13.3 says "see Chapter 14, §14.3 for how identity is computed" but this
+     was changed to use run identifier instead
+   - Some references to Chapter 14 semantics remain
+   - SEVERITY: Low (documentation debt)
+   - PROPOSAL: Audit remaining Chapter 14 references in Chapter 13.
+
+4. **State in `prepare` vs `next` Semantics**:
+   - Consumer prepare receives state but cannot return state
+   - Only next can return state
+   - This is intentional but may confuse readers
+   - SEVERITY: Very Low (design decision)
+   - PROPOSAL: Add clarifying note in prepare section explaining state flow.
+
+5. **Empty Reservations Scheduling Concern**:
+   - Chapter 16 says consumers sleep on empty reservations
+   - But it's not clear how this interacts with multiple consumers
+   - "one consumer run at a time" means other consumers also blocked
+   - SEVERITY: Low (v1 has exactly one consumer per topic)
+   - PROPOSAL: Add note clarifying this is v1 simplification.
+
+6. **mutationResult.status='none' vs 'skipped' Distinction**:
+   - 'none': no mutation call made (empty reservations or no mutation in mutate)
+   - 'skipped': user chose to skip indeterminate mutation
+   - Both proceed to `next`, but have different semantic meaning
+   - SEVERITY: Very Low (well-defined in doc)
+   - PROPOSAL: None needed, distinction is clear.
+
+7. **Producer State Atomicity with Events**:
+   - Doc says "State is committed atomically with event publishes on successful
+     completion"
+   - This requires transactional semantics across state store and topic
+   - Implementation complexity not acknowledged
+   - SEVERITY: Low (implementation concern)
+   - PROPOSAL: Add implementation note about transaction requirements.
+
+8. **LLM-Assisted State Repair (v2 Roadmap) - Scope Creep Risk**:
+   - Proposed feature allows LLM to read external state and propose fixes
+   - This is powerful but could become complex
+   - Good that it requires explicit user approval
+   - SEVERITY: N/A (v2 proposal, noted for tracking)
+   - PROPOSAL: Ensure clear scope boundaries when implementing.
+
+9. **Attempt Tracking in v2 vs v1 Discrepancy**:
+   - Chapter 20 (v2 roadmap) describes attempt tracking as v2 feature
+   - But 13-reconciliation.md §13.11 references attempt tracking for v1
+   - Chapter 12 also defined attempt tracking extensively
+   - SEVERITY: Medium (unclear what's in v1 vs v2)
+   - PROPOSAL: Clarify which attempt tracking features are v1 vs v2.
+
+10. **Draft Status Documents**:
+    - Chapters 16, 17, and 20 are marked as "Draft"
+    - No process defined for promoting drafts to final
+    - SEVERITY: Very Low (process concern)
+    - PROPOSAL: Consider adding status metadata to all chapters.
+
+OVERALL ASSESSMENT
+------------------
+This commit makes significant progress in refining the execution model with
+clearer semantics, better-defined handler signatures, and comprehensive
+coverage of scheduling and UX patterns.
+
+The main concern is the relationship between the new Topics/Events model and
+the previously documented Logical Items concept. These appear to be parallel
+approaches to the same problem (tracking units of work), and the documentation
+doesn't clearly explain whether:
+- They are complementary layers (items built on events?)
+- One supersedes the other
+- They apply to different use cases
+
+The v2 roadmap is valuable for understanding design direction, and the
+LLM-assisted state repair proposal is an interesting approach to helping
+users recover from automation problems.
+
+The draft chapters (16, 17, 20) provide good foundations for implementation
+planning but need review before being finalized.

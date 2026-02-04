@@ -1,0 +1,294 @@
+COMMIT REVIEW: 461e200
+
+Title: Migrate Memory and Files tools to new Tool interface
+Date: Fri Jan 30 16:40:44 2026 +0100
+
+=============================================================================
+CHANGES SUMMARY
+=============================================================================
+
+This commit migrates 10 tool files and 1 test file to a new structured Tool
+interface that enables mutation tracking and better metadata organization.
+
+**Files Changed** (11 files, 497 insertions, 393 deletions):
+- packages/agent/src/tools/create-note.ts
+- packages/agent/src/tools/delete-note.ts
+- packages/agent/src/tools/get-note.ts
+- packages/agent/src/tools/list-files.ts
+- packages/agent/src/tools/list-notes.ts
+- packages/agent/src/tools/read-file.ts
+- packages/agent/src/tools/save-file.ts
+- packages/agent/src/tools/search-files.ts
+- packages/agent/src/tools/search-notes.ts
+- packages/agent/src/tools/update-note.ts
+- packages/tests/src/note-tools.test.ts
+
+=============================================================================
+DETAILED ANALYSIS
+=============================================================================
+
+**Migration Pattern Applied to Each Tool**:
+
+1. Replace `tool()` from 'ai' package with `defineTool()` or `defineReadOnlyTool()`
+2. Add `namespace` property (e.g., "Memory", "Files")
+3. Add `name` property (e.g., "createNote", "read")
+4. Extract input/output schemas to top-level const variables
+5. Add explicit TypeScript types: `type Input = z.infer<typeof inputSchema>`
+6. Add `isReadOnly: () => false` for mutation tools
+7. Use `defineReadOnlyTool()` for read-only tools (auto-sets isReadOnly)
+8. Add mutation indicators to descriptions:
+   - "⚠️ MUTATION - must be called inside Items.withItem()."
+   - "ℹ️ Not a mutation - can be used outside Items.withItem()."
+9. Update execute signature from `execute: async (params) =>` to
+   `execute: async (input: Input): Promise<Output> =>`
+
+**Tool Classification**:
+
+Read-only tools (use defineReadOnlyTool):
+- Memory.getNote
+- Memory.listNotesMetadata
+- Memory.searchNotes
+- Files.read
+- Files.list
+- Files.search
+
+Mutation tools (use defineTool with isReadOnly: () => false):
+- Memory.createNote
+- Memory.updateNote
+- Memory.deleteNote
+- Files.save
+
+**Test Updates** (note-tools.test.ts):
+
+- Changed tool invocations from `tool.execute!(value, options)` to
+  `tool.execute({ key: value })`
+- All tools now use object-based input instead of single values
+- Removed the second argument (ToolCallOptions) from all execute calls
+- Updated test for "search by string input" to use object format with
+  multiple keywords instead
+
+=============================================================================
+POTENTIAL ISSUES
+=============================================================================
+
+**ISSUE 1: Type assertion pattern creates unsafe cast** [MEDIUM]
+Severity: Medium
+Location: All 10 tool files, e.g., create-note.ts:128
+
+Every tool function ends with:
+```typescript
+  }) as Tool<Input, Output>;
+}
+```
+
+This type assertion bypasses TypeScript's structural type checking. If the
+defineTool or defineReadOnlyTool helper doesn't actually return a compatible
+type, the assertion silently coerces it.
+
+Proposal: The defineTool/defineReadOnlyTool helpers should return the properly
+typed Tool<TInput, TOutput> directly. Check if the helpers can be made generic
+to avoid the need for type assertions:
+```typescript
+return defineTool<Input, Output>({
+  // ... config
+});
+// No 'as Tool<Input, Output>' needed
+```
+
+---
+
+**ISSUE 2: Removed .default() from nullable optional fields** [LOW]
+Severity: Low
+Location: Multiple files
+
+Before:
+```typescript
+tags: z.array(z.string()).nullable().optional().default(null)
+```
+
+After:
+```typescript
+tags: z.array(z.string()).nullable().optional()
+```
+
+The removal of .default(null) means the field will be `undefined` if not
+provided, rather than `null`. This changes the semantic meaning and may
+affect downstream code that checks for `null` specifically.
+
+Example in update-note.ts:64:
+```typescript
+if (title !== null && title !== undefined) updates.title = title;
+```
+
+The code was updated to check for both null AND undefined, which is correct,
+but this is a subtle API change.
+
+Proposal: This is handled correctly in update-note.ts. Verify all other tools
+handle undefined the same way, or restore .default(null) for consistency.
+
+---
+
+**ISSUE 3: search-notes.ts lost support for string input** [LOW - Intentional?]
+Severity: Low
+Location: packages/agent/src/tools/search-notes.ts
+
+Before:
+```typescript
+inputSchema: z.union([
+  z.object({ keywords, tags, regexp }),
+  z.string().min(1).describe("Search keywords, space-separated")
+])
+```
+
+After:
+```typescript
+inputSchema: z.object({
+  keywords: ...,
+  tags: ...,
+  regexp: ...,
+});
+```
+
+The ability to pass a simple string that gets split into keywords was removed.
+The test was updated to use the object form, but this is a breaking change
+for any existing callers using the string shorthand.
+
+Proposal: If this is intentional (standardizing all tools to object input),
+document it in the commit message or IMPLEMENTATION_PLAN.md. If not intentional,
+restore the z.union pattern.
+
+---
+
+**ISSUE 4: Missing newline at end of files** [TRIVIAL - Fixed]
+Severity: Trivial
+Location: Multiple files showed "\ No newline at end of file" before
+
+The migration adds proper newlines at the end of files (list-files.ts,
+read-file.ts, save-file.ts, search-files.ts). This is a good cleanup.
+
+---
+
+**ISSUE 5: Inconsistent semicolon style after createEvent calls** [TRIVIAL]
+Severity: Trivial (style)
+Location: create-note.ts:77, update-note.ts:97
+
+Changed from:
+```typescript
+await getContext().createEvent("create_note", {...})
+```
+
+To:
+```typescript
+await getContext().createEvent("create_note", {...});
+```
+
+This is a minor style fix (adding semicolon after the call). Inconsistency
+was present before; now it's consistent.
+
+---
+
+**ISSUE 6: read-file.ts offset parameter loses default** [LOW]
+Severity: Low
+Location: packages/agent/src/tools/read-file.ts:14
+
+Before:
+```typescript
+offset: z.number().int().min(0).optional().default(0)
+```
+
+After:
+```typescript
+offset: z.number().int().min(0).optional()
+```
+
+The default(0) was removed. The code at line 69 handles this:
+```typescript
+const startOffset = input.offset ?? 0;
+```
+
+So functionally equivalent, but the schema no longer documents the default.
+
+Proposal: Add .describe("... (default: 0)") to the field, or keep .default(0)
+in the schema for self-documentation.
+
+---
+
+**ISSUE 7: search-files.ts applies offset incorrectly** [MEDIUM - Pre-existing]
+Severity: Medium (pre-existing bug, not introduced by this commit)
+Location: packages/agent/src/tools/search-files.ts:51-54
+
+```typescript
+execute: async (input: Input): Promise<Output> => {
+  const { query, limit = 50, offset = 0 } = input;
+  const files = await fileStore.searchFiles(query, limit);
+  // Apply offset manually since the FileStore searchFiles doesn't support it
+  return files.slice(offset);
+}
+```
+
+The offset is applied AFTER the limit, which is incorrect. If limit=10 and
+offset=5, this:
+1. Fetches 10 files
+2. Slices from index 5, returning 5 files
+
+But correct pagination should:
+1. Skip first 5 results
+2. Return next 10 results
+
+This is a pre-existing bug but worth noting.
+
+Proposal: Either fix FileStore.searchFiles to support offset, or fetch
+limit+offset files and slice correctly:
+```typescript
+const files = await fileStore.searchFiles(query, limit + offset);
+return files.slice(offset, offset + limit);
+```
+
+=============================================================================
+ARCHITECTURAL OBSERVATIONS
+=============================================================================
+
+**Good Patterns**:
+1. Consistent namespace/name structure enables ToolWrapper to organize tools
+2. isReadOnly function allows dynamic mutation detection based on input
+3. Clear separation between defineTool (mutations) and defineReadOnlyTool
+4. Mutation indicators in descriptions help LLM understand constraints
+5. Explicit type annotations improve code readability and IDE support
+
+**Schema Organization**:
+Extracting inputSchema and outputSchema to top-level consts is a good pattern:
+- Makes schemas reusable if needed
+- Improves readability by separating schema from tool logic
+- Enables easier schema testing if needed
+
+=============================================================================
+PROPOSALS
+=============================================================================
+
+1. **Fix search-files offset bug** (Medium effort)
+   Change search logic to handle pagination correctly.
+
+2. **Remove type assertions** (Low effort)
+   Update defineTool/defineReadOnlyTool generics to avoid needing `as Tool<>`.
+
+3. **Document string input removal from searchNotes** (Low effort)
+   Add a note in IMPLEMENTATION_PLAN.md or changelog about this API change.
+
+4. **Restore .default() or update descriptions** (Low effort)
+   Either restore .default(null) / .default(0) for optional fields, or ensure
+   descriptions document the default behavior.
+
+=============================================================================
+OVERALL ASSESSMENT
+=============================================================================
+
+This is a substantial refactoring commit that successfully migrates 10 tools
+to the new Tool interface. The migration is consistent and well-executed,
+following a clear pattern across all tools.
+
+The main concerns are:
+1. Type assertion pattern could be improved
+2. Pre-existing offset bug in search-files (not introduced here)
+3. Minor API change removing string input from searchNotes
+
+Quality: Good (minor issues, one pre-existing bug noted)

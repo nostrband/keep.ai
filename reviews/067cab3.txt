@@ -1,0 +1,155 @@
+COMMIT: 067cab3
+TITLE: Fix Electron file protocol security: symlink traversal and Windows case bypass
+DATE: 2026-01-30
+FILES: IMPLEMENTATION_PLAN.md, apps/electron/src/main.ts
+
+## CHANGES SUMMARY
+
+This commit fixes two security vulnerabilities in the Electron app's file:// protocol handler:
+
+1. **Symlink Traversal Vulnerability**
+   - Problem: The code used `path.resolve()` which only normalizes path syntax (like `../`) but does NOT resolve symbolic links. An attacker who could create a symlink in `public/` pointing outside could escape the directory restriction.
+   - Fix: Replaced `path.resolve()` with `fs.realpathSync()` which resolves both path syntax AND symbolic links to their actual filesystem locations
+   - Locations: Line 464 (base dir) and line 495 (requested file)
+
+2. **Windows Case Sensitivity Bypass**
+   - Problem: Windows filesystem is case-insensitive (PUBLIC == public), but JavaScript string comparison is case-sensitive. An attacker could bypass the prefix check by using different case.
+   - Fix: On Windows, normalize both paths to lowercase before comparison
+   - Location: Lines 508-511
+
+3. **Improved Error Handling**
+   - Added try-catch for `fs.realpathSync()` to return 404 when file doesn't exist (instead of server error)
+   - Return 403 Forbidden when file exists but is outside allowed directory
+   - Location: Lines 494-502
+
+## ATTACK SCENARIOS PREVENTED
+
+### Symlink Traversal Attack (Before Fix)
+```
+1. Attacker creates: public/evil → /etc  (symlink)
+2. Attacker requests: file:///app/public/evil/passwd
+3. path.resolve() returns: "/app/public/evil/passwd" (symlink NOT resolved)
+4. Prefix check passes: "/app/public/evil/passwd".startsWith("/app/public/")
+5. Attacker reads /etc/passwd through the symlink
+```
+
+### Symlink Traversal Attack (After Fix)
+```
+1. Attacker creates: public/evil → /etc  (symlink)
+2. Attacker requests: file:///app/public/evil/passwd
+3. fs.realpathSync() returns: "/etc/passwd" (symlink RESOLVED)
+4. Prefix check fails: "/etc/passwd".startsWith("/app/public/") = FALSE
+5. Returns 403 Forbidden
+```
+
+### Windows Case Bypass Attack (Before Fix)
+```
+1. allowedBaseDir = "C:\Users\App\public"
+2. Attacker requests: file:///C:/Users/App/PUBLIC/../../etc/passwd
+3. resolvedPath = "C:\Users\App\PUBLIC\..\..\etc\passwd" → "C:\etc\passwd"
+4. (Actually this specific path would fail, but case differences in the base path could be exploited)
+```
+
+### Windows Case Bypass Attack (After Fix)
+```
+1. Both paths normalized to lowercase before comparison
+2. Case variations no longer bypass validation
+```
+
+## POTENTIAL ISSUES
+
+### Issue 1: Defense in Depth - Base Directory Symlink Resolution
+**Severity: Info (Good practice)**
+**Location: apps/electron/src/main.ts:464**
+
+The fix also applies `fs.realpathSync()` to the base directory path:
+```javascript
+const allowedBaseDir = fs.realpathSync(path.resolve(__dirname, "../public"));
+```
+
+**Analysis**: This is defense in depth - if `__dirname` somehow contained symlinks or if the application directory structure had unexpected symlinks, they would be resolved. This is good security practice.
+
+**Proposal**: No action needed - this is a strength.
+
+---
+
+### Issue 2: No Validation That Public Directory Exists at Startup
+**Severity: Low (Developer Experience)**
+**Location: apps/electron/src/main.ts:464**
+
+If `/app/public` doesn't exist, `fs.realpathSync()` will throw at app startup, causing a crash in `setupDownloadHandler`.
+
+**Analysis**: This is probably acceptable behavior - the app should crash if core assets are missing. However, a more explicit check with a better error message could improve developer experience during setup.
+
+**Proposal**: Consider adding an explicit check:
+```javascript
+const publicDir = path.resolve(__dirname, "../public");
+if (!fs.existsSync(publicDir)) {
+  throw new Error(`Public directory not found: ${publicDir}`);
+}
+const allowedBaseDir = fs.realpathSync(publicDir);
+```
+This is a minor DX improvement, not a security issue.
+
+---
+
+### Issue 3: Error Handling for fs.realpathSync
+**Severity: Info (Correctly Handled)**
+**Location: apps/electron/src/main.ts:494-502**
+
+The code catches exceptions from `fs.realpathSync()` and returns 404:
+```javascript
+try {
+  resolvedPath = fs.realpathSync(filePath);
+} catch {
+  return new Response("Not found", { status: 404, ... });
+}
+```
+
+**Analysis**: This is correct - `realpathSync` throws `ENOENT` when file doesn't exist. Returning 404 is appropriate and prevents information leakage about the filesystem structure.
+
+**Proposal**: No action needed.
+
+---
+
+## CODE QUALITY OBSERVATIONS
+
+1. **Good**: Platform-specific code is properly guarded with `if (process.platform === 'win32')`
+2. **Good**: The fix applies to both the base directory AND requested files - complete coverage
+3. **Good**: Error responses are appropriate: 404 for missing files, 403 for forbidden paths
+4. **Good**: Debug logging on blocked requests helps with troubleshooting
+5. **Good**: Original logic preserved for Unix/macOS where case sensitivity is correct
+
+## ARCHITECTURAL NOTES
+
+1. **File Protocol Security Model**: The Electron app serves a bundled SPA from `public/`. All other file access is blocked. This is a simple and secure model.
+
+2. **No Other Vulnerable Locations**: Searched for other `path.resolve` and `fileURLToPath` usages in the Electron app. All other path operations use fixed, hardcoded paths controlled by the application (icon paths, preload scripts, index.html). No other locations require similar security fixes.
+
+3. **Public Directory Contents**: The public directory contains only:
+   - index.html (SPA entry point)
+   - manifest.json (PWA manifest)
+   - assets/ (Vite-bundled JS/CSS)
+
+   No sensitive files should ever be in this directory.
+
+## VERIFICATION STATUS
+
+- [x] Symlink fix verified: Uses `fs.realpathSync()` instead of `path.resolve()`
+- [x] Windows case fix verified: Lowercase normalization on Windows only
+- [x] 404 handling verified: Returns 404 when `realpathSync` throws
+- [x] 403 handling verified: Returns 403 when path is outside allowed directory
+- [x] Base directory also resolved: `allowedBaseDir` also uses `realpathSync`
+- [x] No other vulnerable locations: Other path operations use fixed paths
+
+## EDGE CASES VERIFIED
+
+1. **Symlinks TO public directory**: If `/app/symlink → /app/public`, requests through the symlink would resolve correctly and be allowed. This is correct behavior.
+
+2. **Trailing slashes**: The comparison uses `+ path.sep` to ensure proper directory boundary checking.
+
+3. **Root access**: The comparison `resolvedPath === allowedBaseDir` allows access to the public directory itself (for index.html).
+
+## CONCLUSION
+
+This commit correctly addresses two serious security vulnerabilities in the Electron file protocol handler. The fixes are minimal, focused, and complete. The implementation handles edge cases properly and includes appropriate error handling. No bugs or security issues found in the implementation.

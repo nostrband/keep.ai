@@ -1,0 +1,334 @@
+COMMIT REVIEW: c8aa537 - Complete logical items implementation: prompts and tests
+============================================================================
+
+COMMIT INFO:
+- Hash: c8aa537febaf8015c15d3f7dd599b84fb82ebfc0
+- Author: Artur Briugeman
+- Date: 2026-01-30 17:24:29
+- Co-Authored-By: Claude Opus 4.5
+- Files Changed: 5
+- Insertions: 560, Deletions: 131
+
+============================================================================
+CHANGES DESCRIPTION
+============================================================================
+
+This commit completes the logical items infrastructure by:
+1. Adding prompting guidance for planner and maintainer agents
+2. Adding comprehensive mutation enforcement tests (14 new tests)
+3. Fixing pre-existing type errors in test files
+
+FILES CHANGED:
+
+1. **packages/agent/src/agent-env.ts** (+90 lines)
+   - Adds "Logical Items" section to planner system prompt (lines 463-527)
+   - Adds "Logical Item Constraints" section to maintainer system prompt (lines 623-641)
+
+2. **packages/tests/src/logical-items.test.ts** (+422 lines, -6 lines)
+   - Removes placeholder comment
+   - Adds "Mutation Enforcement" test suite with 14 tests
+
+3. **packages/tests/src/note-tools.test.ts** (-28 lines)
+   - Removes unused `createToolCallOptions()` helper
+   - Removes second argument from all `execute()` calls
+
+4. **packages/tests/src/utility-tools.test.ts** (-40 lines)
+   - Removes unused `createToolCallOptions()` helper
+   - Removes second argument from all `execute()` calls
+
+5. **IMPLEMENTATION_PLAN.md** (+10 lines, -9 lines)
+   - Marks logical items infrastructure as COMPLETE
+   - Updates test count from 28 to 42
+
+============================================================================
+PLANNER PROMPT ADDITIONS
+============================================================================
+
+The planner prompt now includes (lines 460-527):
+
+1. **Code Example**: Full withItem usage pattern showing:
+   - ID format: `email:${email.id}` (stable, external-identifier-based)
+   - Title format: descriptive human-readable string
+   - isDone check before processing
+   - Console.log usage for skipping messages
+
+2. **ID Requirements**:
+   - Stable: Same entity → same ID every time
+   - Based on external identifiers: Use email.id, invoice.number, etc.
+   - Independent of volatile data: No timestamps, counters, indices
+   - Good examples: `email:${messageId}`, `invoice:${invoiceNumber}`
+   - Bad examples: `email:${index}`, `item-${Date.now()}`
+
+3. **Title Requirements**:
+   - Include stable external identifier
+   - Include human-recognizable descriptor
+   - Describe what the item IS, not how processed
+   - Good: "Email from alice@example.com: \"Invoice December\""
+   - Bad: "Processing item", "Email #5"
+
+4. **Items.list Usage**: Code examples for:
+   - Checking if specific item was already processed
+   - Getting count of completed items for progress reporting
+
+5. **Five Rules** (enforced at runtime):
+   - Rule 1: All mutations MUST be inside Items.withItem()
+   - Rule 2: Only ONE withItem can be active at a time
+   - Rule 3: Always check ctx.item.isDone before mutations
+   - Rule 4: Items must be independent (no cross-dependencies)
+   - Rule 5: Use Items.list to check progress or resume
+
+============================================================================
+MAINTAINER PROMPT ADDITIONS
+============================================================================
+
+The maintainer prompt now includes (lines 620-641):
+
+1. **MUST NOT Modify**:
+   - Logical item ID construction (first argument to withItem)
+   - Structure or components of item IDs
+
+2. **MAY Modify**:
+   - Item titles (second argument) for readability
+   - Handler logic inside withItem
+   - Control flow around withItem calls
+
+3. **Failure Condition**:
+   - If fix requires changing logical item ID format
+   - NOT a repair - requires re-planning
+   - Fail explicitly: "Cannot repair: would change logical item identity"
+
+4. **Same Five Rules** as planner (enforced at runtime)
+
+============================================================================
+TEST ADDITIONS
+============================================================================
+
+NEW TEST SUITE: "Mutation Enforcement" (14 tests)
+
+Test structure:
+- Creates in-memory database
+- Creates KeepDb wrapper and ItemStore
+- Creates SandboxAPI with workflow context
+- Tests enforcement at the API level
+
+TEST CATEGORIES:
+
+1. **Mutations Outside withItem** (3 tests):
+   - "should abort when mutation called outside withItem in workflow mode"
+   - "should allow Console.log outside withItem as exception"
+   - "should allow read-only tools outside withItem"
+
+2. **Mutations Inside withItem** (2 tests):
+   - "should allow mutations inside withItem scope"
+   - "should block mutations on completed items (isDone=true)"
+
+3. **withItem Validation** (5 tests):
+   - "should reject empty id"
+   - "should reject empty title"
+   - "should reject non-function handler"
+   - "should reject nested withItem calls"
+   - "should require workflow context"
+
+4. **Non-workflow Mode** (1 test):
+   - "should allow mutations outside withItem in planner mode (no workflowId)"
+
+5. **Item State Tracking** (3 tests):
+   - "should mark new item as done on successful handler completion"
+   - "should mark new item as failed on handler error"
+   - "should not update status for already-done items"
+
+============================================================================
+TEST FILE CLEANUPS
+============================================================================
+
+**note-tools.test.ts and utility-tools.test.ts**:
+
+These files had a pre-existing issue where they were using the old AI SDK
+`execute()` signature that took a second `options` argument:
+```typescript
+// Old (broken):
+tool.execute!(input, createToolCallOptions())
+
+// New (fixed):
+tool.execute!(input)
+```
+
+The `createToolCallOptions()` helper was removed since it's no longer used.
+Also fixed: `null` input test changed to use empty object `{}` instead.
+
+============================================================================
+POTENTIAL ISSUES
+============================================================================
+
+ISSUE 1: TEST SETUP CREATES api OBJECT WITH MOCK STORES
+Severity: LOW
+Location: logical-items.test.ts:238-250
+Description: The test creates a minimal mock API object with only noteStore,
+scriptStore, and fileStore. If SandboxAPI ever needs other stores during
+initialization or tool registration, tests would fail with unclear errors.
+
+```typescript
+api = {
+  itemStore,
+  noteStore: {
+    validateCreateNote: vi.fn().mockResolvedValue(undefined),
+    createNote: vi.fn().mockResolvedValue(undefined),
+    getNote: vi.fn().mockResolvedValue(null),
+  },
+  scriptStore: {
+    getWorkflow: vi.fn().mockResolvedValue({ status: 'active' }),
+  },
+  fileStore: {},
+};
+```
+
+Proposal: Consider using a factory function that creates a complete mock API
+with all required properties, or document which properties are required.
+
+---
+
+ISSUE 2: TESTS USE `any` TYPE FOR SANDBOX GLOBAL
+Severity: LOW
+Location: logical-items.test.ts:219
+Description: `let global: any` means TypeScript won't catch errors if test
+code accesses wrong properties/methods on the global object.
+
+Proposal: Define a typed interface for the sandbox global object to get
+better type safety in tests.
+
+---
+
+ISSUE 3: SOME TESTS ACCESS ctx.item WITHOUT TYPE
+Severity: VERY LOW
+Location: Various test handler callbacks
+Description: Handler callbacks use `async (ctx: any) => {...}` losing type
+information about ctx.item structure.
+
+Proposal: Define ItemContext type for handler parameter.
+
+---
+
+ISSUE 4: TEST FOR "mutations on completed items" INSERTS RAW SQL
+Severity: LOW
+Location: logical-items.test.ts:386-388
+Description: Test creates a pre-existing done item via raw SQL:
+```typescript
+await db.exec(
+  `INSERT INTO items (id, workflow_id, logical_item_id, title, status, ...) VALUES (...)`
+);
+```
+
+This is fragile - if the schema changes, the test will break. However, this
+is a pragmatic approach for testing edge cases where data needs to exist
+before the test runs.
+
+Proposal: Consider adding a test helper method to ItemStore for creating
+test fixtures, or accept the raw SQL as necessary for this case.
+
+---
+
+ISSUE 5: TEST IMPORTS SandboxAPI DYNAMICALLY
+Severity: VERY LOW
+Location: logical-items.test.ts:263
+Description: Tests do `const { SandboxAPI } = await import("@app/agent")`
+inside each test case. This works but adds import overhead for each test.
+
+Proposal: Move the import to the top level or beforeAll block for efficiency.
+
+---
+
+ISSUE 6: PROMPT DUPLICATION - "Five Rules" APPEAR TWICE
+Severity: MEDIUM
+Location: agent-env.ts:528-533, agent-env.ts:636-641
+Description: The "Logical Items Rules" section (5 rules) appears identically
+in both the planner and maintainer prompts:
+
+```
+1. All mutations MUST be inside Items.withItem() - mutations outside will abort the script
+2. Only ONE Items.withItem can be active at a time - no nesting or parallel withItem calls
+3. Always check ctx.item.isDone before mutations to skip already-completed items...
+4. Items must be independent - processing one must not depend on another's outcome
+5. Use Items.list to check progress or resume from a known position
+```
+
+This duplication means if the rules change, both places need updating.
+
+Proposal: Extract the rules to a shared constant or template that both
+prompts reference. Alternatively, accept duplication as acceptable for
+prompt clarity (prompts often benefit from being self-contained).
+
+---
+
+ISSUE 7: PLANNER PROMPT EXAMPLE USES DIFFERENT STYLE THAN MAINTAINER
+Severity: VERY LOW
+Location: agent-env.ts
+Description: Planner gets extensive code examples and detailed explanations.
+Maintainer gets a shorter section focused on constraints. This is actually
+appropriate since:
+- Planner creates new scripts, needs full guidance
+- Maintainer repairs existing scripts, needs constraint focus
+
+Proposal: No change needed - the asymmetry is intentional and appropriate.
+
+============================================================================
+DESIGN EVALUATION
+============================================================================
+
+PROMPT ENGINEERING QUALITY:
+
+1. **Clear Structure**: Both prompts use headers, bullet points, and code
+   examples that are easy to parse.
+
+2. **Good/Bad Examples**: The ID and title requirements include explicit
+   good and bad examples, which is excellent for LLM guidance.
+
+3. **Actionable Rules**: The five rules are concrete and enforceable at
+   runtime, creating consistency between documentation and behavior.
+
+4. **Maintainer Constraints**: The explicit "cannot modify ID format"
+   constraint prevents maintainer from breaking item identity, which would
+   cause duplicate processing.
+
+TEST QUALITY:
+
+1. **Comprehensive Coverage**: Tests cover all enforcement scenarios:
+   - Outside withItem (3 cases: abort, console exception, read-only allowed)
+   - Inside withItem (2 cases: allowed, blocked on done)
+   - Validation (5 edge cases)
+   - Mode-specific (1 case: non-workflow mode)
+   - State tracking (3 cases: done, failed, unchanged for already-done)
+
+2. **Realistic Setup**: Tests use real database (in-memory SQLite) and
+   actual SandboxAPI, not just mocks.
+
+3. **Clear Naming**: Test names describe expected behavior clearly.
+
+============================================================================
+SUBSEQUENT DEPRECATION NOTE
+============================================================================
+
+This code was subsequently deprecated in commit 3196cac (exec-02) as part
+of migrating from Items-based to Topics-based execution. The prompts were
+updated to reflect the new model. The test suite remains useful for
+understanding the design intent of the Items system.
+
+============================================================================
+SUMMARY
+============================================================================
+
+This is a well-executed completion commit that:
+
+1. CORRECTLY adds planner prompt guidance with comprehensive examples
+2. CORRECTLY adds maintainer constraints to prevent ID mutation
+3. CORRECTLY implements 14 mutation enforcement tests
+4. CORRECTLY fixes pre-existing type errors in test files
+5. CORRECTLY documents the "Five Rules" that govern logical items
+
+The main issues are:
+- MEDIUM: Prompt duplication of the Five Rules (acceptable tradeoff)
+- LOW: Test setup uses minimal mock API object
+- LOW: Tests use `any` types for sandbox global
+- LOW: Raw SQL for test fixture setup
+
+Overall: GOOD COMMIT - Completes the logical items infrastructure with proper
+documentation for AI agents and comprehensive test coverage.

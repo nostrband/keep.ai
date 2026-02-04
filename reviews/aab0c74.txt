@@ -1,0 +1,227 @@
+COMMIT: aab0c74
+TITLE: Fix P2/P3 code quality issues (7 specs)
+DATE: Fri Jan 30 15:53:47 2026 +0100
+
+================================================================================
+CHANGES SUMMARY
+================================================================================
+
+1. Fix console-log backslash escaping: escape backslashes before quotes
+   to prevent ambiguity with inputs like `test\'`
+   (packages/agent/src/tools/console-log.ts)
+
+2. Crop before escaping in console-log: apply 1000 char limit before
+   escaping for predictable truncation behavior
+   (packages/agent/src/tools/console-log.ts)
+
+3. Fix connectors error classification: use specific patterns for "token"
+   and "service" to avoid false positives (e.g., "token bucket rate limit")
+   (apps/server/src/routes/connectors.ts)
+
+4. Extract disconnect mutation hook: create useDisconnectConnection hook
+   in dbWrites.ts and refactor ConnectionsSection to use it
+   (apps/web/src/hooks/dbWrites.ts, apps/web/src/components/ConnectionsSection.tsx)
+
+5. Fix cron format range validation: add bounds checking for minutes (0-59),
+   hours (0-23), day of week (0-7), falling back to raw cron if invalid
+   (apps/web/src/lib/formatCronSchedule.ts)
+
+6. Fix cron "every minute" check: verify all five fields are wildcards
+   before returning "Every minute" description
+   (apps/web/src/lib/formatCronSchedule.ts)
+
+7. Fix pre-existing ZodNativeEnum type error in tool-wrapper.ts
+   (packages/agent/src/sandbox/tool-wrapper.ts)
+
+================================================================================
+ISSUES FOUND
+================================================================================
+
+ISSUE #1 [MEDIUM]: Cron range validation incomplete - missing month and day of month
+Location: apps/web/src/lib/formatCronSchedule.ts
+Description: The spec (cron-format-range-validation.md) mentions month should
+  be validated (1-12) and day of month should be validated (1-31), but NO
+  range validation was added for these fields. Only minutes, hours, and day
+  of week were validated.
+Severity: MEDIUM
+Impact: Out-of-range month or day values will still display incorrect
+  information rather than falling back to raw cron string
+
+ISSUE #2 [MEDIUM]: Missing test for specific backslash-quote edge case
+Location: packages/tests/src/utility-tools.test.ts
+Description: The commit message mentions `test\'` as the motivation for the
+  fix, but there's NO test case specifically for this input pattern. Only the
+  existing backslash test was updated to expect double-escaped output.
+Severity: MEDIUM
+Impact: The specific edge case that motivated the fix has no test coverage,
+  could regress in the future
+
+ISSUE #3 [LOW]: Error classification still missing common OAuth patterns
+Location: apps/server/src/routes/connectors.ts:230-246
+Description: The token patterns added are more specific but still miss common
+  OAuth error messages:
+  - "token is expired" (slightly different wording)
+  - "refresh token invalid"
+  - "bearer token missing"
+  - "token validation failed"
+  The service patterns also miss:
+  - "service temporarily unavailable"
+Severity: LOW
+Impact: Some OAuth errors may still be misclassified, though this is an
+  improvement over the previous overly-broad pattern
+
+ISSUE #4 [LOW]: Potential misclassification of rate limit + access token errors
+Location: apps/server/src/routes/connectors.ts:220-246
+Description: Classification checks auth errors (401) before service errors
+  (503). An error message like "access token rate limit exceeded" would match
+  "access token" first and be classified as 401, even though it's a rate
+  limit error that should be 503.
+Severity: LOW
+Impact: Rate limit errors containing token-related words may be misclassified
+
+ISSUE #5 [LOW]: No tests added for any of the 7 fixes
+Location: packages/tests/*
+Description: While the existing backslash test was updated, no NEW tests were
+  added for:
+  - Crop before escape behavior
+  - Error classification patterns
+  - useDisconnectConnection hook
+  - Cron range validation
+  - Cron "every minute" check
+Severity: LOW
+Impact: All fixes lack dedicated test coverage, could regress
+
+ISSUE #6 [LOW]: Unicode escape sequences may be affected by backslash escaping
+Location: packages/agent/src/tools/console-log.ts:47-49
+Description: Input like `\u0041` would have the backslash escaped to `\\u0041`,
+  potentially breaking intentional escape sequences. This may or may not be
+  the desired behavior depending on use case.
+Severity: LOW
+Impact: Intentional escape sequences in log messages will display as literal
+  backslashes
+
+ISSUE #7 [INFO]: Hook takes apiEndpoint as parameter inconsistently
+Location: apps/web/src/hooks/dbWrites.ts:275
+Description: useDisconnectConnection takes apiEndpoint as a parameter, while
+  other hooks might get it from context. Not wrong, but inconsistent.
+Severity: INFO
+Impact: None functional, just a pattern inconsistency
+
+================================================================================
+PROPOSALS FOR FIXES
+================================================================================
+
+PROPOSAL #1: Complete cron range validation (for Issue #1)
+---
+Location: apps/web/src/lib/formatCronSchedule.ts
+Add validation for month and dayOfMonth fields:
+
+  // In the specific day/month handling section:
+  if (dayOfMonth !== "*") {
+    const dayOfMonthNum = parseInt(dayOfMonth, 10);
+    if (isNaN(dayOfMonthNum) || dayOfMonthNum < 1 || dayOfMonthNum > 31) {
+      return cron; // Fall back to raw cron
+    }
+  }
+
+  if (month !== "*") {
+    const monthNum = parseInt(month, 10);
+    if (isNaN(monthNum) || monthNum < 1 || monthNum > 12) {
+      return cron; // Fall back to raw cron
+    }
+  }
+
+PROPOSAL #2: Add test for backslash-quote edge case (for Issue #2)
+---
+Location: packages/tests/src/utility-tools.test.ts
+Add specific test:
+
+  it("should escape backslash-quote sequence correctly", async () => {
+    const tool = makeConsoleLogTool(mockContext as ToolContext);
+    await tool.execute({ line: "test\\'" });
+    expect(mockContext.onLog).toHaveBeenCalled();
+    const loggedLine = (mockContext.onLog as any).mock.calls[0][0];
+    // test\' should become 'test\\\'' (escaped backslash + escaped quote)
+    expect(loggedLine).toContain("test\\\\\\'");
+  });
+
+PROPOSAL #3: Add more OAuth token patterns (for Issue #3)
+---
+Location: apps/server/src/routes/connectors.ts:230-233
+Add additional common patterns:
+
+  // Token-related 401 patterns
+  errorMessageLower.includes("token expired") ||
+  errorMessageLower.includes("token is expired") ||
+  errorMessageLower.includes("invalid token") ||
+  errorMessageLower.includes("token revoked") ||
+  errorMessageLower.includes("access token") ||
+  errorMessageLower.includes("refresh token invalid") ||
+  errorMessageLower.includes("bearer token missing") ||
+  errorMessageLower.includes("token validation failed") ||
+
+PROPOSAL #4: Reorder rate limit check before token check (for Issue #4)
+---
+Location: apps/server/src/routes/connectors.ts
+Move rate limit detection before auth error detection to avoid misclassification:
+
+  // Check rate limit FIRST (before auth checks)
+  if (errorMessageLower.includes("rate limit")) {
+    statusCode = 429; // Or 503 as currently used
+  }
+  // Then check auth errors
+  else if (
+    errorMessageLower.includes("unauthorized") ||
+    // ... token patterns
+  ) {
+    statusCode = 401;
+  }
+  // Then service errors
+  else if (...) {
+    statusCode = 503;
+  }
+
+PROPOSAL #5: Add tests for new functionality (for Issue #5)
+---
+Create test cases for each fix:
+
+1. packages/tests/src/utility-tools.test.ts:
+   - Test crop happens before escape (verify 1000 char input with many quotes)
+
+2. apps/server tests or new file:
+   - Test error classification for each pattern
+   - Test edge cases like "token bucket rate limit"
+
+3. apps/web tests:
+   - Test useDisconnectConnection hook
+   - Test cron range validation with out-of-range values
+   - Test "every minute" with various cron patterns
+
+================================================================================
+SUMMARY
+================================================================================
+
+Overall Quality: GOOD - Most fixes are correct, some incomplete
+
+Fixes that work correctly (5/7):
+- Console-log backslash escaping - CORRECT
+- Console-log crop before escape - CORRECT
+- Extract disconnect mutation hook - CORRECT
+- Cron "every minute" check - CORRECT
+- ZodNativeEnum type fix - CORRECT
+
+Fixes that are incomplete (2/7):
+- Cron range validation - INCOMPLETE (missing month and day of month)
+- Error classification - INCOMPLETE (missing some common patterns, edge case
+  with rate limit + token)
+
+Test coverage: WEAK
+- Only one existing test updated
+- No new tests added for any of the 7 fixes
+- Specific edge case that motivated backslash fix has no test
+
+Recommendations:
+1. Add month (1-12) and day of month (1-31) validation to formatCronSchedule
+2. Add test for the `test\'` edge case
+3. Consider reordering rate limit check before token patterns
+4. Add test coverage for all fixes to prevent regression

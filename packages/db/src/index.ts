@@ -53,5 +53,25 @@ export type { ExecutionLog, ExecutionLogEventType, ExecutionLogRunType } from ".
 export { ItemStore } from "./item-store";
 export type { Item, ItemStatus, ItemCreatedBy, ListItemsOptions } from "./item-store";
 
+// Topic store (execution model - topics)
+export { TopicStore } from "./topic-store";
+export type { Topic, ListTopicsOptions } from "./topic-store";
+
+// Event store (execution model - events)
+export { EventStore } from "./event-store";
+export type { Event, EventStatus, PublishEvent, PeekEventsOptions, EventReservation } from "./event-store";
+
+// Handler run store (execution model - handler runs)
+export { HandlerRunStore } from "./handler-run-store";
+export type { HandlerRun, HandlerType, HandlerRunPhase, HandlerErrorType, CreateHandlerRunInput, UpdateHandlerRunInput } from "./handler-run-store";
+
+// Mutation store (execution model - mutations)
+export { MutationStore } from "./mutation-store";
+export type { Mutation, MutationStatus, MutationResolution, CreateMutationInput, UpdateMutationInput } from "./mutation-store";
+
+// Handler state store (execution model - handler state)
+export { HandlerStateStore } from "./handler-state-store";
+export type { HandlerState } from "./handler-state-store";
+
 // Api
 export * from "./api";

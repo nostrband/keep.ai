@@ -12,8 +12,16 @@ export {
   makeAudioExplainTool,
   makeAtobTool,
   makeConsoleLogTool,
-  makeItemsListTool,
+  // makeItemsListTool removed (exec-02 - deprecated Items infrastructure)
+  // Topics API (exec-03)
+  makeTopicsPeekTool,
+  makeTopicsGetByIdsTool,
+  makeTopicsPublishTool,
+  // Tool definition helpers
+  defineTool,
+  defineReadOnlyTool,
 } from "./tools";
+export type { Tool, ReadOnlyTool } from "./tools";
 
 // AI tools (planner/maintainer specific)
 export {
@@ -88,6 +96,35 @@ export {
 
 export { initSandbox } from "./sandbox/sandbox";
 
+// Sandbox tool management (exec-03a)
+export { ToolWrapper, type ToolWrapperConfig, type ExecutionPhase, type OperationType } from "./sandbox/tool-wrapper";
+export { createWorkflowTools, createTaskTools, type ToolListConfig } from "./sandbox/tool-lists";
+
+// Workflow validation (exec-05)
+export { validateWorkflowScript, isWorkflowFormatScript, type WorkflowConfig, type ValidationResult } from "./workflow-validator";
+
+// Handler state machine (exec-06)
+export {
+  executeHandler,
+  isTerminal,
+  type HandlerResult,
+  type PrepareResult,
+  type HandlerExecutionContext,
+} from "./handler-state-machine";
+
+// Session orchestration (exec-07)
+export {
+  executeWorkflowSession,
+  executeWorkflowSessionIfIdle,
+  resumeIncompleteSessions,
+  canStartSession,
+  getSessionCost,
+  type SessionTrigger,
+  type SessionResult,
+  type SessionConfig,
+} from "./session-orchestration";
+
+/** @deprecated Use ToolWrapper from './sandbox/tool-wrapper' instead */
 export { SandboxAPI } from "./sandbox/api";
 
 export { AgentEnv as ReplEnv } from "./agent-env";

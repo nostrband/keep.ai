@@ -1,0 +1,214 @@
+COMMIT REVIEW: 88bf4f0
+======================
+Title: Add comprehensive test coverage for execution model database stores
+Date: 2026-02-03 18:44:06
+Files Changed: 6 (5 new test files + IMPLEMENTATION_PLAN.md update)
+Lines Added: ~2040, Lines Removed: ~6
+Tests Added: 124 new tests (745 total after commit)
+
+SUMMARY OF CHANGES
+==================
+This commit adds comprehensive unit tests for the new execution model database
+stores introduced in the exec-* spec series:
+
+1. TopicStore tests (topic-store.test.ts) - 19 tests
+   - CRUD operations, getOrCreate idempotency, list ordering, deletion
+
+2. EventStore tests (event-store.test.ts) - 30 tests
+   - Publish, peek, reserve, consume, skip, release operations
+   - Event status transitions, idempotency by messageId
+
+3. HandlerRunStore tests (handler-run-store.test.ts) - 26 tests
+   - Create, update, phase transitions, queries
+   - Producer and consumer phase progressions
+
+4. MutationStore tests (mutation-store.test.ts) - 28 tests
+   - Lifecycle, status transitions, reconciliation
+   - Happy path, failure path, crash recovery scenarios
+
+5. HandlerStateStore tests (handler-state-store.test.ts) - 21 tests
+   - Get/set, JSON handling, delete operations
+   - Workflow/handler isolation, complex serialization
+
+All tests use in-memory SQLite databases with proper setup/teardown.
+
+POSITIVE ASPECTS
+================
+1. Excellent schema accuracy - all test schemas exactly match production v36 migration
+2. Comprehensive happy-path coverage for all store APIs
+3. Good testing of edge cases like non-existent IDs, empty arrays, limits
+4. Proper state machine progression tests (producer/consumer phases)
+5. Extensive JSON serialization tests (nested objects, arrays, null, booleans)
+6. Tests verify isolation between workflows and handlers
+7. Tests verify ordering behavior (timestamps, alphabetical)
+8. Tests verify idempotency guarantees (messageId, getOrCreate)
+9. Clean test structure with beforeEach/afterEach lifecycle
+10. Good documentation comments referencing migration files
+
+POTENTIAL ISSUES
+================
+
+### ISSUE 1: Transaction parameter never tested (HIGH)
+
+All store methods accept an optional `tx?: DBInterface` parameter for transaction
+support, but NO tests exercise this functionality.
+
+Production code actively uses transactions:
+```typescript
+// handler-state-machine.ts:189-198
+await api.db.db.tx(async (tx: DBInterface) => {
+  await api.handlerStateStore.set(..., tx);
+  await api.handlerRunStore.update(..., tx);
+});
+```
+
+Missing tests:
+- Transaction isolation (changes not visible until commit)
+- Transaction rollback on error
+- Atomicity of multi-store operations
+- Nested transaction behavior
+
+Proposal:
+Add transaction-specific tests for at least one store, verifying:
+1. Rollback reverts all changes
+2. Partial transaction failure doesn't corrupt state
+3. Concurrent transactions have proper isolation
+
+---
+
+### ISSUE 2: No concurrent access testing (MEDIUM)
+
+None of the test files test race conditions or concurrent modifications:
+- Two processes reserving the same event simultaneously
+- Concurrent getOrCreate calls with same parameters
+- Concurrent phase updates on same handler run
+
+The stores are used in a multi-threaded context (scheduler, workers) and
+concurrent access bugs could cause data corruption or lost updates.
+
+Proposal:
+Add concurrency tests using Promise.all to simulate parallel operations,
+verifying that:
+1. Only one caller succeeds for exclusive operations
+2. Data remains consistent after concurrent modifications
+
+---
+
+### ISSUE 3: Missing error handling tests (MEDIUM)
+
+No tests verify behavior with:
+- Non-existent IDs in update operations (e.g., markApplied on missing ID)
+- Malformed JSON in payload/state fields
+- Constraint violations beyond the tested uniqueness
+- Database errors or connection issues
+
+Proposal:
+Add negative tests that verify appropriate error handling or silent no-ops
+for invalid operations.
+
+---
+
+### ISSUE 4: Timing-dependent tests could be flaky (LOW)
+
+Several tests use setTimeout delays to ensure different timestamps:
+
+```typescript
+// handler-run-store.test.ts:219, 413
+await new Promise(r => setTimeout(r, 10));
+```
+
+On slow or heavily loaded systems, 10ms may not be sufficient for:
+- Timestamp ordering guarantees
+- Creation order verification
+
+Proposal:
+Either:
+A) Explicitly set timestamps in test data instead of relying on system clock
+B) Use longer delays (100ms) for timestamp-dependent tests
+C) Assert on approximate ordering rather than exact order
+
+---
+
+### ISSUE 5: Missing edge case tests (LOW)
+
+Across all test files, these edge cases are not tested:
+
+EventStore:
+- Events with very large payloads
+- Multiple reserve/release cycles (attempt_number increment)
+- Consuming events not in "reserved" state (error case)
+
+HandlerRunStore:
+- Invalid phase transitions (committed → pending)
+- Update on non-existent ID
+- prepare_result and logs fields never updated in tests
+
+MutationStore:
+- needs_reconcile status (defined but unused in tests)
+- Status transition validation (e.g., pending → applied without in_flight)
+- Concurrent markApplied calls
+
+TopicStore:
+- Empty string workflow_id or name
+- Special characters in names
+- SQL injection attempts
+
+HandlerStateStore:
+- Very large state objects
+- Empty string parameters
+
+Proposal:
+Prioritize adding tests for:
+1. Invalid state transitions (high risk of bugs)
+2. Update operations on non-existent IDs
+3. The needs_reconcile status (dead code if never used)
+
+---
+
+### ISSUE 6: Delete operations don't verify row count (LOW)
+
+All delete methods (deleteBySession, deleteByWorkflow, deleteByTopic) return
+void and tests don't verify that rows were actually deleted:
+
+```typescript
+// handler-run-store.test.ts
+await store.deleteBySession(sessionId);
+// No verification that delete actually worked
+```
+
+Proposal:
+After delete operations, add get() calls to verify the data is actually gone.
+Current tests could pass even if delete is broken but leaves data.
+
+---
+
+### ISSUE 7: Missing crsql_as_crr in test schemas (INFORMATIONAL)
+
+Production schemas include `SELECT crsql_as_crr('tablename')` to enable
+CRSQLite conflict-free replication, but test schemas omit this.
+
+This is acceptable for in-memory test databases that don't need replication,
+but worth documenting why it's omitted.
+
+CONCLUSION
+==========
+This is a high-quality test suite that provides excellent coverage for the
+happy-path scenarios of the new execution model stores. The schemas are
+accurate, assertions are comprehensive, and tests are well-structured.
+
+The main gaps are around transaction support (HIGH priority), concurrency
+(MEDIUM), and error handling (MEDIUM). These should be addressed before
+relying on these tests for production confidence.
+
+Test Quality: 8/10
+Schema Accuracy: 10/10
+Coverage (Happy Path): 9/10
+Coverage (Edge Cases): 6/10
+Coverage (Error Handling): 4/10
+Coverage (Transactions): 0/10
+
+Recommended priority for additions:
+1. Transaction tests (HIGH) - production actively uses transactions
+2. Concurrency tests (MEDIUM) - multi-threaded context
+3. Error handling tests (MEDIUM) - defensive programming
+4. Edge case tests (LOW) - nice to have

@@ -1,0 +1,109 @@
+COMMIT: d44ae2a
+TITLE: Fix P0 critical issues: file permissions, atomicity, race conditions, and fail-fast
+DATE: 2026-01-30
+FILES: IMPLEMENTATION_PLAN.md, apps/cli/src/commands/init.ts, packages/agent/src/task-worker.ts, packages/db/src/script-store.ts, packages/node/src/getDBPath.ts
+
+## CHANGES SUMMARY
+
+This commit addresses four P0 (critical) security and data integrity issues:
+
+1. **Secret Key File Permissions (getDBPath.ts, init.ts)**
+   - Problem: `users.json` was created with default 0644 permissions (world-readable), but it contains secret keys
+   - Fix: Added `{ mode: 0o600 }` to `fs.writeFileSync()` calls so the file is only readable by the owner
+   - Locations: `packages/node/src/getDBPath.ts:155`, `apps/cli/src/commands/init.ts:92`
+
+2. **TOCTOU Race Conditions in Directory Creation (getDBPath.ts, init.ts)**
+   - Problem: Code pattern `if (!fs.existsSync(dir)) { fs.mkdirSync(dir) }` has a Time-Of-Check-Time-Of-Use race where another process could create the directory between the check and the mkdir
+   - Fix: Removed the `existsSync` checks and rely on `mkdirSync(..., { recursive: true })` which handles existing directories gracefully
+   - Locations: 5 total - 3 in getDBPath.ts (lines 64, 107, 125), 2 in init.ts (lines 44, 55)
+
+3. **Atomic incrementMaintenanceFixCount (script-store.ts)**
+   - Problem: The function had a TOCTOU race between `UPDATE` and `SELECT` queries - two concurrent callers could get the same count
+   - Fix: Changed to `UPDATE ... RETURNING maintenance_fix_count` which atomically updates and returns the new value in a single query
+   - Location: `packages/db/src/script-store.ts:752-764`
+
+4. **Fail-Fast on Missing scriptRunId (task-worker.ts)**
+   - Problem: When scriptRunId was missing from inbox, the code returned a "fallback" context with the current active script. If the planner had updated the script since the failure, the maintainer would attempt to fix the wrong script version
+   - Fix: Return `undefined` instead of fallback context, causing immediate task failure rather than silent incorrect behavior
+   - Location: `packages/agent/src/task-worker.ts:539-551`
+
+5. **IMPLEMENTATION_PLAN.md**
+   - Added as a new file tracking all P0/P1/P2/P3 implementation items
+   - Documents 24 total items with their status, file locations, and fixes
+
+## POTENTIAL ISSUES
+
+### Issue 1: Permission Fix Only at Creation Time
+**Severity: Low**
+**Location: packages/node/src/getDBPath.ts:155, apps/cli/src/commands/init.ts:92**
+
+The 0o600 permissions are only set when `users.json` is first created. If any external code or process rewrites the file without specifying the mode, permissions could be reset to default 0644.
+
+**Analysis**: The codebase only writes to `users.json` inside `ensureEnv()` which is called once during initial setup. The file is never rewritten after creation - only read. This is safe by design.
+
+**Proposal**: No action needed - the design is correct.
+
+---
+
+### Issue 2: RETURNING Clause SQLite Version Requirement
+**Severity: Info (Not a bug)**
+**Location: packages/db/src/script-store.ts:752-764**
+
+The `UPDATE ... RETURNING` syntax requires SQLite 3.35.0 (released March 2021) or later.
+
+**Analysis**: Checked other usages in the codebase - `incrementHandlerCount()` already uses the same pattern. The project likely targets SQLite 3.35+ as a requirement.
+
+**Proposal**: No action needed - pattern is already used elsewhere in the codebase.
+
+---
+
+### Issue 3: Undefined Return vs. Error Object
+**Severity: Low**
+**Location: packages/agent/src/task-worker.ts:537-550**
+
+The `loadMaintainerContext` function now returns `undefined` on some error paths (missing scriptRunId) but returns a full context object on others (missing workflow or script). This inconsistency could be confusing.
+
+**Analysis**: Reviewed the caller at lines 176-187 - it properly handles `undefined` by calling `finishTask(task, "Error", "Cannot load maintainer context")`. The behavior is correct.
+
+**Proposal**: Consider adding more specific error messages by returning an error reason string or using a Result type pattern. This is a minor code quality suggestion, not a bug.
+
+---
+
+### Issue 4: current_user.txt Has Default Permissions
+**Severity: Info (Not a vulnerability)**
+**Location: packages/node/src/getDBPath.ts:120, apps/cli/src/commands/init.ts:49**
+
+The `current_user.txt` file is written without explicit permission mode, using default 0644.
+
+**Analysis**: This file only contains the public key (hex string), not secret keys. Public keys are meant to be shareable and do not require protection.
+
+**Proposal**: No action needed - this is by design.
+
+---
+
+## CODE QUALITY OBSERVATIONS
+
+1. **Good**: Consistent fix across both `getDBPath.ts` and `init.ts` - the same permission pattern is applied in both locations
+2. **Good**: The debug messages are helpful: "Ensured directory exists" vs "Created directory" accurately reflects the new behavior
+3. **Good**: The `IMPLEMENTATION_PLAN.md` file provides excellent documentation of what was fixed and what remains
+
+## ARCHITECTURAL NOTES
+
+1. The fail-fast pattern in `loadMaintainerContext` is correct - the maintainer agent must know exactly which script run failed to provide relevant fixes. Without this, the agent could:
+   - Read the wrong script code (planner may have updated it)
+   - Miss the error context from the failed run
+   - Apply fixes to a version that's no longer active
+
+2. The RETURNING clause is the correct SQLite pattern for atomic increment-and-read operations. This prevents race conditions where two workers could both get the same "fix count" and think they have attempts remaining.
+
+## VERIFICATION STATUS
+
+- [x] Permission fix verified: `writeFileSync` calls now include `{ mode: 0o600 }`
+- [x] TOCTOU fix verified: All 5 existsSync checks removed
+- [x] Atomicity fix verified: Uses `UPDATE ... RETURNING` single query
+- [x] Fail-fast fix verified: Returns `undefined` instead of fallback context
+- [x] Caller handling verified: `executeTask` properly handles undefined maintainerContext
+
+## CONCLUSION
+
+This commit correctly addresses four P0 security and data integrity issues. The fixes are minimal, focused, and appropriate for the problems identified. No bugs or significant issues found in the implementation.

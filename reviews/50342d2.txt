@@ -1,0 +1,117 @@
+COMMIT: 50342d2 - Improve web app type safety and code quality (P2)
+DATE: Fri Jan 30 14:29:19 2026 +0100
+REVIEWED: 2026-02-04
+
+================================================================================
+SUMMARY OF CHANGES
+================================================================================
+
+This commit improves type safety and reduces code duplication in the web app:
+
+1. WorkflowDetailPage.tsx:
+   - Added `import type { Task } from "@app/db"`
+   - Changed `maintainerTasks.map((task: any) => ...)` to `(task: Task)`
+   - Eliminates unsafe `any` type in favor of proper typing
+
+2. WorkflowsPage.tsx:
+   - Added `VALID_FILTERS` constant with whitelist of supported filter values
+   - Added `normalizeFilter()` function for case-insensitive filter matching
+   - Filter param now normalized before use throughout component
+   - Invalid filters are silently treated as "no filter"
+
+3. dbScriptReads.ts:
+   - Extracted duplicated fallback object into `DEFAULT_DRAFT_ACTIVITY_SUMMARY` constant
+   - Used in both early return (when api is null) and catch block
+   - Eliminates code duplication for the same object literal
+
+4. IMPLEMENTATION_PLAN.md:
+   - Marked 3 specs as fixed (type safety, extract default, filter handling)
+   - Updated completion counts (13 -> 16 complete)
+
+================================================================================
+POTENTIAL ISSUES
+================================================================================
+
+ISSUE 1: No user feedback for invalid filter values
+Severity: Low
+Location: apps/web/src/components/WorkflowsPage.tsx:15-19
+
+When a user navigates to `/workflows?filter=InvalidValue`, the filter is silently
+ignored and the page shows all workflows. The URL parameter remains unchanged,
+which may confuse users who expect their filter to work.
+
+Currently only "drafts" is supported (used by StaleDraftsBanner.tsx:52), but
+the architecture suggests more filters could be added. Other workflow statuses
+like "active", "paused", "error", "archived" could be future filter values.
+
+PROPOSAL 1: Add user feedback for invalid filters
+- Show a toast notification when an invalid filter is detected
+- Or redirect to `/workflows` (clean URL) when filter is invalid
+- Example:
+  ```typescript
+  const filter = normalizeFilter(rawFilter);
+  useEffect(() => {
+    if (rawFilter && !filter) {
+      toast.warning(`Unknown filter "${rawFilter}" - showing all workflows`);
+    }
+  }, [rawFilter, filter]);
+  ```
+
+---
+
+ISSUE 2: DEFAULT_DRAFT_ACTIVITY_SUMMARY not exported (by design, but worth noting)
+Severity: None (information only)
+Location: apps/web/src/hooks/dbScriptReads.ts:288-294
+
+The constant is correctly kept internal to the module. Exporting it would expose
+implementation details. The `DraftActivitySummary` type is already exported,
+which is sufficient for consumers. No action needed.
+
+---
+
+ISSUE 3: Task type correctness verified
+Severity: None (information only)
+Location: apps/web/src/components/WorkflowDetailPage.tsx:4, 498
+
+The `Task` type from `@app/db` is confirmed correct for `maintainerTasks`:
+- `useMaintainerTasks()` hook calls `api.taskStore.getMaintainerTasksForWorkflow()`
+- This returns `Promise<Task[]>` per task-store.ts:679-703
+- All properties used (id, title, state, error, timestamp) exist on Task interface
+
+No type mismatch. The change from `any` to `Task` is safe.
+
+================================================================================
+ARCHITECTURAL OBSERVATIONS
+================================================================================
+
+1. The filter whitelist approach (`VALID_FILTERS`) is extensible. Adding new
+   filter values is as simple as adding to the array. Good pattern.
+
+2. The `normalizeFilter()` function correctly handles:
+   - null/undefined params (returns null)
+   - Case normalization (lowercase)
+   - Whitelist validation
+   - Type narrowing (returns `ValidFilter | null`)
+
+3. The duplicate object extraction pattern in dbScriptReads.ts follows DRY
+   principles correctly. The constant is not exported because it's an
+   implementation detail of the hook's error handling.
+
+================================================================================
+CODE QUALITY
+================================================================================
+
++ Good: Type safety improved by eliminating `any`
++ Good: DRY principle applied with extracted constant
++ Good: Case-insensitive filter matching is user-friendly
++ Good: Whitelist approach prevents arbitrary filter injection
+
+- Minor: Silent handling of invalid filters may confuse users
+- Note: Filter list is hardcoded; consider generating from workflow status enum
+
+================================================================================
+VERDICT
+================================================================================
+
+APPROVED with minor suggestion: Consider adding user feedback for invalid filters.
+The core changes are correct and improve code quality.

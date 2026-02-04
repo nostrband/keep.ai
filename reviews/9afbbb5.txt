@@ -1,0 +1,171 @@
+COMMIT REVIEW: 9afbbb5
+======================
+Title: Implement exec-09: Integrate session execution into WorkflowScheduler
+Date: 2026-02-03 18:31:25
+Files Changed: 2 (workflow-scheduler.ts, IMPLEMENTATION_PLAN.md)
+Lines Added: ~153, Lines Removed: ~10
+
+SUMMARY OF CHANGES
+==================
+This commit integrates the new session-based execution model (exec-07) into the
+WorkflowScheduler, enabling new-format workflows to use the handler-based
+execution system while maintaining backwards compatibility with old-format
+workflows.
+
+Key changes:
+1. Imports session-orchestration and handler-state-machine types
+2. Makes start() async and calls resumeIncompleteSessions() on startup
+3. Adds isNewFormatWorkflow() to detect new format via handler_config field
+4. Adds executeNewFormatWorkflow() for session-based execution path
+5. Adds handleSessionResult() to emit appropriate signals based on outcome
+6. Branches execution in processNextWorkflow() based on workflow format
+
+Architecture:
+- New-format workflows (those with handler_config set from exec-05 validation)
+  use executeWorkflowSessionIfIdle() which enforces single-threaded execution
+- Old-format workflows continue using the legacy WorkflowWorker execution path
+- Session results are translated to scheduler signals for retry/notification
+
+POTENTIAL ISSUES
+================
+
+### ISSUE 1: Missing retry/backoff support for new-format workflows (MEDIUM-HIGH)
+
+Location: packages/agent/src/workflow-scheduler.ts:432-471 (handleSessionResult)
+
+Problem:
+The new-format execution path does NOT integrate with the retry backoff mechanism
+that exists for old-format workflows. In old-format execution:
+- Network errors trigger 'retry' signal with exponential backoff (10s, 20s, 40s...)
+- After 5 retries, escalates to user attention
+- Auth/permission errors go directly to 'needs_attention'
+- Logic errors trigger 'maintenance' mode for auto-fix
+
+In new-format execution (handleSessionResult):
+- ALL failures emit 'needs_attention' with hardcoded errorType='logic'
+- No retry backoff for transient network errors
+- No maintenance mode trigger for actual logic errors
+- The error type from session-orchestration is ignored
+
+Impact:
+- Transient network failures will immediately mark workflows as errored
+- Users will see unnecessary error notifications for recoverable issues
+- No auto-fix capability for new-format script logic errors
+
+Root cause:
+The SessionResult interface doesn't include errorType field, and
+handleSessionResult doesn't read it from the session even though
+session-orchestration properly classifies errors.
+
+Proposal:
+1. Add errorType to SessionResult interface in session-orchestration.ts
+2. In handleSessionResult, check error type and route appropriately:
+   - Network → 'retry' signal (with exponential backoff)
+   - Auth/Permission → 'needs_attention' signal
+   - Logic → 'maintenance' signal for auto-fix
+   - Internal → 'needs_attention' signal
+
+---
+
+### ISSUE 2: Redundant signal emission on completion (LOW)
+
+Location: packages/agent/src/workflow-scheduler.ts:439-446
+
+Problem:
+On successful completion, the code both:
+1. Deletes retry state directly: this.workflowRetryState.delete(workflowId)
+2. Sends 'done' signal: this.worker['onSignal']({type: 'done', ...})
+
+The 'done' signal handler (line 124-127) also deletes retry state. This is
+redundant but harmless.
+
+However, accessing this.worker['onSignal'] via bracket notation to call a private
+callback is a code smell and breaks encapsulation. The WorkflowWorker's onSignal
+is passed in the constructor and stored privately.
+
+Proposal:
+Either:
+A) Call handleWorkerSignal directly (it's the actual handler):
+   this.handleWorkerSignal({type: 'done', ...})
+B) Remove the signal call entirely since retry state is already cleared inline
+
+Option A is cleaner and maintains the signal-based architecture.
+
+---
+
+### ISSUE 3: Accessing private property with bracket notation (LOW)
+
+Location: packages/agent/src/workflow-scheduler.ts:439, 460
+
+Problem:
+The code accesses this.worker['onSignal'] using bracket notation to bypass
+TypeScript's private access. This is fragile:
+- If WorkflowWorker changes its internal structure, this will silently break
+- It circumvents type checking
+- It's confusing - handleSessionResult should call handleWorkerSignal instead
+
+Proposal:
+Replace this.worker['onSignal'](signal) with this.handleWorkerSignal(signal)
+This is the scheduler's own method that handles signals consistently.
+
+---
+
+### ISSUE 4: Missing error handling in resumeIncompleteSessions catch (LOW)
+
+Location: packages/agent/src/workflow-scheduler.ts:179-183
+
+Problem:
+The error is caught and logged but the error object isn't fully utilized:
+```typescript
+} catch (e) {
+  this.debug("Error resuming incomplete sessions:", e);
+}
+```
+
+While this is defensive and prevents startup failures, it might be worth
+logging more context or considering whether certain errors should propagate.
+
+The current behavior is acceptable - session resume is best-effort and
+shouldn't block startup.
+
+---
+
+### ISSUE 5: No suspended session handling signal (INFORMATIONAL)
+
+Location: packages/agent/src/workflow-scheduler.ts:449-454
+
+When a session is suspended, the code only clears retry state:
+```typescript
+case 'suspended':
+  this.debug(`Session ${result.sessionId} suspended...`);
+  this.workflowRetryState.delete(workflowId);
+  break;
+```
+
+No signal is emitted. This may be intentional since:
+- Suspended means user paused the workflow
+- Status is already set by session-orchestration
+- No need to notify scheduler of user-initiated action
+
+However, for consistency and observability, consider adding a 'suspended' signal
+type so all session outcomes flow through the signal handling infrastructure.
+
+POSITIVE ASPECTS
+================
+1. Clean separation - new format uses session-orchestration, old format unchanged
+2. Proper detection of workflow format via handler_config field
+3. Crash recovery via resumeIncompleteSessions() on startup
+4. Single-threaded enforcement with executeWorkflowSessionIfIdle()
+5. Good debug logging throughout
+6. Maintains backwards compatibility completely
+7. Well-documented commit message explaining the changes
+
+CONCLUSION
+==========
+The commit implements the core integration correctly, but the error handling
+and retry logic for new-format workflows is incomplete. The most significant
+issue is that transient network failures won't be retried, leading to
+unnecessary error escalation. This should be addressed before new-format
+workflows are widely used.
+
+Priority: ISSUE 1 should be fixed soon (MEDIUM-HIGH)

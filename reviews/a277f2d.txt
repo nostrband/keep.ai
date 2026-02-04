@@ -1,0 +1,93 @@
+COMMIT REVIEW: a277f2d
+=======================
+Date: 2026-01-30 13:24:19 +0100
+Author: Claude Agent
+Message: Remove done plan
+
+SUMMARY
+-------
+This commit deletes the IMPLEMENTATION_PLAN.md file entirely. The file contained 245 lines of documentation tracking implementation progress for the Keep.ai automation platform.
+
+The deleted file documented:
+- Priority 1: Maintainer Task Type (marked complete)
+- Priority 2: Tier 1 v1 Features (dry-run testing, collapse events, highlight events, detect abandoned drafts)
+- Priority 3: Tier 2 v1 Features (prompt stale drafts, archive old drafts, script versioning UI, agent status)
+- Priority 4: Tier 3 v1 Features (script diff view, simplify Q&A, handle abandoned drafts)
+- Priority 5: Post-v1 Features (balance/payments, in-app bug report)
+- Test Coverage Gaps tracking
+- Code Quality Notes
+- Implementation Notes for Maintainer architecture
+
+FILES CHANGED: 1 file, -245 lines
+
+POTENTIAL ISSUES
+----------------
+
+ISSUE 1: Documentation Loss
+Severity: Medium
+Location: IMPLEMENTATION_PLAN.md (deleted)
+
+Description: The file contained valuable context about:
+- Feature completion status and history
+- Architectural decisions (maintainer task type architecture section)
+- Test coverage tracking
+- Code quality notes (FIXMEs, skipped tests, their justifications)
+- Notification types documented in one place
+
+This information loss could make it harder for future developers to understand:
+- Why certain design decisions were made
+- What features are complete vs. planned
+- What edge cases were considered
+
+Proposal:
+1. Instead of deleting, consider moving to docs/ or archiving
+2. Or ensure key information exists elsewhere (AGENTS.md, README, individual spec files)
+3. The architectural notes in "Implementation Notes" section are especially valuable
+
+---
+
+ISSUE 2: Premature Deletion
+Severity: Low
+Location: N/A
+
+Description: This commit is immediately followed by d6db443 which moves specs back from done/ to new/, suggesting the "done" state was premature. The plan deletion may have been part of a hasty cleanup.
+
+Proposal: Verify that all documented features are truly complete before removing tracking documents.
+
+---
+
+ISSUE 3: Missing Rationale
+Severity: Low
+Location: Commit message
+
+Description: The commit message "Remove done plan" doesn't explain why the plan is considered "done" or why it's being removed rather than archived.
+
+Proposal: For documentation deletions, include rationale in commit message:
+- "Remove done plan: all P1-P4 features shipped, moving to CHANGELOG format"
+- Or similar context
+
+POSITIVE ASPECTS
+----------------
++ Cleans up project root from stale planning documents
++ The merge commit (57349b7) included this file, so its content was captured at that point
++ Reduces maintenance burden of outdated planning documents
+
+CONTEXTUAL NOTE
+---------------
+Looking at the commit history:
+1. 57349b7 (13:23:16) - Merge that added IMPLEMENTATION_PLAN.md
+2. a277f2d (13:24:19) - This commit deleting it (1 minute later)
+3. d6db443 (13:27:30) - Moving specs back to new/ (3 minutes later)
+
+This rapid sequence suggests the merge may have incorrectly included completed planning docs, and this deletion is cleanup. However, the subsequent d6db443 moving specs back to new/ indicates the completion status was incorrect.
+
+VERDICT
+-------
+ACCEPTABLE but could be improved.
+
+The deletion itself is reasonable for cleanup, but:
+- Key architectural documentation should be preserved elsewhere
+- The rapid commit sequence suggests the merge state was incorrect
+- Better rationale in commit messages would help future maintainers
+
+RECOMMENDATION: Accept the deletion but ensure architectural notes (maintainer task type design, notification types, etc.) are captured in AGENTS.md or similar persistent documentation.
