@@ -154,6 +154,58 @@ function errorTypeToRunStatus(type: ErrorType): RunStatus {
 // isDefiniteFailure is now imported from failure-handling.ts
 
 // ============================================================================
+// Mutation Result for Next Phase (exec-14)
+// ============================================================================
+
+/**
+ * Mutation result for the next phase.
+ */
+interface MutationResultForNext {
+  status: "applied" | "skipped" | "none";
+  result?: unknown;
+}
+
+/**
+ * Get mutation result for the next phase.
+ *
+ * Per exec-14 spec, handles the mutation result based on status and resolution.
+ * This is a local version to avoid circular imports with indeterminate-resolution.ts.
+ */
+function getMutationResultForNextPhase(mutation: Mutation | null): MutationResultForNext {
+  if (!mutation) {
+    return { status: "none" };
+  }
+
+  switch (mutation.status) {
+    case "applied":
+      // Normal success or user_assert_applied
+      return {
+        status: "applied",
+        result: mutation.result ? JSON.parse(mutation.result) : null,
+      };
+
+    case "failed":
+      if (mutation.resolved_by === "user_skip") {
+        // User chose to skip - next phase should know
+        return { status: "skipped" };
+      }
+      // If failed and not skipped, shouldn't reach next phase
+      // Return none to be safe (run should have been retried or terminated)
+      return { status: "none" };
+
+    case "pending":
+      // Mutation handler ran but didn't call any mutation tool
+      // Treat as no mutation
+      return { status: "none" };
+
+    default:
+      // in_flight, needs_reconcile, indeterminate - shouldn't reach next
+      // Return none to be safe
+      return { status: "none" };
+  }
+}
+
+// ============================================================================
 // Phase Reset Rules (exec-10)
 // ============================================================================
 
@@ -349,6 +401,29 @@ async function suspendRun(
   reason: string
 ): Promise<void> {
   await pauseRun(api, run, "paused:reconciliation", reason);
+}
+
+/**
+ * Pause a handler run and its workflow for indeterminate mutation.
+ *
+ * Per exec-14 spec:
+ * - Set run status to paused:reconciliation
+ * - Pause workflow so scheduler doesn't pick it up
+ * - User must manually resolve the indeterminate mutation
+ */
+async function pauseRunForIndeterminate(
+  api: KeepDbApi,
+  run: HandlerRun,
+  reason: string
+): Promise<void> {
+  // Pause the handler run
+  await pauseRun(api, run, "paused:reconciliation", reason);
+
+  // Also pause the workflow (exec-14: workflow paused during indeterminate)
+  await api.scriptStore.updateWorkflowFields(run.workflow_id, {
+    status: "paused",
+  });
+  log(`Workflow ${run.workflow_id} paused due to indeterminate mutation`);
 }
 
 /**
@@ -751,16 +826,18 @@ return await workflow.consumers.${run.handler_name}.prepare(__state__);
       await executeMutate(api, run, context);
     } else if (mutation.status === "in_flight") {
       // Crashed mid-mutation → indeterminate (no reconciliation)
+      // Per exec-14: Mark indeterminate and pause workflow
       await api.mutationStore.markIndeterminate(
         mutation.id,
         "Mutation was in_flight at restart - outcome uncertain"
       );
-      await suspendRun(api, run, "indeterminate_mutation");
+      await pauseRunForIndeterminate(api, run, "indeterminate_mutation");
     } else if (mutation.status === "applied") {
       log(`Handler run ${run.id} (consumer): mutating → mutated`);
       await api.handlerRunStore.updatePhase(run.id, "mutated");
     } else if (mutation.status === "indeterminate") {
-      await suspendRun(api, run, "indeterminate_mutation");
+      // Already indeterminate from previous attempt - ensure workflow paused
+      await pauseRunForIndeterminate(api, run, "indeterminate_mutation");
     } else if (mutation.status === "failed") {
       await failRun(
         api,
@@ -823,13 +900,9 @@ return await workflow.consumers.${run.handler_name}.prepare(__state__);
       ? JSON.parse(run.prepare_result)
       : { reservations: [], data: undefined };
 
+    // Get mutation result for next phase (exec-14)
     const mutation = await api.mutationStore.getByHandlerRunId(run.id);
-    const mutationResult = mutation
-      ? {
-          status: mutation.status,
-          result: mutation.result ? JSON.parse(mutation.result) : null,
-        }
-      : { status: "none" };
+    const mutationResult = getMutationResultForNextPhase(mutation);
 
     const { sandbox, toolWrapper, logs } = await createHandlerSandbox(
       workflow,

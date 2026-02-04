@@ -22,11 +22,18 @@ export type MutationStatus =
 
 /**
  * User resolution for indeterminate mutations.
+ *
+ * Per exec-14 spec:
+ * - user_assert_applied: User verified mutation happened
+ * - user_assert_failed: User verified mutation did not happen
+ * - user_skip: User wants to skip this event
+ * - user_retry: Legacy alias for user_assert_failed (creates retry)
  */
 export type MutationResolution =
   | "user_skip"
   | "user_retry"
-  | "user_assert_failed";
+  | "user_assert_failed"
+  | "user_assert_applied";
 
 /**
  * Mutation record - ledger for tracking external side effects.

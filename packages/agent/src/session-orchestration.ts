@@ -524,12 +524,17 @@ export async function resumeIncompleteSessions(
             mutation.id,
             "Mutation was in_flight at restart - outcome uncertain"
           );
-          // Mark run as crashed and paused for reconciliation
+          // Mark run as paused for reconciliation
           await api.handlerRunStore.update(run.id, {
             status: "paused:reconciliation",
             error: "Mutation outcome uncertain - requires user verification",
             end_timestamp: new Date().toISOString(),
           });
+          // Per exec-14: Also pause the workflow so scheduler doesn't pick it up
+          await api.scriptStore.updateWorkflowFields(workflowId, {
+            status: "paused",
+          });
+          log(`Workflow ${workflowId} paused due to indeterminate mutation`);
           // Don't create retry run - needs user reconciliation
           continue;
         }
