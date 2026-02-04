@@ -1,6 +1,4 @@
-# 16. Scheduling (Draft)
-
-> **Status**: Draft proposal for v1. Requires review and refinement.
+# 16. Scheduling
 
 This chapter defines when and how handlers of the execution model are invoked by the host runtime.
 
