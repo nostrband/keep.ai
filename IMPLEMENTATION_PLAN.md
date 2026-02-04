@@ -356,24 +356,24 @@ SELECT crsql_as_crr('producer_schedules');
 | `packages/agent/src/failure-handling.ts` | Error→RunStatus mapping, failure routing | COMPLETE |
 | `packages/agent/src/indeterminate-resolution.ts` | Indeterminate mutation resolution functions | COMPLETE |
 | `packages/agent/src/scheduler-state.ts` | SchedulerStateManager (dirty/queued flags) | COMPLETE |
-| `packages/agent/src/config-cache.ts` | ConfigCache for parsed WorkflowConfig | NOT STARTED |
+| `packages/agent/src/config-cache.ts` | ConfigCache for parsed WorkflowConfig | DEFERRED (v2 optimization) |
 
 ---
 
 ## Files to Modify
 
-| File | Changes |
-|------|---------|
-| `packages/db/src/handler-run-store.ts` | Add status, retry_of; update types; add retry chain queries |
-| `packages/db/src/handler-state-store.ts` | Add wake_at; add batch query; add wakeAt methods |
-| `packages/db/src/event-store.ts` | Add countPendingByTopic batch query |
-| `packages/db/src/mutation-store.ts` | Add user_assert_applied resolution type |
-| `packages/db/src/database.ts` | Import new migrations |
-| `packages/db/src/api.ts` | Add ProducerScheduleStore to KeepDbApi |
+| File | Changes | Status |
+|------|---------|--------|
+| `packages/db/src/handler-run-store.ts` | Add status, retry_of; update types; add retry chain queries | DONE (exec-09, exec-10) |
+| `packages/db/src/handler-state-store.ts` | Add wake_at; add batch query; add wakeAt methods | DONE (exec-11) |
+| `packages/db/src/event-store.ts` | Add countPendingByTopic batch query | DONE (exec-11) |
+| `packages/db/src/mutation-store.ts` | Add user_assert_applied resolution type | DONE (exec-14) |
+| `packages/db/src/database.ts` | Import new migrations | DONE (v39-v43) |
+| `packages/db/src/api.ts` | Add ProducerScheduleStore to KeepDbApi | DONE (exec-13) |
 | `packages/proto/src/errors.ts` | Deprecate ensureClassified, classifyGenericError | DONE (exec-12) |
 | `packages/agent/src/handler-state-machine.ts` | Update phase/status handling; add retry logic; fix error classification | DONE (exec-09, exec-10, exec-12) |
 | `packages/agent/src/session-orchestration.ts` | Replace ensureClassified; use new scheduling | DONE (exec-12) |
-| `packages/agent/src/workflow-scheduler.ts` | Use per-producer schedules; integrate SchedulerStateManager |
+| `packages/agent/src/workflow-scheduler.ts` | Use per-producer schedules; integrate SchedulerStateManager | DEFERRED (v2) |
 | 13 tool files in `packages/agent/src/tools/` | Remove classifyGenericError usage (verified: 13 files) | DONE (exec-12) |
 
 ---
