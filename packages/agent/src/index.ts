@@ -177,6 +177,20 @@ export {
   type WorkflowConfigForScheduler,
 } from "./scheduler-state";
 
+// Schedule utilities (exec-13)
+export {
+  parseInterval,
+  computeNextRunTime,
+  extractSchedule,
+} from "./schedule-utils";
+
+// Producer schedule initialization (exec-13)
+export {
+  initializeProducerSchedules,
+  updateProducerSchedules,
+  removeProducerSchedules,
+} from "./producer-schedule-init";
+
 export type {
   Sandbox,
   SandboxOptions,

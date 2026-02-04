@@ -31,6 +31,7 @@ import { initSandbox, Sandbox, EvalContext } from "./sandbox/sandbox";
 import { ToolWrapper, ExecutionPhase } from "./sandbox/tool-wrapper";
 import { createWorkflowTools } from "./sandbox/tool-lists";
 import { WorkflowConfig } from "./workflow-validator";
+import { computeNextRunTime } from "./schedule-utils";
 import type { ConnectionManager } from "@app/connectors";
 import debug from "debug";
 
@@ -520,7 +521,8 @@ async function savePrepareAndReserve(
 
 /**
  * Commit a producer run atomically.
- * Updates handler state, marks run committed, increments handler count.
+ * Updates handler state, marks run committed, increments handler count,
+ * and updates per-producer schedule (exec-13).
  */
 async function commitProducer(
   api: KeepDbApi,
@@ -553,6 +555,27 @@ async function commitProducer(
 
     // Update session handler count
     await api.scriptStore.incrementHandlerCount(run.script_run_id, tx);
+
+    // Update per-producer schedule (exec-13)
+    // Get the producer's schedule config and compute next run time
+    const schedule = await api.producerScheduleStore.get(
+      run.workflow_id,
+      run.handler_name,
+      tx
+    );
+    if (schedule) {
+      const nextRunAt = computeNextRunTime(
+        schedule.schedule_type,
+        schedule.schedule_value
+      );
+      await api.producerScheduleStore.updateAfterRun(
+        run.workflow_id,
+        run.handler_name,
+        nextRunAt,
+        tx
+      );
+      log(`Producer ${run.handler_name} next_run_at updated to ${new Date(nextRunAt).toISOString()}`);
+    }
   });
   log(`Handler run ${run.id} (producer) committed`);
 }

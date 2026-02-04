@@ -73,5 +73,9 @@ export type { Mutation, MutationStatus, MutationResolution, CreateMutationInput,
 export { HandlerStateStore } from "./handler-state-store";
 export type { HandlerState } from "./handler-state-store";
 
+// Producer schedule store (execution model - producer scheduling, exec-13)
+export { ProducerScheduleStore } from "./producer-schedule-store";
+export type { ProducerSchedule, ScheduleType } from "./producer-schedule-store";
+
 // Api
 export * from "./api";
