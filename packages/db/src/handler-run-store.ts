@@ -107,6 +107,7 @@ export interface HandlerRun {
   handler_name: string;
   phase: HandlerRunPhase;
   status: RunStatus; // Why execution is paused/stopped
+  retry_of: string; // ID of previous attempt (empty for first attempt)
   prepare_result: string; // JSON: { reservations, data, ui }
   input_state: string; // JSON: State received from previous run
   output_state: string; // JSON: State returned by handler
@@ -127,6 +128,12 @@ export interface CreateHandlerRunInput {
   handler_type: HandlerType;
   handler_name: string;
   input_state?: string;
+  /** ID of previous attempt (empty for first attempt) */
+  retry_of?: string;
+  /** Starting phase for retry runs (default: 'pending') */
+  phase?: HandlerRunPhase;
+  /** Prepare result to copy from previous run (for retries after mutation) */
+  prepare_result?: string;
 }
 
 /**
@@ -184,19 +191,25 @@ export class HandlerRunStore {
     const db = tx || this.db.db;
     const id = bytesToHex(randomBytes(16));
     const now = new Date().toISOString();
+    const phase = input.phase || "pending";
+    const retry_of = input.retry_of || "";
+    const prepare_result = input.prepare_result || "";
 
     await db.exec(
       `INSERT INTO handler_runs (
         id, script_run_id, workflow_id, handler_type, handler_name,
-        phase, status, prepare_result, input_state, output_state,
+        phase, status, retry_of, prepare_result, input_state, output_state,
         start_timestamp, end_timestamp, error, error_type, cost, logs
-      ) VALUES (?, ?, ?, ?, ?, 'pending', 'active', '', ?, '', ?, '', '', '', 0, '[]')`,
+      ) VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, '', ?, '', '', '', 0, '[]')`,
       [
         id,
         input.script_run_id,
         input.workflow_id,
         input.handler_type,
         input.handler_name,
+        phase,
+        retry_of,
+        prepare_result,
         input.input_state || "",
         now,
       ]
@@ -208,9 +221,10 @@ export class HandlerRunStore {
       workflow_id: input.workflow_id,
       handler_type: input.handler_type,
       handler_name: input.handler_name,
-      phase: "pending",
+      phase,
       status: "active",
-      prepare_result: "",
+      retry_of,
+      prepare_result,
       input_state: input.input_state || "",
       output_state: "",
       start_timestamp: now,
@@ -403,6 +417,87 @@ export class HandlerRunStore {
   }
 
   /**
+   * Get the retry chain for a run (for UI/debugging).
+   * Returns all runs in the chain, oldest first.
+   *
+   * Walks backwards from the given run to the original attempt,
+   * then returns the chain in chronological order.
+   */
+  async getRetryChain(runId: string, tx?: DBInterface): Promise<HandlerRun[]> {
+    const chain: HandlerRun[] = [];
+    let currentId: string | null = runId;
+
+    // Walk backwards through retry_of links to find original
+    while (currentId) {
+      const run = await this.get(currentId, tx);
+      if (!run) break;
+      chain.unshift(run); // Add to beginning (oldest first)
+      currentId = run.retry_of || null;
+    }
+
+    return chain;
+  }
+
+  /**
+   * Find the latest attempt in a retry chain.
+   *
+   * Given any run ID in a chain (original or retry), finds the most recent attempt.
+   * Uses a recursive approach: first walks back to original, then forward to latest.
+   */
+  async findLatestInChain(
+    runId: string,
+    tx?: DBInterface
+  ): Promise<HandlerRun | null> {
+    const db = tx || this.db.db;
+
+    // First, find the original run (the one with no retry_of)
+    let originalId = runId;
+    let current = await this.get(runId, tx);
+    while (current && current.retry_of) {
+      originalId = current.retry_of;
+      current = await this.get(current.retry_of, tx);
+    }
+
+    // Now find the latest run in the chain (the one nothing points to)
+    // Start from original and follow forward
+    let latestRun = current;
+    let searchId = originalId;
+
+    while (true) {
+      // Find any run that has retry_of pointing to current
+      const results = await db.execO<Record<string, unknown>>(
+        `SELECT * FROM handler_runs WHERE retry_of = ? LIMIT 1`,
+        [searchId]
+      );
+
+      if (!results || results.length === 0) {
+        // No more retries, we found the latest
+        break;
+      }
+
+      latestRun = this.mapRowToHandlerRun(results[0]);
+      searchId = latestRun.id;
+    }
+
+    return latestRun;
+  }
+
+  /**
+   * Get runs that are retries of a given run.
+   * Returns direct children only (not the full descendant chain).
+   */
+  async getRetriesOf(runId: string, tx?: DBInterface): Promise<HandlerRun[]> {
+    const db = tx || this.db.db;
+    const results = await db.execO<Record<string, unknown>>(
+      `SELECT * FROM handler_runs WHERE retry_of = ? ORDER BY start_timestamp`,
+      [runId]
+    );
+
+    if (!results) return [];
+    return results.map((row) => this.mapRowToHandlerRun(row));
+  }
+
+  /**
    * Map a database row to a HandlerRun object.
    */
   private mapRowToHandlerRun(row: Record<string, unknown>): HandlerRun {
@@ -414,6 +509,7 @@ export class HandlerRunStore {
       handler_name: row.handler_name as string,
       phase: row.phase as HandlerRunPhase,
       status: (row.status as RunStatus) || "active", // Default for pre-v39 rows
+      retry_of: (row.retry_of as string) || "", // Default for pre-v41 rows
       prepare_result: row.prepare_result as string,
       input_state: row.input_state as string,
       output_state: row.output_state as string,

@@ -70,7 +70,7 @@ async function createTables(db: DBInterface): Promise<void> {
     )
   `);
 
-  // Handler runs table (includes status column from v39)
+  // Handler runs table (includes status column from v39, retry_of column from v41)
   await db.exec(`
     CREATE TABLE IF NOT EXISTS handler_runs (
       id TEXT PRIMARY KEY NOT NULL DEFAULT '',
@@ -80,6 +80,7 @@ async function createTables(db: DBInterface): Promise<void> {
       handler_name TEXT NOT NULL DEFAULT '',
       phase TEXT NOT NULL DEFAULT 'pending',
       status TEXT NOT NULL DEFAULT 'active',
+      retry_of TEXT NOT NULL DEFAULT '',
       prepare_result TEXT NOT NULL DEFAULT '',
       input_state TEXT NOT NULL DEFAULT '',
       output_state TEXT NOT NULL DEFAULT '',
@@ -95,6 +96,7 @@ async function createTables(db: DBInterface): Promise<void> {
   await db.exec(`CREATE INDEX IF NOT EXISTS idx_handler_runs_workflow ON handler_runs(workflow_id)`);
   await db.exec(`CREATE INDEX IF NOT EXISTS idx_handler_runs_phase ON handler_runs(phase)`);
   await db.exec(`CREATE INDEX IF NOT EXISTS idx_handler_runs_status ON handler_runs(status)`);
+  await db.exec(`CREATE INDEX IF NOT EXISTS idx_handler_runs_retry_of ON handler_runs(retry_of)`);
 
   // Mutations table
   await db.exec(`

@@ -4,7 +4,7 @@
 
 This plan addresses gaps between the current implementation and the updated execution model specifications (`specs/exec-*`). The specs fix discrepancies between documentation (16-scheduling.md, 06b-consumer-lifecycle.md) and existing implementation.
 
-**Current Schema Version**: v40
+**Current Schema Version**: v41
 **Target**: Simple, lovable, complete v1 Keep.AI release
 **Last Verified**: 2026-02-04
 
@@ -15,7 +15,7 @@ This plan addresses gaps between the current implementation and the updated exec
 | Spec | Description | Status | Completion | Priority |
 |------|-------------|--------|------------|----------|
 | exec-09 | Run Status Separation | COMPLETE | 100% | P1 - Critical (Blocker) |
-| exec-10 | Retry Chain | NOT STARTED | 0% | P1 - Critical |
+| exec-10 | Retry Chain | COMPLETE | 100% | P1 - Critical |
 | exec-11 | Scheduler State & wakeAt | NOT STARTED | 0% | P2 - High |
 | exec-12 | Failure Classification | PARTIAL | ~40% | P1 - Critical |
 | exec-13 | Producer Scheduling | NOT STARTED | 0% | P2 - High |
@@ -23,6 +23,7 @@ This plan addresses gaps between the current implementation and the updated exec
 
 **Blocking Dependencies**:
 - exec-09 COMPLETE - unblocks exec-10, exec-11, exec-12, exec-14
+- exec-10 COMPLETE - unblocks exec-14 (for retry on "didn't happen")
 - exec-11 blocks exec-13
 
 ---
@@ -151,57 +152,43 @@ Implementation completed with the following changes:
 
 **Problem**: Each retry should be a separate run record linked via `retry_of`. Current implementation has no `retry_of` column, doesn't create new runs on retry, doesn't implement phase reset rules.
 
-**Verified Code Locations**:
-- `packages/db/src/migrations/v36.ts:69-92` - handler_runs table creation (NO retry_of column)
-- `packages/db/src/handler-run-store.ts:38-54` - HandlerRun interface (MISSING retry_of)
-- `packages/db/src/handler-run-store.ts:56-68` - CreateHandlerRunInput (MISSING retry_of)
-- `packages/db/src/script-store.ts:457-484` - script_runs has getRetriesOfRun() (SESSION level - exists)
-- `packages/agent/src/handler-state-machine.ts:122-135` - failRun() (NO retry creation)
-- `packages/agent/src/session-orchestration.ts:476-519` - resumeIncompleteSessions() (NO retry linking)
-- `packages/agent/src/session-orchestration.ts:499-505` - Resumes same run, doesn't create retry
+**Current State (100% Complete - COMPLETE)**:
 
-**Note**: Session-level retry tracking EXISTS in `script_runs.retry_of` (v20 migration), but handler-level tracking is MISSING.
+Implementation completed with the following changes:
 
-**Current State (0% Complete - NOT STARTED)**:
-- [ ] `handler_runs` table has NO `retry_of` column (confirmed in v36 migration)
-- [ ] `HandlerRun` interface at lines 38-54 has NO `retry_of` field
-- [ ] `CreateHandlerRunInput` at lines 56-68 has NO `retry_of` field
-- [ ] No retry chain tracking at handler level (cannot trace attempt history)
-- [ ] Session-level retry EXISTS in `script_runs.retry_of` (v20), but handler-level is MISSING
-- [ ] No `getRetryChain()` or `getLatestAttempt()` methods in HandlerRunStore
-- [ ] No `createRetryRun()` function
-- [ ] No phase reset logic (before mutation → fresh start, after mutation → continue from emitting)
-- [ ] Crash recovery in `resumeIncompleteSessions()` at lines 476-519 has NO retry linking
-- [ ] Lines 499-505 resume same run, doesn't create linked retry runs
-- [ ] No `shouldCopyResults()` or `getStartPhaseForRetry()` functions
-- [ ] Migration v41 does NOT exist
+1. **Database Migrations**:
+   - [x] Migration v41: Added `retry_of TEXT NOT NULL DEFAULT ''` column to `handler_runs`
+   - [x] Created index `idx_handler_runs_retry_of` for retry chain queries
 
-**Implementation Tasks**:
-- [ ] **DB Migration v41**: Add `retry_of TEXT` column to `handler_runs`, add index
-  - File: `packages/db/src/migrations/v41.ts` (NEW)
-  ```sql
-  ALTER TABLE handler_runs ADD COLUMN retry_of TEXT NOT NULL DEFAULT '';
-  CREATE INDEX idx_handler_runs_retry_of ON handler_runs(retry_of);
-  ```
-- [ ] **Interface**: Update `HandlerRun` at line 38-54 to include `retry_of: string`
-- [ ] **Interface**: Update `CreateHandlerRunInput` at line 56-68 to include `retry_of?: string`
-- [ ] **Store**: Add to `HandlerRunStore`:
-  - [ ] `getRetryChain(runId)` - returns all runs in chain (oldest first)
-  - [ ] `findLatestInChain(originalRunId)` - gets most recent attempt
-- [ ] **State Machine**: Add in `handler-state-machine.ts` after line 80:
-  - [ ] `shouldCopyResults(phase)` - returns true if phase === 'mutated' || phase === 'emitting'
-  - [ ] `getStartPhaseForRetry(previousPhase)` - returns 'emitting' if mutation applied, else 'preparing'
-  - [ ] `createRetryRun(params)` - atomic: mark previous with status + create new run with retry_of
-- [ ] **Crash Recovery**: Update `resumeIncompleteSessions()` at line 476-519:
-  - [ ] Find active runs → mark as `status: 'crashed'`
-  - [ ] For non-indeterminate: create recovery run with `retry_of`
-  - [ ] For indeterminate mutations: don't auto-retry (handled by exec-14)
-- [ ] **Session Orchestration**: Update to use retry semantics:
-  - [ ] When handler fails with `paused:transient` → scheduler creates retry after backoff
-  - [ ] When handler fails with `failed:logic` → auto-fix creates retry with new script
+2. **Type System & Store** (`packages/db/src/handler-run-store.ts`):
+   - [x] Added `retry_of: string` field to `HandlerRun` interface
+   - [x] Added `retry_of?: string`, `phase?: HandlerRunPhase`, `prepare_result?: string` to `CreateHandlerRunInput`
+   - [x] Updated `create()` to handle new fields
+   - [x] Updated `mapRowToHandlerRun()` to include retry_of
+   - [x] Added `getRetryChain(runId)` - returns all runs in chain (oldest first)
+   - [x] Added `findLatestInChain(runId)` - gets most recent attempt
+   - [x] Added `getRetriesOf(runId)` - gets direct retries of a run
 
-**Dependencies**: exec-09 (for status field)
-**Tests**: Test retry chain creation, phase reset rules, crash recovery
+3. **Phase Reset Rules** (`packages/agent/src/handler-state-machine.ts`):
+   - [x] Added `shouldCopyResults(phase)` - returns true if phase === 'mutated' || phase === 'emitting'
+   - [x] Added `getStartPhaseForRetry(previousPhase)` - returns 'emitting' if mutation applied, else 'preparing'
+   - [x] Added `RetryReason` type: 'transient' | 'logic_fix' | 'crashed_recovery' | 'user_retry'
+   - [x] Added `CreateRetryRunParams` interface
+   - [x] Added `createRetryRun(params)` - atomic: mark previous with status + create new run with retry_of
+
+4. **Crash Recovery** (`packages/agent/src/session-orchestration.ts`):
+   - [x] Updated `resumeIncompleteSessions()` to properly handle crash recovery:
+     - Find active runs → mark as `status: 'crashed'`
+     - For non-indeterminate: create recovery run with `retry_of`
+     - For indeterminate mutations (in_flight): mark `paused:reconciliation`, don't auto-retry
+
+5. **Tests** (`packages/tests/src/handler-run-store.test.ts`):
+   - [x] Added 6 new tests for retry chain functionality
+   - [x] Tests for: retry_of linking, getRetryChain, findLatestInChain, getRetriesOf, starting phase, prepare_result copying
+   - [x] Updated test table schemas to include retry_of column
+
+**Dependencies**: exec-09 (for status field) - COMPLETE
+**Tests**: `packages/tests/src/handler-run-store.test.ts` (retry chain tests), `packages/tests/src/session-orchestration.test.ts`
 
 ---
 
@@ -420,8 +407,8 @@ ALTER TABLE handler_runs ADD COLUMN status TEXT NOT NULL DEFAULT 'active';
 -- v40: exec-09 - Data migration (COMPLETE)
 -- Migrates existing phase values to status: committed->committed, failed->failed:logic, suspended->paused:reconciliation
 
--- v41: exec-10 - Retry chain
-ALTER TABLE handler_runs ADD COLUMN retry_of TEXT;
+-- v41: exec-10 - Retry chain (COMPLETE)
+ALTER TABLE handler_runs ADD COLUMN retry_of TEXT NOT NULL DEFAULT '';
 CREATE INDEX idx_handler_runs_retry_of ON handler_runs(retry_of);
 
 -- v42: exec-11 - Per-consumer wakeAt
@@ -453,7 +440,7 @@ SELECT crsql_as_crr('producer_schedules');
 |------|---------|--------|
 | `packages/db/src/migrations/v39.ts` | Add status column to handler_runs | COMPLETE |
 | `packages/db/src/migrations/v40.ts` | Data migration for status values | COMPLETE |
-| `packages/db/src/migrations/v41.ts` | Add retry_of column to handler_runs | NOT STARTED |
+| `packages/db/src/migrations/v41.ts` | Add retry_of column to handler_runs | COMPLETE |
 | `packages/db/src/migrations/v42.ts` | Add wake_at column to handler_state | NOT STARTED |
 | `packages/db/src/migrations/v43.ts` | Create producer_schedules table | NOT STARTED |
 | `packages/db/src/producer-schedule-store.ts` | ProducerScheduleStore class | NOT STARTED |

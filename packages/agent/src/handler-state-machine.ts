@@ -162,6 +162,144 @@ function isDefiniteFailure(error: ClassifiedError): boolean {
 }
 
 // ============================================================================
+// Phase Reset Rules (exec-10)
+// ============================================================================
+
+/**
+ * Phases where mutation has been applied.
+ * After mutation is applied, retry runs must continue forward (not reset).
+ */
+type ConsumerPhase = Extract<
+  HandlerRunPhase,
+  "pending" | "preparing" | "prepared" | "mutating" | "mutated" | "emitting" | "committed"
+>;
+
+/**
+ * Check if prepare_result and mutation_result should be copied to retry run.
+ *
+ * Per exec-10 spec: After mutation is applied, we must proceed forward
+ * with existing results (can't re-do the mutation).
+ *
+ * @param phase - The phase at which the run failed
+ * @returns true if results should be copied
+ */
+export function shouldCopyResults(phase: HandlerRunPhase): boolean {
+  // After mutation is applied, we must proceed forward with existing results
+  return phase === "mutated" || phase === "emitting";
+}
+
+/**
+ * Get the starting phase for a retry run based on the previous run's phase.
+ *
+ * Per exec-10 spec:
+ * - Before mutation (preparing, prepared, mutating with failed mutation): Start fresh from preparing
+ * - After mutation (mutated, emitting): Resume from emitting with copied results
+ *
+ * @param previousPhase - The phase at which the previous run stopped
+ * @returns The phase the retry run should start at
+ */
+export function getStartPhaseForRetry(previousPhase: HandlerRunPhase): HandlerRunPhase {
+  if (shouldCopyResults(previousPhase)) {
+    // Can't reset - mutation happened, resume from emitting
+    return "emitting";
+  }
+  // Before mutation - start fresh
+  return "preparing";
+}
+
+/**
+ * Reason for creating a retry run.
+ */
+export type RetryReason =
+  | "transient" // Network/rate limit, auto-retry
+  | "logic_fix" // Script error fixed, retry with new script
+  | "crashed_recovery" // Host crashed, recovery run
+  | "user_retry"; // User manually triggered retry
+
+/**
+ * Parameters for creating a retry run.
+ */
+export interface CreateRetryRunParams {
+  /** The previous run that failed/crashed */
+  previousRun: HandlerRun;
+  /** The status to set on the previous run */
+  previousRunStatus: RunStatus;
+  /** Why we're creating a retry */
+  reason: RetryReason;
+  /** The API for database access */
+  api: KeepDbApi;
+}
+
+/**
+ * Create a new retry run linked to a previous failed run.
+ *
+ * Per exec-10 spec:
+ * - Creates a new run with retry_of pointing to previous run
+ * - Applies phase reset rules (fresh start vs continue from emitting)
+ * - Copies prepare_result if mutation was applied
+ * - Atomic: marks previous run + creates new run in single transaction
+ *
+ * @param params - The retry parameters
+ * @returns The newly created retry run
+ */
+export async function createRetryRun(
+  params: CreateRetryRunParams
+): Promise<HandlerRun> {
+  const { previousRun, previousRunStatus, reason, api } = params;
+
+  const startPhase = getStartPhaseForRetry(previousRun.phase);
+  const copyResults = shouldCopyResults(previousRun.phase);
+
+  log(
+    `Creating retry run for ${previousRun.id} (${previousRun.handler_name}): ` +
+    `reason=${reason}, startPhase=${startPhase}, copyResults=${copyResults}`
+  );
+
+  // Atomic: update previous run status AND create new run
+  // Use wrapper object to work around TypeScript closure narrowing limitations
+  const result: { newRun: HandlerRun | null } = { newRun: null };
+
+  await api.db.db.tx(async (tx: DBInterface) => {
+    // 1. Mark previous run with final status
+    await api.handlerRunStore.update(
+      previousRun.id,
+      {
+        status: previousRunStatus,
+        end_timestamp: new Date().toISOString(),
+      },
+      tx
+    );
+
+    // 2. Create new retry run
+    result.newRun = await api.handlerRunStore.create(
+      {
+        script_run_id: previousRun.script_run_id,
+        workflow_id: previousRun.workflow_id,
+        handler_type: previousRun.handler_type,
+        handler_name: previousRun.handler_name,
+        // Link to previous attempt
+        retry_of: previousRun.id,
+        // Phase reset or continue from emitting
+        phase: startPhase,
+        // Copy results if mutation was applied
+        prepare_result: copyResults ? previousRun.prepare_result : undefined,
+        // Same input state
+        input_state: previousRun.input_state,
+      },
+      tx
+    );
+  });
+
+  if (!result.newRun) {
+    throw new Error("Failed to create retry run");
+  }
+
+  const newRun = result.newRun;
+  log(`Created retry run ${newRun.id} with retry_of=${previousRun.id}`);
+  return newRun;
+}
+
+// ============================================================================
 // Helper Functions
 // ============================================================================
 
