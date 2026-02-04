@@ -1,0 +1,127 @@
+COMMIT REVIEW: 782539e
+======================
+Title: Add intent, perms, items, reconcile, idempotency docs, add logical-item spec, minor fixes
+Author: Claude Agent
+Date: 2026-01-30
+
+SUMMARY OF CHANGES
+------------------
+This commit adds a comprehensive set of foundational documentation and specification
+documents for the Keep.AI v1 automation execution model. The changes span:
+
+1. **New Documentation Files Added (docs/dev/)**:
+   - 10-intent-spec.md: Defines Intent Spec for drift control and semantic contracts
+   - 11-permissions.md: Defines permissions, grants, and enforced policy model
+   - 12-logical-items.md: Defines logical items as the fundamental unit of work
+   - 13-reconciliation.md: Defines mutation reconciliation for indeterminate outcomes
+   - 14-idempotency.md: Defines idempotent execution across retries/repairs
+   - 15-host-policies.md: Placeholder for configurable host runtime policies
+
+2. **Updated Documentation**:
+   - 04-runtime-planner-executor-maintainer.md: Added sandbox/tool wrapper details,
+     impact classification for Maintainer, script versioning info
+   - 09-failure-repair.md: Added cross-references to new chapters
+
+3. **New Spec Added**:
+   - specs/logical-items.md: Comprehensive 1453-line specification for logical items
+
+4. **Minor Code Changes**:
+   - Removed tailwindcss-animate dependency from apps/web
+   - Removed animation classes from dropdown-menu.tsx
+   - Added CSS override for Radix popper positioning issues
+   - Moved maintainer-task-type.md from specs/new to specs/done
+   - Deleted IMPLEMENTATION_PLAN.md (old plan)
+
+DETAILED ANALYSIS
+-----------------
+The documentation establishes a well-thought-out architecture with clear separation
+of concerns:
+
+**Intent Spec (10-intent-spec.md)**:
+- Defines semantic contracts to prevent drift when LLMs generate/repair code
+- Clearly distinguishes between enforced (host-level) and best-effort (LLM) constraints
+- Intentionally keeps users from editing Intent Spec directly to preserve delegation model
+
+**Permissions (11-permissions.md)**:
+- Host-enforced, not LLM-enforced - critical for security
+- Permission envelopes are immutable per workflow major version
+- Repairs cannot expand permissions - prevents silent authority escalation
+
+**Logical Items (12-logical-items.md)**:
+- Fundamental unit of work tracking (progress, observability, control)
+- Item ledger with clear state transitions (processing→done/failed/skipped/needs_attention)
+- Attempt tracking for reprocessing scenarios
+- Strong emphasis on stable logical item IDs with detailed guidance
+
+**Reconciliation (13-reconciliation.md)**:
+- Explicit modeling of indeterminate mutation outcomes
+- Tool-provided reconcile() method for each mutator
+- State machine: in_flight → applied/failed/needs_reconcile/indeterminate
+- Fail-closed design with user escalation
+
+**Idempotency (14-idempotency.md)**:
+- Built on logical items and reconciliation
+- Mutation identity keyed by logical_item_id, attempt_id, tool, operation, params
+- Payload comparison for detecting divergence during replay
+- Clear guarantees and non-goals
+
+POTENTIAL ISSUES
+----------------
+
+1. **CSS Override Concern** (apps/web/src/ui/globals.css:4-8):
+   ```css
+   [data-radix-popper-content-wrapper] {
+     transform: none !important;
+     position: absolute !important;
+     inset: auto !important;
+   }
+   ```
+   - Using !important to override Radix internals is fragile and could break with
+     Radix updates. This appears to be a workaround for positioning issues.
+   - SEVERITY: Low
+   - PROPOSAL: Consider investigating root cause of Radix positioning issues rather
+     than global CSS override. May need to update Radix UI version or check for
+     conflicting styles.
+
+2. **Chapter 15 Host Policies Mostly Placeholder**:
+   - The document contains placeholders for all substantive sections (retry policies,
+     reconciliation limits, repair budgets, timeouts, configuration).
+   - SEVERITY: Low (documentation debt, not code issue)
+   - PROPOSAL: Track completion of this chapter in specs backlog.
+
+3. **Logical Items Spec Length**:
+   - At 1453 lines, specs/logical-items.md is extremely long for a single spec file.
+   - SEVERITY: Low (style/organization concern)
+   - PROPOSAL: Consider splitting into multiple smaller specs if implementation
+     work needs to be parallelized or phased.
+
+4. **No Implementation of specs/logical-items.md**:
+   - The spec is added but no corresponding implementation code.
+   - SEVERITY: Low (expected for documentation-first approach)
+   - PROPOSAL: Ensure spec is tracked for implementation priority.
+
+5. **Potential Circular References in Documentation**:
+   - Chapter 14 references Chapter 12 and 13
+   - Chapter 13 references Chapter 14
+   - This can make reading order confusing for new contributors.
+   - SEVERITY: Very Low
+   - PROPOSAL: Add a "Reading Order" note to the main docs index.
+
+6. **IMPLEMENTATION_PLAN.md Deletion**:
+   - The old implementation plan was deleted without apparent migration of any
+     remaining TODO items. The file showed Priority 4/5 items were still pending.
+   - SEVERITY: Low to Medium
+   - PROPOSAL: Verify all actionable items from the deleted plan are tracked
+     elsewhere (specs or separate tracking document).
+
+OVERALL ASSESSMENT
+------------------
+This is a well-structured documentation commit that establishes important
+architectural foundations for the v1 release. The separation of concerns between
+Intent Spec, Permissions, Logical Items, Reconciliation, and Idempotency is clean
+and the documentation provides clear guidance for both implementation and LLM
+agent constraints.
+
+The CSS workaround is the only code-level concern, and it's minor. The main
+follow-up needed is to ensure the detailed specs lead to actual implementation
+work being prioritized.

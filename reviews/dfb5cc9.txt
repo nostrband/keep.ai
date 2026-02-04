@@ -1,0 +1,224 @@
+COMMIT REVIEW: dfb5cc9 - Migrate remaining tools to new Tool interface
+============================================================================
+
+COMMIT INFO:
+- Hash: dfb5cc9d200fed2a58f35e09cfe10fe11f3c85f3
+- Author: Artur Briugeman
+- Date: 2026-01-30 16:55:56
+- Co-Authored-By: Claude Opus 4.5
+- Files Changed: 27
+- Insertions: 1129, Deletions: 716
+
+============================================================================
+CHANGES DESCRIPTION
+============================================================================
+
+This commit completes the migration of all 35 tools from the old AI SDK `tool()`
+interface to the new custom `Tool` interface with namespace, name, and isReadOnly
+metadata. This is a key step in the logical items infrastructure implementation.
+
+TOOLS MIGRATED (26 files, 26 tools):
+
+1. **Util tools (2):**
+   - `atob.ts`: Util.atob - base64 decode (read-only)
+   - `get-weather.ts`: Weather.get - weather forecast (read-only)
+
+2. **Console tool (1):**
+   - `console-log.ts`: Console.log - logging (read-only, allowed outside withItem)
+
+3. **Web tools (3):**
+   - `web-search.ts`: Web.search - web search (read-only)
+   - `web-fetch.ts`: Web.fetchParse - fetch and parse URLs (read-only)
+   - `web-download.ts`: Web.download - download files (read-only)
+
+4. **Google tools (4):**
+   - `gmail.ts`: Gmail.api - Gmail API (read-only always)
+   - `gdrive.ts`: GoogleDrive.api - GDrive API (dynamic - method determines read/write)
+   - `gsheets.ts`: GoogleSheets.api - Sheets API (dynamic - method determines read/write)
+   - `gdocs.ts`: GoogleDocs.api - Docs API (dynamic - method determines read/write)
+
+5. **Notion tool (1):**
+   - `notion.ts`: Notion.api - Notion API (dynamic - method determines read/write)
+
+6. **Image tools (3):**
+   - `images-explain.ts`: Images.explain - analyze images (read-only)
+   - `images-generate.ts`: Images.generate - generate images (MUTATION)
+   - `images-transform.ts`: Images.transform - transform images (MUTATION)
+
+7. **Text tools (4):**
+   - `text-extract.ts`: Text.extract (read-only)
+   - `text-classify.ts`: Text.classify (read-only)
+   - `text-summarize.ts`: Text.summarize (read-only)
+   - `text-generate.ts`: Text.generate (read-only)
+
+8. **Document tools (2):**
+   - `pdf-explain.ts`: Pdf.explain - analyze PDFs (read-only)
+   - `audio-explain.ts`: Audio.explain - analyze audio (read-only)
+
+9. **User tool (1):**
+   - `user-send.ts`: User.send - send messages to user (read-only)
+
+10. **Scripts tools (5):**
+    - `get-script.ts`: Scripts.get (read-only)
+    - `list-scripts.ts`: Scripts.list (read-only)
+    - `script-history.ts`: Scripts.history (read-only)
+    - `list-script-runs.ts`: Scripts.listRuns (read-only)
+    - `get-script-run.ts`: Scripts.getRun (read-only)
+
+PATTERN CHANGES:
+
+Before:
+```typescript
+import { tool } from "ai";
+export function makeAtobTool() {
+  return tool({
+    description: "...",
+    inputSchema: z.string(),
+    outputSchema: z.string(),
+    execute: async (input) => { ... },
+  });
+}
+```
+
+After:
+```typescript
+import { defineReadOnlyTool, Tool } from "./types";
+const inputSchema = z.string();
+const outputSchema = z.string();
+type Input = z.infer<typeof inputSchema>;
+type Output = z.infer<typeof outputSchema>;
+
+export function makeAtobTool(): Tool<Input, Output> {
+  return defineReadOnlyTool({
+    namespace: "Util",
+    name: "atob",
+    description: `...
+ℹ️ Not a mutation - can be used outside Items.withItem().`,
+    inputSchema,
+    outputSchema,
+    execute: async (input) => { ... },
+  }) as Tool<Input, Output>;
+}
+```
+
+============================================================================
+POTENTIAL ISSUES
+============================================================================
+
+ISSUE 1: INCONSISTENT TYPE CASTING
+Severity: LOW
+Location: All migrated tool files
+Description: Every tool function ends with `as Tool<Input, Output>` cast.
+This suggests the return type of defineReadOnlyTool/defineTool doesn't match
+Tool<Input, Output>. The type system should be self-consistent without casts.
+
+Proposal: Review the types.ts helpers to ensure they return properly typed
+Tool<TInput, TOutput> without needing explicit casts at call sites.
+
+---
+
+ISSUE 2: DYNAMIC isReadOnly FOR GOOGLE TOOLS MAY BE INCOMPLETE
+Severity: MEDIUM
+Location: gdocs.ts, gdrive.ts, gsheets.ts, notion.ts
+Description: These tools use `isReadOnly: (params) => READ_METHODS.has(params.method)`
+to determine read vs write based on API method. The READ_METHODS sets may not be
+complete if new methods are added to SUPPORTED_METHODS in the future.
+
+Current READ_METHODS:
+- GoogleDocs: documents.get (but create, batchUpdate are write)
+- GoogleDrive: files.list, files.get, files.export
+- GoogleSheets: spreadsheets.get, spreadsheets.values.get, spreadsheets.values.batchGet
+- Notion: databases.query, databases.retrieve, pages.retrieve, blocks.children.list, search
+
+The code correctly uses Set membership for safety (per spec fix-google-tools-event-tracking-pattern).
+
+Proposal: Add a comment noting that new read methods must be added to both
+SUPPORTED_METHODS and READ_METHODS, or refactor to derive READ_METHODS from
+SUPPORTED_METHODS using a naming pattern (though explicit is probably safer).
+
+---
+
+ISSUE 3: Gmail TOOL IS MARKED FULLY READ-ONLY BUT IT ISN'T
+Severity: HIGH
+Location: gmail.ts:54
+Description: The Gmail tool is defined using `defineReadOnlyTool` which implies
+all operations are read-only. However, Gmail does have write operations through
+the API (e.g., users.messages.modify for marking emails read/unread, adding labels).
+
+Current SUPPORTED_METHODS for Gmail:
+- users.messages.list (read)
+- users.messages.get (read)
+- users.labels.list (read)
+- users.threads.list (read)
+- users.threads.get (read)
+- users.getProfile (read)
+
+These ARE all read-only, so the current implementation is actually correct for
+the currently supported methods. BUT if users.messages.modify or similar write
+methods are ever added, the tool should switch to `defineTool` with dynamic isReadOnly.
+
+Proposal: Add a comment explaining that Gmail.api is read-only because only read
+methods are currently supported, and to switch to `defineTool` with dynamic
+isReadOnly if write methods are added.
+
+---
+
+ISSUE 4: User.send MARKED AS READ-ONLY
+Severity: LOW
+Location: user-send.ts
+Description: User.send sends messages to the user and is marked as read-only.
+While it doesn't modify external systems like databases, sending a message could
+be considered a side effect. The definition seems correct since it's not modifying
+external user-controlled state - it's internal to the automation system.
+
+Proposal: No change needed - the classification seems correct for the intended
+purpose of mutation tracking (which tracks changes to external state).
+
+---
+
+ISSUE 5: DESCRIPTIONS HAVE INCONSISTENT MUTATION INFO FORMATTING
+Severity: LOW
+Location: All tool files
+Description: Some tools have:
+- "ℹ️ Not a mutation - can be used outside Items.withItem()" (read-only tools)
+- "⚠️ MUTATION - must be called inside Items.withItem()" (write tools)
+- "⚠️ MUTATION INFO:\n- Read methods (can use...)\n- Write methods (MUST use...)"
+  (dynamic tools)
+
+This is actually good documentation but the format varies slightly between files.
+
+Proposal: Minor issue - consider standardizing the exact wording for consistency.
+
+---
+
+ISSUE 6: UNUSED IMPORT WARNING POTENTIAL
+Severity: VERY LOW
+Location: get-weather.ts:7
+Description: NetworkError is imported but may not be used after the refactoring.
+Line 7 shows: `import { LogicError, classifyHttpError, classifyGenericError,
+isClassifiedError } from "../errors";`
+
+The diff shows NetworkError was removed from the import. This is correct.
+
+Proposal: No issue - the import was correctly cleaned up.
+
+============================================================================
+SUMMARY
+============================================================================
+
+This is a well-executed, systematic refactoring that:
+
+1. CORRECTLY migrates all tools to the new interface with proper metadata
+2. CORRECTLY distinguishes read-only tools (defineReadOnlyTool) from
+   mutation-capable tools (defineTool with isReadOnly function)
+3. CORRECTLY handles dynamic read/write determination for API-wrapper tools
+4. CORRECTLY adds user-facing documentation about mutation requirements
+5. CORRECTLY extracts input/output schemas to module scope for type inference
+
+The main issues are:
+- HIGH: Verify Gmail.api is intentionally restricted to read-only methods
+- MEDIUM: Document that READ_METHODS must be updated when adding new methods
+- LOW: The `as Tool<...>` casts suggest type helper could be improved
+
+Overall: GOOD COMMIT - Implements the tool interface migration cleanly with
+proper separation of read-only vs mutation operations.

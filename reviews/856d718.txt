@@ -1,0 +1,231 @@
+COMMIT: 856d718
+TITLE: Add session orchestration test coverage (exec-07)
+DATE: 2026-02-03 19:14:56 +0100
+AUTHOR: Artur Briugeman (Co-Authored-By: Claude Opus 4.5)
+
+== SUMMARY ==
+
+This commit adds comprehensive test coverage for the session orchestration system
+(exec-07). The test file contains 25 tests covering:
+- Basic validation (no active script, invalid JSON config)
+- Session state management (completed, failed states)
+- Trigger types (schedule, manual, event)
+- Consumer loop and work detection
+- Budget limit enforcement
+- Single-threaded constraint (canStartSession, executeIfIdle)
+- Cost aggregation from handler runs
+- Crash recovery (resumeIncompleteSessions)
+- Handler run ordering
+
+Files changed:
+- IMPLEMENTATION_PLAN.md - Marks exec-07 tests as done
+- packages/tests/src/session-orchestration.test.ts - 850 lines of new tests
+
+== CHANGES ==
+
+### Test Infrastructure (lines 1-175)
+
+The test file creates a complete in-memory database schema that mirrors production:
+- `workflows` table with handler_config and consumer_sleep_until columns
+- `scripts` table
+- `script_runs` table (sessions) with trigger field
+- `handler_runs` table with full phase tracking
+- `mutations` table for mutation ledger
+- `handler_state` table
+- `topics` and `events` tables for event-driven execution
+
+Helper functions:
+- `createTables(db)` - Creates all required tables
+- `createWorkflowWithScript(db, ...)` - Sets up workflow with script
+- `createTopicWithEvents(api, ...)` - Creates topic and publishes events
+
+### Test Suites
+
+1. **Basic Validation (lines 240-324)**
+   - Tests that missing active_script fails gracefully
+   - Tests that invalid handler_config JSON is handled
+   - Tests that session record is created on execution start
+   - Tests empty workflow (no producers/consumers) completes successfully
+
+2. **Session State Management (lines 326-392)**
+   - Tests completed session state and timestamps
+   - Tests failed session state and workflow status change to "error"
+
+3. **Trigger Types (lines 394-477)**
+   - Tests schedule trigger runs producers
+   - Tests manual trigger runs producers
+   - Tests event trigger skips producers
+
+4. **Consumer Loop (lines 479-545)**
+   - Tests no consumer runs when no pending work
+   - Tests consumer runs created when pending events exist
+
+5. **Budget Limit (lines 547-580)**
+   - Tests maxIterations configuration respected
+
+6. **Single-Threaded Constraint (lines 582-654)**
+   - canStartSession returns true when no active runs
+   - canStartSession returns false when active run exists
+   - canStartSession returns true when all runs terminal
+   - executeWorkflowSessionIfIdle returns null when busy
+   - executeWorkflowSessionIfIdle executes when idle
+
+7. **Cost Aggregation (lines 656-719)**
+   - getSessionCost returns 0 for empty session
+   - getSessionCost aggregates all handler run costs
+   - getSessionCost handles null costs gracefully
+
+8. **Crash Recovery (lines 721-803)**
+   - resumeIncompleteSessions skips paused workflows
+   - resumeIncompleteSessions resumes active workflows
+
+9. **Handler Run Order (lines 805-850)**
+   - Tests correct handler_type and handler_name on creation
+   - Tests producers run before consumers
+
+== ISSUE REVIEW ==
+
+### Issue 1: Test Creates Incomplete Database Schema
+**Severity:** Low
+**Location:** packages/tests/src/session-orchestration.test.ts:34-130
+
+The test creates tables with `NOT NULL DEFAULT ''` for all columns, but the actual
+production migrations may have different defaults. For example:
+- `handler_run_count INTEGER NOT NULL DEFAULT 0` is correct
+- `handler_config TEXT NOT NULL DEFAULT ''` should match the actual migration
+
+This could mask issues where the actual migration has different defaults.
+
+**Impact:** Tests may pass even if production schema differs slightly.
+
+### Issue 2: executeHandler Mock Not Fully Verified
+**Severity:** Low
+**Location:** Various test locations calling executeWorkflowSession
+
+The tests create handler runs but the executeHandler function (from handler-state-machine)
+is called for real. However, the script code provided in tests is minimal:
+```javascript
+const workflow = { producers: { checkEmails: { handler: async () => ({}) } } };
+```
+
+This minimal script cannot actually execute in the sandbox, so executeHandler will
+fail. The tests appear to verify that failure handling works, but this is indirect.
+
+**Impact:** Tests verify failure paths more than success paths.
+
+### Issue 3: Missing Test for Partial Producer Failure
+**Severity:** Medium
+**Location:** Trigger type tests (lines 394-477)
+
+When a workflow has multiple producers and one fails, the session should stop
+immediately (per exec-07 spec). There's no test that verifies:
+1. First producer succeeds
+2. Second producer fails
+3. Session is marked failed
+4. Third producer is never run
+
+**Impact:** Bug could exist where all producers are attempted even after failure.
+
+### Issue 4: Missing Test for Consumer Reservation Lifecycle
+**Severity:** Medium
+**Location:** Consumer loop tests (lines 479-545)
+
+The tests verify that consumer handler runs are created, but don't verify the full
+event lifecycle:
+- Events reserved during prepare phase
+- Events consumed during next phase
+- Events skipped on handler failure
+
+**Impact:** Event state transitions may not be tested.
+
+### Issue 5: continueSession Not Directly Tested
+**Severity:** Low
+**Location:** packages/agent/src/session-orchestration.ts:404-462
+
+The continueSession function is only called indirectly through resumeIncompleteSessions.
+There's no direct test of continueSession behavior such as:
+- Correct iteration counting from existing handler runs
+- Budget enforcement when continuing
+
+**Impact:** Edge cases in continueSession may not be caught.
+
+### Issue 6: Race Condition in canStartSession Test
+**Severity:** Low
+**Location:** packages/tests/src/session-orchestration.test.ts:582-654
+
+The test creates a handler run and then checks canStartSession, but in production
+there could be a race where:
+1. canStartSession returns true
+2. Another process starts a session
+3. This process also starts a session
+
+The tests don't verify the atomicity of the check-then-act pattern.
+
+**Impact:** Concurrent session starts could occur in production.
+
+### Issue 7: Cost Aggregation Doesn't Filter by Session
+**Severity:** Low
+**Location:** packages/agent/src/session-orchestration.ts:189-195
+
+The getSessionCost function is correctly implemented, but the test at line 676-719
+creates handler runs with the same session ID without verifying isolation from
+other sessions.
+
+Actually, looking more closely, this is fine - the test is isolated per beforeEach.
+No issue here.
+
+## RETRACTED: Issue 7 is not an issue.
+
+== PROPOSALS ==
+
+### Proposal 1: Add Schema Validation Test
+Add a test that compares the test schema with actual migration output to ensure
+they stay in sync:
+```typescript
+it("schema should match production migrations", async () => {
+  const prodDb = await createDBWithMigrations();
+  // Compare table schemas
+});
+```
+
+### Proposal 2: Add Mock executeHandler for Success Paths
+Create a mock that allows testing success paths without a full sandbox:
+```typescript
+vi.mock("./handler-state-machine", () => ({
+  executeHandler: vi.fn().mockResolvedValue({ phase: "committed" })
+}));
+```
+
+### Proposal 3: Add Multi-Producer Failure Test
+```typescript
+it("should stop after first producer failure", async () => {
+  await createWorkflowWithScript(db, "workflow-1", "script-1", code,
+    '{"producers":{"p1":{},"p2":{},"p3":{}},"consumers":{}}'
+  );
+  // Configure p2 to fail
+  const result = await executeWorkflowSession(...);
+  expect(result.status).toBe("failed");
+  const runs = await api.handlerRunStore.getBySession(result.sessionId!);
+  expect(runs.filter(r => r.handler_type === "producer")).toHaveLength(2);
+});
+```
+
+### Proposal 4: Add Event Lifecycle Tests
+Add tests that verify event status transitions through the consumer lifecycle:
+- Event starts as 'pending'
+- Event becomes 'reserved' during prepare
+- Event becomes 'consumed' on commit
+- Event stays 'reserved' or becomes 'skipped' on failure
+
+### Proposal 5: Add Direct continueSession Tests
+Add a describe block that directly tests continueSession:
+```typescript
+describe("continueSession", () => {
+  it("should start from correct iteration count", async () => {...});
+  it("should respect budget when continuing", async () => {...});
+});
+```
+
+### Proposal 6: Document Single-Threaded Limitation
+Add a comment to canStartSession noting that the check is not atomic and relies
+on caller serialization (e.g., scheduler's setInterval ensures sequential calls).

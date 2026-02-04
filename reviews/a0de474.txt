@@ -1,0 +1,134 @@
+COMMIT: a0de474
+TITLE: Fix P2/P3 code quality issues and add transport tests
+DATE: Fri Jan 30 15:29:41 2026 +0100
+
+================================================================================
+CHANGES SUMMARY
+================================================================================
+
+1. Fixed invalid nested MAX(COALESCE(MAX(...))) SQL in draft activity queries
+   with proper CASE expressions (P2) in packages/db/src/script-store.ts
+
+2. Added tests for POST endpoint error handling in TransportClientHttp:
+   500, 503, and 400 responses (P2) in packages/tests/src/transport-client-http.test.ts
+
+3. Removed files.list from GDrive TRACKED_METHODS - read ops don't need
+   audit tracking (P3) in packages/agent/src/tools/gdrive.ts
+
+4. Standardized React Query mutations on callback pattern in ArchivedPage (P3)
+   in apps/web/src/components/ArchivedPage.tsx
+
+5. Removed obsolete v7 migration prototyping code from database.ts (P3)
+   in packages/db/src/database.ts
+
+================================================================================
+ISSUES FOUND
+================================================================================
+
+ISSUE #1 [MINOR]: SQL comparison logic order could be simplified
+Location: packages/db/src/script-store.ts:886-894, 971-979
+Description: The CASE expression compares chat messages against COALESCE of
+  scripts/workflow, then scripts against workflow timestamp. The second condition
+  does not compare against chat messages, though in practice the first condition
+  would catch newer chat messages. SQLite's MAX() can take multiple arguments
+  for a simpler solution: MAX(MAX(cm.timestamp), MAX(s.timestamp), w.timestamp)
+Severity: LOW
+Proposal: Consider simplifying to direct MAX() across all three values. However,
+  current solution is functionally correct.
+
+ISSUE #2 [MINOR]: Transport tests lack specificity about "graceful" error handling
+Location: packages/tests/src/transport-client-http.test.ts:500-733
+Description: Tests verify operations "complete without throwing" but don't assert:
+  - Whether errors are logged or exposed via error callbacks
+  - What happens to subsequent operations after an error
+  - Whether retry logic exists and works
+Severity: LOW
+Proposal: Add assertions about expected error behavior (logging, state changes).
+  Rename tests to specify expected behavior like "should continue operation
+  after 500 error" instead of vague "gracefully".
+
+ISSUE #3 [MINOR]: Test code duplication
+Location: packages/tests/src/transport-client-http.test.ts:500-580
+Description: createErrorServer() duplicates ~60 lines of SSE setup from
+  createMockServer() (lines 27-117). This creates maintenance burden.
+Severity: LOW
+Proposal: Refactor to share SSE setup code between createMockServer() and
+  createErrorServer(). Extract common server setup to a shared helper.
+
+ISSUE #4 [MINOR]: Missing test coverage for edge cases
+Location: packages/tests/src/transport-client-http.test.ts
+Description: Tests added for 500, 503, 400 errors but missing:
+  - Network timeout scenarios
+  - Malformed JSON responses
+  - Connection refused/network errors
+  - Mixed success/failure scenarios (sync succeeds, data fails)
+Severity: LOW
+Proposal: Add test cases for the missing scenarios to improve coverage.
+
+ISSUE #5 [MINOR]: Hardcoded wait times in tests could be flaky
+Location: packages/tests/src/transport-client-http.test.ts (wait(100), wait(50))
+Description: Hardcoded wait times could cause flakiness in CI environments
+  with varying performance characteristics.
+Severity: LOW
+Proposal: Consider using more deterministic synchronization or increasing
+  wait times with configurable timeouts.
+
+ISSUE #6 [INFO]: Migration removal assumes all users past v7
+Location: packages/db/src/database.ts (removed lines 163-191)
+Description: The temporary v7 migration code was removed but there's no
+  documentation confirming all production databases are at version >= 7.
+  If any users are on v6 or earlier, they will skip this migration step.
+Severity: INFO - Likely not an issue but worth verifying
+Proposal: Document verification that all production databases are past v7,
+  or add a migration version assertion if concerned about edge cases.
+
+================================================================================
+PROPOSALS FOR FIXES
+================================================================================
+
+PROPOSAL #1: Simplify SQL timestamp comparison (for Issue #1)
+---
+Replace CASE expression in getAbandonedDrafts() and getDraftActivitySummary():
+
+Current:
+  CASE
+    WHEN MAX(cm.timestamp) IS NOT NULL
+         AND MAX(cm.timestamp) > COALESCE(MAX(s.timestamp), w.timestamp)
+      THEN MAX(cm.timestamp)
+    WHEN MAX(s.timestamp) IS NOT NULL
+         AND MAX(s.timestamp) > w.timestamp
+      THEN MAX(s.timestamp)
+    ELSE w.timestamp
+  END as last_activity
+
+Proposed:
+  MAX(
+    COALESCE(MAX(cm.timestamp), w.timestamp),
+    COALESCE(MAX(s.timestamp), w.timestamp),
+    w.timestamp
+  ) as last_activity
+
+Note: Current solution works correctly; this is an optional simplification.
+
+PROPOSAL #2: Improve test specificity (for Issues #2, #3, #4, #5)
+---
+1. Rename tests to be more specific about expected behavior
+2. Add assertions for error state/logging after failed requests
+3. Extract common SSE server setup to shared helper
+4. Add missing test cases for timeouts, malformed JSON, network errors
+
+================================================================================
+SUMMARY
+================================================================================
+
+Overall Quality: GOOD
+- All changes are functionally correct
+- No critical bugs introduced
+- Follows established patterns
+
+Minor improvements possible:
+- SQL could be simplified (optional)
+- Test specificity and coverage could be improved
+- Test code has some duplication
+
+The commit successfully addresses P2/P3 issues as intended.

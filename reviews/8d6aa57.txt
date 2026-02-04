@@ -1,0 +1,78 @@
+# Review: Commit 8d6aa57
+
+## Summary
+
+This commit fixes a bug in the draft activity double-counting logic in `packages/db/src/script-store.ts`. Previously, drafts older than 30 days were counted in both `archivableDrafts` AND `abandonedDrafts`, inflating counts and breaking semantic meaning. The fix makes age brackets mutually exclusive:
+- staleDrafts: 3-7 days
+- abandonedDrafts: 7-30 days
+- archivableDrafts: 30+ days
+
+### Files Changed
+- `IMPLEMENTATION_PLAN.md` - Marked task as complete
+- `packages/db/src/script-store.ts` - Fixed counting logic (removed double-counting)
+- `packages/tests/src/script-store.test.ts` - Updated test expectations
+
+---
+
+## Changes in Plain English
+
+1. **script-store.ts (lines 999-1025)**: Changed the `getDraftActivitySummary()` method to use an `if-else` chain instead of independent `if` statements. Before, when a draft was 30+ days old, it incremented both `archivableDrafts++` AND `abandonedDrafts++`. Now each draft is counted in exactly one age bracket.
+
+2. **Test expectations updated**:
+   - Test "should count archivable drafts separately": Changed expected `abandonedDrafts` from 2 to 1 (since 35-day draft now only counts as archivable)
+   - Test "should handle 30-day threshold boundary": Changed expected `abandonedDrafts` from 2 to 1
+
+---
+
+## Potential Issues
+
+### Issue 1: Stale Comment in StaleDraftsBanner.tsx (LOW)
+
+**Location**: `apps/web/src/components/StaleDraftsBanner.tsx:39`
+
+**Description**: The component has a comment that is now misleading:
+```typescript
+} else if (abandonedDrafts > 0) {
+  // Only show abandoned message if no archivable
+  // (to avoid duplication since archivable is a subset)
+```
+
+This comment implies archivable is still a subset of abandoned (the old behavior). The `else if` logic is correct, but the **comment is stale and could confuse future developers**.
+
+**Proposal**: Update the comment to:
+```typescript
+} else if (abandonedDrafts > 0) {
+  // Show abandoned message (categories are now mutually exclusive)
+```
+
+### Issue 2: Incomplete Banner Visibility Check (LOW)
+
+**Location**: `apps/web/src/components/StaleDraftsBanner.tsx:24`
+
+**Description**: The early return condition is:
+```typescript
+if (abandonedDrafts === 0 && waitingForInput === 0) return null;
+```
+
+This doesn't check `archivableDrafts`. A draft could be 30+ days old (archivable) but not abandoned (7-30 days), and this condition wouldn't account for it properly.
+
+**Why it's LOW severity**: The component still works correctly because `archivableDrafts > 0` check on line 33 handles this case. The condition is suboptimal but not broken.
+
+**Proposal**: Consider updating to:
+```typescript
+if (abandonedDrafts === 0 && archivableDrafts === 0 && waitingForInput === 0) return null;
+```
+
+---
+
+## Code Quality Assessment
+
+- **Test Coverage**: Good. Tests explicitly verify mutually exclusive behavior at boundary conditions (30 days exactly, just over 30 days, etc.)
+- **Backward Compatibility**: LOW RISK. The old comment "Also counts as abandoned for backward compatibility" suggested this might have been intentional, but no code in the repository actually depended on the double-counting. The UI component uses `else if` logic that never relied on this.
+- **Documentation**: Interface comments in script-store.ts were properly updated
+
+---
+
+## Verdict
+
+**APPROVE** - The fix is correct and well-tested. The two issues identified are minor documentation/code clarity concerns that don't affect functionality.

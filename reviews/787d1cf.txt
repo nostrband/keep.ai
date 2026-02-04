@@ -1,0 +1,99 @@
+COMMIT: 787d1cfa288655f8a1dcc1bd56c481b39352a990
+AUTHOR: Claude Agent <claude@anthropic.com>
+DATE: Fri Jan 30 13:29:55 2026 +0100
+SUBJECT: Remove 'ideas' from plan prompt
+
+================================================================================
+CHANGES SUMMARY
+================================================================================
+
+This commit modifies PROMPT_plan.md to:
+
+1. Removes the instruction to check `ideas/*` folder when adding specs
+2. Removes the instruction to author specifications at `specs/FILENAME.md`
+3. Removes the instruction to document plans in @IMPLEMENTATION_PLAN.md using a subagent
+4. Simplifies the ULTIMATE GOAL statement to be more concise
+5. Renames the product from generic "local personal automation product" to "Keep.AI"
+
+Before:
+> ULTIMATE GOAL: We want to achieve a simple, lovable and complete v1 release of
+> a local personal automation product with AI creating and maintaining the
+> automations. Consider missing elements and plan accordingly. If an element is
+> missing, search first to confirm it doesn't exist, then if needed author the
+> specification at specs/FILENAME.md, also check `ideas/*` for ideas to consider
+> when adding specs. If you create a new element then document the plan to
+> implement it in @IMPLEMENTATION_PLAN.md using a subagent.
+
+After:
+> ULTIMATE GOAL: We want to achieve a simple, lovable and complete v1 Keep.AI
+> release - it's a local personal automation product with AI creating and
+> maintaining the automations, with user only expressing intent and then fully
+> delegating to the system.
+
+================================================================================
+POTENTIAL ISSUES
+================================================================================
+
+1. MISSING NEWLINE AT END OF FILE
+   Severity: Minor (styling)
+
+   The new file content ends without a trailing newline, which is a common
+   convention violation. Most style guides and tools expect files to end with
+   a newline character.
+
+2. LOSS OF SPEC AUTHORING GUIDANCE
+   Severity: Low-Medium (potential process gap)
+
+   The previous prompt explicitly instructed agents to:
+   - Search before assuming something is missing
+   - Author specs at specs/FILENAME.md if needed
+   - Check ideas/* for context when adding specs
+   - Document plans in IMPLEMENTATION_PLAN.md
+
+   This guidance is now removed. The simplified goal statement focuses on the
+   product vision but loses the operational instructions for how to handle
+   missing functionality.
+
+   Question: Is this guidance now provided elsewhere? Looking at the current
+   PROMPT_plan.md, step 1 does mention creating/updating @IMPLEMENTATION_PLAN.md,
+   so that specific guidance wasn't fully lost - it's covered in step 1.
+
+3. IDEAS FOLDER STILL EXISTS
+   Severity: Informational
+
+   The `ideas/` folder still exists with 15 files. This commit removes the
+   instruction to reference it, but the folder itself remains. This may be
+   intentional (ideas are now archived/deprecated) or an oversight.
+
+================================================================================
+PROPOSALS
+================================================================================
+
+1. ADD TRAILING NEWLINE
+   Add a newline at the end of the file to follow standard conventions.
+
+   Effort: Trivial
+
+2. CLARIFY IDEAS FOLDER STATUS
+   Either:
+   a) Move `ideas/` to `ideas_archived/` or add a README indicating these are
+      historical ideas that have been superseded
+   b) Delete the `ideas/` folder if no longer needed
+   c) Keep as-is if the ideas are still valuable reference material even though
+      agents aren't explicitly directed to check them
+
+   Effort: Trivial
+
+================================================================================
+OVERALL ASSESSMENT
+================================================================================
+
+This is a reasonable simplification of the planning prompt. The key changes:
+- Product now has a name (Keep.AI) in the prompt
+- Vision statement is cleaner and emphasizes user delegation
+- Removes potentially outdated process instructions
+
+The commit appears intentional and appropriate for a maturing project that no
+longer needs agents to create new specs from scratch (v1 scope is likely frozen).
+
+No bugs or critical issues identified.

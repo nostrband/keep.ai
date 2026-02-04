@@ -1,0 +1,115 @@
+COMMIT REVIEW: 12d2c49
+=======================
+Title: Remove deprecated Gmail-specific API endpoints
+Author: Artur Briugeman <brugeman.artur@gmail.com>
+Date: Tue Feb 3 19:35:37 2026 +0100
+Co-Authored-By: Claude Opus 4.5
+
+FILES CHANGED:
+- IMPLEMENTATION_PLAN.md (+3, -2)
+- apps/server/src/server.ts (-439)
+
+SUMMARY OF CHANGES:
+-------------------
+This commit removes 439 lines of deprecated Gmail-specific API endpoints from
+server.ts and updates IMPLEMENTATION_PLAN.md to mark this task as complete.
+
+Removed endpoints:
+1. GET  /api/gmail/status   - Check if Gmail is connected
+2. POST /api/gmail/connect  - Generate OAuth auth URL
+3. GET  /api/gmail/callback - Handle OAuth callback
+4. POST /api/gmail/check    - Validate Gmail connection
+
+Also removed:
+- GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET constants
+- import { google } from "googleapis" (no longer needed)
+
+VERIFICATION OF REPLACEMENT:
+----------------------------
+VERIFIED: All removed functionality is available through generic connector endpoints.
+
+Endpoint Mapping:
+| Deprecated               | Replacement                              |
+|-------------------------|------------------------------------------|
+| /api/gmail/status       | GET  /api/connectors/gmail/list          |
+| /api/gmail/connect      | POST /api/connectors/gmail/connect       |
+| /api/gmail/callback     | GET  /api/connectors/gmail/callback      |
+| /api/gmail/check        | POST /api/connectors/:service/:id/check  |
+
+Generic connector routes: apps/server/src/routes/connectors.ts
+- Lines 34-299: Complete implementation of all connector endpoints
+- Supports: gmail, gdrive, gsheets, gdocs, notion
+
+ConnectionManager: packages/connectors/src/manager.ts (591 lines)
+- Full OAuth flow management
+- Token refresh and revocation
+- Connection listing
+
+CredentialStore: packages/connectors/src/store.ts (411 lines)
+- File-based secure storage (0o600 permissions)
+- Atomic writes
+- Path traversal protection
+
+Service Definitions: packages/connectors/src/services/google.ts
+- gmailService, gdriveService, gsheetsService, gdocsService properly configured
+
+VERIFICATION OF NO BROKEN REFERENCES:
+-------------------------------------
+VERIFIED: No remaining references to removed endpoints or constants.
+
+Frontend (apps/web/):
+- ConnectionsSection.tsx uses /api/connectors/{service}/connect (lines 366, 418)
+- useDisconnectConnection uses /api/connectors/{service}/{accountId}
+
+Electron (apps/electron/):
+- No references to deprecated endpoints found
+
+Agent tools (packages/agent/):
+- gmail.ts uses ConnectionManager to fetch credentials
+- google-common.ts creates OAuth clients with retrieved credentials
+
+Tests:
+- No test files reference deprecated endpoints
+
+GMAIL_CLIENT_ID/SECRET:
+- Not found anywhere in codebase (correctly removed)
+
+Legacy Migration:
+- migrateOldGmailCredentials() in server.ts handles migration from old format
+- This is intentional for backwards compatibility
+
+POTENTIAL ISSUES:
+-----------------
+1. NONE IDENTIFIED
+
+   The removal is clean and complete. All functionality has been properly migrated
+   to the generic connector system before the deprecated endpoints were removed.
+
+2. POSITIVE OBSERVATION - Better Architecture
+   The new generic connector system is superior:
+   - Supports multiple services (not just Gmail)
+   - Better error handling with type-based classification
+   - Token revocation on disconnect
+   - Automatic token refresh
+   - Security hardening (file permissions, path traversal protection)
+
+PROPOSALS:
+----------
+None required. This is a clean removal of deprecated code that has been fully
+replaced by a more capable generic system.
+
+FUTURE CONSIDERATION:
+The IMPLEMENTATION_PLAN.md still lists other items under "Deprecated Code to Remove":
+- [ ] chat_events table
+- [ ] task_states table
+- [ ] resources table
+- [ ] item_activities table
+- [ ] SandboxAPI (api.ts)
+
+These should be addressed in future cleanup commits.
+
+VERDICT: APPROVED
+-----------------
+Excellent cleanup commit. The deprecated Gmail-specific endpoints have been safely
+removed after being fully replaced by the generic connector system. No broken
+references, no missing functionality. The codebase is cleaner and more maintainable.

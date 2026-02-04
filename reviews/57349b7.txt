@@ -1,0 +1,118 @@
+COMMIT REVIEW: 57349b7
+=======================
+Date: 2026-01-30 13:23:16 +0100
+Author: Claude Agent
+Message: Merge
+
+SUMMARY
+-------
+This is a merge commit bringing together two branches:
+- Base: 782539e (Add intent, perms, items, reconcile, idempotency docs, add logical-item spec, minor fixes)
+- Merged: 417b07f (New commit reviews)
+
+The merge introduces the complete Maintainer Task Type feature - a major architectural addition for bounded, autonomous script repair. When a workflow script fails with a logic error, instead of immediately escalating to the user, the system now creates a maintainer task to attempt automatic repair.
+
+KEY CHANGES
+-----------
+1. CORE FEATURE: Maintainer Task Type
+   - New task type "maintainer" alongside "worker" and "planner"
+   - Operates in isolated thread with restricted tools (only "fix" tool)
+   - Budget: max 3 fix attempts before user escalation
+   - Separate version tracking: major.minor (planner increments major, maintainer increments minor)
+
+2. DATABASE CHANGES (Migration v34)
+   - Added maintenance fields to workflows: maintenance (boolean), maintenance_fix_count (integer)
+   - Scripts table: major_version + minor_version replacing single version field
+   - Inbox target type extended for maintainer
+
+3. NEW "FIX" TOOL (packages/agent/src/ai-tools/fix.ts)
+   - Validates workflow script structure
+   - Creates new script with incremented minor version
+   - Handles race conditions if planner updated while maintainer was running
+
+4. ORCHESTRATION
+   - enterMaintenanceMode() creates maintainer task atomically
+   - Multiple exit paths: fix applied, fix not called (escalate), max attempts exceeded, race condition
+
+5. UI CHANGES
+   - WorkflowDetailPage: displays maintainer tasks separately
+   - NotificationCard: new card for maintenance notifications
+   - Version history with rollback support
+
+6. COMPREHENSIVE TEST COVERAGE
+   - 12+ test files added with 950+ test cases
+   - maintainer-integration.test.ts (793 lines)
+   - fix-tool.test.ts (524 lines)
+   - Storage, compression, connection tests
+
+FILES CHANGED: 109 files, +15,694 lines, -242 lines
+
+POTENTIAL ISSUES
+----------------
+
+ISSUE 1: Race Condition Side Effects Not Reconciled (KNOWN/DEFERRED)
+Severity: Medium
+Location: packages/agent/src/ai-tools/fix.ts:93-115
+
+Description: When maintainer creates a fix but planner has updated in parallel:
+- Fix IS saved as v1.x (good)
+- NOT activated as active script (good)
+- BUT: Any side effects from maintainer's execution (API calls, mutations) already occurred
+
+Current mitigation: Fix saved but not activated. Documented as deferred to future "reconciliation" work.
+Proposal: For v1, this is acceptable. Future work should track mutations and allow rollback.
+
+---
+
+ISSUE 2: Minor Version Overflow Not Handled
+Severity: Low (Edge case)
+Location: packages/db/src/script-store.ts
+
+Description: After 9 minor version increments (1.9), there's no handling for overflow.
+Proposal: Add check to escalate or reset if minor_version exceeds threshold (e.g., 9).
+
+---
+
+ISSUE 3: No Explicit Timeout on Maintainer Task Execution
+Severity: Low
+Location: packages/agent/src/task-worker.ts
+
+Description: Maintainer tasks run until completion or max attempts. No timeout configured.
+Proposal: Add optional timeout (e.g., 5 minutes) to prevent stuck maintainer tasks.
+
+---
+
+ISSUE 4: Message Enrichment Replaces Original Inbox (Minor History Loss)
+Severity: Low
+Location: packages/agent/src/task-worker.ts
+
+Description: When loading maintainer context, original inbox item content is enriched/replaced.
+Proposal: Acceptable for v1. Consider preserving original message for debugging.
+
+POSITIVE ASPECTS
+----------------
++ Well-designed race condition handling with explicit documentation
++ Comprehensive test coverage (7000+ lines of tests)
++ Early validation for critical fields (workflow_id, scriptRunId)
++ Atomic transactions via db.tx() for maintenance mode entry
++ Clear separation: planner (create/update) vs maintainer (fix only)
++ Callback pattern for detecting tool calls (reliable)
++ Graceful user escalation with actionable messages
++ Log truncation (5000 chars) prevents context explosion
+
+VERDICT
+-------
+PRODUCTION-READY merge with thoughtful bounded repair capability.
+
+The maintainer system is well-architected with appropriate safeguards:
+- Atomic state transitions
+- Race condition detection and handling
+- Comprehensive error handling
+- Extensive test coverage
+- Clear escalation paths
+
+Known limitations (acceptable for v1):
+- Side effects from rejected fixes not reconciled
+- No version overflow handling (edge case)
+
+RECOMMENDATION: Approved. The feature provides significant value for autonomous error recovery.

@@ -1,0 +1,170 @@
+COMMIT: e873273 - Fix tool always saves and add onCalled callback (P1)
+DATE: Fri Jan 30 14:40:26 2026 +0100
+REVIEWED: 2026-02-04
+
+================================================================================
+SUMMARY OF CHANGES
+================================================================================
+
+This commit implements two related P1 fixes for the maintainer fix tool:
+
+1. Fix tool now ALWAYS saves fixes (never discards maintainer work):
+   - Previously: Race condition caused fix to be discarded entirely
+   - Now: Fix is always saved as new minor version, just not activated if race
+   - Changed return property: `applied` -> `activated` (semantic clarity)
+   - Race detection: Now compares `active_script_id` vs `expectedScriptId`
+   - Previously compared `major_version` vs `expectedMajorVersion`
+
+2. Added `onCalled` callback for reliable fix tool detection:
+   - Previously: Used fragile `checkIfFixToolCalled()` inspecting `part.type`
+   - Now: Agent class has `fixCalled` flag set via callback
+   - Callback invoked after fix is saved, passes FixResult
+
+Files changed:
+- packages/agent/src/ai-tools/fix.ts - Core fix tool logic rewritten
+- packages/agent/src/agent.ts - Added fixCalled flag and callback wiring
+- packages/agent/src/agent-types.ts - MaintainerContext type updated
+- packages/agent/src/task-worker.ts - Uses agent.fixCalled, loads expectedScriptId
+- packages/tests/src/fix-tool.test.ts - Comprehensive test updates
+- packages/tests/src/maintainer-integration.test.ts - Test updates
+
+================================================================================
+POTENTIAL ISSUES
+================================================================================
+
+ISSUE 1: Orphaned script versions accumulate without cleanup
+Severity: Medium (data hygiene concern)
+Location: packages/agent/src/ai-tools/fix.ts:76-83
+
+When race condition is detected, the fix is saved but not activated. These
+"orphaned" scripts:
+- Remain in the database indefinitely (no cleanup mechanism)
+- ARE visible in the UI (ScriptDetailPage shows all script versions)
+- Don't have any flag distinguishing them from activated versions
+- Could clutter script history, especially for frequently-updated workflows
+
+Race condition scenario:
+1. Workflow at v1.0 fails -> maintainer starts working on fix
+2. User updates intent -> planner creates v2.0 (becomes active)
+3. Maintainer finishes -> creates v1.1 (saved but never activated)
+Result: UI shows v1.0, v1.1, v2.0 - user may be confused about v1.1
+
+PROPOSAL 1A: Add flag to distinguish activated vs saved-only scripts
+- Add `was_activated: boolean` column to scripts table
+- Set to true when script becomes active_script_id
+- UI can filter/style non-activated versions differently
+
+PROPOSAL 1B: Add documentation/UI indicator
+- If orphaned scripts are intentional (audit trail), document this behavior
+- Add visual indicator in script history: "v1.1 (saved but superseded)"
+
+PROPOSAL 1C: Periodic cleanup job
+- Delete orphaned scripts older than N days that were never activated
+- Preserves recent ones for debugging, cleans old clutter
+
+---
+
+ISSUE 2: No indication to user when fix was saved but not activated
+Severity: Low
+Location: packages/agent/src/ai-tools/fix.ts:119-120
+
+When `activated: false` is returned, the maintainer task completes but the user
+gets no notification that their fix attempt was saved but superseded. The fix
+tool description says:
+  "activated: false if the planner updated the script while you were working
+   (your fix was saved but not activated)"
+
+But this message goes to the AI, not the user. The user only sees:
+- Workflow is no longer in maintenance mode
+- Their manually-created v2.0 is running
+- They may never know a fix (v1.1) was attempted and saved
+
+PROPOSAL 2: Add notification for race condition scenario
+- When `activated: false`, create a notification informing user:
+  "Auto-fix completed for v1.0 but was superseded by your changes (v2.0)"
+- Allows user to review the fix if v2.0 also fails
+
+---
+
+ISSUE 3: fixCalled flag is instance-scoped but never explicitly reset
+Severity: None (verified safe)
+Location: packages/agent/src/agent.ts:40
+
+The `fixCalled = false` is initialized as a class property. Investigation
+confirms this is safe because:
+- TaskWorker creates a NEW ReplAgent instance for each task (line 223)
+- The flag cannot leak across task executions
+- Each maintainer task starts with fixCalled = false
+
+No action needed, but documenting this for future maintainers.
+
+---
+
+ISSUE 4: All uses of expectedMajorVersion properly migrated
+Severity: None (verified complete)
+Location: Multiple files
+
+Comprehensive search confirms:
+- No code references to `expectedMajorVersion` remain
+- Only references are in spec files (documentation, not executable)
+- `expectedScriptId` is properly threaded through:
+  - agent-types.ts (MaintainerContext interface)
+  - fix.ts (makeFixTool parameter)
+  - agent.ts (passes to makeFixTool)
+  - task-worker.ts (loadMaintainerContext returns it)
+  - All tests updated
+
+---
+
+ISSUE 5: All uses of result.applied migrated to result.activated
+Severity: None (verified complete)
+Location: Multiple files
+
+Search confirms no remaining uses of `.applied` in code. All test assertions
+updated to check `.activated`. Only references to "applied" are in old spec
+documentation files.
+
+================================================================================
+ARCHITECTURAL OBSERVATIONS
+================================================================================
+
+1. Design philosophy change: "Never discard maintainer work"
+   - Old: Race condition = discard fix entirely
+   - New: Race condition = save fix, don't activate
+   - Rationale: AI work is expensive, preserve for audit/debugging
+   - Trade-off: Database accumulates more script versions
+
+2. Race detection improvement:
+   - Old: Compare major_version (could miss same-major updates)
+   - New: Compare active_script_id (exact match required)
+   - More precise, handles edge cases like minor version fixes
+
+3. Callback pattern for tool detection:
+   - Old: Fragile SDK inspection of part.type === "tool-fix"
+   - New: Explicit callback in tool options
+   - More reliable, doesn't depend on SDK internals
+
+================================================================================
+CODE QUALITY
+================================================================================
+
++ Good: Comprehensive test coverage updated for all changes
++ Good: Clear semantic rename (applied -> activated)
++ Good: Callback pattern is cleaner than SDK inspection
++ Good: Comments explain race condition handling clearly
++ Good: Preserved backward compatibility in test structure
+
+- Medium: Orphaned scripts accumulate without cleanup
+- Low: No user notification when fix is superseded
+- Minor: Tests use explicit script IDs which couples tests to implementation
+
+================================================================================
+VERDICT
+================================================================================
+
+APPROVED with suggestions:
+1. Consider adding a mechanism to track/clean orphaned script versions
+2. Consider notifying users when their fix was superseded by concurrent changes
+
+Core logic is sound and well-tested. The design decision to never discard
+maintainer work is reasonable for an AI-assisted system.

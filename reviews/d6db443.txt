@@ -1,0 +1,121 @@
+COMMIT REVIEW: d6db443
+=======================
+Date: 2026-01-30 13:27:30 +0100
+Author: Claude Agent
+Message: Move mistakenly 'done' specs back to 'new'
+
+SUMMARY
+-------
+This commit moves 19 specification files from specs/done/ back to specs/new/, correcting what appears to be premature marking of these specs as complete.
+
+The specs moved cover various fixes and improvements:
+- Integration tests (add-escalatetouser-integration-tests.md)
+- Constant exports (export-max-fix-attempts-constant.md)
+- Default value extraction (extract-draft-activity-summary-default.md)
+- Error handling (fail-fast-missing-scriptrunid.md)
+- Bug fixes (fix-compression-error-message.md, fix-draft-activity-double-counting.md)
+- Race conditions (fix-getdbpath-race-condition.md, fix-increment-maintenance-fix-count-atomicity.md)
+- Type safety (fix-maintainer-tasks-type-safety.md, fix-maxresultsizesafe-return-value.md)
+- MIME detection (fix-mime-detection-fallback.md)
+- Security (fix-secret-key-file-permissions.md)
+- Tests (fix-skipped-compression-tests.md)
+- Tool fixes (fix-tool-always-save-check-active.md, fix-tool-called-callback.md)
+- UI improvements (improve-workflows-filter-param-handling.md)
+- Context loading (include-full-changelog-in-maintainer-context.md)
+- Refactoring (refactor-task-scheduler-priority-tests.md)
+- Log handling (truncate-maintainer-logs-by-chars.md)
+
+FILES CHANGED: 19 files (renames only, 0 insertions/deletions)
+
+CONTEXT
+-------
+This commit is part of a rapid sequence:
+1. 57349b7 (13:23:16) - Merge that incorrectly included specs in done/
+2. a277f2d (13:24:19) - Deleted IMPLEMENTATION_PLAN.md
+3. d6db443 (13:27:30) - THIS COMMIT - Corrects spec locations
+
+The merge commit (57349b7) appears to have accidentally placed these specs in the done/ directory when they should have remained in new/ for implementation.
+
+POTENTIAL ISSUES
+----------------
+
+ISSUE 1: Underlying Merge Issue Not Addressed
+Severity: Medium
+Location: The original merge (57349b7)
+
+Description: This commit corrects the symptom (wrong spec locations) but the root cause is that the merge brought in incorrect state. The merge itself should have been reviewed more carefully before committing.
+
+Proposal: For future merges, verify spec locations match actual implementation status before finalizing.
+
+---
+
+ISSUE 2: Specs May Already Be Implemented
+Severity: Medium
+Location: specs/new/*.md (all 19 files)
+
+Description: Looking at the spec names:
+- "fix-tool-called-callback.md" - The fix.ts callback pattern IS implemented in the merge
+- "truncate-maintainer-logs-by-chars.md" - Log truncation IS in task-worker.ts
+- "fix-maintainer-tasks-type-safety.md" - Type imports ARE present
+
+These specs describe features that WERE implemented in the merge. Moving them back to new/ may be incorrect.
+
+Proposal:
+1. Review each spec against actual codebase to verify implementation status
+2. Specs that ARE implemented should return to done/
+3. Only truly unimplemented specs should stay in new/
+
+---
+
+ISSUE 3: Lack of Verification Process
+Severity: Low
+Location: Commit workflow
+
+Description: The rapid commit sequence (4 minutes from merge to this fix) suggests insufficient review before committing. A checklist for merge commits could help:
+- [ ] Verify spec locations match implementation status
+- [ ] Verify deleted files were intentional
+- [ ] Review IMPLEMENTATION_PLAN.md accuracy
+
+Proposal: Add pre-merge verification step for spec file locations.
+
+SPECIFIC SPEC ANALYSIS
+----------------------
+Based on the merge content review, here's likely status of moved specs:
+
+LIKELY IMPLEMENTED (should be in done/):
+- fix-tool-called-callback.md - Callback pattern in fix.ts lines 123-125
+- truncate-maintainer-logs-by-chars.md - Log truncation in task-worker.ts lines 586-591
+- fix-maintainer-tasks-type-safety.md - Type imports visible in WorkflowDetailPage
+- fail-fast-missing-scriptrunid.md - Validation in task-worker.ts lines 546-550
+- include-full-changelog-in-maintainer-context.md - Changelog loading in context
+
+UNCLEAR (needs verification):
+- add-escalatetouser-integration-tests.md - Need to check test files
+- fix-increment-maintenance-fix-count-atomicity.md - Transaction wrapping exists
+- fix-tool-always-save-check-active.md - Need to check save.ts
+- Others require individual verification
+
+POSITIVE ASPECTS
+----------------
++ Acknowledges and corrects the error promptly (within 4 minutes)
++ Uses descriptive commit message explaining the fix
++ File renames preserve git history
++ Shows attention to spec management hygiene
+
+VERDICT
+-------
+PARTIAL CORRECTION - The intent is correct but execution may be overkill.
+
+This commit recognizes an issue with the merge but may over-correct by moving ALL 19 specs back to new/, when evidence suggests many were actually implemented in the merge.
+
+RECOMMENDATION:
+1. Re-verify each spec against the codebase
+2. Move truly implemented specs back to done/
+3. Keep only unimplemented specs in new/
+4. Consider adding automated spec status verification
+
+FOLLOW-UP NEEDED
+----------------
+A subsequent review should verify the current location of these specs and whether they match actual implementation status. Based on the merge analysis:
+- At least 5 of these specs appear to be fully implemented
+- The rest need individual verification

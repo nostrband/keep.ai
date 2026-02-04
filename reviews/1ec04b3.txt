@@ -1,0 +1,92 @@
+COMMIT REVIEW: 1ec04b3
+=======================
+Title: Update IMPLEMENTATION_PLAN.md to reflect exec model completion
+Author: Artur Briugeman <brugeman.artur@gmail.com>
+Date: Tue Feb 3 19:21:12 2026 +0100
+Co-Authored-By: Claude Opus 4.5
+
+FILES CHANGED:
+- IMPLEMENTATION_PLAN.md (+43, -182)
+
+SUMMARY OF CHANGES:
+-------------------
+This commit updates the IMPLEMENTATION_PLAN.md document to mark all execution model
+specs (exec-01 through exec-09) as COMPLETE and tags the release as v1.0.0-alpha.98.
+The change condenses verbose implementation status descriptions into concise summaries
+while preserving the essential information about what was implemented.
+
+Key documentation changes:
+1. Changed "Current State" to "Final State" in executive summary
+2. Marked all 9 exec specs with [x] checkboxes as complete
+3. Removed detailed per-spec implementation notes, leaving only:
+   - Brief description of what each spec implements
+   - Status: COMPLETE
+   - Key files/components created
+4. Simplified dependency tracking since all specs are now done
+
+VERIFICATION OF CLAIMS:
+-----------------------
+All claims made in this commit have been verified against the codebase:
+
+EXEC-01 Database Schema: VERIFIED
+- packages/db/src/migrations/v36.ts exists and is registered
+- All 5 stores exist: TopicStore, EventStore, HandlerRunStore, MutationStore, HandlerStateStore
+- Stores are exported in packages/db/src/index.ts and registered in api.ts
+
+EXEC-02 Deprecate Items: VERIFIED
+- Items.withItem() removed from SandboxAPI and ToolWrapper
+- ItemStore marked as @deprecated
+
+EXEC-03 Topics API: VERIFIED
+- packages/agent/src/tools/topics.ts exists with peek, getByIds, publish methods
+
+EXEC-03a Tool Migration: VERIFIED
+- packages/agent/src/sandbox/tool-lists.ts exists with createWorkflowTools(), createTaskTools()
+- ToolWrapper has phase tracking implementation
+
+EXEC-04 Phase Tracking: VERIFIED
+- ExecutionPhase type defined in tool-wrapper.ts
+- Phase restriction matrix implemented
+
+EXEC-05 Script Validation: VERIFIED
+- packages/agent/src/workflow-validator.ts exists
+- handler_config field added to Workflow interface
+
+EXEC-06 Handler State Machine: VERIFIED
+- packages/agent/src/handler-state-machine.ts exists with executeHandler()
+
+EXEC-07 Session Orchestration: VERIFIED
+- packages/agent/src/session-orchestration.ts exists with executeWorkflowSession()
+
+EXEC-08 Planner Prompts: VERIFIED
+- PLANNER_SYSTEM_PROMPT updated with "Workflow Structure", "Phase Rules", "Event Design" sections
+
+EXEC-09 Scheduler Integration: VERIFIED
+- WorkflowScheduler imports and uses executeWorkflowSessionIfIdle
+- resumeIncompleteSessions() called on start
+
+Test Coverage: VERIFIED
+- All test files exist: topic-store.test.ts, event-store.test.ts, handler-run-store.test.ts,
+  handler-state-store.test.ts, mutation-store.test.ts, topics-api.test.ts, phase-tracking.test.ts,
+  handler-state-machine.test.ts, session-orchestration.test.ts
+
+POTENTIAL ISSUES:
+-----------------
+1. MINOR - Information Loss
+   The condensed documentation loses implementation details that could be useful for
+   future maintenance. For example, specific line numbers and file locations were removed.
+   However, the code itself serves as the source of truth, so this is acceptable for
+   a completion milestone.
+
+2. NONE - No functional issues identified
+
+PROPOSALS:
+----------
+None required. This is a documentation-only change that accurately reflects the
+completed state of the execution model implementation. The claims are verified
+by the existence of all referenced implementation files and test coverage.
+
+VERDICT: APPROVED
+-----------------
+This commit accurately documents the completion of a major architectural refactor.
+All claims are substantiated by the codebase.

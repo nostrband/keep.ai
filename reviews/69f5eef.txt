@@ -1,0 +1,217 @@
+COMMIT: 69f5eef - Refactor task scheduler and escalation for testability (P2)
+DATE: Fri Jan 30 14:59:15 2026 +0100
+REVIEWED: 2026-02-04
+
+================================================================================
+SUMMARY OF CHANGES
+================================================================================
+
+This commit extracts internal logic into exported functions for testability:
+
+1. TaskScheduler - extracted `selectTaskByPriority`:
+   - Moved priority selection logic from processNextTask to standalone function
+   - Exports function and TaskPriorityOptions type
+   - Added optional `onSkipped` callback for logging skipped tasks
+   - Tests now import and use real production code instead of duplicating
+
+2. WorkflowWorker - extracted `escalateToUser`:
+   - Moved escalation logic to exported function
+   - Created types: EscalateToUserOptions, EscalateToUserResult
+   - Returns success/notificationCreated/messageCreated status
+   - WorkflowWorker.escalateToUserInternal wraps function and emits signal
+   - Tests now call actual function instead of manually implementing
+
+3. Tests updated (maintainer-integration.test.ts):
+   - Created chats and chat_messages tables for escalation tests
+   - Added tests for message sending with/without chat_id
+   - Added test for log truncation (last 20 lines)
+   - Tests verify workflow status, notification, and message creation
+
+Files changed:
+- packages/agent/src/index.ts - Added exports
+- packages/agent/src/task-scheduler.ts - Extracted selectTaskByPriority
+- packages/agent/src/workflow-worker.ts - Extracted escalateToUser
+- packages/tests/src/maintainer-integration.test.ts - New integration tests
+- packages/tests/src/task-scheduler-priority.test.ts - Uses exported function
+
+================================================================================
+POTENTIAL ISSUES
+================================================================================
+
+ISSUE 1: `success: true` always returned, even on partial failure
+Severity: Medium (API semantics concern)
+Location: packages/agent/src/workflow-worker.ts:68-73
+
+The `escalateToUser` function always returns `success: true`:
+```typescript
+const result: EscalateToUserResult = {
+  success: true,  // Always true!
+  notificationCreated: false,
+  messageCreated: false,
+};
+```
+
+If the workflow status update succeeds but notification/message creation fails,
+success is still true. The caller must check individual flags to know what
+actually worked.
+
+Current behavior implies "success" means "workflow updated" not "everything worked".
+
+PROPOSAL 1A: Rename for clarity
+- Rename `success` to `workflowUpdated` to make semantics clear
+- Or add JSDoc explaining success means "core escalation completed"
+
+PROPOSAL 1B: Make success reflect full result
+- success = workflowUpdated && notificationCreated
+- Message is optional (chat_id may not exist)
+
+---
+
+ISSUE 2: Inconsistent log truncation strategy
+Severity: Low (but inconsistent with codebase patterns)
+Location: packages/agent/src/workflow-worker.ts:109
+
+Escalation message truncates logs to last 20 LINES:
+```typescript
+const recentLogs = logs.slice(-20).join("\n");
+```
+
+But maintainer context uses last 5000 CHARACTERS (task-worker.ts:586-591):
+```typescript
+const MAX_LOG_CHARS = 5000;
+allLogs = "[truncated]\n" + allLogs.slice(-MAX_LOG_CHARS);
+```
+
+The char-based approach was chosen per spec (truncate-maintainer-logs-by-chars.md)
+because:
+- Very long lines could blow up context
+- Line-based truncation doesn't handle unusual line lengths
+
+PROPOSAL 2: Use character-based truncation for consistency
+```typescript
+const MAX_ESCALATION_LOG_CHARS = 2000;  // Smaller for user message
+let recentLogs = logs.join("\n");
+if (recentLogs.length > MAX_ESCALATION_LOG_CHARS) {
+  recentLogs = "[truncated]\n" + recentLogs.slice(-MAX_ESCALATION_LOG_CHARS);
+}
+```
+
+---
+
+ISSUE 3: No sensitive data filtering in escalation logs
+Severity: Medium (security concern)
+Location: packages/agent/src/workflow-worker.ts:109-127
+
+The escalation message includes raw logs sent to user chat:
+```typescript
+**Recent Logs:**
+\`\`\`
+${recentLogs || "(no logs)"}
+\`\`\`
+```
+
+If scripts log sensitive data (API keys, tokens, passwords, PII), it will be
+shown in the user's chat. While the user owns this data, it could:
+- Be synced to other devices
+- Appear in chat history indefinitely
+- Be visible to anyone with device access
+
+PROPOSAL 3: Add log sanitization
+- Redact patterns like `Bearer ...`, `api_key=...`, `password=...`
+- Or warn users in UI that logs may contain sensitive data
+- Or truncate lines containing common sensitive patterns
+
+---
+
+ISSUE 4: Unused `_script` parameter in escalateToUserInternal
+Severity: Low (code smell)
+Location: packages/agent/src/workflow-worker.ts:687
+
+```typescript
+private async escalateToUserInternal(
+  workflow: Workflow,
+  _script: Script,  // Unused!
+  scriptRunId: string,
+```
+
+The underscore prefix indicates intentionally unused. This was kept for API
+compatibility at the call site (line 657 still passes script). Clean refactor
+would remove this parameter from both places.
+
+PROPOSAL 4: Remove unused parameter in follow-up commit
+- Remove `_script` from escalateToUserInternal signature
+- Update call site to not pass script
+- Minor cleanup, low priority
+
+---
+
+ISSUE 5: selectTaskByPriority relies on pre-sorted input
+Severity: Low (implicit contract)
+Location: packages/agent/src/task-scheduler.ts:37-43
+
+The function uses `.find()` which returns first match. If multiple tasks of
+same priority exist, order depends on input array order. The caller (line 275)
+sorts by timestamp before calling:
+```typescript
+const tasks = availableTasks.sort((a, b) => a.timestamp - b.timestamp);
+```
+
+This contract is implicit - if another caller forgets to sort, behavior changes.
+
+PROPOSAL 5: Document or enforce sorting
+- Add JSDoc: "Note: Returns first matching task; caller should sort by priority"
+- Or: Add optional sort comparator to TaskPriorityOptions
+- Or: Sort internally (but this changes semantics if caller relies on order)
+
+================================================================================
+ARCHITECTURAL OBSERVATIONS
+================================================================================
+
+1. Test-driven refactoring done correctly:
+   - Functions extracted without changing behavior
+   - Tests updated to use production code
+   - Eliminated test logic duplication (tests no longer copy scheduler logic)
+
+2. Good separation of concerns:
+   - selectTaskByPriority: Pure function, easy to test
+   - escalateToUser: Side-effectful but isolated, returns result object
+   - Internal wrappers (escalateToUserInternal) add signal emission
+
+3. Priority ordering verified correct:
+   - planner > worker > maintainer
+   - Per-workflow conflict: planner supersedes maintainer for same workflow
+   - Edge cases handled (empty array, null workflow_id)
+
+4. Comprehensive new test coverage:
+   - Message sending when chat_id available
+   - Graceful handling when chat_id missing
+   - Log truncation (verifies last 20 lines used)
+   - Tests create necessary tables (chats, chat_messages)
+
+================================================================================
+CODE QUALITY
+================================================================================
+
++ Good: Eliminated test code duplication
++ Good: Functions are now independently testable
++ Good: Return types clearly indicate what succeeded
++ Good: Comprehensive test coverage added
++ Good: onSkipped callback pattern is flexible
+
+- Medium: success always true is potentially misleading
+- Low: Log truncation inconsistent with codebase (lines vs chars)
+- Low: Unused _script parameter retained
+- Low: No log sanitization for sensitive data
+
+================================================================================
+VERDICT
+================================================================================
+
+APPROVED with suggestions:
+1. Clarify `success` semantics (rename or document)
+2. Consider character-based log truncation for consistency
+3. Consider log sanitization to avoid leaking sensitive data
+4. Remove unused _script parameter in cleanup commit
+
+The refactoring achieves its goal: production code is now testable without
+tests duplicating implementation logic. Good architectural improvement.

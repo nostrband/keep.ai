@@ -1,0 +1,223 @@
+COMMIT REVIEW: 2595ff8
+=======================
+
+Commit: 2595ff810fcf21254f756efda7d78289c126537c
+Author: Artur Briugeman
+Date: Fri Jan 30 15:20:14 2026 +0100
+Title: Fix graceful shutdown and race conditions (P1)
+
+FILES CHANGED:
+- IMPLEMENTATION_PLAN.md (+34, -4)
+- apps/server/src/server.ts (+2, -2)
+- packages/agent/src/ai-tools/schedule.ts (+4, -6)
+- packages/agent/src/task-scheduler.ts (+22, -2)
+- packages/agent/src/workflow-scheduler.ts (+22, -2)
+
+================================================================================
+CHANGE SUMMARY
+================================================================================
+
+1. server.ts - Add Missing Awaits in Shutdown
+   - Line 1616: Changed nostr.stop() to await nostr.stop()
+   - Line 1621: Changed peer.stop() to await peer.stop()
+   - Ensures transports fully stop before continuing shutdown sequence
+
+2. schedule.ts - Migrate to Atomic Updates
+   - Replaced spread pattern with updateWorkflowFields()
+   - Before: { ...workflow, cron, next_run_timestamp } + updateWorkflow()
+   - After: updateWorkflowFields(workflow.id, { cron, next_run_timestamp })
+   - Prevents race conditions where spread could overwrite concurrent changes
+
+3. task-scheduler.ts & workflow-scheduler.ts - Graceful Shutdown
+   - Set isShuttingDown flag first
+   - Clear interval to stop new checkWork scheduling
+   - Poll loop waits for isRunning to become false
+   - 30-second timeout with warning if exceeded
+
+================================================================================
+VERIFICATION RESULTS
+================================================================================
+
+ASYNC METHODS - VERIFIED ✓
+
+nostr.stop() at packages/sync/src/nostr/NostrTransport.ts:220-227:
+- Declared as async stop()
+- Awaits internal stop calls on PeerRecv and PeerSend
+- Only closes pool if not externally provided
+
+peer.stop() at packages/sync/src/Peer.ts:138-154:
+- Declared as async stop()
+- Awaits all transports' stop() calls
+- Includes error handling (try/catch)
+
+Both methods properly return Promises and need to be awaited.
+
+
+SHUTDOWN ORDER - VERIFIED ✓
+
+Sequence in server.ts close() (lines 1595-1637):
+1. TaskScheduler.close()
+2. WorkflowScheduler.close()
+3. File transfer cleanup
+4. NostrTransport.stop() <- NOW AWAITED
+5. HTTP stop (sync)
+6. Peer.stop() <- NOW AWAITED
+7. Pool close
+8. HTTP server close
+9. KeyStore and KeepDB
+
+Order is sound: schedulers first, then transports, then peer, then database.
+
+
+ATOMIC UPDATE - VERIFIED ✓
+
+updateWorkflowFields() at packages/db/src/script-store.ts:779-829:
+- Uses parameterized SQL with individual SET clauses
+- Only updates specified fields (cron, next_run_timestamp)
+- Single UPDATE query prevents partial write races
+- Supports optional transaction parameter
+
+The spread pattern had a race condition:
+1. Thread A reads workflow (cron="0 9 * * *")
+2. Thread B reads workflow (cron="0 9 * * *")
+3. Thread A updates cron to "0 10 * * *", calls updateWorkflow(fullObj)
+4. Thread B updates next_run_timestamp, calls updateWorkflow(fullObj) with OLD cron
+5. Thread B's stale cron overwrites Thread A's change
+
+updateWorkflowFields() eliminates this by only touching specified fields.
+
+
+OTHER UNAWAITED CALLS - VERIFIED ✓
+
+Checked all stop() calls in server.ts close():
+- FileSender.stop(), FileReceiver.stop(): Return void (sync), safe
+- http.stop(): Returns void (sync), safe
+
+Only nostr.stop() and peer.stop() were truly async and needed await.
+
+================================================================================
+POTENTIAL ISSUES
+================================================================================
+
+ISSUE 1: 30-Second Timeout May Be Insufficient (MEDIUM)
+-------------------------------------------------------
+Files:
+- packages/agent/src/task-scheduler.ts:151
+- packages/agent/src/workflow-scheduler.ts:163
+
+The 30-second timeout is hardcoded:
+  const SHUTDOWN_TIMEOUT_MS = 30000;
+
+What happens in checkWork():
+- task-scheduler calls processNextTask() -> worker.executeTask()
+- workflow-scheduler calls processNextWorkflow() -> worker.executeWorkflow()
+
+These worker methods are unbounded - a long-running task or workflow could
+exceed 30 seconds. When timeout is reached:
+1. Warning is logged
+2. Shutdown continues
+3. Work continues in background
+4. Could result in:
+   - Orphaned runs marked incomplete at next startup
+   - Partial workflow execution
+   - Database inconsistency if mid-transaction
+
+PROPOSAL:
+Make timeout configurable via environment variable:
+  const SHUTDOWN_TIMEOUT_MS = parseInt(process.env.SHUTDOWN_TIMEOUT_MS || "30000", 10);
+
+Or accept longer-running work with documentation that orphaned runs are
+handled at startup.
+
+
+ISSUE 2: No Graceful Cancellation of In-Progress Work (MEDIUM)
+--------------------------------------------------------------
+Files:
+- packages/agent/src/task-scheduler.ts:153-159
+- packages/agent/src/workflow-scheduler.ts:165-171
+
+The polling loop waits but has no way to signal the running work to stop:
+  while (this.isRunning) {
+    if (Date.now() - startTime > SHUTDOWN_TIMEOUT_MS) {
+      this.debug("Warning: Shutdown timeout reached with work still in progress");
+      break;  // Exits but work keeps running
+    }
+    await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS));
+  }
+
+If timeout is reached, the scheduler exits close() but the work continues
+in the background. There's no AbortController or cancellation mechanism.
+
+PROPOSAL (future enhancement):
+Add AbortController to task execution that can be signaled during shutdown:
+  // In scheduler
+  this.currentAbortController?.abort();
+
+  // In worker.executeTask()
+  if (signal?.aborted) throw new Error("Task cancelled");
+
+This is a larger change and may not be needed if orphaned run handling at
+startup is sufficient.
+
+
+ISSUE 3: Polling Inefficiency (LOW)
+-----------------------------------
+Files:
+- packages/agent/src/task-scheduler.ts:150-158
+- packages/agent/src/workflow-scheduler.ts:162-170
+
+Polling every 100ms for up to 30 seconds = 300 iterations maximum.
+This is inefficient but functional for shutdown.
+
+Alternative approaches:
+- Event emitter: work completion emits event
+- Condition variable: work completion signals waiting promise
+
+Current approach is acceptable for shutdown scenarios.
+
+
+ISSUE 4: interval Set to undefined After Clear (INFORMATIONAL)
+--------------------------------------------------------------
+Files:
+- packages/agent/src/task-scheduler.ts:143-145
+- packages/agent/src/workflow-scheduler.ts:155-157
+
+  if (this.interval) {
+    clearInterval(this.interval);
+    this.interval = undefined;
+  }
+
+Setting to undefined is good practice but the type definition should match.
+Verified: interval is typed as NodeJS.Timeout | undefined in both files.
+
+Status: Correct implementation.
+
+================================================================================
+POSITIVE FINDINGS
+================================================================================
+
+1. Correct await placement - nostr.stop() and peer.stop() are truly async
+2. Shutdown order is sound - schedulers before transports before database
+3. Atomic updates - eliminates race condition in spread pattern
+4. isShuttingDown flag - prevents new work from starting during shutdown
+5. Timeout with warning - doesn't hang indefinitely, logs when exceeded
+6. Consistent pattern - both schedulers use identical close() logic
+7. Debug logging - shutdown progress is observable
+8. Interval cleanup - properly cleared and set to undefined
+
+================================================================================
+VERDICT
+================================================================================
+
+This commit correctly addresses critical race conditions and shutdown issues:
+1. Missing awaits fixed - transports now properly stopped before continuing
+2. Atomic updates - schedule tool no longer races with concurrent changes
+3. Graceful shutdown - schedulers wait for in-progress work
+
+The main considerations are:
+- 30-second timeout may be insufficient for long tasks (medium)
+- No cancellation mechanism for in-progress work (medium, future enhancement)
+- Polling is inefficient but acceptable (low)
+
+Code quality is high. The fixes are correct and follow good patterns.
+Production ready with awareness that very long tasks may log timeout warnings.

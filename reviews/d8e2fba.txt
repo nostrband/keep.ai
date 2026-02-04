@@ -1,0 +1,142 @@
+COMMIT REVIEW: d8e2fba
+======================
+Title: New execution model spec
+Author: Claude Agent
+Date: 2026-02-02
+
+SUMMARY OF CHANGES
+------------------
+This commit introduces the core v1 execution model documentation and adds several
+related specifications:
+
+1. **New Documentation Files Added (docs/dev/)**:
+   - 05-execution-model.md: Defines the v1 workflow execution model with Topics,
+     Producers, and Consumers structured as prepare→mutate→next phases
+   - 07-connectors-auth.md: Comprehensive connectors and authentication model
+     documentation
+
+2. **Minor Update**:
+   - 11-permissions.md: Small wording clarification (line 187: "run fails safely" →
+     "execution aborts immediately"; line 209: clarified Maintainer gets copy of
+     permission envelope)
+
+3. **New Spec Added**:
+   - specs/new/logical-items-ui.md: 434-line UI spec for displaying logical items
+     on workflow pages (summary box and list page)
+
+DETAILED ANALYSIS
+-----------------
+
+**Execution Model (05-execution-model.md)**:
+This is a foundational document defining how Keep.AI automations execute:
+
+- **Core Architecture**: Topics (durable event streams), Producers (read-only ingress),
+  Consumers (process events, perform exactly one mutation)
+
+- **Three-Phase Consumer Model**: prepare → mutate → next
+  - prepare: Select inputs, compute data, declare reservations (no side effects)
+  - mutate: Perform exactly one external mutation, read-by-id only
+  - next: Publish downstream events (no mutations)
+
+- **Key Design Decisions**:
+  - Single-threaded correctness (one workflow run at a time)
+  - PrepareResult is persisted atomically to pin inputs
+  - Reservations bind mutations to specific input events
+  - Events are marked consumed only after full commit
+
+- **Safety Guarantees**:
+  - List/search reads disallowed in mutate (prevents selection drift)
+  - Mutations are idempotent via payload hash
+  - No implicit retries
+
+**Connectors Auth (07-connectors-auth.md)**:
+Comprehensive treatment of external service integration:
+
+- Connectors as explicit, typed, policy-enforced integration points
+- Clear error taxonomy: authentication, transient, permanent
+- Auth failures halt execution and require human action
+- Security considerations: local encrypted storage, no remote credential access
+- Contributor guide for adding new connectors
+
+**Logical Items UI Spec**:
+Detailed UI specification for:
+- Items summary box on workflow detail page
+- Items list page with filters and search
+- Database changes (index, ItemStore methods)
+- React hooks (useItemCounts, useItems)
+
+POTENTIAL ISSUES
+----------------
+
+1. **Execution Model Has Multiple Placeholder Notes**:
+   - Several sections reference future chapters not yet written
+   - "Future versions may introduce guarded reads" - unclear timeline
+   - SEVERITY: Low (documentation work in progress)
+   - PROPOSAL: Track which chapters need to be written to complete the model.
+
+2. **No Implementation Code for Execution Model**:
+   - This defines a significantly different execution model from current codebase
+   - Current code uses "logical items" with withItem() handler pattern
+   - New model uses Topics/Producers/Consumers with prepare/mutate/next phases
+   - SEVERITY: Medium (conceptual shift requiring significant implementation)
+   - PROPOSAL: Verify migration path from current logical items to new Topics model
+     is planned. These seem to be complementary concepts that need to be reconciled.
+
+3. **Connectors Doc Contains Many Placeholders**:
+   - Multiple "to be filled" sections:
+     - Supported auth mechanisms
+     - OAuth callback handling details
+     - Schema/table references
+     - Client instantiation details
+     - Idempotency implementation details
+     - Action-needed payload examples
+     - Encryption/key management details
+     - Code pointers/examples
+   - SEVERITY: Low (expected for design doc, but many holes)
+   - PROPOSAL: Track all placeholder sections for completion.
+
+4. **Logical Items UI Spec - ItemStatus Type Mismatch**:
+   - Spec defines ItemStatus as: processing, done, failed, skipped
+   - Comment mentions "needs_attention: amber - reserved for future"
+   - But 12-logical-items.md defines needs_attention as a current state
+   - SEVERITY: Medium (inconsistency between specs)
+   - PROPOSAL: Align ItemStatus type across all specs to include needs_attention.
+
+5. **Missing Integration with Existing Code**:
+   - The spec references `@app/db/src/item-store.ts` but current code has
+     different patterns for tracking items
+   - SEVERITY: Low to Medium
+   - PROPOSAL: Verify ItemStore implementation exists or add to implementation plan.
+
+6. **Permission Doc Update - Subtle Semantic Change**:
+   - Changed "run fails safely" to "execution aborts immediately"
+   - These have slightly different implications (abort vs fail)
+   - SEVERITY: Very Low (documentation clarity improvement)
+   - PROPOSAL: None needed, change is appropriate.
+
+7. **Topics vs Logical Items Conceptual Overlap**:
+   - 12-logical-items.md defines logical items with withItem() pattern
+   - 05-execution-model.md defines Topics with Producer/Consumer pattern
+   - Both seem to address "units of work" but use different models
+   - SEVERITY: Medium (architectural clarity needed)
+   - PROPOSAL: Document relationship between these concepts. Are Topics the
+     implementation of logical items? Are they different layers? The transition
+     from 782539e's logical items to this Topics model needs explanation.
+
+OVERALL ASSESSMENT
+------------------
+This commit continues building out the v1 execution model documentation with
+the core Topics/Producer/Consumer architecture. The execution model is well-
+designed with clear safety guarantees and the prepare→mutate→next phase
+structure provides good separation of concerns.
+
+The main concern is the conceptual relationship between this execution model
+and the logical items model from the previous commit. Both address "units of
+work" but use different terminology and patterns. This should be clarified
+to avoid confusion during implementation.
+
+The connectors documentation is comprehensive in scope but has many placeholder
+sections that need completion.
+
+The logical items UI spec is detailed and implementation-ready, but has a minor
+type inconsistency with the logical items documentation that should be resolved.

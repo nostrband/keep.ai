@@ -1,0 +1,89 @@
+# Review: f5d6af7 - Update IMPLEMENTATION_PLAN.md: tag v1.0.0-alpha.104 and clarify suppressions
+
+**Commit:** f5d6af7cfff1371458d37310294f238983f0df73
+**Author:** Artur Briugeman (Co-Authored-By: Claude Opus 4.5)
+**Date:** Tue Feb 3 20:05:58 2026 +0100
+**Files Changed:** IMPLEMENTATION_PLAN.md (10 insertions, 7 deletions)
+
+## Summary of Changes
+
+This commit updates the IMPLEMENTATION_PLAN.md documentation with three changes:
+
+1. **Version Tag Update**: Updates the referenced version from `v1.0.0-alpha.99` to `v1.0.0-alpha.104` in the Executive Summary and Verification Status sections.
+
+2. **Verification Status Addition**: Adds a new line confirming "Type-check passes with no errors" to the verification checklist.
+
+3. **@ts-ignore Section Reframing**: Changes the section header from "@ts-ignore Suppressions to Fix" to "@ts-ignore Suppressions (Third-Party Type Gaps)" and adds explanatory context claiming these suppressions are caused by incomplete type definitions in third-party libraries, not bugs. Lists specific files and their claimed reasons.
+
+## Issues Identified
+
+### Issue 1: Inaccurate Line Numbers in Documentation
+
+**Severity:** Low (Documentation)
+
+The documented line numbers for @ts-ignore suppressions in server.ts are incorrect:
+- Documentation claims lines 863 and 2014
+- Actual @ts-ignore locations are lines 856 and 1575
+- The file only has ~1639 lines total, so line 2014 doesn't exist
+
+**Proposal:** Update the line numbers to match actual locations:
+- Line 856: Fastify plugin registration (`http.registerRoutes`)
+- Line 1575: `reply.sendFile("index.html")` call
+
+### Issue 2: Questionable @ts-ignore at agent.ts:359
+
+**Severity:** Medium (Code Quality)
+
+The commit claims line 359 in agent.ts suppresses "AI SDK provider metadata types", but the actual code at that line is:
+
+```typescript
+// @ts-ignore
+this.debug("openRouterUsage", this.openRouterUsage);
+```
+
+This is simply a debug logging call. The `debug` module from npm accepts any arguments, and `this.openRouterUsage` is defined as `{ cost: number }` at line 38. There should be no type issue here that requires suppression.
+
+This @ts-ignore:
+- Does not match the stated reason (provider metadata types)
+- May be suppressing an actual issue that should be investigated
+- Or may be entirely unnecessary and could be removed
+
+**Proposal:** Investigate whether this @ts-ignore is actually needed. If the TypeScript compiler accepts the code without it, remove the suppression. If there's a genuine issue, document the actual reason.
+
+### Issue 3: Missing Verification of Claims
+
+**Severity:** Low (Process)
+
+The commit claims "Type-check passes with no errors" but the @ts-ignore suppressions mask any underlying type issues. While 6 of 7 verified suppressions are legitimate third-party gaps, one (agent.ts:359) appears questionable.
+
+**Proposal:** Run `pnpm typecheck` without the @ts-ignore at agent.ts:359 to verify if it's actually needed.
+
+## Valid Changes
+
+The following claims in the commit were verified as accurate:
+
+1. **apps/server/src/server.ts** (lines 856, 1575):
+   - Both are legitimate Fastify plugin type compatibility issues
+   - First: Plugin registration async function signature
+   - Second: `sendFile()` method type definitions
+
+2. **apps/web/src/db.ts** (line 2-3):
+   - Legitimate Vite WASM import with `?url` query
+   - Vite's type definitions don't support this pattern
+
+3. **packages/agent/src/agent.ts** (lines 277, 336):
+   - Line 277: Legitimate AI SDK provider metadata types (accessing `.cost` from `JSONValue`)
+   - Line 336: Legitimate AI SDK message stream type compatibility
+
+4. **packages/browser/src/startWorker.ts** (line 74):
+   - Legitimate SharedWorker module option types
+   - TypeScript DOM types may lag behind browser support
+
+## Overall Assessment
+
+This commit is primarily a documentation update that attempts to clarify technical debt. The reframing of @ts-ignore suppressions from "to fix" to "third-party type gaps" is largely accurate but contains minor inaccuracies in line numbers and one questionable justification.
+
+**Recommendation:** The documentation changes are mostly acceptable, but the following should be addressed:
+1. Correct the line numbers for server.ts
+2. Investigate and potentially remove the @ts-ignore at agent.ts:359
+3. If the suppression at line 359 is needed, update the documentation with the actual reason

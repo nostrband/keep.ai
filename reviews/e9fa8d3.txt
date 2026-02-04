@@ -1,0 +1,276 @@
+COMMIT: e9fa8d3
+TITLE: Implement logical items infrastructure (P1 partial)
+DATE: Fri Jan 30 15:44:56 2026 +0100
+
+================================================================================
+CHANGES SUMMARY
+================================================================================
+
+This commit adds core infrastructure for logical items tracking in workflows:
+
+1. Database: v35 migration for items table with workflow_id, logical_item_id,
+   status, title, and tracking columns (packages/db/src/migrations/v35.ts)
+
+2. ItemStore: New store for managing items with getItem, startItem, setStatus,
+   listItems, and countByStatus methods (packages/db/src/item-store.ts)
+
+3. Items.withItem(): API for processing work in discrete trackable units
+   with automatic status updates (processing -> done/failed)
+   (packages/agent/src/sandbox/api.ts)
+
+4. Items.list(): Tool for querying processed items with filtering and
+   pagination support (packages/agent/src/tools/items-list.ts)
+
+5. Sandbox: wrapGuestCallback() and awaitGuestPromise() for host to invoke
+   guest callbacks (packages/agent/src/sandbox/sandbox.ts)
+
+6. New ToolWrapper class for tool registration with validation and mutation
+   enforcement (packages/agent/src/sandbox/tool-wrapper.ts)
+
+7. New tool types with Tool interface and helpers
+   (packages/agent/src/tools/types.ts)
+
+================================================================================
+ISSUES FOUND
+================================================================================
+
+ISSUE #1 [CRITICAL]: Race condition in ItemStore.startItem()
+Location: packages/db/src/item-store.ts:105-169
+Description: The getItem() followed by conditional UPDATE or INSERT is not
+  atomic. Two concurrent calls with the same (workflowId, logicalItemId) could
+  both see no existing item and both try to INSERT, causing a UNIQUE constraint
+  violation.
+Severity: CRITICAL
+Impact: Concurrent withItem calls for same item could fail spuriously under load
+
+ISSUE #2 [CRITICAL]: Memory leak in wrapGuestCallback()
+Location: packages/agent/src/sandbox/sandbox.ts:549-552
+Description: In wrapGuestCallback(), the line `ownedHandle = fnHandle.dup()`
+  creates a new QuickJS handle that is NEVER disposed anywhere. Every guest
+  callback passed to host creates a permanent memory leak.
+Severity: CRITICAL
+Impact: Long-running workflows with many callbacks will accumulate QuickJS
+  handles until memory exhaustion
+
+ISSUE #3 [HIGH]: Potential infinite loop in #awaitGuestPromise
+Location: packages/agent/src/sandbox/sandbox.ts:614-651
+Description: The while(true) loop has no timeout or maximum iteration count.
+  If a promise never settles and executePendingJobs() keeps returning 0, this
+  becomes an infinite busy loop. The queueMicrotask yields but doesn't
+  guarantee progress.
+Severity: HIGH
+Impact: A poorly-written script with never-settling promises could hang the
+  worker indefinitely
+
+ISSUE #4 [MEDIUM]: Nested withItem detection is fragile
+Location: packages/agent/src/sandbox/api.ts:530
+Description: The activeItem check only detects synchronous nesting. Two
+  concurrent withItem calls (e.g., via Promise.all) would not be detected
+  since both check activeItem === null before either sets it.
+Severity: MEDIUM
+Impact: Concurrent withItem could bypass nesting restriction, causing
+  unexpected state tracking behavior
+
+ISSUE #5 [MEDIUM]: Duplicate code between SandboxAPI and ToolWrapper
+Location: packages/agent/src/sandbox/api.ts, packages/agent/src/sandbox/tool-wrapper.ts
+Description: Both classes have:
+  - Identical checkWorkflowActive() implementation
+  - Similar tool wrapping logic
+  - Same error handling patterns
+  The comment says SandboxAPI is deprecated in favor of ToolWrapper, but both
+  exist with overlapping functionality.
+Severity: MEDIUM
+Impact: Maintenance burden, risk of divergent behavior
+
+ISSUE #6 [MEDIUM]: ToolWrapper phase tracking not thread-safe
+Location: packages/agent/src/sandbox/tool-wrapper.ts:94-96
+Description: currentPhase, mutationExecuted, currentMutation are instance
+  variables. If same ToolWrapper instance is used for concurrent handler
+  executions, race conditions will occur.
+Severity: MEDIUM
+Impact: Phase state could leak between different handler invocations
+
+ISSUE #7 [MEDIUM]: Double disposal risk in promise handling
+Location: packages/agent/src/sandbox/sandbox.ts:623-630
+Description: Code disposes state.value/state.error then promiseHandle. If
+  these are references to the same handle, this could double-dispose.
+Severity: MEDIUM
+Impact: Potential crash or undefined behavior from double disposal
+
+ISSUE #8 [LOW]: Missing index on last_run_id
+Location: packages/db/src/migrations/v35.ts
+Description: Queries filtering by last_run_id would benefit from an index.
+  Current indexes only cover workflow_id, status, and created_at.
+Severity: LOW
+Impact: Slow queries when filtering by run_id at scale
+
+ISSUE #9 [LOW]: Inefficient pagination in Items.list
+Location: packages/agent/src/tools/items-list.ts:119-132
+Description: Fetches limit+1 items to check has_more, then calls countByStatus
+  separately for total count. Could be optimized with single SQL query using
+  window functions.
+Severity: LOW
+Impact: Extra database query for each list call
+
+ISSUE #10 [LOW]: Missing input validation for logicalItemId format
+Location: packages/agent/src/sandbox/api.ts
+Description: logicalItemId validation only checks non-empty but doesn't
+  validate format. Could accept invalid characters that cause issues in
+  database or UI.
+Severity: LOW
+Impact: Potential display issues or SQL edge cases with unusual characters
+
+ISSUE #11 [INFO]: Empty string defaults in migration may be confusing
+Location: packages/db/src/migrations/v35.ts:26-40
+Description: Using DEFAULT '' for created_by_run_id and last_run_id. NULL
+  might be more semantically correct for "not yet set" fields.
+Severity: INFO
+Impact: None functional, but semantic clarity
+
+================================================================================
+PROPOSALS FOR FIXES
+================================================================================
+
+PROPOSAL #1: Fix race condition in startItem() (for Issue #1)
+---
+Location: packages/db/src/item-store.ts:105-169
+Use INSERT ON CONFLICT DO UPDATE pattern for atomicity:
+
+  async startItem(...): Promise<Item> {
+    const db = tx || this.db.db;
+    const now = Date.now();
+    const id = bytesToHex(randomBytes(16));
+
+    await db.exec(
+      `INSERT INTO items (
+        id, workflow_id, logical_item_id, title, status,
+        current_attempt_id, created_by, created_by_run_id, last_run_id,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, 'processing', 1, ?, ?, ?, ?, ?)
+      ON CONFLICT (workflow_id, logical_item_id) DO UPDATE SET
+        status = CASE WHEN status = 'done' THEN status ELSE 'processing' END,
+        title = ?,
+        last_run_id = ?,
+        updated_at = ?`,
+      [id, workflowId, logicalItemId, title, createdBy, runId, runId, now, now,
+       title, runId, now]
+    );
+
+    return this.getItem(workflowId, logicalItemId, db)!;
+  }
+
+PROPOSAL #2: Fix memory leak in wrapGuestCallback (for Issue #2)
+---
+Location: packages/agent/src/sandbox/sandbox.ts:549-608
+Track guest callback handles and dispose them when sandbox is destroyed:
+
+  private guestCallbackHandles: QuickJSHandle[] = [];
+
+  private wrapGuestCallback(ctx: QuickJSContext, fnHandle: QuickJSHandle) {
+    const ownedHandle = fnHandle.dup();
+    this.guestCallbackHandles.push(ownedHandle);  // Track for cleanup
+
+    return async (...hostArgs: unknown[]): Promise<unknown> => {
+      // ... existing implementation
+    };
+  }
+
+  // In sandbox cleanup/dispose method:
+  dispose() {
+    for (const handle of this.guestCallbackHandles) {
+      handle.dispose();
+    }
+    this.guestCallbackHandles = [];
+    // ... existing cleanup
+  }
+
+PROPOSAL #3: Add timeout to awaitGuestPromise (for Issue #3)
+---
+Location: packages/agent/src/sandbox/sandbox.ts:614-651
+Add timeout and max iterations:
+
+  async #awaitGuestPromise(promiseHandle: QuickJSHandle): Promise<unknown> {
+    const ctx = this.#ctx;
+    const MAX_ITERATIONS = 10000;
+    const TIMEOUT_MS = 30000;
+    const startTime = Date.now();
+    let iterations = 0;
+
+    while (true) {
+      iterations++;
+      if (iterations > MAX_ITERATIONS) {
+        promiseHandle.dispose();
+        throw new Error('Promise await exceeded max iterations');
+      }
+      if (Date.now() - startTime > TIMEOUT_MS) {
+        promiseHandle.dispose();
+        throw new Error('Promise await timed out');
+      }
+      // ... rest of loop
+    }
+  }
+
+PROPOSAL #4: Make withItem nesting detection atomic (for Issue #4)
+---
+Location: packages/agent/src/sandbox/api.ts
+Use atomic compare-and-set pattern:
+
+  private activeItemLock = false;
+
+  private createWithItemFunction() {
+    return async (...): Promise<unknown> => {
+      // Atomic check-and-set
+      if (this.activeItemLock) {
+        return this.abortWithLogicError('Concurrent withItem calls detected');
+      }
+      this.activeItemLock = true;
+
+      try {
+        // ... rest of implementation
+      } finally {
+        this.activeItemLock = false;
+      }
+    };
+  }
+
+PROPOSAL #5: Extract shared utility for workflow checking (for Issue #5)
+---
+Create packages/agent/src/sandbox/workflow-utils.ts:
+
+  export async function checkWorkflowActive(
+    scriptStore: ScriptStore,
+    workflowId: string,
+    debug: Debugger
+  ): Promise<void> {
+    const workflow = await scriptStore.getWorkflow(workflowId);
+    if (!workflow || workflow.status !== 'active') {
+      debug(`Workflow ${workflowId} is no longer active`);
+      throw new WorkflowPausedError(workflowId);
+    }
+  }
+
+Then import and use in both SandboxAPI and ToolWrapper.
+
+================================================================================
+SUMMARY
+================================================================================
+
+Overall Quality: CONCERNING - Multiple critical issues need attention
+
+CRITICAL (must fix before production):
+- Race condition in ItemStore.startItem() - use UPSERT pattern
+- Memory leak in wrapGuestCallback() - track and dispose handles
+- Potential infinite loop in #awaitGuestPromise - add timeout
+
+HIGH (fix before scaling):
+- Add timeout to promise handling
+
+MEDIUM (fix for correctness):
+- Make withItem nesting detection atomic
+- Remove duplicate code between SandboxAPI and ToolWrapper
+- Make ToolWrapper phase tracking handler-scoped
+- Check for double disposal in promise handling
+
+The implementation provides solid infrastructure for logical items, but the
+memory leak and race condition issues must be fixed before production use
+with concurrent workflows.

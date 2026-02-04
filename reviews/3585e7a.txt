@@ -1,0 +1,156 @@
+COMMIT REVIEW: 3585e7a
+=======================
+Title: Clean up deprecated code: drop unused tables and components
+Author: Artur Briugeman (Co-Authored-By: Claude Opus 4.5)
+Date: 2026-02-03
+
+SUMMARY OF CHANGES
+------------------
+This commit performs a significant technical debt cleanup by:
+
+1. Migration v37 - Drops three deprecated database tables:
+   - `resources` table: Never implemented (Spec 08), zero usage
+   - `task_states` table: Data migrated to tasks.asks field (Spec 10, v31/v32)
+   - `chat_notifications` table: Per-device notification tracking removed (Spec 07)
+
+2. Removes deprecated task tools directory (packages/agent/src/tools/deprecated/):
+   - add-task-recurring.ts (63 lines)
+   - add-task.ts (72 lines)
+   - get-task.ts (35 lines)
+   - list-tasks.ts (61 lines)
+   - send-to-task-inbox.ts (73 lines)
+   - task-update.ts (85 lines)
+   Total: ~389 lines of deprecated code removed
+
+3. Removes AuthDialog component (apps/web/src/components/AuthDialog.tsx):
+   - Was a 5-line re-export stub pointing to AuthPopup
+   - AuthPopup is the correct component, actively used
+
+4. Updates IMPLEMENTATION_PLAN.md:
+   - Database version updated from v36 to v37
+   - Technical debt items marked as completed
+
+FILES CHANGED
+-------------
+- IMPLEMENTATION_PLAN.md (+10/-6)
+- apps/web/src/components/AuthDialog.tsx (DELETED, -5 lines)
+- packages/agent/src/tools/deprecated/* (6 files DELETED, -389 lines)
+- packages/db/src/database.ts (+2 lines - registers v37 migration)
+- packages/db/src/migrations/v37.ts (NEW, +46 lines)
+
+Net change: -400+ lines of code removed (technical debt reduction)
+
+DETAILED ANALYSIS
+-----------------
+
+### Migration v37 Implementation
+
+The migration correctly handles CRR (Conflict-free Replicated Relations) tables:
+
+```typescript
+// CRR tables require crsql_as_crr_undo before DROP
+await tx.exec("SELECT crsql_as_crr_undo('resources')");
+await tx.exec(`DROP INDEX IF EXISTS idx_resources_id`);
+await tx.exec(`DROP TABLE IF EXISTS resources`);
+
+await tx.exec("SELECT crsql_as_crr_undo('task_states')");
+await tx.exec(`DROP TABLE IF EXISTS task_states`);
+
+// Local table (non-CRR) - no undo needed
+await tx.exec(`DROP INDEX IF EXISTS idx_chat_notifications_device`);
+await tx.exec(`DROP TABLE IF EXISTS chat_notifications`);
+```
+
+The order of operations is correct:
+1. Undo CRR tracking first
+2. Drop indexes
+3. Drop table
+
+### Deprecated Task Tools Removal
+
+The removed tools were part of a legacy task management system that has been
+replaced by the workflow-based execution model. All 6 tools were already marked
+as deprecated with "@deprecated" JSDoc comments.
+
+Verification confirms:
+- No imports from tools/deprecated/ exist in active code
+- No references to makeAddTaskTool, makeListTasksTool, etc. in active code
+- Sandbox API (sandbox/api.ts) has comment: "Tasks.* tools removed (deprecated)"
+- Tools index exports only active tools
+
+### AuthDialog Removal
+
+AuthDialog was already just a re-export:
+```typescript
+export { AuthPopup as AuthDialog } from './AuthPopup';
+```
+
+Verification confirms:
+- AuthPopup exists and is fully implemented (399 lines)
+- AuthPopup is actively used by HeaderAuthNotice and AuthEventItem
+- No remaining imports of AuthDialog in the codebase
+
+POTENTIAL ISSUES
+----------------
+
+### Issue 1: README.md Documentation Outdated (MEDIUM)
+
+File: packages/agent/README.md
+
+The README contains outdated documentation that references the deprecated task tools:
+- Lines 83-102: Code example imports `makeAddTaskTool` which no longer exists
+- Lines 142-146: "Task Management" section lists deprecated tools with broken links
+- Lines 278, 284-288: References deprecated `TaskState` type
+
+**Impact:** Developers reading the README will encounter non-working example code.
+
+**Proposal:** Update README.md to:
+1. Remove the "Task Management" section (lines 141-146)
+2. Update code examples to remove deprecated tool imports
+3. Update type documentation to use `asks?: string` instead of `TaskState`
+
+### Issue 2: No Migration Rollback Strategy (LOW)
+
+The migration drops tables without any rollback mechanism. This is expected for
+SQLite migrations, but worth noting.
+
+**Impact:** If rollback is needed, data in dropped tables is permanently lost.
+
+**Mitigation:** The tables being dropped were verified to have no active usage:
+- resources: Never implemented
+- task_states: Data migrated to tasks.asks in v32
+- chat_notifications: Feature removed in Spec 07
+
+This is acceptable given proper verification was done before removal.
+
+### Issue 3: Build Artifacts May Contain Stale References (TRIVIAL)
+
+Some pre-built JavaScript bundles in apps/electron/public/assets/ may contain
+references to dropped tables until next build.
+
+**Impact:** None - these are regenerated on build.
+
+**Proposal:** No action needed.
+
+VERIFICATION STATUS
+-------------------
+[x] resources table - No active code references found
+[x] task_states table - All code migrated to use tasks.asks field
+[x] chat_notifications table - All code and UI removed (Spec 07)
+[x] AuthDialog - No active imports found
+[x] Deprecated task tools - No active imports or registrations found
+[x] CRR undo pattern - Correct order of operations verified
+[x] Index cleanup - All created indexes are dropped before tables
+
+VERDICT
+-------
+APPROVED - This is a well-executed technical debt cleanup. All deprecated code
+has been properly verified as unused before removal. The migration pattern for
+CRR tables is correct. The only issue requiring follow-up is the outdated
+README.md documentation which should be updated in a subsequent commit.
+
+RECOMMENDATIONS
+---------------
+1. Update packages/agent/README.md to remove references to deprecated task tools
+2. Consider adding a "Breaking Changes" section to release notes mentioning the
+   removed tables (for users who may have been querying the database directly)

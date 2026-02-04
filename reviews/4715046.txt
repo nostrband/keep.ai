@@ -1,0 +1,167 @@
+COMMIT REVIEW: 4715046
+=======================
+
+Commit: 47150469ee5b921f909518032c5cae97336eedb0
+Author: Artur Briugeman
+Date: Fri Jan 30 15:05:57 2026 +0100
+Title: Fix P1 UX issues in workflow management (P1)
+
+FILES CHANGED:
+- IMPLEMENTATION_PLAN.md (+8, -8)
+- apps/web/src/components/ArchivedPage.tsx (+9, -1)
+- apps/web/src/components/WorkflowDetailPage.tsx (+51, -3)
+
+================================================================================
+CHANGE SUMMARY
+================================================================================
+
+1. ArchivedPage.tsx - Null Check for Workflow Restore
+   - Added explicit null check before restoring archived workflow
+   - If workflow.find() returns undefined, shows error message and aborts
+   - Prevents silent fallback to "draft" status on race conditions
+
+2. WorkflowDetailPage.tsx - Replace window.confirm() with Modal
+   - Added state: showArchiveConfirm
+   - Refactored handleArchive() to show modal instead of window.confirm()
+   - New confirmArchive() performs the actual mutation
+   - Custom modal with backdrop, icon, buttons matching design system
+
+================================================================================
+POTENTIAL ISSUES
+================================================================================
+
+ISSUE 1: Inconsistent Error Handling Pattern (LOW)
+--------------------------------------------------
+File: apps/web/src/components/ArchivedPage.tsx:27-29
+
+The new null check error handling differs from the existing mutation error
+handler in the same file:
+
+New code (lines 27-29):
+  if (!workflow) {
+    error.show("Workflow not found. Try refreshing the page.");
+    return;
+  }
+
+Existing pattern (lines 40-43):
+  onError: (err) => {
+    console.error("Failed to restore workflow:", err);
+    error.show(err instanceof Error ? err.message : "Failed to restore workflow");
+  }
+
+The mutation error handler includes console.error() for debugging, but the new
+null check does not. This inconsistency makes debugging harder.
+
+PROPOSAL:
+Add console.error() to the null check for consistency:
+  if (!workflow) {
+    console.error("Workflow not found when restoring:", workflowId);
+    error.show("Workflow not found. Try refreshing the page.");
+    return;
+  }
+
+
+ISSUE 2: Missing Escape Key Handler for Modal (MEDIUM)
+------------------------------------------------------
+File: apps/web/src/components/WorkflowDetailPage.tsx:728-764
+
+The archive confirmation modal does not handle the Escape key to dismiss.
+This is standard modal UX behavior that users expect.
+
+ConsolePage.tsx has this pattern (lines 119-132):
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && modalContent !== null) {
+        closeModal();
+      }
+    };
+    if (modalContent !== null) {
+      document.addEventListener("keydown", handleKeyDown);
+      return () => document.removeEventListener("keydown", handleKeyDown);
+    }
+  }, [modalContent]);
+
+PROPOSAL:
+Add useEffect with Escape key listener when showArchiveConfirm is true:
+  useEffect(() => {
+    if (!showArchiveConfirm) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setShowArchiveConfirm(false);
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [showArchiveConfirm]);
+
+
+ISSUE 3: Missing ARIA Attributes for Accessibility (MEDIUM)
+-----------------------------------------------------------
+File: apps/web/src/components/WorkflowDetailPage.tsx:728-764
+
+The modal lacks accessibility attributes:
+- No role="dialog"
+- No aria-labelledby linking to the title
+- No aria-modal="true"
+- No focus trap or initial focus management
+
+Note: This is a systemic issue - ConsolePage and DevicesPage modals also lack
+these attributes. However, new code should follow best practices.
+
+PROPOSAL:
+Add accessibility attributes to the modal:
+  <div
+    className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="archive-dialog-title"
+    onClick={() => setShowArchiveConfirm(false)}
+  >
+    <div ...>
+      <h3 id="archive-dialog-title" className="text-lg font-semibold text-gray-900">
+        Archive Workflow?
+      </h3>
+      ...
+    </div>
+  </div>
+
+
+ISSUE 4: Inline Arrow Functions in Modal (LOW)
+----------------------------------------------
+File: apps/web/src/components/WorkflowDetailPage.tsx:731
+
+The modal uses inline arrow functions for onClick handlers:
+  onClick={() => setShowArchiveConfirm(false)}
+
+ConsolePage extracts the close function for reuse:
+  const closeModal = () => setModalContent(null);
+  // Later: onClick={closeModal}
+
+This is a minor style inconsistency. The inline approach works but is
+slightly less readable and creates new function instances on each render.
+
+PROPOSAL (optional):
+Extract a closeArchiveConfirm function:
+  const closeArchiveConfirm = () => setShowArchiveConfirm(false);
+  // Use: onClick={closeArchiveConfirm}
+
+================================================================================
+POSITIVE FINDINGS
+================================================================================
+
+1. Null check placement is correct - properly guards against race conditions
+2. Modal dismissal works correctly - backdrop click with stopPropagation
+3. Button state management is correct - Archive button disabled during mutation
+4. User feedback is clear - error and success messages shown appropriately
+5. Design consistency - modal styling matches the app's design system
+6. Component reuse - uses existing Button component and patterns
+7. No window.confirm() usage remaining in codebase - complete migration
+
+================================================================================
+VERDICT
+================================================================================
+
+The commit correctly addresses the P1 UX issues. The main concerns are:
+- Missing Escape key handler (medium priority)
+- Missing ARIA attributes (medium priority, systemic issue)
+- Minor inconsistency in error logging pattern (low priority)
+
+These are polish issues rather than bugs. The core functionality is solid.

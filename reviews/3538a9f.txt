@@ -1,0 +1,115 @@
+# Review: Commit 3538a9f
+
+## Summary
+
+This commit fixes two P1 issues related to maintainer context and MIME detection:
+
+1. **Maintainer context improvements**:
+   - Removed `.slice(0, 5)` limit on changelog entries - now includes full changelog for major version
+   - Changed log truncation from line-based (50 lines) to character-based (5000 chars max) with `[truncated]` prefix
+
+2. **MIME detection fix**:
+   - Fixed unreachable fallback code path - filename-based detection now works when buffer detection returns `application/octet-stream`
+
+### Files Changed
+- `IMPLEMENTATION_PLAN.md` - Marked 3 tasks as complete
+- `packages/agent/src/task-worker.ts` - Changelog and log truncation changes
+- `packages/node/src/fileUtils.ts` - MIME detection fallback fix
+- `packages/tests/src/fileUtils.test.ts` - Updated test expectations
+
+---
+
+## Changes in Plain English
+
+### 1. Changelog Limit Removal (task-worker.ts:577)
+
+**Before**: Only the last 5 changelog entries were included in maintainer context
+**After**: All changelog entries for the current major version are included
+
+This helps the maintainer agent avoid repeating failed approaches by having full history of prior fix attempts.
+
+### 2. Log Truncation Change (task-worker.ts:586-591)
+
+**Before**:
+```typescript
+const logLines = allLogs.split("\n");
+const trimmedLogs = logLines.length > 50
+  ? logLines.slice(-50).join("\n")
+  : allLogs;
+```
+
+**After**:
+```typescript
+const MAX_LOG_CHARS = 5000;
+const trimmedLogs = allLogs.length > MAX_LOG_CHARS
+  ? "[truncated]\n" + allLogs.slice(-MAX_LOG_CHARS)
+  : allLogs;
+```
+
+Character-based truncation is more predictable for LLM token counting. The `[truncated]` prefix clearly signals incomplete logs.
+
+### 3. MIME Detection Fix (fileUtils.ts:114-128)
+
+**Before**: Condition `!mediaType` was never true because `detectBufferMime` always returns at least `application/octet-stream`
+**After**: Condition changed to `mediaType === 'application/octet-stream'` - now triggers fallback to filename-based detection
+
+This fixes MIME types for text files (.txt, .json, .css, etc.) which don't have magic bytes for buffer detection.
+
+---
+
+## Potential Issues
+
+### Issue 1: Unbounded Changelog Growth (MEDIUM)
+
+**Location**: `packages/agent/src/task-worker.ts:577-584`
+
+**Description**: Removing the 5-entry limit allows changelogs to grow unbounded. A workflow with 100 minor versions will now include all 100 entries.
+
+**Impact**:
+- Each changelog entry is ~50-100 bytes (version + comment)
+- 100 entries = ~5-10KB of additional context
+- Combined with 5000-char logs + error details + script code, this could cause context bloat for LLM calls
+
+**Proposal**: Consider adding a configurable upper limit (e.g., 20-30 entries) or documenting expected changelog sizes. Monitor in production for workflows with unusually high minor version counts.
+
+### Issue 2: Stale Documentation in agent-types.ts (LOW)
+
+**Location**: `packages/agent/src/agent-types.ts:62` (approximately)
+
+**Description**: The `MaintainerContext` interface likely documents logs as "last 50 lines" which is now incorrect (should be "last 5000 characters").
+
+**Proposal**: Update interface documentation to reflect character-based truncation.
+
+### Issue 3: Log Truncation Edge Cases (LOW)
+
+**Location**: `packages/agent/src/task-worker.ts:586-591`
+
+**Description**: Character-based truncation behaves differently than line-based:
+- Very short lines (10 chars each): 50 lines = 500 chars before, 5000 chars = ~500 lines after
+- Very long lines (200+ chars): 50 lines = 10000+ chars before, 5000 chars = ~25 lines after
+
+For verbose logs with long lines, less log content is now preserved.
+
+**Severity**: LOW - The new approach is more predictable for token counting, which is the primary concern for LLM context.
+
+### Issue 4: Test Coverage for Changelog Limit (LOW)
+
+**Location**: `packages/tests/src/script-store.test.ts`
+
+**Description**: There appears to be an existing test that validates 5-entry changelog limit behavior. This test was not updated and may now be testing obsolete behavior or may be testing independent logic that still uses `.slice(0, 5)` elsewhere.
+
+**Proposal**: Verify test still accurately reflects production behavior; update or remove if testing removed functionality.
+
+---
+
+## Code Quality Assessment
+
+- **MIME Detection Fix**: Excellent. Dead code was made reachable, test coverage added, clear improvement for text file handling.
+- **Log Truncation**: Good. More predictable for LLM token counting. `[truncated]` prefix is helpful UX.
+- **Changelog Limit Removal**: Reasonable but needs monitoring. The intent (full history for maintainer) is valid, but unbounded growth is a concern.
+
+---
+
+## Verdict
+
+**APPROVE** - The fixes are correct and address real bugs. The MIME detection fix is particularly valuable. The changelog growth concern is worth monitoring in production but doesn't block the change.

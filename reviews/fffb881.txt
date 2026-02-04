@@ -1,0 +1,206 @@
+COMMIT REVIEW: fffb881 - Add mutation enforcement to SandboxAPI for workflow mode
+============================================================================
+
+COMMIT INFO:
+- Hash: fffb881603ca26fe543850b5fbd26ddc04f1f7b5
+- Author: Artur Briugeman
+- Date: 2026-01-30 17:14:45
+- Co-Authored-By: Claude Opus 4.5
+- Files Changed: 3
+- Insertions: 54, Deletions: 6
+
+============================================================================
+CHANGES DESCRIPTION
+============================================================================
+
+This commit implements mutation enforcement in SandboxAPI for workflow mode.
+The core idea is that mutations (non-read-only tool calls) must be scoped
+inside Items.withItem() to enable progress tracking.
+
+FILES CHANGED:
+
+1. **packages/agent/src/sandbox/api.ts** (+33 lines)
+   - Adds `enforceMutationRestrictions(ns: string, name: string): void` method
+   - Integrates enforcement into the tool execution pipeline
+
+2. **IMPLEMENTATION_PLAN.md** (+16/-6)
+   - Updates logical-items status to reflect mutation enforcement completion
+   - Adds note about ClassifiedError migration spec
+
+3. **packages/tests/src/logical-items.test.ts** (+5 lines)
+   - Adds note about mutation enforcement location and testing strategy
+
+============================================================================
+CODE ANALYSIS
+============================================================================
+
+NEW METHOD: enforceMutationRestrictions()
+```typescript
+private enforceMutationRestrictions(ns: string, name: string): void {
+  // Mutations require active item scope
+  if (this.activeItem === null) {
+    const message = `${ns}.${name} is a mutation and must be called inside Items.withItem(). ` +
+      `Wrap your mutations in a withItem call to track progress.`;
+    return this.abortWithLogicError(message);
+  }
+
+  // Check if item is done - can't mutate completed items
+  if (this.activeItemIsDone) {
+    const message = `${ns}.${name}: cannot perform mutations on completed item "${this.activeItem.id}". ` +
+      `Check ctx.item.isDone before attempting mutations.`;
+    return this.abortWithLogicError(message);
+  }
+}
+```
+
+INTEGRATION IN TOOL EXECUTION:
+```typescript
+// Enforce mutation restrictions in workflow mode
+// Mutations must be inside Items.withItem() to enable progress tracking
+if (this.workflowId && tool.isReadOnly) {
+  const isReadOnly = tool.isReadOnly(validatedInput);
+  if (!isReadOnly) {
+    // This is a mutation - check if we're inside withItem scope
+    // Exception: Console.log is allowed outside withItem (it's for debugging)
+    if (ns !== 'Console' || name !== 'log') {
+      this.enforceMutationRestrictions(ns, name);
+    }
+  }
+}
+```
+
+============================================================================
+POTENTIAL ISSUES
+============================================================================
+
+ISSUE 1: Console.log EXCEPTION IS HARDCODED
+Severity: LOW
+Location: api.ts:203-205
+Description: The exception for Console.log is hardcoded with string comparison:
+`if (ns !== 'Console' || name !== 'log')`. If Console.log is renamed or other
+debugging tools are added that should be allowed outside withItem, this needs
+to be updated manually.
+
+Proposal: Consider adding a `canRunOutsideWithItem?: boolean` property to the
+Tool interface for explicit opt-out of mutation enforcement. This would be
+more extensible. However, Console.log is the only debugging tool, so the
+current approach is pragmatic.
+
+---
+
+ISSUE 2: RELIES ON activeItem AND activeItemIsDone STATE
+Severity: INFO (Not an issue, just noting design)
+Location: api.ts:102-114
+Description: The enforcement relies on `this.activeItem` and `this.activeItemIsDone`
+state being correctly set/cleared in the withItem implementation. If withItem
+has a bug where it doesn't clear state (e.g., in a finally block), mutations
+could be incorrectly allowed/denied in subsequent calls.
+
+The existing withItem implementation does use proper try/finally to clear state,
+so this is correctly implemented. Just noting the coupling.
+
+Proposal: No change needed - the design is sound.
+
+---
+
+ISSUE 3: ERROR MESSAGES REFERENCE Items.withItem API THAT USER MUST USE
+Severity: LOW
+Location: api.ts:103-105, 111-113
+Description: Error messages tell the user to use `Items.withItem()` with code
+examples. This is good for developer experience but the messages are verbose.
+
+Current messages:
+- "Memory.createNote is a mutation and must be called inside Items.withItem().
+   Wrap your mutations in a withItem call to track progress."
+- "Memory.createNote: cannot perform mutations on completed item "email:123".
+   Check ctx.item.isDone before attempting mutations."
+
+Proposal: Messages are clear and actionable. No change needed.
+
+---
+
+ISSUE 4: isReadOnly CHECK USES OPTIONAL CHAINING IMPLICITLY
+Severity: VERY LOW
+Location: api.ts:125
+Description: `tool.isReadOnly` is optional, so `tool.isReadOnly(validatedInput)`
+would fail if isReadOnly is undefined. The code checks `if (this.workflowId && tool.isReadOnly)`
+which guards against undefined correctly.
+
+Proposal: No issue - the guard is correct.
+
+---
+
+ISSUE 5: IMPLEMENTATION_PLAN UPDATE SLIGHTLY INCONSISTENT
+Severity: VERY LOW
+Location: IMPLEMENTATION_PLAN.md
+Description: The plan lists mutation enforcement as complete but mentions
+"Tests for mutation enforcement (integration tests)" as remaining. However,
+the test file note says integration tests "would require full sandbox
+initialization which is slow and has disposal issues."
+
+This suggests a known gap in test coverage that's being tracked.
+
+Proposal: The commit correctly documents this limitation. The tests are
+added in the follow-up commit c8aa537.
+
+============================================================================
+DESIGN EVALUATION
+============================================================================
+
+ENFORCEMENT RULES:
+
+1. **Workflow mode only**: Enforcement is gated by `this.workflowId` check.
+   Non-workflow modes (planner, maintainer) can freely call mutations.
+   This is correct - planners create scripts, they don't execute workflows.
+
+2. **Uses tool.isReadOnly()**: The enforcement respects the tool's self-declared
+   read-only status. Dynamic tools (like Gmail.api with different methods) can
+   have method-specific behavior. Good design.
+
+3. **Console.log exception**: Debugging should always be allowed. Correct.
+
+4. **Two-level check**:
+   - Level 1: Must be inside withItem scope (activeItem !== null)
+   - Level 2: Item must not be completed (activeItemIsDone === false)
+
+   This prevents both "stray mutations" and "mutations on completed items".
+
+5. **Error handling**: Uses `abortWithLogicError` which:
+   - Sets `classifiedError` in context for downstream handling
+   - Calls `abortController.abort()` to terminate execution
+   - Throws the error for immediate stop
+
+   This ensures the workflow stops cleanly with proper error reporting.
+
+============================================================================
+SUBSEQUENT DEPRECATION NOTE
+============================================================================
+
+This code was subsequently deprecated and removed in commit 3196cac (exec-02)
+as part of migrating from the Items-based execution model to the Topics-based
+event-driven model. The enforcement moved to phase-based restrictions in
+ToolWrapper.
+
+============================================================================
+SUMMARY
+============================================================================
+
+This is a clean, focused commit that:
+
+1. CORRECTLY implements mutation scoping to Items.withItem()
+2. CORRECTLY handles the Console.log debugging exception
+3. CORRECTLY checks both scope existence and item completion status
+4. CORRECTLY gates enforcement on workflow mode only
+5. CORRECTLY integrates with the existing error/abort handling
+
+The implementation is well-designed with:
+- Clear separation of concerns (enforcement method vs integration)
+- Good error messages that guide developers
+- Proper state management through existing withItem infrastructure
+
+Issues found:
+- LOW: Console.log exception is hardcoded (acceptable for now)
+- VERY LOW: Plan notes test gap (addressed in follow-up commit)
+
+Overall: GOOD COMMIT - Implements mutation enforcement correctly with proper
+safeguards and clear error messaging.

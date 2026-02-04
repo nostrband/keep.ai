@@ -1,0 +1,129 @@
+COMMIT REVIEW: 862e0c2
+=======================
+Implement exec-06 and exec-07: Handler state machine and session orchestration
+
+SUMMARY OF CHANGES
+------------------
+This is a substantial commit (1540+ lines added) implementing the core execution
+engine for the new workflow model. Two major components:
+
+exec-06 (Handler State Machine):
+1. NEW FILE: packages/agent/src/handler-state-machine.ts (909 lines)
+   - executeHandler() core loop that processes handlers through phases
+   - Producer phases: pending -> executing -> committed|failed
+   - Consumer phases: pending -> preparing -> prepared -> mutating -> mutated -> emitting -> committed
+   - Mutation tracking with status (pending, in_flight, applied, failed, indeterminate)
+   - Crash recovery via checkpoint-based resume
+   - Helper functions: failRun, suspendRun, savePrepareAndReserve, commitProducer, commitConsumer
+
+exec-07 (Session Orchestration):
+2. NEW FILE: packages/agent/src/session-orchestration.ts (558 lines)
+   - executeWorkflowSession() main entry point
+   - Session container using script_runs with trigger types
+   - Producer execution followed by consumer loop (100 iteration budget)
+   - findConsumerWithPendingWork() for work detection
+   - Session state: completeSession, failSession, suspendSession
+   - Recovery: resumeIncompleteSessions, continueSession
+   - Single-threaded constraint: executeWorkflowSessionIfIdle, canStartSession
+   - Cost aggregation from handler runs
+
+3. MODIFIED: packages/agent/src/index.ts
+   - Exports executeHandler, isTerminal, HandlerResult, PrepareResult, HandlerExecutionContext
+   - Exports executeWorkflowSession, executeWorkflowSessionIfIdle, resumeIncompleteSessions,
+     canStartSession, getSessionCost, SessionTrigger, SessionResult, SessionConfig
+
+4. MODIFIED: packages/db/src/script-store.ts
+   - Added incrementHandlerCount() method for atomic session counting
+
+5. MODIFIED: IMPLEMENTATION_PLAN.md
+   - Marked exec-06 and exec-07 as complete
+   - Updated dependency graph and file tracking
+
+ISSUES FOUND
+------------
+
+ISSUE 1 (LOW): Silent truncation when hitting iteration limit
+Location: packages/agent/src/session-orchestration.ts lines 378-384
+Problem: When 100 iteration limit is hit, session completes as "completed" even
+though there may still be pending work. Only logged, no indication to user.
+  if (iterations >= maxIterations) {
+    log(`Session ${sessionId} hit budget limit (${maxIterations} iterations)`);
+  }
+  await completeSession(api, session);
+  return { status: "completed", sessionId };
+Risk: User may not realize workflow didn't process all items.
+Proposal: Consider returning status: "completed_with_remaining_work" or adding
+a flag to SessionResult indicating budget was exhausted.
+
+ISSUE 2 (LOW): No cost-based budgeting
+Location: packages/agent/src/session-orchestration.ts
+Problem: Session has iteration budget (100) but no cost budget. If each handler
+iteration is expensive, total cost could be unbounded.
+Proposal: Consider adding optional maxCost to SessionConfig.
+
+ISSUE 3 (LOW): No validation of handler names from config
+Location: packages/agent/src/handler-state-machine.ts lines 381-384
+Problem: Handler names come from workflow.handler_config JSON. If config references
+a non-existent handler (e.g., typo), will fail during sandbox evaluation with
+a confusing error rather than a clear "handler not found" error.
+Proposal: Add pre-flight validation that handler exists in script before execution.
+
+ISSUE 4 (MINOR): JSON parsing without size limits
+Location: Multiple locations parse JSON (prepare_result, output_state, handler_config)
+Problem: Large payloads could cause memory issues.
+Risk: Very low - SQLite has built-in limits.
+Proposal: Document expected payload sizes or add soft limits.
+
+POSITIVE OBSERVATIONS
+---------------------
++ All required database methods verified to exist and work correctly:
+  - handlerRunStore: getBySession, getIncomplete, getWorkflowsWithIncompleteRuns,
+    hasActiveRun, updatePhase
+  - mutationStore: getByHandlerRunId, create, markInFlight, markApplied,
+    markFailed, markIndeterminate, get
+  - eventStore: reserveEvents, consumeEvents, countPending
+  - handlerStateStore: get, set
+  - scriptStore: incrementHandlerCount, finishScriptRun
+
++ Transaction handling is EXCELLENT:
+  - commitProducer: Wraps state update + phase transition + handler count in one tx
+  - commitConsumer: Wraps event consumption + state update + phase transition in one tx
+  - savePrepareAndReserve: Atomically saves prepare result and reserves events
+  - All stores properly accept optional tx parameter
+
++ Error handling is comprehensive:
+  - Error classification (auth, permission, network, logic, unknown)
+  - isDefiniteFailure() distinguishes definite vs indeterminate failures
+  - Mutation error handling properly marks failed vs indeterminate
+  - Top-level try/catch with error classification
+
++ Crash recovery is well-designed:
+  - State machine reads fresh state from DB each iteration
+  - Mutation in_flight at restart -> indeterminate (safe)
+  - resumeIncompleteSessions() properly skips paused/error workflows
+  - continueSession() resumes consumer loop from where it left off
+
++ Single-threaded constraint enforced:
+  - canStartSession() checks hasActiveRun()
+  - executeWorkflowSessionIfIdle() prevents overlapping sessions
+
++ Code quality is high:
+  - Clear separation of concerns
+  - Comprehensive logging via debug module
+  - Types exported for external use
+  - Configurable iteration limit
+
+VERIFICATION PERFORMED
+----------------------
+1. All database methods exist and have correct signatures
+2. Transaction handling follows consistent pattern
+3. Schema has handler_run_count column (v36 migration)
+4. Phase state machine matches spec exactly
+5. Mutation lifecycle (pending -> in_flight -> applied/failed/indeterminate)
+
+RECOMMENDATIONS
+---------------
+1. LOW: Consider adding "completed_with_remaining_work" status when budget exhausted
+2. LOW: Consider adding maxCost to SessionConfig for cost-based budgeting
+3. LOW: Add handler existence validation before execution
+4. NONE: Code is production-ready as-is

@@ -1,0 +1,221 @@
+COMMIT REVIEW: 7ab00c4
+======================
+Title: Add test coverage for execution model components (exec-03, exec-04, exec-06)
+Date: 2026-02-03 19:08:46
+Files Changed: 5 (3 new test files + index.ts export + IMPLEMENTATION_PLAN.md)
+Lines Added: ~2216, Lines Removed: ~3
+Tests Added: 105 new tests
+
+SUMMARY OF CHANGES
+==================
+This commit adds unit and integration tests for execution model components:
+
+1. topics-api.test.ts - 29 tests for Topics.peek, Topics.getByIds, Topics.publish
+   - Tests tool integration with EventStore and TopicStore
+   - Verifies idempotency, ordering, status filtering, error handling
+   - Includes complete producer-consumer workflow integration test
+
+2. phase-tracking.test.ts - 48 tests for ToolWrapper phase restriction matrix
+   - Tests all 16 combinations (4 phases x 4 operations)
+   - Verifies phase transitions, state management
+   - Tests tool categorization (read, mutate, topic_peek, topic_publish)
+   - Verifies LogicError on phase violations
+
+3. handler-state-machine.test.ts - 28 tests for executeHandler state machine
+   - Tests terminal state handling
+   - Tests phase transitions for producer and consumer
+   - Tests mutation status handling (in_flight, applied, failed, indeterminate)
+   - Tests reservation and empty-work-early-exit paths
+
+4. packages/agent/src/index.ts - Exports Tool types and defineTool helpers
+   - Exposes defineTool, defineReadOnlyTool functions
+   - Exports Tool, ReadOnlyTool types for test usage
+
+POSITIVE ASPECTS
+================
+
+### Topics API Tests (topics-api.test.ts)
+
+1. Excellent coverage of all three Topics API operations
+2. Proper integration with real in-memory database
+3. Good edge cases: empty arrays, non-existent topics, partial matches
+4. Complete producer-consumer workflow integration test
+5. Verifies tool metadata (namespace, name) correctness
+6. Tests idempotency of publish (same messageId ignored)
+7. Tests status filtering (peek only returns pending events)
+8. Tests ordering (created_at ASC)
+9. Complex payload serialization tested (nested objects, unicode)
+
+### Phase Tracking Tests (phase-tracking.test.ts)
+
+1. Complete 4x4 phase/operation matrix coverage - all 16 combinations tested
+2. Perfect alignment with implementation's PHASE_RESTRICTIONS constant
+3. Proper mock context setup with all required EvalContext fields
+4. Tests verify phase enforcement through actual tool execution
+5. Tests single-mutation-per-mutate-phase enforcement
+6. Tests LogicError thrown for phase violations
+7. Tests Topics tool categorization (peek/getByIds → topic_peek, publish → topic_publish)
+8. Tests null phase (task mode) allows all operations
+
+### Handler State Machine Tests (handler-state-machine.test.ts)
+
+1. Good terminal state handling tests (committed, suspended, failed)
+2. Tests non-existent handler run error case
+3. Tests missing workflow and missing script error cases
+4. Comprehensive mutation status handling tests
+5. Tests empty reservations early exit (prepared → committed)
+6. One crash recovery test for in_flight mutation → indeterminate
+
+POTENTIAL ISSUES
+================
+
+### ISSUE 1: Handler state machine tests are incomplete (HIGH)
+
+Location: packages/tests/src/handler-state-machine.test.ts
+
+Problem:
+The tests don't actually test the executeHandler state machine running through
+its full execution path. Most tests either:
+- Test terminal states (already done, nothing to do)
+- Manually transition phases without executing handler code
+- Test error cases that exit early
+
+Missing critical tests:
+- No end-to-end producer execution (pending → executing → committed with code run)
+- No end-to-end consumer execution (full 7-phase progression with code run)
+- No crash recovery resume tests (start at intermediate phase, verify continuation)
+- No checkpoint resume loop tests
+- No hasMutate=false consumer path test
+- No hasNext=true emitting phase test
+
+Impact:
+The core value of executeHandler - crash-safe execution with checkpoint resume -
+is not adequately tested. Bugs in phase transitions or recovery logic could go
+undetected.
+
+Proposal:
+1. Add integration tests with executable code or properly mocked sandbox
+2. Add crash recovery tests: create handler at each phase, verify executeHandler
+   continues correctly
+3. Add complete flow tests for both producer and consumer patterns
+4. Mock or stub the sandbox to avoid actual code execution complexity
+
+---
+
+### ISSUE 2: Tests use timing delays for ordering (MEDIUM)
+
+Location:
+- topics-api.test.ts:111, 212
+- Other test files with setTimeout
+
+Problem:
+Tests use `setTimeout` delays (e.g., 10ms) to ensure different timestamps for
+ordering verification. This is fragile - on slow or loaded systems, delays may
+not be sufficient, causing flaky test failures.
+
+Example:
+```typescript
+await eventStore.publishEvent(...);
+await new Promise(r => setTimeout(r, 10));  // Hope this is enough
+await eventStore.publishEvent(...);
+```
+
+Proposal:
+Either:
+A) Set explicit timestamps in test data (if API allows)
+B) Use longer delays (100-200ms) with comment explaining why
+C) Modify tests to not rely on strict ordering where possible
+
+---
+
+### ISSUE 3: Mock setup doesn't match production context (MEDIUM)
+
+Location: packages/tests/src/handler-state-machine.test.ts
+
+Problem:
+Tests create scripts with string code templates that won't actually execute:
+```typescript
+code: `
+  export const handlers = {
+    checkEmails: {
+      producer: { schedule: '*/5 * * * *' },
+      async produce() { return { ok: true }; }
+    }
+  };
+`
+```
+
+This code never runs because tests either:
+- Exit early due to terminal states
+- Manually transition phases
+- Hit error conditions before execution
+
+The handler-state-machine relies on sandbox execution to run handler code.
+Without testing actual execution, phase handler bugs won't be caught.
+
+Proposal:
+1. Mock the sandbox layer to return controlled results
+2. Or write integration tests with minimal executable code
+3. Or export and test individual phase handlers directly
+
+---
+
+### ISSUE 4: No transaction parameter testing (LOW)
+
+Same issue as 88bf4f0 - store methods accept `tx?: DBInterface` but tests
+don't exercise transaction functionality.
+
+---
+
+### ISSUE 5: Missing edge cases in Topics API tests (LOW)
+
+Location: packages/tests/src/topics-api.test.ts
+
+Missing tests:
+- Invalid topic names (empty string, special characters)
+- Malformed payloads
+- Concurrent peek/reserve operations
+- Very large payloads
+- Error recovery after database errors
+
+---
+
+### ISSUE 6: Phase tracking doesn't test invalid operation types (LOW)
+
+Location: packages/tests/src/phase-tracking.test.ts
+
+Tests don't verify behavior with unknown/invalid operation types. While TypeScript
+would catch this at compile time, runtime errors could still occur if operation
+types are determined dynamically.
+
+---
+
+### ISSUE 7: No abort signal testing (LOW)
+
+Location: packages/tests/src/handler-state-machine.test.ts
+
+The HandlerExecutionContext includes optional abortController, but no tests
+verify that abort signals are properly handled during execution.
+
+CONCLUSION
+==========
+This commit provides excellent test coverage for Topics API and phase tracking,
+but the handler state machine tests are incomplete. The Topics API tests achieve
+comprehensive coverage with good integration testing. The phase tracking tests
+perfectly verify the 4x4 restriction matrix.
+
+However, the handler-state-machine.test.ts doesn't adequately test the core
+executeHandler functionality - the checkpoint resume loop and crash recovery
+that make the state machine valuable. Most tests test around execution rather
+than through it.
+
+Test Quality Breakdown:
+- topics-api.test.ts: 9/10 (excellent coverage, minor timing issues)
+- phase-tracking.test.ts: 9/10 (complete matrix, proper mocks)
+- handler-state-machine.test.ts: 5/10 (good structure, incomplete coverage)
+
+Recommended priority for additions:
+1. Add full executeHandler integration tests (HIGH)
+2. Add crash recovery resume tests (HIGH)
+3. Fix timing-dependent tests (MEDIUM)
+4. Add missing edge cases (LOW)

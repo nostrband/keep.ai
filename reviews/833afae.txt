@@ -1,0 +1,246 @@
+COMMIT REVIEW: 833afae - Implement exec-03a: Complete tool migration to ToolWrapper
+==================================================================================
+
+SUMMARY OF CHANGES
+------------------
+This commit completes the tool migration from SandboxAPI to ToolWrapper and
+adds phase tracking for the new execution model.
+
+Key changes:
+- Create tool-lists.ts with createWorkflowTools() and createTaskTools()
+- Add phase tracking to ToolWrapper (setPhase, getPhase, checkPhaseAllowed)
+- Add ExecutionPhase and OperationType types for phase-based access control
+- Update WorkflowWorker to use ToolWrapper + createWorkflowTools
+- Update TaskWorker to use ToolWrapper + createTaskTools
+- Export ToolWrapper, tool-lists, and phase types from agent index
+- SandboxAPI remains deprecated for backwards compatibility
+- Fix type errors in logical-items.test.ts for removed makeItemsListTool
+
+Phase tracking matrix enforces:
+- Producer phase: read + topic_publish allowed
+- Prepare phase: read + topic_peek allowed
+- Mutate phase: single mutation allowed (one per phase)
+- Next phase: topic_publish only
+
+FILES CHANGED
+-------------
+- IMPLEMENTATION_PLAN.md (+50/-47 lines)
+- packages/agent/src/index.ts (+5 lines - exports new types)
+- packages/agent/src/sandbox/tool-lists.ts (+208 lines - new file)
+- packages/agent/src/sandbox/tool-wrapper.ts (+131/-48 lines)
+- packages/agent/src/task-worker.ts (+25/-8 lines)
+- packages/agent/src/workflow-worker.ts (+27/-21 lines)
+- packages/tests/src/logical-items.test.ts (+11/-1 lines - type fixes)
+
+ISSUES FOUND
+------------
+
+### ISSUE 1: Mutate Phase Blocks Read Operations (Design Question)
+Location: packages/agent/src/sandbox/tool-wrapper.ts:56-61
+
+The PHASE_RESTRICTIONS matrix disallows reads in the mutate phase:
+
+```typescript
+mutate: { read: false, mutate: true, topic_peek: false, topic_publish: false },
+```
+
+This means during the mutate phase, if a mutation tool needs to read data
+(e.g., to validate or look up related information), it cannot use read tools.
+
+Impact: Mutations must be fully prepared with all needed data before entering
+mutate phase. This is likely intentional for atomicity but may be surprising.
+
+Proposal: Document this restriction clearly in the execution model docs.
+If reads are needed during mutation, they must happen in prepare phase.
+
+
+### ISSUE 2: No Read Operations Allowed in Next Phase (Design Question)
+Location: packages/agent/src/sandbox/tool-wrapper.ts:61
+
+The next phase only allows topic_publish:
+
+```typescript
+next: { read: false, mutate: false, topic_peek: false, topic_publish: true },
+```
+
+This means handlers cannot read any data when preparing downstream events
+in the next phase.
+
+Impact: All data needed for publishing downstream events must be available
+from previous phases (stored in handler state or prepare result).
+
+Proposal: This seems intentional to keep the next phase minimal. Document
+the pattern: "Prepare all data in prepare/mutate phases, emit in next phase."
+
+
+### ISSUE 3: createTaskTools Passes workflowId as undefined (Low Severity)
+Location: packages/agent/src/task-worker.ts:913-927
+
+When creating tools for task execution, workflowId is not passed:
+
+```typescript
+const tools = createTaskTools({
+  api: this.api,
+  getContext: () => sandbox.context!,
+  connectionManager: this.connectionManager,
+  userPath: this.userPath,
+  // Note: Tasks don't have workflowId/scriptRunId - they operate outside workflow context
+});
+```
+
+This means Topics tools (Topics.peek, Topics.publish) will throw errors if
+called from a task:
+
+```typescript
+if (!workflowId) {
+  throw new Error("Topics.peek requires a workflow context");
+}
+```
+
+Impact: Tasks (planner/maintainer) cannot use Topics tools. This is likely
+intentional since tasks operate outside workflow context.
+
+Proposal: Document that Topics.* tools are only available in workflow
+execution, not in task execution. Or consider not adding them to task tools.
+
+
+### ISSUE 4: ToolWrapper.docs vs SandboxAPI.tools Naming Change (Very Low Severity)
+Location: packages/agent/src/task-worker.ts:956
+
+The migration changed the property name from `tools` to `docs`:
+
+```typescript
+// Old: sandboxAPI.tools
+// New: toolWrapper.docs  // Use toolWrapper.docs instead of sandboxAPI.tools
+```
+
+The comment explains the change, but the naming is slightly inconsistent.
+The ToolWrapper actually exposes `toolDocs` internally, not `docs`.
+
+Impact: Minor naming confusion. No functional impact.
+
+Proposal: Either rename the public accessor to match internal naming or
+add a comment explaining the accessor name.
+
+
+### ISSUE 5: Phase Tracking Not Used in TaskWorker (Intentional?)
+Location: packages/agent/src/task-worker.ts:941
+
+TaskWorker creates ToolWrapper but never calls setPhase():
+
+```typescript
+const toolWrapper = new ToolWrapper({
+  tools,
+  api: this.api,
+  getContext: () => sandbox.context!,
+  // ...
+  // Note: No phase tracking for tasks - they operate outside handler execution
+  taskType: taskType === 'planner' || taskType === 'maintainer' ? taskType : undefined,
+});
+```
+
+When currentPhase is null, all operations are allowed:
+
+```typescript
+if (this.currentPhase === null) {
+  return;  // Skip phase check
+}
+```
+
+Impact: This is intentional - tasks aren't subject to phase restrictions.
+The code handles this correctly but could be more explicit.
+
+Proposal: Add explicit comment in checkPhaseAllowed explaining null phase
+semantics, or consider adding a separate "task mode" flag for clarity.
+
+
+### ISSUE 6: Single Mutation Enforcement Resets on Phase Change (Correct)
+Location: packages/agent/src/sandbox/tool-wrapper.ts:123-127
+
+The setPhase method correctly resets mutation tracking:
+
+```typescript
+setPhase(phase: ExecutionPhase): void {
+  this.currentPhase = phase;
+  this.mutationExecuted = false;  // Reset on phase change
+}
+```
+
+This allows one mutation per mutate phase entry. If the state machine
+re-enters mutate phase, another mutation is allowed.
+
+Impact: Correct behavior. Just noting for documentation.
+
+Proposal: None - this is correct behavior.
+
+
+### ISSUE 7: Topics Tools Included in Task Tools (Potential Issue)
+Location: packages/agent/src/sandbox/tool-lists.ts:187-195
+
+createTaskTools includes Topics tools via createWorkflowTools:
+
+```typescript
+export function createTaskTools(config: ToolListConfig): AnyTool[] {
+  // Start with all workflow tools (includes Topics.*)
+  const tools = createWorkflowTools(config);
+  // Add Scripts.* tools for planner/maintainer introspection
+  tools.push(makeGetScriptTool(...));
+```
+
+But since workflowId is undefined for tasks, Topics tools will throw errors.
+
+Impact: Tasks have Topics tools available but they'll throw on use.
+This is confusing - better to not include them at all.
+
+Proposal: Either:
+1. Remove Topics tools from createTaskTools
+2. Make Topics tools gracefully handle missing workflow context
+3. Add explicit check in createTaskTools to filter out Topics tools
+
+
+POSITIVE OBSERVATIONS
+---------------------
+1. Clean separation of concerns: tool-lists.ts handles tool creation,
+   ToolWrapper handles execution and phase enforcement
+2. Phase restriction matrix is well-designed and easy to understand
+3. Single mutation enforcement per phase is correctly implemented
+4. ToolWrapper correctly handles null phase for task mode
+5. WorkflowWorker and TaskWorker migrations are clean and complete
+6. Comprehensive phase-tracking.test.ts provides good coverage
+7. ExecutionPhase and OperationType types provide clear API contract
+8. Tool list factories are reusable and configurable
+
+ARCHITECTURE NOTES
+------------------
+The phase tracking system implements a capability-based access control:
+
+```
+Phase       | read  | mutate | topic_peek | topic_publish
+------------|-------|--------|------------|---------------
+producer    | YES   | NO     | NO         | YES
+prepare     | YES   | NO     | YES        | NO
+mutate      | NO    | ONCE   | NO         | NO
+next        | NO    | NO     | NO         | YES
+(null/task) | YES   | YES    | YES        | YES
+```
+
+This enforces the execution model where:
+1. Producers only read external data and emit events
+2. Consumers prepare by reading/peeking, then mutate once, then emit downstream
+3. Side effects (mutations) are isolated and tracked
+
+The handler state machine (exec-06/exec-07) orchestrates phase transitions
+by calling setPhase() before executing handler code.
+
+VERDICT
+-------
+This commit successfully completes the tool migration and implements a
+robust phase tracking system. The main concerns are around Topics tools
+being included in task tools where they can't function, which should be
+addressed with filtering or better error messages.
+
+Critical Issues: 0
+Medium Issues: 0
+Low Issues: 2 (Topics in task tools, createTaskTools workflowId)
+Very Low Issues: 1
+Design Questions: 2 (read restrictions in mutate/next phases)

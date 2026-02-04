@@ -1,0 +1,155 @@
+COMMIT: da80682
+TITLE: Add early workflow_id validation for maintainer tasks
+DATE: 2026-01-30
+FILES: IMPLEMENTATION_PLAN.md, packages/agent/src/task-worker.ts
+
+## CHANGES SUMMARY
+
+This commit adds early validation for the `workflow_id` field on maintainer tasks, failing fast with a clear error message instead of failing late with a confusing error.
+
+**The Change (packages/agent/src/task-worker.ts:120-124):**
+```typescript
+// Fail fast: maintainer tasks require workflow_id to load context
+if (taskType === "maintainer" && !task.workflow_id) {
+  this.debug("Maintainer task missing workflow_id");
+  return this.finishTask(task, "Configuration error", "Maintainer task missing workflow_id");
+}
+```
+
+**Why This Matters:**
+- Maintainer tasks use `workflow_id` to load the workflow, its active script, and the failed script run context
+- Without `workflow_id`, the maintainer agent cannot determine what to fix
+- Previously, missing `workflow_id` would cause a late failure with confusing error: "Maintainer task requires maintainerContext"
+- Now it fails immediately with clear error: "Maintainer task missing workflow_id"
+
+## DETAILED ANALYSIS
+
+### Task Flow Before the Fix
+
+1. Task created with type "maintainer" but missing `workflow_id`
+2. `executeTask()` starts processing
+3. Gets inbox items (line 126)
+4. Restores history if needed (lines 150-164)
+5. Reaches maintainer context loading (line 176):
+   ```typescript
+   if (taskType === "maintainer" && task.workflow_id) {
+     maintainerContext = await this.loadMaintainerContext(task.workflow_id, inbox);
+   }
+   ```
+6. Since `task.workflow_id` is falsy, the if-block is skipped
+7. `maintainerContext` remains `undefined`
+8. Later at line 182: check fails with confusing error "Cannot create maintainer context - missing workflow or script"
+
+### Task Flow After the Fix
+
+1. Task created with type "maintainer" but missing `workflow_id`
+2. `executeTask()` starts processing
+3. Early validation at line 121 catches the issue immediately
+4. Task finishes with clear error: "Configuration error" / "Maintainer task missing workflow_id"
+5. No further processing, no wasted resources
+
+### Where Maintainer Tasks Are Created
+
+Maintainer tasks are created ONLY in `packages/db/src/api.ts:enterMaintenanceMode()`:
+```typescript
+const maintainerTask: Task = {
+  // ...
+  type: "maintainer",
+  workflow_id: workflowId,  // ALWAYS set from the function parameter
+  // ...
+};
+```
+
+The `enterMaintenanceMode()` function always receives `workflowId` from its caller (`workflow-worker.ts:666`), so in normal operation, `workflow_id` is always present.
+
+### Why Validation Is Still Valuable
+
+Even though the official code path always provides `workflow_id`, this validation is valuable because:
+1. **Defensive Programming**: Guards against future code changes that might create maintainer tasks differently
+2. **Clear Documentation**: Makes the requirement explicit in the codebase
+3. **Better Debugging**: If something does go wrong, the error message is clear
+4. **Type Safety Gap**: The Task interface has `workflow_id: string` as a required field, but the database allows empty strings (`DEFAULT ''`)
+
+## POTENTIAL ISSUES
+
+### Issue 1: Missing Test Coverage
+**Severity: Low (Testing Gap)**
+**Location: packages/agent/src/task-worker.ts:120-124**
+
+The commit doesn't add tests for the new validation. There should be a test that:
+1. Creates a maintainer task with empty `workflow_id`
+2. Calls `executeTask()`
+3. Verifies the task finishes with error "Maintainer task missing workflow_id"
+
+**Proposal**: Add a test case in the maintainer integration tests:
+```typescript
+it("fails fast when maintainer task is missing workflow_id", async () => {
+  const task = createMaintainerTask({ workflow_id: "" });
+  await taskWorker.executeTask(task);
+  // Verify task finished with error
+  const finishedTask = await taskStore.getTask(task.id);
+  expect(finishedTask.error).toBe("Maintainer task missing workflow_id");
+});
+```
+
+---
+
+### Issue 2: Inconsistent Validation for Other Task Types
+**Severity: Info (Code Pattern)**
+**Location: packages/agent/src/task-worker.ts**
+
+Maintainer tasks now have early `workflow_id` validation, but worker/planner tasks don't have similar validation for their required fields.
+
+**Analysis**: Worker and planner tasks always have `chat_id` set during creation (in `api.createTask()`). If a malformed task somehow got through, it would fail later at `sendToUser()`. However, this is an unlikely scenario.
+
+**Proposal**: Consider adding similar validation for worker/planner tasks:
+```typescript
+if ((taskType === "worker" || taskType === "planner") && !task.chat_id) {
+  return this.finishTask(task, "Configuration error", "Task missing chat_id");
+}
+```
+This is a minor consistency suggestion, not a bug.
+
+---
+
+### Issue 3: Task Type String vs Union Type
+**Severity: Info (Type Safety)**
+**Location: packages/db/src/task-store.ts:34**
+
+The Task interface defines `type: string` rather than a union type like `type: "worker" | "planner" | "maintainer"`. This allows invalid task types to be created.
+
+**Analysis**: The code does check for valid types at line 114-118 and fails with a clear error. However, a stricter type would catch this at compile time.
+
+**Proposal**: Consider defining:
+```typescript
+export type TaskType = "worker" | "planner" | "maintainer";
+export interface Task {
+  // ...
+  type: TaskType;
+  // ...
+}
+```
+This is a minor type safety improvement, not a bug.
+
+---
+
+## CODE QUALITY OBSERVATIONS
+
+1. **Good**: Validation is placed at the right location - after type check, before any resource loading
+2. **Good**: Uses the standard `finishTask()` pattern for error handling
+3. **Good**: Error message is specific and actionable: "Maintainer task missing workflow_id"
+4. **Good**: Debug logging included for troubleshooting
+5. **Good**: Minimal change - only 6 lines added, focused and non-invasive
+6. **Good**: Error state is "Configuration error" which is distinct from runtime errors
+
+## VERIFICATION STATUS
+
+- [x] Early validation verified: Check is before any context loading
+- [x] Error handling verified: Uses standard `finishTask()` pattern
+- [x] Error message verified: Clear "Maintainer task missing workflow_id"
+- [x] Task creation verified: `enterMaintenanceMode()` always sets `workflow_id`
+- [x] Caller chain verified: `workflow-worker.ts` always passes `workflow.id`
+
+## CONCLUSION
+
+This commit correctly adds early validation for a required field on maintainer tasks. The fix is minimal, well-placed, and provides clear error messaging. The only suggestion is to add test coverage for this validation case. No bugs found in the implementation.

@@ -1,0 +1,72 @@
+COMMIT REVIEW: 7c0b5f4
+=======================
+Implement exec-08: Update planner prompts for workflow format
+
+SUMMARY OF CHANGES
+------------------
+This commit updates the LLM system prompts to document the new workflow-based
+execution model, replacing the deprecated Items-based documentation.
+
+1. MODIFIED: packages/agent/src/agent-env.ts
+   PLANNER_SYSTEM_PROMPT changes:
+   - Removed "Logical Items" section (~60 lines)
+   - Added "Workflow Structure" section explaining topics, producers, consumers
+   - Added "Phase Rules" section (prepare -> mutate -> next)
+   - Added "Event Design" section (messageId, title guidelines)
+   - Added complete workflow example (~80 lines)
+
+   MAINTAINER_SYSTEM_PROMPT changes:
+   - Removed "Logical Item Constraints" section
+   - Added "Workflow Constraints" section with phase rules
+
+2. MODIFIED: IMPLEMENTATION_PLAN.md
+   - Marked exec-08 as complete
+   - Updated dependency graph
+
+ISSUES FOUND
+------------
+
+ISSUE 1 (HIGH): Specification document has outdated API signatures
+Location: specs/exec-08-planner-prompts.md
+Problem: The spec document contains INCORRECT API examples that don't match implementation:
+
+  WRONG (in spec doc):
+    const pending = await Topics.peek("email.received", { limit: 1 });
+    await Topics.publish("email.received", { messageId, title, payload });
+
+  CORRECT (matches implementation):
+    const pending = await Topics.peek({ topic: "email.received", limit: 1 });
+    await Topics.publish({ topic: "email.received", event: { messageId, title, payload } });
+
+Lines affected in spec: 36, 58, 88, 165
+Risk: Anyone reading the spec for reference will get incorrect examples.
+Impact: Mitigated because agent-env.ts has correct signatures - LLM sees correct code.
+Proposal: Update specs/exec-08-planner-prompts.md to match actual implementation.
+
+POSITIVE OBSERVATIONS
+---------------------
++ Prompts in agent-env.ts are EXCELLENT and fully consistent with implementation
++ Topics.peek and Topics.publish API signatures match actual tool implementations
++ Phase restrictions documented match PHASE_RESTRICTIONS in tool-wrapper.ts exactly:
+  - producer: read=true, mutate=false, topic_peek=false, topic_publish=true
+  - prepare: read=true, mutate=false, topic_peek=true, topic_publish=false
+  - mutate: read=false, mutate=true, topic_peek=false, topic_publish=false
+  - next: read=false, mutate=false, topic_peek=false, topic_publish=true
++ Event design guidelines (stable messageId, descriptive title) are clear
++ Complete workflow example demonstrates all phases correctly
++ Maintainer constraints properly reflect what can/cannot be changed
++ Old Items references properly deprecated - only exist in tool description comments
+
+VERIFICATION PERFORMED
+----------------------
+1. Topics.peek API: Verified in topics.ts - takes { topic, limit? }
+2. Topics.publish API: Verified in topics.ts - takes { topic, event: {...} }
+3. Phase tracking: Verified in tool-wrapper.ts - exact match with documented rules
+4. Event lifecycle: Verified in event-store.ts - pending -> reserved -> consumed
+5. Handler state machine: Verified phases match documentation
+
+RECOMMENDATIONS
+---------------
+1. HIGH: Update specs/exec-08-planner-prompts.md with correct API signatures
+2. LOW: Consider removing old Items.withItem() references from tool description comments
+   (not critical - they're just documentation)
