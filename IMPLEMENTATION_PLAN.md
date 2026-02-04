@@ -301,7 +301,7 @@ Implementation completed with the following changes:
 **Note**: The old `workflows.next_run_timestamp` still exists for backwards compatibility. New code should use per-producer schedules. Full scheduler integration (replacing workflow-level checks with per-producer queries) can be done incrementally.
 
 **Dependencies**: exec-11 (for SchedulerStateManager) - COMPLETE
-**Tests**: `packages/tests/src/producer-schedule-store.test.ts` (to be added)
+**Tests**: `packages/tests/src/producer-schedule-store.test.ts` - COMPLETE (24 tests)
 
 ---
 
