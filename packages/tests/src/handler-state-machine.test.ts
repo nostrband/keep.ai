@@ -70,7 +70,7 @@ async function createTables(db: DBInterface): Promise<void> {
     )
   `);
 
-  // Handler runs table
+  // Handler runs table (includes status column from v39)
   await db.exec(`
     CREATE TABLE IF NOT EXISTS handler_runs (
       id TEXT PRIMARY KEY NOT NULL DEFAULT '',
@@ -79,6 +79,7 @@ async function createTables(db: DBInterface): Promise<void> {
       handler_type TEXT NOT NULL DEFAULT '',
       handler_name TEXT NOT NULL DEFAULT '',
       phase TEXT NOT NULL DEFAULT 'pending',
+      status TEXT NOT NULL DEFAULT 'active',
       prepare_result TEXT NOT NULL DEFAULT '',
       input_state TEXT NOT NULL DEFAULT '',
       output_state TEXT NOT NULL DEFAULT '',
@@ -93,6 +94,7 @@ async function createTables(db: DBInterface): Promise<void> {
   await db.exec(`CREATE INDEX IF NOT EXISTS idx_handler_runs_script_run ON handler_runs(script_run_id)`);
   await db.exec(`CREATE INDEX IF NOT EXISTS idx_handler_runs_workflow ON handler_runs(workflow_id)`);
   await db.exec(`CREATE INDEX IF NOT EXISTS idx_handler_runs_phase ON handler_runs(phase)`);
+  await db.exec(`CREATE INDEX IF NOT EXISTS idx_handler_runs_status ON handler_runs(status)`);
 
   // Mutations table
   await db.exec(`
@@ -261,7 +263,9 @@ describe("Handler State Machine", () => {
 
       const result = await executeHandler("non-existent-run", context);
 
-      expect(result.phase).toBe("failed");
+      // Per exec-09: status indicates the failure reason
+      expect(result.phase).toBe("failed"); // Internal uses "failed" as phase for non-existent
+      expect(result.status).toBe("failed:internal");
       expect(result.error).toContain("not found");
       expect(result.errorType).toBe("logic");
     });
@@ -275,8 +279,10 @@ describe("Handler State Machine", () => {
         handler_name: "checkEmails",
       });
 
+      // Per exec-09: set both phase and status for committed runs
       await api.handlerRunStore.update(run.id, {
         phase: "committed",
+        status: "committed",
         end_timestamp: new Date().toISOString(),
       });
 
@@ -284,6 +290,7 @@ describe("Handler State Machine", () => {
       const result = await executeHandler(run.id, context);
 
       expect(result.phase).toBe("committed");
+      expect(result.status).toBe("committed");
       expect(result.error).toBeUndefined();
     });
 
@@ -295,8 +302,10 @@ describe("Handler State Machine", () => {
         handler_name: "checkEmails",
       });
 
+      // Per exec-09: use status to indicate failed, phase stays at executing
       await api.handlerRunStore.update(run.id, {
-        phase: "failed",
+        phase: "executing",
+        status: "failed:logic",
         error: "Test error",
         error_type: "logic",
         end_timestamp: new Date().toISOString(),
@@ -305,12 +314,13 @@ describe("Handler State Machine", () => {
       const context: HandlerExecutionContext = { api };
       const result = await executeHandler(run.id, context);
 
-      expect(result.phase).toBe("failed");
+      expect(result.phase).toBe("executing");
+      expect(result.status).toBe("failed:logic");
       expect(result.error).toBe("Test error");
       expect(result.errorType).toBe("logic");
     });
 
-    it("should return immediately for already-suspended handler run", async () => {
+    it("should return immediately for already-paused handler run", async () => {
       const run = await api.handlerRunStore.create({
         script_run_id: "session-1",
         workflow_id: "workflow-1",
@@ -318,8 +328,10 @@ describe("Handler State Machine", () => {
         handler_name: "processEmail",
       });
 
+      // Per exec-09: use status to indicate paused, phase stays at mutating
       await api.handlerRunStore.update(run.id, {
-        phase: "suspended",
+        phase: "mutating",
+        status: "paused:reconciliation",
         error: "indeterminate_mutation",
         end_timestamp: new Date().toISOString(),
       });
@@ -327,7 +339,8 @@ describe("Handler State Machine", () => {
       const context: HandlerExecutionContext = { api };
       const result = await executeHandler(run.id, context);
 
-      expect(result.phase).toBe("suspended");
+      expect(result.phase).toBe("mutating");
+      expect(result.status).toBe("paused:reconciliation");
       expect(result.error).toBe("indeterminate_mutation");
     });
   });
@@ -357,7 +370,7 @@ describe("Handler State Machine", () => {
       expect(updated?.phase).toBe("executing");
     });
 
-    it("should fail if workflow not found during executing phase", async () => {
+    it("should fail with status if workflow not found during executing phase", async () => {
       // Create handler run WITHOUT creating workflow
       const run = await api.handlerRunStore.create({
         script_run_id: "session-1",
@@ -372,12 +385,14 @@ describe("Handler State Machine", () => {
       const context: HandlerExecutionContext = { api };
       const result = await executeHandler(run.id, context);
 
-      expect(result.phase).toBe("failed");
+      // Per exec-09: phase stays at executing, status indicates failure
+      expect(result.phase).toBe("executing");
+      expect(result.status).toBe("failed:logic");
       expect(result.error).toContain("Workflow workflow-1 not found");
       expect(result.errorType).toBe("logic");
     });
 
-    it("should fail if no active script during executing phase", async () => {
+    it("should fail with status if no active script during executing phase", async () => {
       // Create workflow without active script
       await db.exec(
         `INSERT INTO workflows (id, title, status, active_script_id, task_id, handler_config) VALUES (?, ?, 'active', '', '', '{}')`,
@@ -397,7 +412,9 @@ describe("Handler State Machine", () => {
       const context: HandlerExecutionContext = { api };
       const result = await executeHandler(run.id, context);
 
-      expect(result.phase).toBe("failed");
+      // Per exec-09: phase stays at executing, status indicates failure
+      expect(result.phase).toBe("executing");
+      expect(result.status).toBe("failed:logic");
       expect(result.error).toContain("No active script");
       expect(result.errorType).toBe("logic");
     });
@@ -475,13 +492,14 @@ describe("Handler State Machine", () => {
       // Let's verify by checking what phase it ends up in after the workflow-not-found error
       const result = await executeHandler(run.id, context);
 
-      // It should fail because workflow doesn't exist
-      expect(result.phase).toBe("failed");
+      // Per exec-09: phase stays at mutating (after transition), status indicates failure
+      expect(result.phase).toBe("mutating");
+      expect(result.status).toBe("failed:logic");
     });
   });
 
   describe("executeHandler - Mutation Phase Handling", () => {
-    it("should suspend run if mutation is in_flight on restart", async () => {
+    it("should pause for reconciliation if mutation is in_flight on restart", async () => {
       await createWorkflowWithScript(
         db,
         "workflow-1",
@@ -521,7 +539,9 @@ describe("Handler State Machine", () => {
       const context: HandlerExecutionContext = { api };
       const result = await executeHandler(run.id, context);
 
-      expect(result.phase).toBe("suspended");
+      // Per exec-09: phase stays at mutating, status indicates indeterminate
+      expect(result.phase).toBe("mutating");
+      expect(result.status).toBe("paused:reconciliation");
       expect(result.error).toBe("indeterminate_mutation");
     });
 
@@ -564,7 +584,7 @@ describe("Handler State Machine", () => {
       expect(result.phase).toBe("committed");
     });
 
-    it("should fail if mutation is in failed state", async () => {
+    it("should fail with status if mutation is in failed state", async () => {
       await createWorkflowWithScript(
         db,
         "workflow-1",
@@ -597,11 +617,13 @@ describe("Handler State Machine", () => {
       const context: HandlerExecutionContext = { api };
       const result = await executeHandler(run.id, context);
 
-      expect(result.phase).toBe("failed");
+      // Per exec-09: phase stays at mutating, status indicates failure
+      expect(result.phase).toBe("mutating");
+      expect(result.status).toBe("failed:logic");
       expect(result.error).toContain("External API error");
     });
 
-    it("should suspend if mutation is indeterminate", async () => {
+    it("should pause for reconciliation if mutation is indeterminate", async () => {
       await createWorkflowWithScript(
         db,
         "workflow-1",
@@ -634,7 +656,9 @@ describe("Handler State Machine", () => {
       const context: HandlerExecutionContext = { api };
       const result = await executeHandler(run.id, context);
 
-      expect(result.phase).toBe("suspended");
+      // Per exec-09: phase stays at point of failure, status indicates why stopped
+      expect(result.phase).toBe("mutating"); // Phase stays at mutating
+      expect(result.status).toBe("paused:reconciliation"); // Status indicates indeterminate
       expect(result.error).toBe("indeterminate_mutation");
     });
   });

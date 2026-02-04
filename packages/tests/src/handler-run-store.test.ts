@@ -11,7 +11,7 @@ import { createDBNode } from "@app/node";
 
 /**
  * Helper to create handler_runs table without full migration system.
- * Schema matches packages/db/src/migrations/v36.ts
+ * Schema matches packages/db/src/migrations/v36.ts + v39.ts (status column)
  */
 async function createHandlerRunsTable(db: DBInterface): Promise<void> {
   await db.exec(`
@@ -22,6 +22,7 @@ async function createHandlerRunsTable(db: DBInterface): Promise<void> {
       handler_type TEXT NOT NULL DEFAULT '',
       handler_name TEXT NOT NULL DEFAULT '',
       phase TEXT NOT NULL DEFAULT 'pending',
+      status TEXT NOT NULL DEFAULT 'active',
       prepare_result TEXT NOT NULL DEFAULT '',
       input_state TEXT NOT NULL DEFAULT '',
       output_state TEXT NOT NULL DEFAULT '',
@@ -36,6 +37,7 @@ async function createHandlerRunsTable(db: DBInterface): Promise<void> {
   await db.exec(`CREATE INDEX IF NOT EXISTS idx_handler_runs_script_run ON handler_runs(script_run_id)`);
   await db.exec(`CREATE INDEX IF NOT EXISTS idx_handler_runs_workflow ON handler_runs(workflow_id)`);
   await db.exec(`CREATE INDEX IF NOT EXISTS idx_handler_runs_phase ON handler_runs(phase)`);
+  await db.exec(`CREATE INDEX IF NOT EXISTS idx_handler_runs_status ON handler_runs(status)`);
 }
 
 describe("HandlerRunStore", () => {
@@ -258,7 +260,8 @@ describe("HandlerRunStore", () => {
         handler_type: "consumer",
         handler_name: "processEmail",
       });
-      await handlerRunStore.updatePhase(run2.id, "committed");
+      // Per exec-09: set both phase and status for committed runs
+      await handlerRunStore.update(run2.id, { phase: "committed", status: "committed" });
 
       const run3 = await handlerRunStore.create({
         script_run_id: "session-1",
@@ -274,14 +277,15 @@ describe("HandlerRunStore", () => {
       expect(incomplete.map(r => r.phase).sort()).toEqual(["pending", "preparing"]);
     });
 
-    it("should exclude suspended and failed runs", async () => {
+    it("should exclude paused and failed runs (by status)", async () => {
       const run1 = await handlerRunStore.create({
         script_run_id: "session-1",
         workflow_id: "workflow-1",
         handler_type: "consumer",
         handler_name: "processEmail",
       });
-      await handlerRunStore.updatePhase(run1.id, "suspended");
+      // Per exec-09: use status for paused runs
+      await handlerRunStore.update(run1.id, { phase: "mutating", status: "paused:reconciliation" });
 
       const run2 = await handlerRunStore.create({
         script_run_id: "session-1",
@@ -289,7 +293,8 @@ describe("HandlerRunStore", () => {
         handler_type: "consumer",
         handler_name: "archiveEmail",
       });
-      await handlerRunStore.updatePhase(run2.id, "failed");
+      // Per exec-09: use status for failed runs
+      await handlerRunStore.update(run2.id, { phase: "executing", status: "failed:logic" });
 
       const incomplete = await handlerRunStore.getIncomplete("workflow-1");
       expect(incomplete).toHaveLength(0);
@@ -311,7 +316,8 @@ describe("HandlerRunStore", () => {
         handler_type: "producer",
         handler_name: "checkEmails",
       });
-      await handlerRunStore.updatePhase(run2.id, "committed");
+      // Per exec-09: set both phase and status for committed runs
+      await handlerRunStore.update(run2.id, { phase: "committed", status: "committed" });
 
       await handlerRunStore.create({
         script_run_id: "session-3",
@@ -365,7 +371,8 @@ describe("HandlerRunStore", () => {
         handler_type: "producer",
         handler_name: "checkEmails",
       });
-      await handlerRunStore.updatePhase(run.id, "committed");
+      // Per exec-09: set both phase and status for committed runs
+      await handlerRunStore.update(run.id, { phase: "committed", status: "committed" });
 
       const hasActive = await handlerRunStore.hasActiveRun("workflow-1");
       expect(hasActive).toBe(false);

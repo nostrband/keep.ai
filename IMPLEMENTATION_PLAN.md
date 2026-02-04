@@ -1,267 +1,531 @@
-# Keep.AI Implementation Plan
+# Keep.AI Implementation Plan - Execution Model Fix
 
-This document tracks the implementation status of the new execution model refactor (exec-00 through exec-08) and other pending work items.
+## Overview
 
-**Last Updated:** 2026-02-03
-**Current Database Version:** v38
-**Overall Progress:** 9/9 core specs implemented
+This plan addresses gaps between the current implementation and the updated execution model specifications (`specs/exec-*`). The specs fix discrepancies between documentation (16-scheduling.md, 06b-consumer-lifecycle.md) and existing implementation.
 
----
-
-## Executive Summary
-
-> **COMPLETE** - The execution model refactor (exec-00 through exec-09) is fully implemented. Tagged as `v1.0.0-alpha.104`.
-
-The codebase has transitioned from an **Items-based execution model** (`Items.withItem()`) to a **Topics-based event-driven model** with structured producers/consumers and three-phase execution. This major architectural refactor affects the agent, database, and workflow execution systems.
-
-**Verification Status (2026-02-03):**
-- All tests pass: 875 tests total, 55 appropriately skipped
-- Build is clean with no errors
-- Type-check passes with no errors
-- Codebase is stable at v1.0.0-alpha.104
-
-**Final State:**
-- All 9 core specs (exec-01 through exec-09) implemented and tested
-- Old Items infrastructure deprecated and removed
-- ToolWrapper active with phase tracking; SandboxAPI deprecated
-- Session orchestration integrated into WorkflowScheduler
+**Current Schema Version**: v40
+**Target**: Simple, lovable, complete v1 Keep.AI release
+**Last Verified**: 2026-02-04
 
 ---
 
-## Implementation Priority
+## Implementation Status Summary
 
-### Phase A: Infrastructure (Parallel)
+| Spec | Description | Status | Completion | Priority |
+|------|-------------|--------|------------|----------|
+| exec-09 | Run Status Separation | COMPLETE | 100% | P1 - Critical (Blocker) |
+| exec-10 | Retry Chain | NOT STARTED | 0% | P1 - Critical |
+| exec-11 | Scheduler State & wakeAt | NOT STARTED | 0% | P2 - High |
+| exec-12 | Failure Classification | PARTIAL | ~40% | P1 - Critical |
+| exec-13 | Producer Scheduling | NOT STARTED | 0% | P2 - High |
+| exec-14 | Indeterminate Mutations | PARTIAL | ~85% | P2 - High |
 
-- [x] **[P1] exec-01: Database Schema** - [specs/exec-01-database-schema.md](specs/exec-01-database-schema.md)
-  - Migration v36.ts with tables: `topics`, `events`, `handler_runs`, `mutations`, `handler_state`
-  - Store classes: TopicStore, EventStore, HandlerRunStore, MutationStore, HandlerStateStore
-  - **Status:** COMPLETE
-
-- [x] **[P1] exec-02: Deprecate Items** - [specs/exec-02-deprecate-items.md](specs/exec-02-deprecate-items.md)
-  - Removed Items.withItem() from SandboxAPI and ToolWrapper
-  - Deprecated ItemStore (kept for data preservation)
-  - **Status:** COMPLETE
-  - **Note:** Breaking change - existing workflows using Items.withItem() need re-planning.
-
-### Phase B: Sandbox Changes (Sequential)
-
-- [x] **[P2] exec-03: Topics API** - [specs/exec-03-topics-api.md](specs/exec-03-topics-api.md)
-  - Topics.peek(), Topics.getByIds(), Topics.publish() in `packages/agent/src/tools/topics.ts`
-  - Topics namespace exposed in sandbox (globalThis.Topics)
-  - **Status:** COMPLETE
-
-- [x] **[P2] exec-03a: Complete Tool Migration** - [specs/exec-03a-complete-tool-migration.md](specs/exec-03a-complete-tool-migration.md)
-  - `packages/agent/src/sandbox/tool-lists.ts` with createWorkflowTools(), createTaskTools()
-  - Phase tracking added to ToolWrapper; WorkflowWorker and TaskWorker migrated
-  - SandboxAPI deprecated (kept for backwards compatibility)
-  - **Status:** COMPLETE
-
-- [x] **[P2] exec-04: Phase Tracking** - [specs/exec-04-phase-tracking.md](specs/exec-04-phase-tracking.md)
-  - Phase state management in ToolWrapper (currentPhase, mutationExecuted, currentMutation)
-  - Phase restriction matrix enforcement implemented
-  - **Status:** COMPLETE
-
-- [x] **[P3] exec-05: Script Validation** - [specs/exec-05-script-validation.md](specs/exec-05-script-validation.md)
-  - `packages/agent/src/workflow-validator.ts` with validateWorkflowScript() and zero-tool sandbox
-  - handler_config field added to Workflow; validation integrated into save and fix tools
-  - **Status:** COMPLETE
-
-### Phase C: Execution Engine (Sequential)
-
-- [x] **[P3] exec-06: Handler State Machine** - [specs/exec-06-handler-state-machine.md](specs/exec-06-handler-state-machine.md)
-  - `packages/agent/src/handler-state-machine.ts` with executeHandler() function
-  - Producer phases: pending -> executing -> committed|failed
-  - Consumer phases: pending -> preparing -> prepared -> mutating -> mutated -> emitting -> committed
-  - Crash recovery with checkpoint-based resume
-  - **Status:** COMPLETE
-
-- [x] **[P3] exec-07: Session Orchestration** - [specs/exec-07-session-orchestration.md](specs/exec-07-session-orchestration.md)
-  - `packages/agent/src/session-orchestration.ts` with executeWorkflowSession() function
-  - Session container using script_runs with trigger types (schedule, webhook, manual)
-  - Producer execution followed by consumer loop (max 100 iterations)
-  - Recovery functions: resumeIncompleteSessions(), continueSession()
-  - **Status:** COMPLETE
-
-### Phase D: LLM Integration
-
-- [x] **[P4] exec-08: Planner Prompts** - [specs/exec-08-planner-prompts.md](specs/exec-08-planner-prompts.md)
-  - Updated PLANNER_SYSTEM_PROMPT: removed "Logical Items", added "Workflow Structure", "Phase Rules", "Event Design"
-  - Updated MAINTAINER_SYSTEM_PROMPT: removed "Logical Item Constraints", added "Workflow Constraints"
-  - **Status:** COMPLETE
-
-- [x] **[P4] exec-09: Scheduler Integration** - [No spec file - integration work]
-  - Integrated executeWorkflowSession into WorkflowScheduler
-  - Added resumeIncompleteSessions() call on start()
-  - New format detection via isNewFormatWorkflow() based on handler_config
-  - **Status:** COMPLETE
+**Blocking Dependencies**:
+- exec-09 COMPLETE - unblocks exec-10, exec-11, exec-12, exec-14
+- exec-11 blocks exec-13
 
 ---
 
-## Dependency Graph
+## Phase 1: Foundation (exec-09, exec-12)
 
+### 1.1 exec-09: Separate Run Status from Phase
+
+**Problem**: `handler_runs.phase` includes `suspended`, `failed` which are statuses not phases. No distinction between "paused for retry" vs "failed permanently".
+
+**Current State (100% Complete - COMPLETE)**:
+
+Implementation completed with the following changes:
+
+1. **Database Migrations**:
+   - [x] Migration v39: Added `status TEXT NOT NULL DEFAULT 'active'` column to `handler_runs`
+   - [x] Migration v40: Data migration for existing records (committed -> committed, failed -> failed:logic, suspended -> paused:reconciliation)
+
+2. **Type System**:
+   - [x] Added `RunStatus` type with all statuses: `'active' | 'paused:transient' | 'paused:approval' | 'paused:reconciliation' | 'failed:logic' | 'failed:internal' | 'committed' | 'crashed'`
+   - [x] Added helper functions: `isTerminalStatus()`, `isPausedStatus()`, `isFailedStatus()`
+   - [x] Updated `HandlerRun` interface to include `status: RunStatus`
+   - [x] Updated `UpdateHandlerRunInput` to include `status?: RunStatus`
+
+3. **State Machine Updates** (`handler-state-machine.ts`):
+   - [x] Added new `pauseRun()` function that keeps phase and sets status
+   - [x] Added `errorTypeToRunStatus()` mapping function
+   - [x] Updated all call sites to use new pauseRun semantics
+
+4. **Session Orchestration Updates** (`session-orchestration.ts`):
+   - [x] Updated failure/paused detection to check status instead of phase
+
+5. **Query Updates**:
+   - [x] Updated all queries to use `status='active'` instead of `phase NOT IN (...)`
+
+6. **Tests**:
+   - [x] All tests pass
+
+**Dependencies**: None (UNBLOCKS exec-10, exec-11, exec-12, exec-14)
+**Tests**: `packages/tests/src/handler-run-store.test.ts`, `packages/tests/src/handler-state-machine.test.ts`
+
+---
+
+### 1.2 exec-12: Failure Classification and Run Status Mapping
+
+**Problem**: Error types exist but don't map to run statuses. `ensureClassified()` and `classifyGenericError()` use unreliable pattern matching. Unclassified errors should be InternalError (bug in our code), not LogicError.
+
+**Verified Code Locations**:
+- `packages/proto/src/errors.ts:1-178` - ClassifiedError hierarchy (IMPLEMENTED ✓)
+- `packages/proto/src/errors.ts:179-238` - classifyHttpError, classifyFileError (IMPLEMENTED ✓)
+- `packages/proto/src/errors.ts:240-286` - classifyGenericError (NOT marked @deprecated - uses pattern matching)
+- `packages/proto/src/errors.ts:294-309` - ensureClassified (NOT marked @deprecated - falls back to LogicError)
+- `packages/proto/src/errors.ts:307-308` - Default fallback to LogicError (WRONG - should be InternalError)
+- `packages/agent/src/handler-state-machine.ts:88-103` - errorTypeToHandlerErrorType (PARTIAL - maps to DB type only)
+- `packages/agent/src/handler-state-machine.ts:409,508,672,808,898` - ensureClassified calls (5 total in state machine)
+- `packages/agent/src/session-orchestration.ts:386` - ensureClassified call (1 total in orchestration)
+- `packages/proto/src/errors.ts:342-362` - classifyGoogleApiError (CORRECT ✓)
+- `packages/proto/src/errors.ts:375-410` - classifyNotionError (CORRECT ✓)
+
+**Current State (~40% Complete - PARTIAL)**:
+- [x] `ClassifiedError` base class EXISTS with `AuthError`, `PermissionError`, `NetworkError`, `LogicError`, `InternalError`
+- [x] `classifyHttpError()` EXISTS and maps HTTP status codes → ClassifiedError
+- [x] `classifyFileError()` EXISTS and maps Node.js errno → ClassifiedError
+- [x] `classifyGoogleApiError()` EXISTS for Google APIs
+- [x] `classifyNotionError()` EXISTS for Notion API
+- [x] `errorTypeToHandlerErrorType()` EXISTS at line 88 (maps to DB type only)
+- [ ] `classifyGenericError()` NOT marked @deprecated (still used in 13 tool files)
+- [ ] `ensureClassified()` NOT marked @deprecated (still used in 5 places in handler-state-machine.ts)
+- [ ] `ensureClassified()` still used in 1 place in session-orchestration.ts (line 386)
+- [ ] Unclassified errors become LogicError at line 307-308 (wrong - should be InternalError)
+- [ ] No `errorTypeToRunStatus()` mapping function
+- [ ] No failure routing functions (scheduleRetry, triggerAutoFix, pauseForUserAction)
+- [ ] `failure-handling.ts` module does NOT exist
+
+**Tool Files Using classifyGenericError() (13 files verified)**:
+1. `packages/agent/src/tools/get-weather.ts`
+2. `packages/agent/src/tools/audio-explain.ts`
+3. `packages/agent/src/tools/pdf-explain.ts`
+4. `packages/agent/src/tools/text-generate.ts`
+5. `packages/agent/src/tools/text-summarize.ts`
+6. `packages/agent/src/tools/text-classify.ts`
+7. `packages/agent/src/tools/text-extract.ts`
+8. `packages/agent/src/tools/images-transform.ts`
+9. `packages/agent/src/tools/images-explain.ts`
+10. `packages/agent/src/tools/images-generate.ts`
+11. `packages/agent/src/tools/web-download.ts`
+12. `packages/agent/src/tools/web-fetch.ts`
+13. `packages/agent/src/tools/web-search.ts`
+
+**Implementation Tasks**:
+- [ ] **Create** `packages/agent/src/failure-handling.ts` (NEW):
+  - [ ] `errorTypeToRunStatus(errorType: ErrorType): RunStatus` mapping:
+    - auth → 'paused:approval'
+    - permission → 'paused:approval'
+    - network → 'paused:transient'
+    - logic → 'failed:logic'
+    - internal → 'failed:internal'
+  - [ ] `getRunStatusForError(error: unknown): { status: RunStatus; error: ClassifiedError }` - treats unclassified as InternalError
+  - [ ] `routeFailure(run, status, error)` - routes to retry/auto-fix/escalate
+  - [ ] `scheduleRetry(run, error)` with exponential backoff
+  - [ ] `triggerAutoFix(run, error)` for logic errors
+  - [ ] `pauseForUserAction(run, error)` for auth/permission
+  - [ ] `pauseForInternal(run, error)` for internal bugs
+  - [ ] `calculateBackoff(retryCount)` - exponential with jitter
+- [ ] **Deprecate** in `packages/proto/src/errors.ts`:
+  - [ ] Mark `ensureClassified()` at line 294 as `@deprecated`
+  - [ ] Mark `classifyGenericError()` at line 240 as `@deprecated`
+  - [ ] Change default fallback at line 307-308 from LogicError to InternalError
+- [ ] **Update** `packages/agent/src/handler-state-machine.ts`:
+  - [ ] Replace 5 `ensureClassified()` calls at lines 409,508,672,808,898
+  - [ ] Use `getRunStatusForError()` to get status
+  - [ ] Use `routeFailure()` to handle errors
+- [ ] **Update** `packages/agent/src/session-orchestration.ts`:
+  - [ ] Replace `ensureClassified()` call at line 386
+- [ ] **Update** all 13 tool files using `classifyGenericError()`:
+  - [ ] Each tool should either throw explicit ClassifiedError or throw InternalError for unexpected errors
+
+**Dependencies**: exec-09 (for RunStatus type)
+**Tests**: Unit tests for failure classification, integration tests for retry/escalation flows
+
+---
+
+## Phase 2: Retry & Mutation Handling (exec-10, exec-14)
+
+### 2.1 exec-10: Retry Chain and Phase Reset Rules
+
+**Problem**: Each retry should be a separate run record linked via `retry_of`. Current implementation has no `retry_of` column, doesn't create new runs on retry, doesn't implement phase reset rules.
+
+**Verified Code Locations**:
+- `packages/db/src/migrations/v36.ts:69-92` - handler_runs table creation (NO retry_of column)
+- `packages/db/src/handler-run-store.ts:38-54` - HandlerRun interface (MISSING retry_of)
+- `packages/db/src/handler-run-store.ts:56-68` - CreateHandlerRunInput (MISSING retry_of)
+- `packages/db/src/script-store.ts:457-484` - script_runs has getRetriesOfRun() (SESSION level - exists)
+- `packages/agent/src/handler-state-machine.ts:122-135` - failRun() (NO retry creation)
+- `packages/agent/src/session-orchestration.ts:476-519` - resumeIncompleteSessions() (NO retry linking)
+- `packages/agent/src/session-orchestration.ts:499-505` - Resumes same run, doesn't create retry
+
+**Note**: Session-level retry tracking EXISTS in `script_runs.retry_of` (v20 migration), but handler-level tracking is MISSING.
+
+**Current State (0% Complete - NOT STARTED)**:
+- [ ] `handler_runs` table has NO `retry_of` column (confirmed in v36 migration)
+- [ ] `HandlerRun` interface at lines 38-54 has NO `retry_of` field
+- [ ] `CreateHandlerRunInput` at lines 56-68 has NO `retry_of` field
+- [ ] No retry chain tracking at handler level (cannot trace attempt history)
+- [ ] Session-level retry EXISTS in `script_runs.retry_of` (v20), but handler-level is MISSING
+- [ ] No `getRetryChain()` or `getLatestAttempt()` methods in HandlerRunStore
+- [ ] No `createRetryRun()` function
+- [ ] No phase reset logic (before mutation → fresh start, after mutation → continue from emitting)
+- [ ] Crash recovery in `resumeIncompleteSessions()` at lines 476-519 has NO retry linking
+- [ ] Lines 499-505 resume same run, doesn't create linked retry runs
+- [ ] No `shouldCopyResults()` or `getStartPhaseForRetry()` functions
+- [ ] Migration v41 does NOT exist
+
+**Implementation Tasks**:
+- [ ] **DB Migration v41**: Add `retry_of TEXT` column to `handler_runs`, add index
+  - File: `packages/db/src/migrations/v41.ts` (NEW)
+  ```sql
+  ALTER TABLE handler_runs ADD COLUMN retry_of TEXT NOT NULL DEFAULT '';
+  CREATE INDEX idx_handler_runs_retry_of ON handler_runs(retry_of);
+  ```
+- [ ] **Interface**: Update `HandlerRun` at line 38-54 to include `retry_of: string`
+- [ ] **Interface**: Update `CreateHandlerRunInput` at line 56-68 to include `retry_of?: string`
+- [ ] **Store**: Add to `HandlerRunStore`:
+  - [ ] `getRetryChain(runId)` - returns all runs in chain (oldest first)
+  - [ ] `findLatestInChain(originalRunId)` - gets most recent attempt
+- [ ] **State Machine**: Add in `handler-state-machine.ts` after line 80:
+  - [ ] `shouldCopyResults(phase)` - returns true if phase === 'mutated' || phase === 'emitting'
+  - [ ] `getStartPhaseForRetry(previousPhase)` - returns 'emitting' if mutation applied, else 'preparing'
+  - [ ] `createRetryRun(params)` - atomic: mark previous with status + create new run with retry_of
+- [ ] **Crash Recovery**: Update `resumeIncompleteSessions()` at line 476-519:
+  - [ ] Find active runs → mark as `status: 'crashed'`
+  - [ ] For non-indeterminate: create recovery run with `retry_of`
+  - [ ] For indeterminate mutations: don't auto-retry (handled by exec-14)
+- [ ] **Session Orchestration**: Update to use retry semantics:
+  - [ ] When handler fails with `paused:transient` → scheduler creates retry after backoff
+  - [ ] When handler fails with `failed:logic` → auto-fix creates retry with new script
+
+**Dependencies**: exec-09 (for status field)
+**Tests**: Test retry chain creation, phase reset rules, crash recovery
+
+---
+
+### 2.2 exec-14: Indeterminate Mutation Handling (Without Reconciliation)
+
+**Problem**: Need to handle uncertain mutation outcomes without auto-reconciliation. User must manually verify and resolve.
+
+**Verified Code Locations**:
+- `packages/db/src/mutation-store.ts:15-21` - MutationStatus type (COMPLETE ✓)
+- `packages/db/src/mutation-store.ts:26-29` - MutationResolution type (MISSING user_assert_applied)
+- `packages/db/src/mutation-store.ts:280-289` - markIndeterminate() (COMPLETE ✓)
+- `packages/db/src/mutation-store.ts:293-307` - resolve() (STORES metadata only, no logic)
+- `packages/agent/src/handler-state-machine.ts:109-113` - isDefiniteFailure() (COMPLETE ✓)
+- `packages/agent/src/handler-state-machine.ts:547-558` - in-flight crash detection (COMPLETE ✓)
+- `packages/agent/src/handler-state-machine.ts:553,558` - suspendRun() calls (WRONG - uses phase not status)
+
+**Current State (~85% Complete - PARTIAL)**:
+- [x] `MutationStatus` type EXISTS and includes `indeterminate`
+- [x] Mutation statuses: `pending`, `in_flight`, `applied`, `failed`, `needs_reconcile`, `indeterminate`
+- [x] `isDefiniteFailure()` EXISTS at lines 109-113 and checks for logic/permission errors
+- [x] In-flight crash detection EXISTS at lines 547-558 and marks mutations as `indeterminate`
+- [x] `MutationStore.markIndeterminate()` EXISTS at lines 280-289 and works correctly
+- [x] `MutationStore.resolve()` EXISTS at lines 293-307 and stores resolution metadata
+- [ ] `MutationResolution` type at lines 26-29 MISSING `user_assert_applied` (only has user_skip, user_retry, user_assert_failed)
+- [ ] Handler run uses `phase: 'suspended'` at lines 553,558 (should be `status: 'paused:reconciliation'`) - BLOCKED by exec-09
+- [ ] No escalation record creation on indeterminate
+- [ ] Workflow not paused on indeterminate (only handler suspended)
+- [ ] `resolveIndeterminateMutation()` function NOT implemented (resolve() only stores metadata)
+- [ ] `getMutationResultForNext()` function NOT implemented (no handling for skipped mutations)
+
+**Implementation Tasks**:
+- [ ] **Types**: Add `user_assert_applied` to `MutationResolution` type
+  - File: `packages/db/src/mutation-store.ts` (line 26-29)
+- [ ] **Update** indeterminate handling at line 547-558 to:
+  - Set `run.status = 'paused:reconciliation'` (not `phase = 'suspended'`) - BLOCKED by exec-09
+  - Pause workflow: `workflow.status = 'paused'`
+- [ ] **Create** escalation record on indeterminate (future: escalation_store)
+- [ ] **Implement** `resolveIndeterminateMutation()` function:
+  - [ ] `'happened'` / `'user_assert_applied'` → mark applied, set `status: 'active'`, phase to `mutated`, resume execution
+  - [ ] `'did_not_happen'` / `'user_assert_failed'` → mark failed, create retry run via exec-10
+  - [ ] `'skip'` / `'user_skip'` → mark failed, skip events, commit run
+- [ ] **Implement** `getMutationResultForNext()` function:
+  - `applied` → return result
+  - `failed` with `resolved_by = 'user_skip'` → return { status: 'skipped' }
+  - Otherwise throw error (shouldn't reach next)
+
+**Dependencies**: exec-09 (for `paused:reconciliation` status), exec-10 (for retry on "didn't happen")
+**Tests**: Test all 3 resolution paths, test escalation creation, test workflow pause
+
+---
+
+## Phase 3: Scheduler (exec-11, exec-13)
+
+### 3.1 exec-11: Scheduler State and wakeAt Implementation
+
+**Problem**: No per-consumer wakeAt (from PrepareResult), no dirty flag tracking, wrong granularity (per-workflow instead of per-consumer).
+
+**Verified Code Locations**:
+- `packages/agent/src/handler-state-machine.ts:51-58` - PrepareResult interface (MISSING wakeAt)
+- `packages/db/src/migrations/v36.ts:121-134` - handler_state table (MISSING wake_at column)
+- `packages/db/src/handler-state-store.ts:143-155` - listByWorkflow() exists (aliased, OK)
+- `packages/db/src/handler-state-store.ts` - MISSING updateWakeAt() method
+- `packages/db/src/event-store.ts` - countPending() for single topic (N+1 queries)
+- `packages/db/src/event-store.ts` - MISSING countPendingByTopic() batch method
+- `packages/agent/src/session-orchestration.ts:146-180` - findConsumerWithPendingWork()
+- `packages/agent/src/session-orchestration.ts:165-177` - N+1 queries for pending events (confirmed)
+- `packages/agent/src/session-orchestration.ts:266-269` - JSON.parse(handler_config) no caching
+- `packages/agent/src/handler-state-machine.ts:593-599` - JSON.parse(handler_config) no caching
+- `packages/agent/src/scheduler-state.ts` - FILE DOES NOT EXIST
+- `packages/agent/src/config-cache.ts` - FILE DOES NOT EXIST
+
+**Current State (0% Complete - NOT STARTED)**:
+- [ ] `PrepareResult` interface at lines 51-58 has NO `wakeAt` field
+- [ ] `handler_state` table (v36 migration) has NO `wake_at` column
+- [ ] `HandlerState` type has NO `wake_at` field
+- [ ] `workflows.consumer_sleep_until` exists but wrong granularity (per-workflow, not per-consumer)
+- [ ] No `updateWakeAt()` method in HandlerStateStore
+- [ ] No `getConsumersWithDueWakeAt()` method in HandlerStateStore
+- [ ] No `countPendingByTopic()` batch method in EventStore (N+1 queries confirmed at lines 165-177)
+- [ ] `scheduler-state.ts` does NOT exist - no `SchedulerStateManager` class
+- [ ] `config-cache.ts` does NOT exist - no `ConfigCache` class
+- [ ] Consumer scheduling at lines 146-180 only checks for pending events, not wakeAt
+- [ ] No dirty flag check (step 1 of spec missing)
+- [ ] No wakeAt check (step 2 of spec missing)
+- [ ] N+1 queries at lines 165-177 (should use batch query)
+- [ ] Repeated JSON.parse of handler_config at lines 266-269, 593-599 (no caching)
+- [ ] Migration v42 does NOT exist
+
+**Implementation Tasks**:
+- [ ] **DB Migration v42**: Add `wake_at INTEGER` column to `handler_state`
+  - File: `packages/db/src/migrations/v42.ts` (NEW)
+  ```sql
+  ALTER TABLE handler_state ADD COLUMN wake_at INTEGER;
+  ```
+- [ ] **Interface**: Update `PrepareResult` at line 51-58 to include `wakeAt?: string` (ISO 8601)
+  - File: `packages/agent/src/handler-state-machine.ts`
+- [ ] **Interface**: Update `HandlerState` to include `wake_at: number | null`
+  - File: `packages/db/src/handler-state-store.ts`
+- [ ] **Store**: Add to `HandlerStateStore`:
+  - [ ] Rename/alias `listByWorkflow()` to `getForWorkflow()` (or just use existing)
+  - [ ] Add `updateWakeAt(workflowId, handlerName, wakeAt)` - upsert wake_at
+  - [ ] Add `getConsumersWithDueWakeAt(workflowId)` - find consumers ready to wake
+- [ ] **Store**: Add to `EventStore`:
+  - [ ] Add `countPendingByTopic(workflowId, topicNames)` - batch query returning Map<topic, count>
+- [ ] **Create** `packages/agent/src/scheduler-state.ts` (NEW):
+  - [ ] `SchedulerStateManager` class with:
+    - Consumer state: `dirty: boolean` (new events arrived)
+    - Producer state: `queued: boolean` (schedule fired while busy)
+    - Methods: `onEventPublish()`, `onConsumerCommit()`, `setConsumerDirty()`, `isConsumerDirty()`
+    - Methods: `setProducerQueued()`, `isProducerQueued()`, `onProducerCommit()`
+    - Method: `clearWorkflow(workflowId)`
+- [ ] **Create** `packages/agent/src/config-cache.ts` (NEW):
+  - [ ] `ConfigCache` class to cache parsed `WorkflowConfig` by workflowId + version
+- [ ] **State Machine**: Update preparing phase:
+  - [ ] Extract wakeAt from PrepareResult
+  - [ ] Clamp to min/max bounds (30s - 24h)
+  - [ ] Store in `handler_state.wake_at`
+- [ ] **Scheduler**: Update `findConsumerWithPendingWork()` at line 146-180:
+  - [ ] Check dirty flag first (in-memory)
+  - [ ] Batch query handler states, check wakeAt
+  - [ ] Batch query pending events by topic (replace N+1 queries at 165-177)
+- [ ] **Recovery**: On restart, set `dirty=true` for consumers with pending events
+- [ ] **Deploy**: On workflow deploy, set all consumer `dirty=true`
+
+**Dependencies**: exec-09 (for status semantics)
+**Tests**: Test wakeAt clamping, per-consumer wake times, dirty flag lifecycle, restart recovery
+
+---
+
+### 3.2 exec-13: Per-Producer Scheduling
+
+**Problem**: Single `workflows.next_run_timestamp` shared by all producers. When Producer A runs, it affects Producer B's schedule. Need per-producer tracking.
+
+**Verified Code Locations**:
+- `packages/db/src/producer-schedule-store.ts` - FILE DOES NOT EXIST
+- `packages/db/src/migrations/v42.ts` - FILE DOES NOT EXIST
+- `packages/agent/src/workflow-scheduler.ts:264-402` - Scheduler tick logic
+- `packages/agent/src/workflow-scheduler.ts:289-310` - Uses workflow.next_run_timestamp (WRONG granularity)
+- `packages/agent/src/workflow-scheduler.ts:356-389` - Updates workflow.next_run_timestamp (WRONG)
+- `packages/db/src/script-store.ts` - No producer schedule initialization on deploy
+- `packages/agent/src/session-orchestration.ts:32` - SessionTrigger includes 'manual'
+- `packages/agent/src/session-orchestration.ts:264-323` - executeWorkflowSession() manual trigger
+- `packages/tests/src/session-orchestration.test.ts:408-431` - Manual trigger test exists
+
+**Current State (0% Complete - NOT STARTED)**:
+- [ ] `producer-schedule-store.ts` does NOT exist
+- [ ] `producer_schedules` table does NOT exist
+- [ ] No `ProducerScheduleStore` class
+- [ ] `ProducerScheduleStore` NOT exported from `packages/db/src/api.ts`
+- [ ] Single `workflow.next_run_timestamp` used for ALL producers at lines 289-310 (wrong granularity)
+- [ ] When Producer A runs, updates workflow timestamp at lines 356-389 affecting all producers
+- [ ] Producer schedule calculated at runtime from cron, not persisted per-producer
+- [ ] No producer `queued` flag for coalescing (SchedulerStateManager doesn't exist)
+- [ ] No `computeNextRunTime()` utility function
+- [ ] Manual trigger framework exists (line 32, 264-323) but not integrated with per-producer scheduling
+- [ ] Migration v43 does NOT exist
+
+**Implementation Tasks**:
+- [ ] **DB Migration v43**: Create `producer_schedules` table
+  - File: `packages/db/src/migrations/v43.ts` (NEW)
+  ```sql
+  CREATE TABLE producer_schedules (
+    id TEXT PRIMARY KEY,
+    workflow_id TEXT NOT NULL,
+    producer_name TEXT NOT NULL,
+    schedule_type TEXT NOT NULL,
+    schedule_value TEXT NOT NULL,
+    next_run_at INTEGER NOT NULL,
+    last_run_at INTEGER,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    UNIQUE(workflow_id, producer_name)
+  );
+  CREATE INDEX idx_producer_schedules_workflow ON producer_schedules(workflow_id);
+  CREATE INDEX idx_producer_schedules_next_run ON producer_schedules(next_run_at);
+  SELECT crsql_as_crr('producer_schedules');
+  ```
+- [ ] **Create** `packages/db/src/producer-schedule-store.ts` (NEW):
+  - [ ] `ProducerScheduleStore` class with:
+    - `initializeForWorkflow(workflowId, config)` - create/update schedules from config
+    - `get(workflowId, producerName)`
+    - `getForWorkflow(workflowId)` - batch query
+    - `getDueProducers(workflowId)`
+    - `updateAfterRun(workflowId, producerName)` - update next_run_at
+    - `getNextScheduledTime(workflowId)` - MIN of all producers
+    - `delete(workflowId, producerName)` - cleanup removed producers
+- [ ] **Add** to `packages/db/src/api.ts`:
+  - [ ] Import and export ProducerScheduleStore
+- [ ] **Utils**: Add `computeNextRunTime(scheduleType, scheduleValue)`:
+  - [ ] Handle 'cron' with croner library (already imported in workflow-scheduler.ts)
+  - [ ] Handle 'interval' with `parseInterval()` helper
+- [ ] **Scheduler State**: Use `SchedulerStateManager` from exec-11 for producer `queued` flag
+- [ ] **Scheduler**: Update `workflow-scheduler.ts` tick at line 264-402:
+  - [ ] Replace workflow.next_run_timestamp checks with per-producer queries
+  - [ ] Check in-memory queued flag first
+  - [ ] Batch query producer schedules
+- [ ] **Commit**: Update `commitProducer()`:
+  - [ ] Update per-producer `next_run_at` (not workflow.next_run_timestamp)
+  - [ ] Clear producer `queued` flag
+- [ ] **Recovery**: On restart, queue producers whose `next_run_at` has passed
+- [ ] **Deploy**: On workflow deploy, initialize producer schedules with `next_run_at = now`
+- [ ] **Config Update**: Handle added/removed producers on config change
+- [ ] **Deprecate**: Stop using `workflows.next_run_timestamp` at line 289-310, 356-389 (keep for backwards compat)
+
+**Dependencies**: exec-11 (for SchedulerStateManager)
+**Tests**: Test independent producer schedules, queued flag coalescing, restart recovery
+
+---
+
+## Database Changes Summary
+
+```sql
+-- v39: exec-09 - Status separation (COMPLETE)
+ALTER TABLE handler_runs ADD COLUMN status TEXT NOT NULL DEFAULT 'active';
+
+-- v40: exec-09 - Data migration (COMPLETE)
+-- Migrates existing phase values to status: committed->committed, failed->failed:logic, suspended->paused:reconciliation
+
+-- v41: exec-10 - Retry chain
+ALTER TABLE handler_runs ADD COLUMN retry_of TEXT;
+CREATE INDEX idx_handler_runs_retry_of ON handler_runs(retry_of);
+
+-- v42: exec-11 - Per-consumer wakeAt
+ALTER TABLE handler_state ADD COLUMN wake_at INTEGER;
+
+-- v43: exec-13 - Per-producer scheduling
+CREATE TABLE producer_schedules (
+  id TEXT PRIMARY KEY,
+  workflow_id TEXT NOT NULL,
+  producer_name TEXT NOT NULL,
+  schedule_type TEXT NOT NULL,
+  schedule_value TEXT NOT NULL,
+  next_run_at INTEGER NOT NULL,
+  last_run_at INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  UNIQUE(workflow_id, producer_name)
+);
+CREATE INDEX idx_producer_schedules_workflow ON producer_schedules(workflow_id);
+CREATE INDEX idx_producer_schedules_next_run ON producer_schedules(next_run_at);
+SELECT crsql_as_crr('producer_schedules');
 ```
-exec-01 (DB Schema) ✓ ───────┬──────────────────────────────────┐
-                             │                                   │
-exec-02 (Deprecate Items) ✓ ─┼──────────┐                        │
-                             │          │                        │
-                             ▼          │                        │
-                      exec-03 (Topics) ✓│                        │
-                             │          │                        │
-                             ▼          ▼                        │
-                      exec-03a (Tool Migration) ✓                │
-                             │                                   │
-                             ▼                                   │
-                      exec-04 (Phase Tracking) ✓ ─────────────────┤
-                             │                                   │
-                             ▼                                   │
-                      exec-05 (Script Validation) ✓              │
-                             │                                   │
-                             ▼                                   │
-                      exec-08 (Planner Prompts) ✓                │
-                                                                 │
-                      exec-06 (Handler State Machine) ✓ ◄────────┘
-                             │
-                             ▼
-                      exec-07 (Session Orchestration) ✓
-                             │
-                             ▼
-                      exec-09 (Scheduler Integration) ✓
-```
-
----
-
-## Technical Debt & Code Quality
-
-### Deprecated Code to Remove (After Migration)
-
-- [x] Gmail-specific API endpoints in apps/server/src/server.ts - REMOVED
-  - Removed deprecated Gmail-specific endpoints (/api/gmail/status, /api/gmail/connect, /api/gmail/callback, /api/gmail/check)
-  - Generic connector endpoints at /api/connectors/* are now the only supported approach
-- [x] `chat_events` table - REMOVED via migration v38
-- [x] `task_states` table - REMOVED via migration v37
-- [x] `resources` table - REMOVED via migration v37
-- [x] `chat_notifications` table - REMOVED via migration v37
-- [x] AuthDialog component - REMOVED (was already just a re-export, now deleted)
-- [x] Deprecated task tools in packages/agent/src/tools/deprecated/ - REMOVED (directory deleted)
-- [x] Task fields: `task`, `cron` (deprecated per Spec 10) - COMPLETE
-  - Fields marked deprecated in task-store.ts (removed from Task interface, see Spec 10 comments)
-  - Database columns remain (SQLite cannot drop columns) but code no longer uses them
-
-**Note:** Migration v37 was created to drop the deprecated tables (`resources`, `task_states`, `chat_notifications`).
-
-**Note:** Migration v38 removed the `chat_events` table and the following deprecated ChatStore methods were removed: `getChatMessages`, `getChatEvents`, `saveChatMessages`, `saveChatEvent`, `countMessages`, `getLastChatActivity`, `getLastChatActivities`, `getChatFirstMessage`.
-
-### FIXME Comments Requiring Attention
-
-- [ ] packages/sync/src/Peer.ts:788 - Transaction delivery reliability for change batches
-- [ ] packages/sync/src/nostr/stream/StreamWriter.ts:515 - Bandwidth threshold tuning
-
-### @ts-ignore Suppressions (Third-Party Type Gaps)
-
-These suppressions are caused by incomplete type definitions in third-party libraries, not bugs in our code:
-
-- apps/server/src/server.ts: lines 863, 2014 - Fastify plugin type compatibility
-- apps/web/src/db.ts: line 2 - Vite WASM import with ?url query
-- packages/agent/src/agent.ts: lines 277, 336, 359 - AI SDK provider metadata types
-- packages/browser/src/startWorker.ts: line 74 - SharedWorker module option types
-
-### Skipped Tests to Re-enable
-
-- [ ] exec-many-args-browser.test.ts - Entire suite (browser environment)
-- [ ] crsqlite-peer-new.test.ts - Synchronization tests
-- [ ] file-transfer.test.ts - Real encryption test
-- [ ] nostr-transport.test.ts - Connection tests (WebSocket)
-- [ ] compression.test.ts - Error handling tests
-- [ ] nostr-transport-sync.test.ts - Synchronization suite
-
----
-
-## Testing Requirements
-
-### New Test Files Needed
-
-For exec-01 (Database stores):
-- [x] packages/tests/src/topic-store.test.ts - ✓ DONE (19 tests)
-- [x] packages/tests/src/event-store.test.ts - ✓ DONE (30 tests)
-- [x] packages/tests/src/handler-run-store.test.ts - ✓ DONE (26 tests)
-- [x] packages/tests/src/mutation-store.test.ts - ✓ DONE (28 tests)
-- [x] packages/tests/src/handler-state-store.test.ts - ✓ DONE (21 tests)
-
-For exec-03:
-- [x] packages/tests/src/topics-api.test.ts - ✓ DONE (29 tests)
-
-For exec-04:
-- [x] packages/tests/src/phase-tracking.test.ts - ✓ DONE (48 tests)
-
-For exec-06:
-- [x] packages/tests/src/handler-state-machine.test.ts - ✓ DONE (28 tests)
-
-For exec-07:
-- [x] packages/tests/src/session-orchestration.test.ts - ✓ DONE (25 tests)
 
 ---
 
 ## Files to Create
 
-```
-packages/db/src/migrations/v36.ts          # ✓ DONE - New database schema
-packages/db/src/topic-store.ts             # ✓ DONE - Topic CRUD operations
-packages/db/src/event-store.ts             # ✓ DONE - Event CRUD + status transitions
-packages/db/src/handler-run-store.ts       # ✓ DONE - Handler run tracking
-packages/db/src/mutation-store.ts          # ✓ DONE - Mutation ledger
-packages/db/src/handler-state-store.ts     # ✓ DONE - Persistent handler state
-packages/agent/src/tools/topics.ts         # ✓ DONE - Topics.peek, getByIds, publish
-packages/agent/src/sandbox/tool-lists.ts   # ✓ DONE - createWorkflowTools, createTaskTools
-packages/agent/src/workflow-validator.ts   # ✓ DONE - Script structure validation
-packages/agent/src/handler-state-machine.ts # ✓ DONE - executeHandler function
-packages/agent/src/session-orchestration.ts # ✓ DONE - executeWorkflowSession function
-```
+| File | Purpose | Status |
+|------|---------|--------|
+| `packages/db/src/migrations/v39.ts` | Add status column to handler_runs | COMPLETE |
+| `packages/db/src/migrations/v40.ts` | Data migration for status values | COMPLETE |
+| `packages/db/src/migrations/v41.ts` | Add retry_of column to handler_runs | NOT STARTED |
+| `packages/db/src/migrations/v42.ts` | Add wake_at column to handler_state | NOT STARTED |
+| `packages/db/src/migrations/v43.ts` | Create producer_schedules table | NOT STARTED |
+| `packages/db/src/producer-schedule-store.ts` | ProducerScheduleStore class | NOT STARTED |
+| `packages/agent/src/failure-handling.ts` | Error→RunStatus mapping, failure routing | NOT STARTED |
+| `packages/agent/src/scheduler-state.ts` | SchedulerStateManager (dirty/queued flags) | NOT STARTED |
+| `packages/agent/src/config-cache.ts` | ConfigCache for parsed WorkflowConfig | NOT STARTED |
+
+---
 
 ## Files to Modify
 
-```
-packages/db/src/database.ts                # ✓ DONE - Register v36 migration
-packages/db/src/index.ts                   # ✓ DONE - Export new stores
-packages/db/src/api.ts                     # ✓ DONE - Add new stores to KeepDbApi
-packages/db/src/item-store.ts              # ✓ DONE - Deprecated with @deprecated JSDoc
-packages/agent/src/tools/items-list.ts     # ✓ DONE - Deprecated with @deprecated JSDoc
-packages/agent/src/sandbox/api.ts          # ✓ DONE - Removed Items.withItem, added Topics, deprecated
-packages/agent/src/sandbox/tool-wrapper.ts # ✓ DONE - Removed Items.withItem, added phase tracking (setPhase, getPhase, checkPhaseAllowed), added currentMutation tracking (setCurrentMutation, getCurrentMutation)
-packages/agent/src/tools/index.ts          # ✓ DONE - Removed items-list, added topics
-packages/agent/src/workflow-worker.ts      # ✓ DONE - Uses ToolWrapper + createWorkflowTools
-packages/agent/src/task-worker.ts          # ✓ DONE - Uses ToolWrapper + createTaskTools
-packages/agent/src/index.ts                # ✓ DONE - Exports ToolWrapper, tool-lists, ExecutionPhase, OperationType, executeHandler, session orchestration
-packages/db/src/script-store.ts            # ✓ DONE - Added handler_config field, updateWorkflowFields support, incrementHandlerCount method
-packages/agent/src/agent-env.ts            # ✓ DONE - Updated planner/maintainer prompts for workflow format
-packages/agent/src/ai-tools/save.ts        # ✓ DONE - Integrated validation
-packages/agent/src/ai-tools/fix.ts         # ✓ DONE - Integrated validation
-```
+| File | Changes |
+|------|---------|
+| `packages/db/src/handler-run-store.ts` | Add status, retry_of; update types; add retry chain queries |
+| `packages/db/src/handler-state-store.ts` | Add wake_at; add batch query; add wakeAt methods |
+| `packages/db/src/event-store.ts` | Add countPendingByTopic batch query |
+| `packages/db/src/mutation-store.ts` | Add user_assert_applied resolution type |
+| `packages/db/src/database.ts` | Import new migrations |
+| `packages/db/src/api.ts` | Add ProducerScheduleStore to KeepDbApi |
+| `packages/proto/src/errors.ts` | Deprecate ensureClassified, classifyGenericError |
+| `packages/agent/src/handler-state-machine.ts` | Update phase/status handling; add retry logic; fix error classification |
+| `packages/agent/src/session-orchestration.ts` | Replace ensureClassified; use new scheduling |
+| `packages/agent/src/workflow-scheduler.ts` | Use per-producer schedules; integrate SchedulerStateManager |
+| 13 tool files in `packages/agent/src/tools/` | Remove classifyGenericError usage (verified: 13 files) |
 
 ---
 
-## Risk Assessment
+## Testing Strategy
 
-**High Risk:**
-- Breaking change for existing workflows using Items.withItem() - **COMPLETED in exec-02**
-- All existing workflows will need to be re-planned after migration
-- Users should be warned before deployment
+1. **Unit Tests**:
+   - Failure classification (errorTypeToRunStatus)
+   - Phase reset rules (shouldCopyResults, getStartPhaseForRetry)
+   - Scheduler state management (dirty/queued flags)
+   - ConfigCache invalidation
+   - ProducerScheduleStore CRUD
 
-**Medium Risk:**
-- Complex state machine logic in exec-06 requires thorough testing
-- Crash recovery scenarios need extensive testing
-- Mutation indeterminate state handling requires careful UX design
+2. **Integration Tests**:
+   - Full retry chain flow (transient → backoff → retry)
+   - Logic error → auto-fix → retry with new script
+   - wakeAt scheduling (consumer returns wakeAt, wakes on time)
+   - Producer coalescing (schedule fires while busy → queued)
+   - Mutation resolution (all 3 paths)
 
-**Low Risk:**
-- Database schema changes are additive (except deprecating items)
-- Old api.ts kept for backwards compatibility during transition
-- Prompt changes can be rolled back if needed
+3. **Crash Recovery Tests**:
+   - Restart with active runs → marked crashed → retry created
+   - Restart with missed schedules → producers queued
+   - Restart with pending wakeAt → consumers ready
+   - Restart with in-flight mutation → indeterminate (no auto-retry)
 
 ---
 
-## Notes
+## Not Implemented (Explicitly Deferred)
 
-- All new database tables should use `crsql_as_crr()` for conflict-free replication
-- Phase enforcement should throw LogicError for violations (not crash)
-- Mutation record must be created BEFORE external call for crash detection
-- Session budget limit (100 iterations) prevents infinite loops
-- Producer schedules support both interval and cron formats
+Per user's note, these are NOT part of this plan:
+1. **Reconciliation logic** (Chapter 13) - uncertain mutations go to `paused:reconciliation` and wait for user
+2. **Auto-reconciliation** - user must manually verify
+3. **Tool-specific reconciliation methods** - deferred
+
+---
+
+## References
+
+- `specs/exec-00-overview.md` - Overview and implementation order
+- `specs/exec-09-run-status-separation.md` - Status separation spec
+- `specs/exec-10-retry-chain.md` - Retry chain spec
+- `specs/exec-11-scheduler-state.md` - Scheduler state and wakeAt spec
+- `specs/exec-12-failure-classification.md` - Failure classification spec
+- `specs/exec-13-producer-scheduling.md` - Per-producer scheduling spec
+- `specs/exec-14-indeterminate-mutations.md` - Indeterminate mutation handling spec
+- `docs/dev/06-execution-model.md`
+- `docs/dev/06a-topics-and-handlers.md`
+- `docs/dev/06b-consumer-lifecycle.md`
+- `docs/dev/09-failure-repair.md`
+- `docs/dev/15-host-policies.md`
+- `docs/dev/16-scheduling.md`

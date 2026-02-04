@@ -8,7 +8,7 @@
  * See specs/exec-07-session-orchestration.md for design details.
  */
 
-import { KeepDbApi, Workflow, ScriptRun, HandlerRun } from "@app/db";
+import { KeepDbApi, Workflow, ScriptRun, HandlerRun, isFailedStatus, isPausedStatus } from "@app/db";
 import { bytesToHex } from "@noble/ciphers/utils";
 import { randomBytes } from "@noble/ciphers/crypto";
 import {
@@ -292,7 +292,8 @@ export async function executeWorkflowSession(
           // Execute handler
           const result = await executeHandler(handlerRun.id, context);
 
-          if (result.phase === "failed") {
+          // Per exec-09: check status instead of phase for failure/paused detection
+          if (isFailedStatus(result.status)) {
             await failSession(
               api,
               session,
@@ -306,7 +307,7 @@ export async function executeWorkflowSession(
             };
           }
 
-          if (result.phase === "suspended") {
+          if (isPausedStatus(result.status)) {
             await suspendSession(
               api,
               session,
@@ -346,20 +347,8 @@ export async function executeWorkflowSession(
       const result = await executeHandler(handlerRun.id, context);
       iterations++;
 
-      if (result.phase === "suspended") {
-        await suspendSession(
-          api,
-          session,
-          result.error || "handler_suspended"
-        );
-        return {
-          status: "suspended",
-          reason: result.error || "handler_suspended",
-          sessionId,
-        };
-      }
-
-      if (result.phase === "failed") {
+      // Per exec-09: check status instead of phase for failure/paused detection
+      if (isFailedStatus(result.status)) {
         await failSession(
           api,
           session,
@@ -369,6 +358,19 @@ export async function executeWorkflowSession(
         return {
           status: "failed",
           error: result.error || "Consumer failed",
+          sessionId,
+        };
+      }
+
+      if (isPausedStatus(result.status)) {
+        await suspendSession(
+          api,
+          session,
+          result.error || "handler_suspended"
+        );
+        return {
+          status: "suspended",
+          reason: result.error || "handler_suspended",
           sessionId,
         };
       }
@@ -433,16 +435,8 @@ async function continueSession(
     const result = await executeHandler(handlerRun.id, context);
     iterations++;
 
-    if (result.phase === "suspended") {
-      await suspendSession(api, session, result.error || "handler_suspended");
-      return {
-        status: "suspended",
-        reason: result.error || "handler_suspended",
-        sessionId: session.id,
-      };
-    }
-
-    if (result.phase === "failed") {
+    // Per exec-09: check status instead of phase for failure/paused detection
+    if (isFailedStatus(result.status)) {
       await failSession(
         api,
         session,
@@ -452,6 +446,15 @@ async function continueSession(
       return {
         status: "failed",
         error: result.error || "Consumer failed",
+        sessionId: session.id,
+      };
+    }
+
+    if (isPausedStatus(result.status)) {
+      await suspendSession(api, session, result.error || "handler_suspended");
+      return {
+        status: "suspended",
+        reason: result.error || "handler_suspended",
         sessionId: session.id,
       };
     }

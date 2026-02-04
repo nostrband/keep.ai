@@ -11,9 +11,15 @@ export type HandlerType = "producer" | "consumer";
 /**
  * Handler run phase (state machine states).
  *
- * Producer: pending → executing → committed | failed
+ * Phase tracks execution progress only - it only moves forward.
+ * Status (see RunStatus) tracks why execution is paused/stopped.
+ *
+ * Producer: pending → executing → committed
  * Consumer: pending → preparing → prepared → mutating → mutated → emitting → committed
- *           with possible transitions to suspended | failed from most states
+ *
+ * Note: 'suspended' and 'failed' are deprecated phase values.
+ * They exist for backwards compatibility with pre-v39 data.
+ * New code should use status field for terminal/paused detection.
  */
 export type HandlerRunPhase =
   | "pending"
@@ -24,8 +30,66 @@ export type HandlerRunPhase =
   | "mutated" // Consumer only
   | "emitting" // Consumer only
   | "committed"
-  | "suspended"
-  | "failed";
+  // Deprecated phase values - kept for backwards compatibility
+  | "suspended" // @deprecated Use status='paused:*' instead
+  | "failed"; // @deprecated Use status='failed:*' instead
+
+/**
+ * Handler run status - why execution is paused/stopped.
+ *
+ * Status is orthogonal to phase:
+ * - Phase tracks progress (preparing → committed)
+ * - Status tracks why stopped (active, paused, failed, etc.)
+ *
+ * Active: Currently executing
+ * Paused: Temporarily stopped, can resume
+ *   - paused:transient: Network/rate limit, will auto-retry
+ *   - paused:approval: Needs user action (auth, permission)
+ *   - paused:reconciliation: Uncertain mutation, needs user verification
+ * Failed: Permanently stopped
+ *   - failed:logic: Script error, auto-fix eligible
+ *   - failed:internal: Host/connector bug
+ * Committed: Successfully completed
+ * Crashed: Found incomplete on restart
+ */
+export type RunStatus =
+  | "active" // Currently executing
+  | "paused:transient" // Transient failure, will retry
+  | "paused:approval" // Waiting for user approval (auth, permission)
+  | "paused:reconciliation" // Uncertain mutation outcome
+  | "failed:logic" // Script error, auto-fix eligible
+  | "failed:internal" // Host/connector bug
+  | "committed" // Successfully completed
+  | "crashed"; // Found incomplete on restart
+
+/**
+ * Check if a run status is terminal (no more execution possible).
+ * Terminal statuses: committed, failed:*, crashed
+ */
+export function isTerminalStatus(status: RunStatus): boolean {
+  return (
+    status === "committed" ||
+    status === "failed:logic" ||
+    status === "failed:internal" ||
+    status === "crashed"
+  );
+}
+
+/**
+ * Check if a run status is paused (temporarily stopped, can resume).
+ * Paused statuses: paused:transient, paused:approval, paused:reconciliation
+ */
+export function isPausedStatus(status: RunStatus): boolean {
+  return status.startsWith("paused:");
+}
+
+/**
+ * Check if a run status is failed (permanently stopped due to error).
+ * Failed statuses: failed:logic, failed:internal
+ */
+export function isFailedStatus(status: RunStatus): boolean {
+  return status.startsWith("failed:");
+}
 
 /**
  * Error type classification for handler failures.
@@ -42,6 +106,7 @@ export interface HandlerRun {
   handler_type: HandlerType;
   handler_name: string;
   phase: HandlerRunPhase;
+  status: RunStatus; // Why execution is paused/stopped
   prepare_result: string; // JSON: { reservations, data, ui }
   input_state: string; // JSON: State received from previous run
   output_state: string; // JSON: State returned by handler
@@ -69,6 +134,7 @@ export interface CreateHandlerRunInput {
  */
 export interface UpdateHandlerRunInput {
   phase?: HandlerRunPhase;
+  status?: RunStatus;
   prepare_result?: string;
   output_state?: string;
   end_timestamp?: string;
@@ -122,9 +188,9 @@ export class HandlerRunStore {
     await db.exec(
       `INSERT INTO handler_runs (
         id, script_run_id, workflow_id, handler_type, handler_name,
-        phase, prepare_result, input_state, output_state,
+        phase, status, prepare_result, input_state, output_state,
         start_timestamp, end_timestamp, error, error_type, cost, logs
-      ) VALUES (?, ?, ?, ?, ?, 'pending', '', ?, '', ?, '', '', '', 0, '[]')`,
+      ) VALUES (?, ?, ?, ?, ?, 'pending', 'active', '', ?, '', ?, '', '', '', 0, '[]')`,
       [
         id,
         input.script_run_id,
@@ -143,6 +209,7 @@ export class HandlerRunStore {
       handler_type: input.handler_type,
       handler_name: input.handler_name,
       phase: "pending",
+      status: "active",
       prepare_result: "",
       input_state: input.input_state || "",
       output_state: "",
@@ -171,6 +238,10 @@ export class HandlerRunStore {
     if (input.phase !== undefined) {
       updates.push("phase = ?");
       params.push(input.phase);
+    }
+    if (input.status !== undefined) {
+      updates.push("status = ?");
+      params.push(input.status);
     }
     if (input.prepare_result !== undefined) {
       updates.push("prepare_result = ?");
@@ -240,6 +311,7 @@ export class HandlerRunStore {
 
   /**
    * Get incomplete (non-terminal) handler runs for a workflow.
+   * Returns runs with status='active' (currently executing).
    */
   async getIncomplete(
     workflowId: string,
@@ -248,7 +320,7 @@ export class HandlerRunStore {
     const db = tx || this.db.db;
     const results = await db.execO<Record<string, unknown>>(
       `SELECT * FROM handler_runs
-       WHERE workflow_id = ? AND phase NOT IN ('committed', 'suspended', 'failed')
+       WHERE workflow_id = ? AND status = 'active'
        ORDER BY start_timestamp`,
       [workflowId]
     );
@@ -259,12 +331,13 @@ export class HandlerRunStore {
 
   /**
    * Get workflow IDs that have incomplete handler runs.
+   * Returns workflow IDs with runs in status='active'.
    */
   async getWorkflowsWithIncompleteRuns(tx?: DBInterface): Promise<string[]> {
     const db = tx || this.db.db;
     const results = await db.execO<{ workflow_id: string }>(
       `SELECT DISTINCT workflow_id FROM handler_runs
-       WHERE phase NOT IN ('committed', 'suspended', 'failed')`
+       WHERE status = 'active'`
     );
 
     if (!results) return [];
@@ -273,12 +346,13 @@ export class HandlerRunStore {
 
   /**
    * Check if a workflow has any active (non-terminal) handler runs.
+   * Returns true if any run has status='active'.
    */
   async hasActiveRun(workflowId: string, tx?: DBInterface): Promise<boolean> {
     const db = tx || this.db.db;
     const results = await db.execO<{ count: number }>(
       `SELECT COUNT(*) as count FROM handler_runs
-       WHERE workflow_id = ? AND phase NOT IN ('committed', 'suspended', 'failed')`,
+       WHERE workflow_id = ? AND status = 'active'`,
       [workflowId]
     );
 
@@ -339,6 +413,7 @@ export class HandlerRunStore {
       handler_type: row.handler_type as HandlerType,
       handler_name: row.handler_name as string,
       phase: row.phase as HandlerRunPhase,
+      status: (row.status as RunStatus) || "active", // Default for pre-v39 rows
       prepare_result: row.prepare_result as string,
       input_state: row.input_state as string,
       output_state: row.output_state as string,

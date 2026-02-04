@@ -73,7 +73,7 @@ async function createTables(db: DBInterface): Promise<void> {
     )
   `);
 
-  // Handler runs table
+  // Handler runs table (includes status column from v39)
   await db.exec(`
     CREATE TABLE IF NOT EXISTS handler_runs (
       id TEXT PRIMARY KEY NOT NULL DEFAULT '',
@@ -82,6 +82,7 @@ async function createTables(db: DBInterface): Promise<void> {
       handler_type TEXT NOT NULL DEFAULT '',
       handler_name TEXT NOT NULL DEFAULT '',
       phase TEXT NOT NULL DEFAULT 'pending',
+      status TEXT NOT NULL DEFAULT 'active',
       prepare_result TEXT NOT NULL DEFAULT '',
       input_state TEXT NOT NULL DEFAULT '',
       output_state TEXT NOT NULL DEFAULT '',
@@ -96,6 +97,7 @@ async function createTables(db: DBInterface): Promise<void> {
   await db.exec(`CREATE INDEX IF NOT EXISTS idx_handler_runs_script_run ON handler_runs(script_run_id)`);
   await db.exec(`CREATE INDEX IF NOT EXISTS idx_handler_runs_workflow ON handler_runs(workflow_id)`);
   await db.exec(`CREATE INDEX IF NOT EXISTS idx_handler_runs_phase ON handler_runs(phase)`);
+  await db.exec(`CREATE INDEX IF NOT EXISTS idx_handler_runs_status ON handler_runs(status)`);
 
   // Mutations table
   await db.exec(`
@@ -572,8 +574,10 @@ describe("Session Orchestration", () => {
         handler_type: "consumer",
         handler_name: "process",
       });
+      // Per exec-09: set status to indicate committed, not just phase
       await api.handlerRunStore.update(run.id, {
         phase: "committed",
+        status: "committed",
         end_timestamp: new Date().toISOString(),
       });
 

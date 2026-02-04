@@ -62,8 +62,8 @@ export { EventStore } from "./event-store";
 export type { Event, EventStatus, PublishEvent, PeekEventsOptions, EventReservation } from "./event-store";
 
 // Handler run store (execution model - handler runs)
-export { HandlerRunStore } from "./handler-run-store";
-export type { HandlerRun, HandlerType, HandlerRunPhase, HandlerErrorType, CreateHandlerRunInput, UpdateHandlerRunInput } from "./handler-run-store";
+export { HandlerRunStore, isTerminalStatus, isPausedStatus, isFailedStatus } from "./handler-run-store";
+export type { HandlerRun, HandlerType, HandlerRunPhase, HandlerErrorType, RunStatus, CreateHandlerRunInput, UpdateHandlerRunInput } from "./handler-run-store";
 
 // Mutation store (execution model - mutations)
 export { MutationStore } from "./mutation-store";

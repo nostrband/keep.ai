@@ -13,6 +13,10 @@ import {
   HandlerRun,
   HandlerRunPhase,
   HandlerErrorType,
+  RunStatus,
+  isTerminalStatus,
+  isPausedStatus,
+  isFailedStatus,
   Mutation,
   Workflow,
   DBInterface,
@@ -41,6 +45,7 @@ const log = debug("handler-state-machine");
  */
 export interface HandlerResult {
   phase: HandlerRunPhase;
+  status: RunStatus;
   error?: string;
   errorType?: HandlerErrorType | "";
 }
@@ -72,10 +77,28 @@ export interface HandlerExecutionContext {
 // ============================================================================
 
 /**
- * Check if a phase is terminal (no more transitions possible).
+ * Check if a run is terminal (no more execution possible).
+ *
+ * Per exec-09 spec, we now check status instead of phase.
+ * Terminal statuses: committed, failed:*, crashed
+ * Paused statuses are NOT terminal (can be resumed).
+ *
+ * @deprecated For backwards compatibility. Use isTerminalStatus(run.status) instead.
  */
 export function isTerminal(phase: HandlerRunPhase): boolean {
+  // Backwards compatibility with old phase-based logic
   return ["committed", "suspended", "failed"].includes(phase);
+}
+
+/**
+ * Check if a handler run is done executing (terminal or paused).
+ *
+ * Returns true if the run is in a state where the state machine should stop.
+ * This includes both terminal states (committed, failed, crashed) and
+ * paused states (paused:transient, paused:approval, paused:reconciliation).
+ */
+export function isRunDone(run: HandlerRun): boolean {
+  return isTerminalStatus(run.status) || isPausedStatus(run.status);
 }
 
 // ============================================================================
@@ -103,6 +126,32 @@ function errorTypeToHandlerErrorType(type: ErrorType): HandlerErrorType {
 }
 
 /**
+ * Map ClassifiedError type to RunStatus.
+ *
+ * Per exec-12 spec:
+ * - auth/permission → paused:approval (needs user action)
+ * - network → paused:transient (will auto-retry)
+ * - logic → failed:logic (auto-fix eligible)
+ * - internal → failed:internal (bug in our code)
+ */
+function errorTypeToRunStatus(type: ErrorType): RunStatus {
+  switch (type) {
+    case "auth":
+      return "paused:approval";
+    case "permission":
+      return "paused:approval";
+    case "network":
+      return "paused:transient";
+    case "logic":
+      return "failed:logic";
+    case "internal":
+      return "failed:internal";
+    default:
+      return "failed:logic"; // Default to repair-eligible
+  }
+}
+
+/**
  * Check if an error is a definite failure (vs potentially indeterminate).
  * Used to decide mutation status when an error occurs during mutate phase.
  */
@@ -118,6 +167,9 @@ function isDefiniteFailure(error: ClassifiedError): boolean {
 
 /**
  * Mark a handler run as failed with classified error.
+ *
+ * Per exec-09 spec, this sets status based on error type instead of
+ * changing phase. Phase stays at the point of failure.
  */
 async function failRun(
   api: KeepDbApi,
@@ -125,29 +177,48 @@ async function failRun(
   error: ClassifiedError
 ): Promise<void> {
   const errorType = errorTypeToHandlerErrorType(error.type);
+  const status = errorTypeToRunStatus(error.type);
   await api.handlerRunStore.update(run.id, {
-    phase: "failed",
+    // Keep phase at point of failure, set status instead
+    status,
     error: error.message,
     error_type: errorType,
     end_timestamp: new Date().toISOString(),
   });
-  log(`Handler run ${run.id} failed: ${error.message} (${errorType})`);
+  log(`Handler run ${run.id} ${status}: ${error.message} (${errorType})`);
+}
+
+/**
+ * Mark a handler run as paused with a specific status and reason.
+ *
+ * Per exec-09 spec, this sets status without changing phase.
+ */
+async function pauseRun(
+  api: KeepDbApi,
+  run: HandlerRun,
+  status: RunStatus,
+  reason: string
+): Promise<void> {
+  await api.handlerRunStore.update(run.id, {
+    status,
+    error: reason,
+    end_timestamp: new Date().toISOString(),
+  });
+  log(`Handler run ${run.id} ${status}: ${reason}`);
 }
 
 /**
  * Mark a handler run as suspended with reason.
+ *
+ * @deprecated Use pauseRun with appropriate status instead.
+ * Kept for backwards compatibility during migration.
  */
 async function suspendRun(
   api: KeepDbApi,
   run: HandlerRun,
   reason: string
 ): Promise<void> {
-  await api.handlerRunStore.update(run.id, {
-    phase: "suspended",
-    error: reason,
-    end_timestamp: new Date().toISOString(),
-  });
-  log(`Handler run ${run.id} suspended: ${reason}`);
+  await pauseRun(api, run, "paused:reconciliation", reason);
 }
 
 /**
@@ -203,6 +274,7 @@ async function commitProducer(
       run.id,
       {
         phase: "committed",
+        status: "committed",
         output_state: JSON.stringify(newState),
         end_timestamp: new Date().toISOString(),
       },
@@ -244,6 +316,7 @@ async function commitConsumer(
       run.id,
       {
         phase: "committed",
+        status: "committed",
         output_state: JSON.stringify(newState),
         end_timestamp: new Date().toISOString(),
       },
@@ -855,14 +928,17 @@ export async function executeHandler(
     if (!run) {
       return {
         phase: "failed",
+        status: "failed:internal",
         error: `Handler run ${handlerRunId} not found`,
         errorType: "logic",
       };
     }
 
-    if (isTerminal(run.phase)) {
+    // Check if run is done (terminal or paused) using status
+    if (isRunDone(run)) {
       return {
         phase: run.phase,
+        status: run.status,
         error: run.error || undefined,
         errorType: run.error_type || undefined,
       };
@@ -878,13 +954,14 @@ export async function executeHandler(
     if (!handler) {
       // Unknown phase - this shouldn't happen
       await api.handlerRunStore.update(run.id, {
-        phase: "failed",
+        status: "failed:internal",
         error: `Unknown phase: ${run.phase}`,
         error_type: "logic",
         end_timestamp: new Date().toISOString(),
       });
       return {
-        phase: "failed",
+        phase: run.phase,
+        status: "failed:internal",
         error: `Unknown phase: ${run.phase}`,
         errorType: "logic",
       };
@@ -898,7 +975,8 @@ export async function executeHandler(
       const classifiedError = ensureClassified(error, "handler-state-machine");
       await failRun(api, run, classifiedError);
       return {
-        phase: "failed",
+        phase: run.phase,
+        status: errorTypeToRunStatus(classifiedError.type),
         error: classifiedError.message,
         errorType: errorTypeToHandlerErrorType(classifiedError.type),
       };
