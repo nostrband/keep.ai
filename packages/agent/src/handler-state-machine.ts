@@ -60,6 +60,12 @@ export interface PrepareResult {
   data?: unknown;
   /** Optional UI output */
   ui?: unknown;
+  /**
+   * Optional wakeAt time for time-based scheduling (exec-11).
+   * ISO 8601 datetime string (e.g., "2024-01-16T09:00:00Z").
+   * Host enforces: 30s minimum, 24h maximum from now.
+   */
+  wakeAt?: string;
 }
 
 /**
@@ -426,14 +432,62 @@ async function pauseRunForIndeterminate(
   log(`Workflow ${run.workflow_id} paused due to indeterminate mutation`);
 }
 
+// ============================================================================
+// wakeAt Constants (exec-11)
+// ============================================================================
+
+/** Minimum wakeAt interval: 30 seconds */
+const MIN_WAKE_INTERVAL_MS = 30 * 1000;
+
+/** Maximum wakeAt interval: 24 hours */
+const MAX_WAKE_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
 /**
- * Save prepare result and reserve events atomically.
+ * Clamp wakeAt to valid range (exec-11).
+ *
+ * Host enforces:
+ * - Minimum: 30 seconds from now
+ * - Maximum: 24 hours from now
+ *
+ * @param wakeAt - Requested wake time in milliseconds
+ * @param now - Current time in milliseconds
+ * @returns Clamped wake time, or 0 if invalid
+ */
+function clampWakeAt(wakeAt: number, now: number): number {
+  if (!wakeAt || isNaN(wakeAt)) {
+    return 0;
+  }
+
+  const min = now + MIN_WAKE_INTERVAL_MS;
+  const max = now + MAX_WAKE_INTERVAL_MS;
+
+  return Math.max(min, Math.min(wakeAt, max));
+}
+
+/**
+ * Save prepare result, reserve events, and record wakeAt atomically.
  */
 async function savePrepareAndReserve(
   api: KeepDbApi,
   run: HandlerRun,
   prepareResult: PrepareResult
 ): Promise<void> {
+  const now = Date.now();
+
+  // Process wakeAt (exec-11)
+  let wakeAtMs = 0;
+  if (prepareResult.wakeAt) {
+    try {
+      const parsed = new Date(prepareResult.wakeAt).getTime();
+      wakeAtMs = clampWakeAt(parsed, now);
+      if (wakeAtMs !== parsed) {
+        log(`Handler run ${run.id} wakeAt clamped: ${prepareResult.wakeAt} → ${new Date(wakeAtMs).toISOString()}`);
+      }
+    } catch {
+      log(`Handler run ${run.id} invalid wakeAt ignored: ${prepareResult.wakeAt}`);
+    }
+  }
+
   await api.db.db.tx(async (tx: DBInterface) => {
     // Save prepare result
     await api.handlerRunStore.update(
@@ -449,8 +503,19 @@ async function savePrepareAndReserve(
     if (prepareResult.reservations && prepareResult.reservations.length > 0) {
       await api.eventStore.reserveEvents(run.id, prepareResult.reservations, tx);
     }
+
+    // Record wakeAt per-consumer (exec-11)
+    // Always update - 0 clears any previous wakeAt
+    await api.handlerStateStore.updateWakeAt(
+      run.workflow_id,
+      run.handler_name,
+      wakeAtMs,
+      tx
+    );
   });
-  log(`Handler run ${run.id} prepared with ${prepareResult.reservations?.length || 0} reservations`);
+
+  const wakeAtInfo = wakeAtMs > 0 ? `, wakeAt=${new Date(wakeAtMs).toISOString()}` : "";
+  log(`Handler run ${run.id} prepared with ${prepareResult.reservations?.length || 0} reservations${wakeAtInfo}`);
 }
 
 /**

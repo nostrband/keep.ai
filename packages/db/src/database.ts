@@ -42,6 +42,7 @@ import { migrateV38 } from "./migrations/v38";
 import { migrateV39 } from "./migrations/v39";
 import { migrateV40 } from "./migrations/v40";
 import { migrateV41 } from "./migrations/v41";
+import { migrateV42 } from "./migrations/v42";
 
 const debugDatabase = debug("db:database");
 
@@ -130,6 +131,7 @@ export class KeepDb implements CRSqliteDB {
       [39, migrateV39],
       [40, migrateV40],
       [41, migrateV41],
+      [42, migrateV42],
     ]);
 
     const readVersion = async () => {

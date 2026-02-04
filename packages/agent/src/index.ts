@@ -171,6 +171,12 @@ export {
   type MutationResult,
 } from "./indeterminate-resolution";
 
+// Scheduler state management (exec-11)
+export {
+  SchedulerStateManager,
+  type WorkflowConfigForScheduler,
+} from "./scheduler-state";
+
 export type {
   Sandbox,
   SandboxOptions,

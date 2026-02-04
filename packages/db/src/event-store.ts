@@ -354,6 +354,81 @@ export class EventStore {
   }
 
   /**
+   * Batch count pending events by topic (exec-11).
+   *
+   * Avoids N+1 queries when checking multiple topics.
+   *
+   * @param workflowId - Workflow ID
+   * @param topicNames - Array of topic names to check
+   * @returns Map of topic name to pending count
+   */
+  async countPendingByTopic(
+    workflowId: string,
+    topicNames: string[],
+    tx?: DBInterface
+  ): Promise<Map<string, number>> {
+    const db = tx || this.db.db;
+
+    if (topicNames.length === 0) {
+      return new Map();
+    }
+
+    const placeholders = topicNames.map(() => "?").join(", ");
+    const results = await db.execO<{ topic_name: string; count: number }>(
+      `SELECT t.name as topic_name, COUNT(e.id) as count
+       FROM topics t
+       LEFT JOIN events e ON e.topic_id = t.id AND e.status = 'pending'
+       WHERE t.workflow_id = ? AND t.name IN (${placeholders})
+       GROUP BY t.name`,
+      [workflowId, ...topicNames]
+    );
+
+    const map = new Map<string, number>();
+    // Initialize all topics with 0
+    for (const name of topicNames) {
+      map.set(name, 0);
+    }
+    // Update with actual counts
+    if (results) {
+      for (const row of results) {
+        map.set(row.topic_name, row.count);
+      }
+    }
+    return map;
+  }
+
+  /**
+   * Check if any topic has pending events (exec-11).
+   *
+   * @param workflowId - Workflow ID
+   * @param topicNames - Array of topic names to check
+   * @returns true if any topic has pending events
+   */
+  async hasPendingEvents(
+    workflowId: string,
+    topicNames: string[],
+    tx?: DBInterface
+  ): Promise<boolean> {
+    const db = tx || this.db.db;
+
+    if (topicNames.length === 0) {
+      return false;
+    }
+
+    const placeholders = topicNames.map(() => "?").join(", ");
+    const results = await db.execO<{ count: number }>(
+      `SELECT COUNT(*) as count FROM events e
+       JOIN topics t ON t.id = e.topic_id
+       WHERE t.workflow_id = ? AND t.name IN (${placeholders}) AND e.status = 'pending'
+       LIMIT 1`,
+      [workflowId, ...topicNames]
+    );
+
+    if (!results || results.length === 0) return false;
+    return results[0].count > 0;
+  }
+
+  /**
    * Get events reserved by a handler run.
    */
   async getReservedByRun(
