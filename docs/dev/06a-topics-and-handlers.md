@@ -46,10 +46,20 @@ Events transition through states:
 
 State transitions are **host-managed**. Scripts never manually dequeue or mark events.
 
+### Publishing Semantics
+
+Event publishing is deduplicated by `messageId` using **last-write-wins**:
+
+* If `messageId` doesn't exist → event is created
+* If `messageId` exists → `title` and `payload` are **updated**
+* Event `status` is **preserved** (pending/consumed/skipped unchanged)
+
+**Why last-write-wins?** This makes auto-fix more robust. If a producer publishes an event with a buggy payload, auto-fix can correct the script, and the retry may update the event with the corrected payload — before the consumer processes it.
+
 ### Properties
 
 * Topics are **fully observable** in the UI
-* Events are **not deleted by default** — they are marked as consumed/handled
+* Events are **not deleted** — they are marked as consumed/handled
 * Topics have **exactly one consumer** in v1
 * Topics may be used as:
   * ingress (emails, Slack messages, timers)
@@ -66,7 +76,7 @@ Producers convert unstructured external inputs into **formal system events**.
 Producers:
 
 * May perform **read-only** external operations
-* May enqueue events into topics; publishing is idempotent and deduplicated by `messageId`
+* May enqueue events into topics; publishing uses last-write-wins deduplication by `messageId` (see Publishing Semantics above)
 
 Producers may NOT:
 
@@ -132,7 +142,7 @@ A **consumer** processes events from subscribed topics and performs **at most on
 * A consumer durably **reserves** input events that it intends to process
 * Reserved events are atomically marked as processed if consumer completes successfully
 
-Note: events are stored in append order, but there is no implicit ordering guarantee — consumers may selectively reserve; FIFO processing is the consumer's responsibility if needed
+Note: there is no event ordering guarantee — consumers may selectively reserve; FIFO processing is the consumer's responsibility if needed
 
 ### Run Identity
 

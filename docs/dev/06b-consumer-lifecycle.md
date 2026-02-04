@@ -61,7 +61,8 @@ Where `state` is the consumer's previous state from the last successful run (und
     ids: string[]
   }>,
   data: { ... },     // payload for mutate and next
-  ui?: { ... }       // optional UX metadata (previews, summaries)
+  ui?: { ... },      // optional UX metadata (previews, summaries)
+  wakeAt?: string    // optional ISO 8601 datetime for time-based wake (see Chapter 16)
 }
 ```
 
@@ -75,7 +76,7 @@ Reservations are the cornerstone of Keep.AI's commit semantics: they bind a plan
 * Ensure the mutation is applied **at most once** for those inputs
 * Make partial progress fully observable
 
-Reserved events are marked `reserved` on `prepare` success, then `consumed` only after the full run completes. If a run fails or enters indeterminate state, reservations remain unconsumed, allowing inspection and safe retry.
+Reserved events are marked `reserved` on `prepare` success, then `consumed` only after the full run commits. If a run pauses or is retried, reservations remain in `reserved` state, allowing inspection and safe continuation.
 
 ### Empty Reservations
 
@@ -85,7 +86,9 @@ Reserved events are marked `reserved` on `prepare` success, then `consumed` only
 * Batching threshold not met
 * Required correlation event not yet available
 
-When reservations are empty, the run skips `mutate` and proceeds directly to `next`. See Chapter 16 for scheduler handling of empty reservations.
+When reservations are empty, the run skips `mutate` and proceeds directly to `next`.
+
+For time-based patterns, `prepare` can include `wakeAt` to request a specific wake time. See Chapter 16 for scheduler handling of empty reservations and the `wakeAt` hint.
 
 ### Replay Semantics
 
@@ -221,41 +224,51 @@ Scripts must handle all `mutationResult` statuses appropriately.
 
 `next` can be relaunched safely:
 
-* Event publishing is idempotent by `messageId`
+* Event publishing is deduplicated by `messageId` (last-write-wins, see Chapter 06a)
 * State is re-computed and committed on success
 
 ---
 
 ## Run Lifecycle
 
-Each consumer run progresses through states:
+### Execution Phase
+
+Each consumer run progresses through **phases**:
 
 ```mermaid
 stateDiagram-v2
-  [*] --> pending: scheduler invokes consumer
+  [*] --> preparing: run starts
 
-  pending --> preparing: run starts
   preparing --> prepared: prepare succeeds
-  preparing --> failed: prepare throws
-
   prepared --> mutating: reservations non-empty
   prepared --> emitting: reservations empty (skip mutate)
 
-  mutating --> mutated: mutation succeeds
-  mutating --> suspended: approval/reconciliation needed
-  mutating --> failed: mutation fails terminally
-
-  suspended --> mutated: reconciliation succeeds
-  suspended --> emitting: user skips
-  suspended --> mutating: user asserts "didn't happen"
-
+  mutating --> mutated: mutation applied
   mutated --> emitting: proceed to next
-  emitting --> committed: next succeeds
-  emitting --> failed: next fails
 
+  emitting --> committed: next succeeds
   committed --> [*]: run complete
-  failed --> [*]: escalate or retry
 ```
+
+**Phase only moves forward.** There is no `failed` state in the phase diagram. Failures pause execution but do not change the phase.
+
+### Run Status (Orthogonal)
+
+Run status tracks *why* a run is paused or stopped. Status is **orthogonal to phase** — a run can be paused at any phase.
+
+| Status | Meaning | Resolution |
+|--------|---------|------------|
+| `active` | Currently executing | — |
+| `paused:transient` | Transient failure, will retry | Backoff then resume |
+| `paused:approval` | Waiting for user approval | User approves/rejects |
+| `paused:reconciliation` | Uncertain mutation outcome | Reconciliation or user action |
+| `failed:logic` | Script error, auto-fix eligible | Auto-fix then retry |
+| `failed:internal` | Host/connector bug | Contact support |
+| `committed` | Successfully completed | — |
+
+**Critical invariant:** Failures change run status, not phase. When a paused run resumes, it continues from the same phase.
+
+See Chapter 16 for run status management, retry scheduling, and phase reset rules.
 
 ---
 
@@ -264,15 +277,17 @@ stateDiagram-v2
 | Phase | Can Relaunch? | Side Effects | Atomicity |
 |-------|---------------|--------------|-----------|
 | prepare | Yes | None | PrepareResult saved on success |
-| mutate | Only if `failed` | External mutation | Host-owned, ledger-tracked |
+| mutate | Only if mutation not applied | External mutation | Host-owned, ledger-tracked |
 | next | Yes | Event publishing (idempotent) | State + event consumption atomic |
 
 **Key invariants:**
 
 * Prepare can always retry — no side effects
-* Mutate only re-executes if mutation definitively failed
+* Mutate only re-executes if mutation definitively did not apply
 * Reconciliation is host-owned — mutate handler not re-executed
 * Next can always retry — publishing is idempotent, state committed atomically
+
+**Phase reset:** Before mutation is applied, execution can reset to `prepare` (e.g., for auto-fix). After mutation is applied, execution must proceed through `next`. See Chapter 06 for reset rules.
 
 ---
 
@@ -282,20 +297,23 @@ A run commits successfully when `next` completes. The host atomically:
 
 1. Marks all events from `reservations` as `consumed` (or `skipped` if user skipped)
 2. Commits state from `next`
-3. Records the run as complete
+3. Records the run as `committed`
 
-If the mutation enters an **indeterminate** state:
+If execution pauses (transient failure, approval needed, reconciliation):
 
-* Run is suspended
+* Run status changes (see Run Status table above)
+* Phase remains unchanged
 * Reservations remain reserved (not consumed)
-* User action required (see Chapter 07)
+* Mutation state is preserved
+* Execution can resume from the same phase when resolved
 
 ---
 
 ## Related Chapters
 
-* Chapter 06 — Execution Model (concepts)
+* Chapter 06 — Execution Model (concepts, phase reset rules)
 * Chapter 06a — Topics and Handlers
 * Chapter 07 — Workflow Operations
+* Chapter 09 — Failure Handling (failure classification)
 * Chapter 13 — Mutation Reconciliation
-* Chapter 16 — Scheduling
+* Chapter 16 — Scheduling (run status, retry logic, phase reset implementation)

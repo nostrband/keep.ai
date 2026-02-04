@@ -102,11 +102,32 @@ Each phase has a **durable checkpoint**: the host persists results atomically be
 
 This separation ensures:
 
-* **Inputs are pinned before side-effects** — what you approved is what executes
+* **Inputs are pinned before side-effects** — what events will be consumed if mutation succeeds
 * **Mutations are isolated** — one mutation per run, tracked in a ledger, reconcilable
 * **Downstream effects are decoupled** — `next` always runs, even if mutation was skipped
 
 The host enforces phase boundaries: attempting a mutation in `prepare` or a read in `mutate` is an immediate abort. See Chapter 06b for detailed phase semantics.
+
+### Phase Reset
+
+The phase model permits **resetting to an earlier phase** under specific conditions:
+
+| Current Phase | Reset Allowed? | Reason |
+|---------------|----------------|--------|
+| `prepare` | Yes | No side effects yet |
+| `mutate` (mutation not applied) | Yes | No side effects yet |
+| `mutate` (mutation applied) | **No** | Mutation is irreversible |
+| `next` | **No** | Mutation already applied |
+
+**The critical boundary is mutation application.** Before a mutation is applied, execution can reset to `prepare` and start fresh. After mutation is applied, execution must proceed forward through `next` to completion.
+
+This property enables:
+
+* Auto-repair to start with a clean slate (before mutation)
+* Safe retry after transient failures (before mutation)
+* Guaranteed progress after mutation
+
+The execution model defines what resets are *permitted*. The scheduler (Chapter 16) defines when resets *actually occur*.
 
 ---
 
@@ -155,6 +176,59 @@ Violations (e.g., attempting mutation in `prepare`) result in immediate abort an
 
 ---
 
+## Scheduling Contract
+
+This section defines what scripts can rely on and what they must not assume. This is the contract between the scheduler and script code — essential for planner prompting.
+
+### What the Scheduler Guarantees
+
+| Guarantee | Description |
+|-----------|-------------|
+| **Run on pending events** | If pending events exist, the consumer will run at least once (one run may process multiple events, or none if returning empty reservations) |
+| **Run on new events** | If a new event arrives while consumer is idle, consumer will eventually run |
+| **Producer schedule** | Producer will run at least once at time >= scheduled time |
+| **Consumer wakeAt** | If `wakeAt` is returned, consumer will run at least once at time >= wakeAt |
+| **Single-threaded execution** | Only one handler runs at a time per workflow |
+| **Phase integrity** | If mutation is applied, `next` will eventually run (after retries/fixes) |
+
+**Important: wakeAt does not persist across runs.** Each prepare must return `wakeAt` if time-based scheduling is needed. Returning null/undefined means "don't wake me based on time — only on new events."
+
+**Batch processing note:** If consumer processes a subset of pending events (e.g., 10 of 1000) and wants to process more in next run, it must either:
+- Return `wakeAt` to schedule the next run, OR
+- Rely on new events arriving to trigger the next run
+
+Without `wakeAt` and without new events, the consumer will not run again.
+
+### What Scripts Must NOT Assume
+
+| Invalid Assumption | Reality |
+|--------------------|---------|
+| "I only run when my trigger fires" | Scheduler may run handlers at any time (restart recovery, manual trigger) |
+| "If I'm running, there's work to do" | Consumer may run and find no actionable events (return empty reservations) |
+| "Current time matches my wakeAt" | Handler may run before or after wakeAt due to scheduling delays |
+| "I run exactly on schedule" | Schedules are best-effort; delays happen |
+| "I won't run twice for the same input" | Handler may retry; use messageId for idempotency and reservations for exactly-once processing |
+| "External state hasn't changed since last run" | Always re-read; never cache across runs |
+| "Phases execute quickly" | Arbitrary delays possible between phases and during any async call |
+
+**No timing assumptions:** Scripts must not assume any timing guarantees — not between runs, not between phases, not even within a phase during async tool calls. External state can change at any moment, any async step can take arbitrary time. Read-after-write consistency is never guaranteed unless the external system provides it. Design for eventual consistency and use external system's own consistency mechanisms where available.
+
+### Script Design Principles
+
+Based on the above, scripts should:
+
+1. **Always check conditions** — Don't assume "if running, conditions are met." Check time, check for pending events, validate assumptions.
+
+2. **Be idempotent** — Use stable `messageId` for event publishing. Assume handlers may run multiple times.
+
+3. **Handle empty gracefully** — Consumer prepare should handle "nothing to do" by returning empty reservations (optionally with `wakeAt`).
+
+4. **Re-read external state** — Don't rely on cached data from previous runs. Each run should read fresh state in prepare.
+
+5. **Don't track time internally** — Use `wakeAt` for time-based logic, not internal counters or timestamps that assume precise scheduling.
+
+---
+
 ## Limitations (v1)
 
 ### Staleness Between Prepare and Execute
@@ -178,8 +252,9 @@ This is why `mutate` forbids all reads: rather than pretend to solve an unsolvab
 | **External constraints** | Use unique keys in the external system. Conflicts fail loudly rather than creating duplicates. |
 | **Idempotent services** | Target services where repeated writes are safe (e.g., "set value" rather than "increment"). |
 | **Accept conflicts** | For multi-writer scenarios, accept that conflicts happen. Failed mutations surface to users for resolution. |
+| **Periodic cleanup** | Run a branch in the workflow that finds and merges potential duplicates. |
 
-**Best practice**: Treat each workflow's output destination as owned by that workflow.
+**Best practice**: Treat each workflow's output destination as owned by that workflow, or explicitly handle inconsistencies otherwise.
 
 ### No Cross-Workflow Coordination
 
@@ -209,6 +284,7 @@ These may be introduced later as explicit extensions.
 ## Related Chapters
 
 * Chapter 06a — Topics and Handlers
-* Chapter 06b — Consumer Lifecycle
+* Chapter 06b — Consumer Lifecycle (phase details, run status)
+* Chapter 09 — Failure Handling (failure classification, repair)
 * Chapter 13 — Mutation Reconciliation
-* Chapter 16 — Scheduling
+* Chapter 16 — Scheduling (run management, phase reset implementation)
