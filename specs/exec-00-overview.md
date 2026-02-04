@@ -1,83 +1,205 @@
-# Execution Model Refactor - Overview
+# Execution Model Fix Specs - Overview
 
 ## Summary
 
-Refactoring Keep.AI from free-form scripts with `Items.withItem()` to structured workflows with topics, producers, consumers, and three-phase execution.
+These specs fix discrepancies between the updated docs (especially 16-scheduling.md, 06b-consumer-lifecycle.md) and the existing exec-* implementation specs.
 
-## Specs
+The docs were recently updated to properly define:
+- Scheduler semantics and state
+- Run status as orthogonal to phase
+- Retry chains with `retry_of` linking
+- `wakeAt` in PrepareResult
+- Failure classification mapping to run statuses
+- Producer queuing and coalescing
+
+## Gaps Identified
+
+| Gap | Doc Reference | Current State |
+|-----|---------------|---------------|
+| Phase vs Status conflation | 06b, 16 | `phase` includes 'failed', 'suspended' |
+| No `retry_of` column | 16 (Run Records) | Runs updated in place, no chain |
+| No `wakeAt` in PrepareResult | 16 (wakeAt Hint) | Not implemented |
+| No dirty/queued flags | 16 (Scheduler State) | Not implemented |
+| Generic error handling | 09, 16 | No mapping to run statuses |
+| No producer queuing | 16 (Producer Scheduling) | Runs skip when busy |
+| No priority ordering | 16 (Priority) | First-come-first-served |
+
+## New Specs
 
 | # | Spec | Description | Dependencies |
 |---|------|-------------|--------------|
-| 01 | [exec-01-database-schema](./exec-01-database-schema.md) | New tables: topics, events, handler_runs, mutations, handler_state | - |
-| 02 | [exec-02-deprecate-items](./exec-02-deprecate-items.md) | Remove Items.withItem, Items.list, ItemStore | - |
-| 03 | [exec-03-topics-api](./exec-03-topics-api.md) | Add Topics.peek, Topics.publish, Topics.getByIds | 01 |
-| 03a | [exec-03a-complete-tool-migration](./exec-03a-complete-tool-migration.md) | Complete api.ts→ToolWrapper migration, add tool-lists.ts | 02, 03 |
-| 04 | [exec-04-phase-tracking](./exec-04-phase-tracking.md) | Phase enforcement in sandbox, replace activeItem | 03a |
-| 05 | [exec-05-script-validation](./exec-05-script-validation.md) | Validate workflow structure on save/fix | 04 |
-| 06 | [exec-06-handler-state-machine](./exec-06-handler-state-machine.md) | Unified state machine for handler execution | 01, 04 |
-| 07 | [exec-07-session-orchestration](./exec-07-session-orchestration.md) | Session-based execution, producer+consumer loop | 06 |
-| 08 | [exec-08-planner-prompts](./exec-08-planner-prompts.md) | Update prompts for new script format | 05 |
+| 09 | [exec-09-run-status-separation](./exec-09-run-status-separation.md) | Separate `status` from `phase` in handler_runs | - |
+| 10 | [exec-10-retry-chain](./exec-10-retry-chain.md) | Add `retry_of` column, phase reset rules | 09 |
+| 11 | [exec-11-scheduler-state](./exec-11-scheduler-state.md) | Implement wakeAt, dirty/queued flags | 09, 10 |
+| 12 | [exec-12-failure-classification](./exec-12-failure-classification.md) | Map errors to run statuses, handling paths | 09 |
+| 13 | [exec-13-producer-scheduling](./exec-13-producer-scheduling.md) | Queuing, coalescing, priority | 11 |
+| 14 | [exec-14-indeterminate-mutations](./exec-14-indeterminate-mutations.md) | Handle uncertain mutations without reconciliation | 09, 12 |
 
 ## Implementation Order
 
-### Phase A: Infrastructure (can be done in parallel)
-1. **exec-01**: Database schema - new tables and columns
-2. **exec-02**: Deprecate items - remove old infrastructure
+### Phase 1: Foundation (exec-09, exec-12)
 
-### Phase B: Sandbox Changes
-3. **exec-03**: Topics API - add Topics global
-4. **exec-03a**: Complete tool migration - tool-lists.ts, switch workers to ToolWrapper
-5. **exec-04**: Phase tracking - add phase enforcement to ToolWrapper
+1. **exec-09**: Add `status` column, update phase enum
+   - Migration to add status column
+   - Update state machine to use status
+   - Migrate existing data
 
-### Phase C: Execution Engine
-6. **exec-05**: Script validation - validate on save/fix
-7. **exec-06**: Handler state machine - core execution loop
-8. **exec-07**: Session orchestration - session-based execution
+2. **exec-12**: Failure classification
+   - Create classification module
+   - Map errors to run statuses
+   - Implement handling paths (retry, auto-fix, escalate)
 
-### Phase D: LLM Integration
-9. **exec-08**: Planner prompts - generate new format scripts
+### Phase 2: Retry & Mutation Handling (exec-10, exec-14)
 
-## Key Concepts
+3. **exec-10**: Retry chain
+   - Add `retry_of` column
+   - Implement createRetryRun()
+   - Implement phase reset rules
+   - Update crash recovery
 
-### Old Model
-- Free-form JS scripts
-- `Items.withItem(id, title, handler)` for mutation tracking
-- Single execution flow
+4. **exec-14**: Indeterminate mutations
+   - Handle uncertain mutations without reconciliation
+   - User resolution flow (happened/didn't happen/skip)
+   - Crash recovery for in_flight mutations
 
-### New Model
-- Structured `const workflow = { ... }` object
-- **Topics**: Internal event streams
-- **Producers**: Poll external systems, publish events
-- **Consumers**: Three-phase processing (prepare → mutate → next)
-- **Sessions**: Group handler runs for "Run once" UX
+### Phase 3: Scheduler (exec-11, exec-13)
 
-### Three-Phase Consumer Execution
+5. **exec-11**: Consumer scheduling & wakeAt
+   - Add wakeAt to PrepareResult
+   - Per-consumer `wake_at` in handler_state
+   - Consumer `dirty` flag (in-memory)
+   - Record wakeAt on prepare commit
 
+6. **exec-13**: Producer scheduling
+   - Per-producer `producer_schedules` table
+   - Producer `queued` flag (in-memory)
+   - Coalesce multiple triggers
+   - Restart recovery
+
+**Note**: exec-11 and exec-13 share a unified `SchedulerStateManager` class:
+- Consumer state: `dirty` flag (new events arrived)
+- Producer state: `queued` flag (schedule fired while busy)
+
+## Key Decisions
+
+### 1. Status Column vs New Table
+
+**Decision**: Add `status` column to `handler_runs` table.
+
+Rationale: Status is a property of the run, not a separate entity. Adding a column is simpler than creating a separate status tracking table.
+
+### 2. Per-Consumer wakeAt
+
+**Decision**: Add `wake_at` column to `handler_state` table (per-consumer).
+
+Rationale: Multiple consumers may have different wake times (e.g., daily digest at 9am vs batch timeout in 1 hour). Per-workflow storage would lose one consumer's wakeAt when another commits. The doc explicitly shows wakeAt in the "Consumer" column of the Scheduler State table.
+
+### 3. Reconciliation Handling
+
+**Decision**: Mark uncertain mutations as `indeterminate` and set status to `paused:reconciliation`. Do NOT auto-retry.
+
+Rationale: Per the user's note, reconciliation is explicitly not implemented yet. Uncertain failures immediately mark as indeterminate and wait for user action.
+
+### 4. Scheduler State Persistence
+
+**Decision**: Keep dirty/queued flags in memory, recover from DB on restart.
+
+Rationale: From doc - "These flags change frequently... Persisting them would add write overhead for state that's easily recoverable."
+
+### 5. Concurrency Model
+
+**Decision**: Single-threaded scheduler is the locking mechanism.
+
+The scheduler checks `hasActiveRun(workflowId)` before starting any handler. No explicit locks needed.
+
+## Performance Optimizations
+
+### Batch Queries (avoid N+1)
+
+| Store | Method | Purpose |
+|-------|--------|---------|
+| `HandlerStateStore` | `getForWorkflow(workflowId)` | Get all handler states in one query |
+| `EventStore` | `countPendingByTopic(workflowId, topics)` | Count pending events grouped by topic |
+| `ProducerScheduleStore` | `getForWorkflow(workflowId)` | Get all producer schedules in one query |
+
+### Config Cache
+
+`ConfigCache` avoids repeated `JSON.parse(workflow.handler_config)`:
+- Cache keyed by `workflowId`
+- Invalidated when `workflow.updated_at` changes
+- Used by scheduler and session orchestration
+
+## Database Changes Summary
+
+```sql
+-- exec-09: Status separation
+ALTER TABLE handler_runs ADD COLUMN status TEXT NOT NULL DEFAULT 'active';
+
+-- exec-10: Retry chain
+ALTER TABLE handler_runs ADD COLUMN retry_of TEXT;
+CREATE INDEX idx_handler_runs_retry_of ON handler_runs(retry_of);
+
+-- exec-11: Per-consumer wakeAt
+ALTER TABLE handler_state ADD COLUMN wake_at INTEGER;
+-- Note: workflows.consumer_sleep_until can be deprecated (was unused)
+
+-- exec-13: Per-producer scheduling
+CREATE TABLE producer_schedules (
+  id TEXT PRIMARY KEY,
+  workflow_id TEXT NOT NULL,
+  producer_name TEXT NOT NULL,
+  schedule_type TEXT NOT NULL,
+  schedule_value TEXT NOT NULL,
+  next_run_at INTEGER NOT NULL,
+  last_run_at INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  UNIQUE(workflow_id, producer_name)
+);
+-- Note: workflows.next_run_timestamp can be deprecated
+
+-- exec-14: No changes needed
+-- Uses existing mutations.status ('indeterminate'), resolved_by, resolved_at
 ```
-prepare: Select inputs, compute mutation params (read-only)
-    ↓
-mutate: Perform ONE external mutation (optional)
-    ↓
-next: Publish downstream events, update state (optional)
-```
 
-### State Machine
+## Related Existing Specs
 
-All handlers run through unified state machine:
-- Same code handles normal execution and restart recovery
-- Each phase transition checkpointed to DB
-- Crash at any point → restart continues from last checkpoint
+These new specs build on and may require updates to:
 
-## Migration Notes
+- **exec-01**: Database schema - add new columns
+- **exec-06**: Handler state machine - major updates for status/retry
+- **exec-07**: Session orchestration - update for priority, queuing
 
-- Existing workflows using `Items.withItem()` will need re-planning
-- `items` table kept for data preservation, marked deprecated
-- Old `script_runs` reused as session container
-- New `handler_runs` for granular execution tracking
+## Not Implemented (Explicitly Deferred)
 
-## Related Docs
+Per the user's note about reconciliation:
 
-- [docs/dev/06-execution-model.md](../../docs/dev/06-execution-model.md)
-- [docs/dev/06a-topics-and-handlers.md](../../docs/dev/06a-topics-and-handlers.md)
-- [docs/dev/06b-consumer-lifecycle.md](../../docs/dev/06b-consumer-lifecycle.md)
-- [docs/dev/IMPLEMENTATION-PLAN-EXECUTION-MODEL.md](../../docs/dev/IMPLEMENTATION-PLAN-EXECUTION-MODEL.md)
+1. **Reconciliation logic** (Chapter 13) - uncertain mutations go to `paused:reconciliation` and wait for user action
+2. **Auto-reconciliation** - not implemented; user must manually verify and resolve
+3. **Tool-specific reconciliation methods** - deferred
+
+## Testing Strategy
+
+1. **Unit tests** for each module:
+   - Failure classification
+   - Phase reset rules
+   - Scheduler state management
+
+2. **Integration tests**:
+   - Full retry chain flow
+   - wakeAt scheduling
+   - Producer coalescing
+
+3. **Crash recovery tests**:
+   - Restart with active runs
+   - Restart with missed schedules
+   - Restart with pending wakeAt
+
+## References
+
+- docs/dev/06-execution-model.md
+- docs/dev/06a-topics-and-handlers.md
+- docs/dev/06b-consumer-lifecycle.md
+- docs/dev/09-failure-repair.md
+- docs/dev/15-host-policies.md
+- docs/dev/16-scheduling.md
