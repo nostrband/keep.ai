@@ -1,7 +1,7 @@
 import { z } from "zod";
 import debug from "debug";
 import { EvalContext } from "../sandbox/sandbox";
-import { LogicError, classifyHttpError, classifyGenericError, isClassifiedError } from "../errors";
+import { LogicError, InternalError, classifyHttpError, isClassifiedError } from "../errors";
 import { defineReadOnlyTool, Tool } from "./types";
 
 const debugGetWeather = debug("agent:get-weather");
@@ -121,7 +121,7 @@ export function makeGetWeatherTool(getContext: () => EvalContext): Tool<Input, O
         geo = await geoRes.json();
       } catch (error) {
         if (isClassifiedError(error)) throw error;
-        throw classifyGenericError(error instanceof Error ? error : new Error(String(error)), "Weather");
+        throw new InternalError(error instanceof Error ? error.message : String(error), { cause: error instanceof Error ? error : undefined, source: "Weather" });
       }
 
       if (!geo.results || geo.results.length === 0) {
@@ -161,7 +161,7 @@ export function makeGetWeatherTool(getContext: () => EvalContext): Tool<Input, O
         data = await wxRes.json();
       } catch (error) {
         if (isClassifiedError(error)) throw error;
-        throw classifyGenericError(error instanceof Error ? error : new Error(String(error)), "Weather");
+        throw new InternalError(error instanceof Error ? error.message : String(error), { cause: error instanceof Error ? error : undefined, source: "Weather" });
       }
 
       // Optional: tiny weathercode → text mapper

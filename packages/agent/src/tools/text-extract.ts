@@ -3,7 +3,7 @@ import { EvalContext } from "../sandbox/sandbox";
 import { getEnv } from "../env";
 import { getTextModelName } from "../model";
 import debug from "debug";
-import { AuthError, LogicError, NetworkError, classifyHttpError, classifyGenericError, formatUsageForEvent } from "../errors";
+import { AuthError, LogicError, NetworkError, InternalError, classifyHttpError, formatUsageForEvent } from "../errors";
 import { defineReadOnlyTool, Tool } from "./types";
 
 const debugTextExtract = debug("TextExtract");
@@ -143,7 +143,7 @@ Output only valid JSON matching the schema, no additional text or markdown forma
         if (error instanceof AuthError || error instanceof NetworkError || error instanceof LogicError) {
           throw error;
         }
-        throw classifyGenericError(error instanceof Error ? error : new Error(String(error)), "Text.extract");
+        throw new InternalError(error instanceof Error ? error.message : String(error), { cause: error instanceof Error ? error : undefined, source: "Text.extract" });
       }
     },
   }) as Tool<Input, Output>;

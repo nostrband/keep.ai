@@ -3,7 +3,7 @@ import { Exa } from "exa-js";
 import { getEnv } from "../env";
 import debug from "debug";
 import { EvalContext } from "../sandbox/sandbox";
-import { AuthError, LogicError, NetworkError, classifyGenericError } from "../errors";
+import { AuthError, LogicError, NetworkError, InternalError } from "../errors";
 import { defineReadOnlyTool, Tool } from "./types";
 
 const debugWebFetch = debug("agent:web-fetch");
@@ -123,8 +123,8 @@ export function makeWebFetchTool(getContext: () => EvalContext): Tool<Input, Out
       try {
         result = await exa.getContents([url], contentOptions);
       } catch (error) {
-        // Classify network/API errors from Exa
-        throw classifyGenericError(error instanceof Error ? error : new Error(String(error)), "Web.fetchParse");
+        // Unclassified error from Exa SDK is an internal bug (SDK should classify)
+        throw new InternalError(error instanceof Error ? error.message : String(error), { cause: error instanceof Error ? error : undefined, source: "Web.fetchParse" });
       }
 
       if (!result.results || result.results.length === 0) {

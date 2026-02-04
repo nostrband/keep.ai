@@ -3,7 +3,7 @@ import { EvalContext } from "../sandbox/sandbox";
 import { getEnv } from "../env";
 import { getTextModelName } from "../model";
 import debug from "debug";
-import { AuthError, LogicError, NetworkError, classifyHttpError, classifyGenericError, isClassifiedError, formatUsageForEvent } from "../errors";
+import { AuthError, LogicError, NetworkError, InternalError, classifyHttpError, isClassifiedError, formatUsageForEvent } from "../errors";
 import { defineReadOnlyTool, Tool } from "./types";
 
 const debugTextSummarize = debug("TextSummarize");
@@ -142,7 +142,7 @@ ${text}`;
         if (isClassifiedError(error)) {
           throw error;
         }
-        throw classifyGenericError(error instanceof Error ? error : new Error(String(error)), "Text.summarize");
+        throw new InternalError(error instanceof Error ? error.message : String(error), { cause: error instanceof Error ? error : undefined, source: "Text.summarize" });
       }
     },
   }) as Tool<Input, Output>;

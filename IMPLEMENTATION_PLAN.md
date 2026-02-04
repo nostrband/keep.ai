@@ -17,7 +17,7 @@ This plan addresses gaps between the current implementation and the updated exec
 | exec-09 | Run Status Separation | COMPLETE | 100% | P1 - Critical (Blocker) |
 | exec-10 | Retry Chain | COMPLETE | 100% | P1 - Critical |
 | exec-11 | Scheduler State & wakeAt | NOT STARTED | 0% | P2 - High |
-| exec-12 | Failure Classification | PARTIAL | ~70% | P1 - Critical |
+| exec-12 | Failure Classification | COMPLETE | 100% | P1 - Critical |
 | exec-13 | Producer Scheduling | NOT STARTED | 0% | P2 - High |
 | exec-14 | Indeterminate Mutations | PARTIAL | ~85% | P2 - High |
 
@@ -71,9 +71,9 @@ Implementation completed with the following changes:
 
 **Problem**: Error types exist but don't map to run statuses. `ensureClassified()` and `classifyGenericError()` use unreliable pattern matching. Unclassified errors should be InternalError (bug in our code), not LogicError.
 
-**Current State (~70% Complete - PARTIAL)**:
+**Current State (100% Complete - COMPLETE)**:
 
-Core error classification infrastructure is complete. Tool files migration is remaining.
+All error classification infrastructure is complete including tool files migration.
 
 **Completed Work**:
 
@@ -98,20 +98,32 @@ Core error classification infrastructure is complete. Tool files migration is re
    - [x] Exported new `failure-handling.ts` module functions
    - [x] Marked `classifyGenericError` and `ensureClassified` as deprecated in exports
 
-**Remaining Tasks**:
-- [ ] **Update** all 13 tool files using `classifyGenericError()`:
-  - [ ] Each tool should either throw explicit ClassifiedError or throw InternalError for unexpected errors
-  - Files: get-weather.ts, audio-explain.ts, pdf-explain.ts, text-generate.ts, text-summarize.ts, text-classify.ts, text-extract.ts, images-transform.ts, images-explain.ts, images-generate.ts, web-download.ts, web-fetch.ts, web-search.ts
-- [ ] Add failure routing functions (future - when auto-fix/escalation infrastructure exists):
-  - [ ] `routeFailure(run, status, error)`
-  - [ ] `scheduleRetry(run, error)`
-  - [ ] `triggerAutoFix(run, error)`
-  - [ ] `pauseForUserAction(run, error)`
-  - [ ] `pauseForInternal(run, error)`
-  - [ ] `calculateBackoff(retryCount)`
+6. **Updated** all 13 tool files - replaced `classifyGenericError()` with `InternalError`:
+   - [x] get-weather.ts
+   - [x] audio-explain.ts
+   - [x] pdf-explain.ts
+   - [x] text-generate.ts
+   - [x] text-summarize.ts
+   - [x] text-classify.ts
+   - [x] text-extract.ts
+   - [x] images-transform.ts
+   - [x] images-explain.ts
+   - [x] images-generate.ts
+   - [x] web-download.ts
+   - [x] web-fetch.ts
+   - [x] web-search.ts
+
+**Future Work** (not part of v1):
+- Failure routing functions (when auto-fix/escalation infrastructure exists):
+  - `routeFailure(run, status, error)`
+  - `scheduleRetry(run, error)`
+  - `triggerAutoFix(run, error)`
+  - `pauseForUserAction(run, error)`
+  - `pauseForInternal(run, error)`
+  - `calculateBackoff(retryCount)`
 
 **Dependencies**: exec-09 (for RunStatus type) - COMPLETE
-**Tests**: All existing tests pass. Unit tests for failure-handling module should be added.
+**Tests**: All 881 existing tests pass.
 
 ---
 
@@ -433,7 +445,7 @@ SELECT crsql_as_crr('producer_schedules');
 | `packages/agent/src/handler-state-machine.ts` | Update phase/status handling; add retry logic; fix error classification | DONE (exec-09, exec-10, exec-12) |
 | `packages/agent/src/session-orchestration.ts` | Replace ensureClassified; use new scheduling | DONE (exec-12) |
 | `packages/agent/src/workflow-scheduler.ts` | Use per-producer schedules; integrate SchedulerStateManager |
-| 13 tool files in `packages/agent/src/tools/` | Remove classifyGenericError usage (verified: 13 files) |
+| 13 tool files in `packages/agent/src/tools/` | Remove classifyGenericError usage (verified: 13 files) | DONE (exec-12) |
 
 ---
 

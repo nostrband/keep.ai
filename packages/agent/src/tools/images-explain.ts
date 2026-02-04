@@ -4,7 +4,7 @@ import { EvalContext } from "../sandbox/sandbox";
 import { getEnv } from "../env";
 import { fileUtils } from "@app/node";
 import debug from "debug";
-import { AuthError, LogicError, NetworkError, PermissionError, classifyHttpError, classifyGenericError, isClassifiedError, formatUsageForEvent } from "../errors";
+import { AuthError, LogicError, NetworkError, PermissionError, InternalError, classifyHttpError, isClassifiedError, formatUsageForEvent } from "../errors";
 import { defineReadOnlyTool, Tool } from "./types";
 
 const debugImgExplain = debug("ImagesExplain");
@@ -230,7 +230,7 @@ Supports png, jpeg, webp and gif image formats.
         if (isClassifiedError(error)) {
           throw error;
         }
-        throw classifyGenericError(error instanceof Error ? error : new Error(String(error)), "Images.explain");
+        throw new InternalError(error instanceof Error ? error.message : String(error), { cause: error instanceof Error ? error : undefined, source: "Images.explain" });
       }
     },
   }) as Tool<Input, Output>;

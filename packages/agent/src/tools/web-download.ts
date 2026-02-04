@@ -3,7 +3,7 @@ import { FileStore } from "@app/db";
 import { storeFileData } from "@app/node";
 import { EvalContext } from "../sandbox/sandbox";
 import debug from "debug";
-import { LogicError, NetworkError, PermissionError, classifyHttpError, classifyGenericError } from "../errors";
+import { LogicError, NetworkError, PermissionError, InternalError, classifyHttpError } from "../errors";
 import { defineTool, Tool } from "./types";
 
 const debugWebDownload = debug("agent:web-download");
@@ -67,7 +67,7 @@ Returns the created file record with metadata.
         });
       } catch (error) {
         // Network errors (connection refused, timeout, etc.)
-        throw classifyGenericError(error instanceof Error ? error : new Error(String(error)), "Web.download");
+        throw new InternalError(error instanceof Error ? error.message : String(error), { cause: error instanceof Error ? error : undefined, source: "Web.download" });
       }
 
       if (!response.ok) {
