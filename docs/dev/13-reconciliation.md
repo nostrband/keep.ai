@@ -202,7 +202,7 @@ Once the `mutate` handler issues a mutation call, the host takes over completely
 2. Executes the external call
 3. Handles the outcome:
    * Success → record `applied` with result, proceed to `next`
-   * Definite failure → record `failed`, may re-execute `mutate` handler
+   * Definite failure → record `failed`; run failure handling proceeds (see Chapter 16)
    * Uncertain → attempt immediate reconciliation
 
 The `mutate` handler is NOT re-executed during this process. Reconciliation is entirely host-owned.
@@ -213,18 +213,20 @@ When a mutation result is indeterminate (timeout, ambiguous errors), the tool wr
 
 * if `reconcile` is absent → update ledger to `indeterminate`, escalate
 * if `reconcile` returns `applied` → update ledger to `applied` with `result`, proceed to `next`
-* if `reconcile` returns `failed` → update ledger to `failed`, may re-execute `mutate` handler
+* if `reconcile` returns `failed` → update ledger to `failed`; run failure handling proceeds (see Chapter 16)
 * if `reconcile` returns `retry` → update ledger to `needs_reconcile`, suspend run, hand off to background reconciliation
 
-This optimization saves background reconciliation job overhead.
+This is the standard inline resolution path. The host attempts reconciliation immediately before suspending the run.
 
 ### 13.7.3 Indeterminate outcomes are not catchable
 
 If a mutation transitions into `needs_reconcile`, the host runtime must:
 
-* suspend run execution immediately (fail closed)
+* set run status to `paused:reconciliation` (see Chapter 06b, Chapter 16)
 * prevent the script from catching/handling that condition
 * take over reconciliation as a host responsibility
+
+The run remains in the `mutating` phase throughout reconciliation — phase does not change, only run status changes (see Chapter 06b: "Failures change run status, not phase").
 
 Rationale:
 
@@ -242,7 +244,7 @@ While in `needs_reconcile`, the host performs reconciliation attempts with backo
 * If `reconcile(params)` returns `failed`:
 
   * set state to `failed`
-  * `mutate` handler may re-execute (see §13.8)
+  * run failure handling proceeds (see Chapter 16)
 * If `reconcile(params)` returns `retry`:
 
   * remain in `needs_reconcile`
@@ -251,28 +253,11 @@ While in `needs_reconcile`, the host performs reconciliation attempts with backo
 If reconciliation is unavailable (no reconcile method) or policy limits are exhausted:
 
 * set state to `indeterminate`
-* escalate (see §13.10)
+* escalate (see §13.9)
 
 ---
 
-## 13.8 When mutate re-executes
-
-The `mutate` handler only re-executes when the mutation is in `failed` state:
-
-* **Natural failure**: mutation definitely did not commit
-* **User action**: user chose "It didn't happen" on an indeterminate mutation
-
-On re-execution:
-
-* `mutate` runs with the **same PrepareResult**
-* Read-by-id calls may return different external state
-* A **different mutation** may be produced
-
-This is acceptable because the previous mutation definitively did not occur. The new mutation is tracked as a fresh attempt under the same run identifier.
-
----
-
-## 13.9 State machine diagram
+## 13.8 State machine diagram
 
 ```mermaid
 stateDiagram-v2
@@ -289,7 +274,7 @@ stateDiagram-v2
   needs_reconcile --> indeterminate: attempts exhausted
 
   applied --> [*]: proceed to next
-  failed --> [*]: re-execute mutate or escalate
+  failed --> [*]: run failure handling (Chapter 16)
   indeterminate --> [*]: escalate to user
 ```
 
@@ -301,13 +286,13 @@ Notes:
 
 ---
 
-## 13.10 Escalation
+## 13.9 Escalation
 
 If a mutation reaches `indeterminate`:
 
-* run execution is suspended
+* run status becomes `paused:reconciliation` (escalated) — see Chapter 06b, Chapter 16
 * the run is escalated to the user
-* workflow is paused, no more runs are scheduled
+* under v1's single-threaded model (Chapter 06), this blocks the entire workflow — no further runs are scheduled
 * the system must not route this to automated repair / Maintainer logic
 
 Escalation must clearly communicate:
@@ -318,21 +303,21 @@ Escalation must clearly communicate:
 * whether the connector can or cannot verify
 * what manual verification is required
 
-This matches the system policy described in `09-failure-repair.md` ("Indeterminate side-effect outcomes").
+This matches the system policy described in `09-failure-repair.md` ("Indeterminate side-effect outcomes"). See Chapter 17 for how escalation is displayed to users in the Inputs & Outputs model.
 
 ### Escalation actions
 
 * **"Try again"** — reset attempt counter, return to `needs_reconcile` (only available if mutation has a `reconcile` method)
-* **"It didn't happen"** — manually sets `failed` state; `mutate` handler re-executes
+* **"It didn't happen"** — manually sets `failed` state; run failure handling proceeds (see Chapter 16)
 * **"Skip"** — `next` executes with `mutationResult.status = 'skipped'`, reserved events marked `skipped` (see Chapter 07)
 
 Note: "It happened, here is the result ID" is intentionally out of scope for v1.
 
 ---
 
-## 13.11 Integration with execution model
+## 13.10 Integration with execution model
 
-The mutation ledger integrates with the consumer run lifecycle (see Chapter 06).
+The mutation ledger integrates with the consumer run lifecycle (see Chapter 06, Chapter 06b).
 
 ### Attempt tracking
 
@@ -352,8 +337,7 @@ When querying an event's history, all runs that reserved it can be retrieved, ea
 ### On failed mutation (`failed`)
 
 1. State stored in ledger
-2. `mutate` handler may re-execute (with same PrepareResult)
-3. New mutation attempt tracked under same run identifier
+2. Run failure handling proceeds — the scheduler (Chapter 16) determines next action based on failure classification (Chapter 09)
 
 ### On user skip
 
@@ -362,28 +346,42 @@ When querying an event's history, all runs that reserved it can be retrieved, ea
 3. `next` receives `{ status: 'skipped' }`
 4. Reserved events marked `skipped` on commit
 
-### On replay (run retry)
+### On crash recovery
 
-When a run is retried (after transient failure or suspension resolution), the mutation ledger is consulted:
+On host restart, incomplete runs with `in_flight` mutations in the ledger are detected. The scheduler (Chapter 16) creates a recovery run that enters reconciliation to determine the mutation outcome before proceeding.
 
-* If state is `applied`: skip `mutate`, proceed to `next` with cached result
-* If state is `failed`: re-execute `mutate` handler
-* If state is `in_flight` or `needs_reconcile`: reconciliation must complete before retry proceeds
+* If ledger state is `applied`: proceed to `next` with cached result (no re-attempt)
+* If ledger state is `in_flight` or `needs_reconcile`: reconciliation must complete before the run can proceed
+* If ledger state is `failed`: scheduler creates a new run per phase reset rules (Chapter 16)
 
-This provides idempotent replay: the same run, when retried, produces the same mutation outcome without duplicate side-effects.
+This ensures no mutations are silently lost across restarts.
 
 ---
 
-## 13.12 Summary
+## 13.11 Summary
 
 Mutation reconciliation in Keep.AI:
 
 * models uncertain outcomes explicitly (`needs_reconcile`, `indeterminate`)
 * records and persists in-flight mutations keyed by run identifier
-* is entirely host-owned — `mutate` handler not re-executed during reconciliation
-* attempts connector-defined reconciliation immediately with backoff
-* blocks execution on unknown outcomes
+* is entirely host-owned — the host takes over the mutation call and retries/reconciles it directly; the `mutate` handler is never re-executed
+* attempts inline reconciliation immediately on uncertain outcomes; suspends the run (`paused:reconciliation`) only if inline resolution fails
+* retries reconciliation with backoff until certainty is reached or policy limits are exhausted
+* blocks execution on unknown outcomes (run stays in `mutating` phase, status `paused:reconciliation`)
 * fails closed and escalates when correctness cannot be established
-* provides cached results on replay for idempotent execution
+* provides cached results on crash recovery for idempotent execution
+
+This chapter concerns **outcome certainty** for a single mutation. Once the outcome is certain (`applied` or `failed`), this chapter's responsibility ends. What happens next — whether the run proceeds to `next` or the scheduler retries the consumer — is defined by the execution model (Chapter 06b) and the scheduler (Chapter 16).
 
 This provides the reliability foundation required for delegated automations.
+
+---
+
+## Related Chapters
+
+* Chapter 06 — Execution Model (phase model, core principles)
+* Chapter 06b — Consumer Lifecycle (phase details, run status, host-owned execution)
+* Chapter 09 — Failure Handling (failure classification)
+* Chapter 15 — Host Policies (backoff and reconciliation retry configuration)
+* Chapter 16 — Scheduling (run management, crash recovery, phase reset rules)
+* Chapter 17 — Inputs & Outputs (escalation display)

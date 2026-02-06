@@ -206,19 +206,10 @@ Once mutation enters `in_flight` state:
 2. Host executes the external call
 3. Host handles the outcome:
    * Success → record `applied`, proceed to `next`
-   * Transient failure → retry with backoff
-   * Indeterminate → reconciliation (see Chapter 13)
+   * Definite failure → record `failed`; run failure handling proceeds (see Chapter 16)
+   * Uncertain → reconciliation (see Chapter 13)
 
-**The `mutate` handler is NOT re-executed during reconciliation.** Reconciliation is entirely host-owned.
-
-### When Mutate Re-executes
-
-The `mutate` handler only re-executes when mutation is in `failed` state:
-
-* Mutation definitively did not commit
-* User chose "It didn't happen" on an indeterminate mutation
-
-On re-execution, `mutate` runs with the **same PrepareResult**. This is safe because the previous mutation definitively did not occur.
+**The `mutate` handler is NOT re-executed during this process.** The host takes over the mutation call directly and handles retries/reconciliation itself. Reconciliation is entirely host-owned.
 
 ---
 
@@ -338,8 +329,8 @@ See Chapter 16 for run status management, retry scheduling, and phase reset rule
 **Key invariants:**
 
 * Prepare can always retry — no side effects
-* Mutate only re-executes if mutation definitively did not apply
-* Reconciliation is host-owned — mutate handler not re-executed
+* Mutate handler is never re-executed — host takes over the call; on failure the scheduler creates a new run (see Chapter 16)
+* Reconciliation is host-owned (see Chapter 13)
 * Next can always retry — publishing is idempotent, state committed atomically
 
 **Phase reset:** Before mutation is applied, execution can reset to `prepare` (e.g., for auto-fix). After mutation is applied, execution must proceed through `next`. See Chapter 06 for reset rules.
