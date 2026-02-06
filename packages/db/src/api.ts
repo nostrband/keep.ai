@@ -19,6 +19,7 @@ import { EventStore } from "./event-store";
 import { HandlerRunStore } from "./handler-run-store";
 import { MutationStore } from "./mutation-store";
 import { HandlerStateStore } from "./handler-state-store";
+import { ProducerScheduleStore } from "./producer-schedule-store";
 
 export class KeepDbApi {
   public readonly db: KeepDb;
@@ -39,6 +40,7 @@ export class KeepDbApi {
   public readonly handlerRunStore: HandlerRunStore;
   public readonly mutationStore: MutationStore;
   public readonly handlerStateStore: HandlerStateStore;
+  public readonly producerScheduleStore: ProducerScheduleStore;
 
   constructor(db: KeepDb) {
     this.db = db;
@@ -59,6 +61,7 @@ export class KeepDbApi {
     this.handlerRunStore = new HandlerRunStore(db);
     this.mutationStore = new MutationStore(db);
     this.handlerStateStore = new HandlerStateStore(db);
+    this.producerScheduleStore = new ProducerScheduleStore(db);
   }
 
   async addMessage(input: {

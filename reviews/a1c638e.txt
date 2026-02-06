@@ -1,0 +1,86 @@
+# Review: a1c638e - Simplify consumer states, define scheduler
+
+## Summary
+
+This commit makes major refinements to the execution model and scheduling documentation:
+
+1. **docs/dev/06-execution-model.md**: Adds Phase Reset rules, Scheduling Contract guarantees, and script design principles
+2. **docs/dev/06a-topics-and-handlers.md**: Adds Publishing Semantics (last-write-wins deduplication), clarifies producer/consumer behavior
+3. **docs/dev/06b-consumer-lifecycle.md**: Major refactor separating Run Status from execution Phase, adds wakeAt to PrepareResult
+4. **docs/dev/16-scheduling.md**: Comprehensive rewrite with wakeAt hint, Scheduler State, Run Management, Phase Reset Rules, failure classification
+5. **Deletes**: 4 old docs in docs/dev/old/ (01-workflow-lifecycle.md through 04-auto-fix-mode.md) - superseded by new model
+
+## Key Changes in Detail
+
+### Phase Reset Model
+- Adds formal rules for when execution can reset to `preparing` phase
+- **Before mutation applied**: Can reset (no side effects yet)
+- **After mutation applied**: Must proceed forward through `next`
+- Critical for auto-repair safety and crash recovery
+
+### Scheduling Contract
+- Documents what scheduler guarantees to scripts (run on pending events, single-threaded execution, phase integrity)
+- Documents what scripts must NOT assume (timing, cached state, idempotent external systems)
+- Essential for planner prompting and script generation
+
+### wakeAt Hint
+- Adds `wakeAt?: string` to PrepareResult for time-based patterns (daily digests, batch timeouts)
+- Consumer wakes at specified time OR on new event (whichever first)
+- Host-enforced constraints (min 30s, max 24h) to prevent abuse
+
+### Run Status vs Phase Separation
+- Phase only tracks execution progress: `preparing → prepared → mutating → mutated → emitting → committed`
+- Status tracks why paused/stopped: `active`, `paused:transient`, `paused:approval`, `paused:reconciliation`, `failed:logic`, `failed:internal`, `committed`
+- Critical invariant: Failures change status, not phase
+
+### Run Management
+- Each attempt stored as separate run record with `retry_of` linking
+- Phase reset rules encoded into retry logic
+- Crash recovery creates new runs (not in-place updates)
+
+### Publishing Semantics
+- Event publishing uses last-write-wins deduplication by messageId
+- If messageId exists, title and payload updated but status preserved
+- Enables auto-fix to correct buggy event payloads before consumer processes
+
+## Potential Issues
+
+### Issue 1: Documentation Inconsistency Risk (Minor)
+**Location**: Multiple doc files reference each other
+**Problem**: The interdependencies between chapters (06, 06a, 06b, 09, 13, 16) create maintenance burden
+**Proposal**: Consider adding a doc validation script that checks cross-references are valid after edits
+
+### Issue 2: wakeAt Bound Enforcement Not Specified
+**Location**: docs/dev/16-scheduling.md, wakeAt constraints section
+**Problem**: Documents min/max intervals but doesn't specify what happens when violated (currently says "clamped to valid range")
+**Impact**: Scripts might expect different behavior (error vs silent clamp)
+**Proposal**: Clearly document that scripts cannot observe the clamping - they just see their handler run at the clamped time
+
+### Issue 3: Missing Error Classification in Failure Table
+**Location**: docs/dev/16-scheduling.md, Failure Classification section
+**Problem**: Table lists failure types but doesn't include `rate_limit` which is commonly separate from `network`
+**Proposal**: Add `rate_limit` as explicit failure type mapping to `paused:transient`
+
+### Issue 4: Producer Queuing Semantics Unclear
+**Location**: docs/dev/16-scheduling.md, Producer Scheduling section
+**Problem**: States producers queue when busy, but doesn't clarify if multiple missed schedules coalesce to one queued run
+**Proposal**: Explicitly state that queued runs are coalesced (doc does say this elsewhere but could be clearer in context)
+
+### Issue 5: Deletion of Old Docs Without Redirect
+**Location**: Deleted docs/dev/old/01-04.md
+**Problem**: Any external references to these files will break silently
+**Proposal**: N/A - these were in `old/` folder already, so this is expected cleanup
+
+## Positive Aspects
+
+1. **Clear Separation of Concerns**: Phase vs Status is a crucial distinction that simplifies reasoning about execution state
+2. **Comprehensive Contract**: Scheduling contract clearly defines guarantees and non-guarantees for script authors
+3. **Practical Patterns**: wakeAt examples (daily digest, batch timeout) show real-world usage
+4. **Safety First**: Phase reset rules prevent unsafe retries after mutation
+5. **Observable State**: Run records preserve full history with retry chains
+
+## Conclusion
+
+This is a well-thought-out documentation commit that establishes solid foundations for the execution model. The separation of phase and status, the scheduling contract, and the wakeAt mechanism are all sound designs. Minor clarifications around error classification and queue coalescing would improve precision.
+
+Reviewed: 2026-02-06

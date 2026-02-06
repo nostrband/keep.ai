@@ -7,7 +7,7 @@ import { fileUtils } from "@app/node";
 import { detectBufferMime, mimeToExt } from "@app/node";
 import fs from "fs";
 import debug from "debug";
-import { AuthError, LogicError, NetworkError, PermissionError, classifyHttpError, classifyGenericError, isClassifiedError, formatUsageForEvent } from "../errors";
+import { AuthError, LogicError, NetworkError, PermissionError, InternalError, classifyHttpError, isClassifiedError, formatUsageForEvent } from "../errors";
 import { defineTool, Tool } from "./types";
 
 const debugImg = debug("ImagesGenerate");
@@ -241,7 +241,7 @@ Generates images and saves them to files. Returns information about the generate
         if (isClassifiedError(error)) {
           throw error;
         }
-        throw classifyGenericError(error instanceof Error ? error : new Error(String(error)), "Images.generate");
+        throw new InternalError(error instanceof Error ? error.message : String(error), { cause: error instanceof Error ? error : undefined, source: "Images.generate" });
       }
     },
   }) as Tool<Input, Output>;

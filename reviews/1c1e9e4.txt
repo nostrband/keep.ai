@@ -1,0 +1,33 @@
+Commit: 1c1e9e4
+Title: Merge branch 'main' of https://github.com/nostrband/keep.ai into main
+Author: Claude Agent <claude@anthropic.com>
+Date: Wed Feb 4 13:27:09 2026 +0100
+
+## Summary
+
+This is a merge commit that integrates the remote `main` branch into the local `main` branch. It combines changes from two parent commits:
+- 80fc4db (local): Remove 'draft' from scheduler
+- f420654 (remote): Various changes from the remote repository
+
+The merge itself does not introduce new code changes - all the individual changes were made in the parent commits which have been reviewed separately.
+
+## Changes Merged
+
+The merge brings in significant changes including:
+- Implementation plan updates
+- New execution model components (handler-state-machine, session-orchestration, workflow-validator)
+- New database stores (event-store, handler-run-store, handler-state-store, mutation-store, topic-store)
+- New migration files (v36, v37, v38)
+- Topics API implementation
+- Deprecated task tools removal
+- Comprehensive test coverage for new components
+- Multiple spec files moved to done folder
+- Review files for previously reviewed commits
+
+## Issues
+
+None. This is a standard merge commit with no conflicts. All individual changes have been reviewed in their respective commits.
+
+## Proposals
+
+None needed. The merge was clean and all constituent commits have independent reviews.

@@ -13,20 +13,25 @@ import {
   HandlerRun,
   HandlerRunPhase,
   HandlerErrorType,
+  RunStatus,
+  isTerminalStatus,
+  isPausedStatus,
+  isFailedStatus,
   Mutation,
   Workflow,
   DBInterface,
 } from "@app/db";
 import {
   ClassifiedError,
-  ensureClassified,
   LogicError,
   ErrorType,
 } from "./errors";
+import { getRunStatusForError, isDefiniteFailure } from "./failure-handling";
 import { initSandbox, Sandbox, EvalContext } from "./sandbox/sandbox";
 import { ToolWrapper, ExecutionPhase } from "./sandbox/tool-wrapper";
 import { createWorkflowTools } from "./sandbox/tool-lists";
 import { WorkflowConfig } from "./workflow-validator";
+import { computeNextRunTime } from "./schedule-utils";
 import type { ConnectionManager } from "@app/connectors";
 import debug from "debug";
 
@@ -41,6 +46,7 @@ const log = debug("handler-state-machine");
  */
 export interface HandlerResult {
   phase: HandlerRunPhase;
+  status: RunStatus;
   error?: string;
   errorType?: HandlerErrorType | "";
 }
@@ -55,6 +61,12 @@ export interface PrepareResult {
   data?: unknown;
   /** Optional UI output */
   ui?: unknown;
+  /**
+   * Optional wakeAt time for time-based scheduling (exec-11).
+   * ISO 8601 datetime string (e.g., "2024-01-16T09:00:00Z").
+   * Host enforces: 30s minimum, 24h maximum from now.
+   */
+  wakeAt?: string;
 }
 
 /**
@@ -72,10 +84,28 @@ export interface HandlerExecutionContext {
 // ============================================================================
 
 /**
- * Check if a phase is terminal (no more transitions possible).
+ * Check if a run is terminal (no more execution possible).
+ *
+ * Per exec-09 spec, we now check status instead of phase.
+ * Terminal statuses: committed, failed:*, crashed
+ * Paused statuses are NOT terminal (can be resumed).
+ *
+ * @deprecated For backwards compatibility. Use isTerminalStatus(run.status) instead.
  */
 export function isTerminal(phase: HandlerRunPhase): boolean {
+  // Backwards compatibility with old phase-based logic
   return ["committed", "suspended", "failed"].includes(phase);
+}
+
+/**
+ * Check if a handler run is done executing (terminal or paused).
+ *
+ * Returns true if the run is in a state where the state machine should stop.
+ * This includes both terminal states (committed, failed, crashed) and
+ * paused states (paused:transient, paused:approval, paused:reconciliation).
+ */
+export function isRunDone(run: HandlerRun): boolean {
+  return isTerminalStatus(run.status) || isPausedStatus(run.status);
 }
 
 // ============================================================================
@@ -103,13 +133,221 @@ function errorTypeToHandlerErrorType(type: ErrorType): HandlerErrorType {
 }
 
 /**
- * Check if an error is a definite failure (vs potentially indeterminate).
- * Used to decide mutation status when an error occurs during mutate phase.
+ * Map ClassifiedError type to RunStatus.
+ *
+ * Per exec-12 spec:
+ * - auth/permission → paused:approval (needs user action)
+ * - network → paused:transient (will auto-retry)
+ * - logic → failed:logic (auto-fix eligible)
+ * - internal → failed:internal (bug in our code)
  */
-function isDefiniteFailure(error: ClassifiedError): boolean {
-  // Logic errors and permission errors are definite failures
-  // Network errors and auth errors might be indeterminate (external call may have succeeded)
-  return error.type === "logic" || error.type === "permission";
+function errorTypeToRunStatus(type: ErrorType): RunStatus {
+  switch (type) {
+    case "auth":
+      return "paused:approval";
+    case "permission":
+      return "paused:approval";
+    case "network":
+      return "paused:transient";
+    case "logic":
+      return "failed:logic";
+    case "internal":
+      return "failed:internal";
+    default:
+      return "failed:logic"; // Default to repair-eligible
+  }
+}
+
+// isDefiniteFailure is now imported from failure-handling.ts
+
+// ============================================================================
+// Mutation Result for Next Phase (exec-14)
+// ============================================================================
+
+/**
+ * Mutation result for the next phase.
+ */
+interface MutationResultForNext {
+  status: "applied" | "skipped" | "none";
+  result?: unknown;
+}
+
+/**
+ * Get mutation result for the next phase.
+ *
+ * Per exec-14 spec, handles the mutation result based on status and resolution.
+ * This is a local version to avoid circular imports with indeterminate-resolution.ts.
+ */
+function getMutationResultForNextPhase(mutation: Mutation | null): MutationResultForNext {
+  if (!mutation) {
+    return { status: "none" };
+  }
+
+  switch (mutation.status) {
+    case "applied":
+      // Normal success or user_assert_applied
+      return {
+        status: "applied",
+        result: mutation.result ? JSON.parse(mutation.result) : null,
+      };
+
+    case "failed":
+      if (mutation.resolved_by === "user_skip") {
+        // User chose to skip - next phase should know
+        return { status: "skipped" };
+      }
+      // If failed and not skipped, shouldn't reach next phase
+      // Return none to be safe (run should have been retried or terminated)
+      return { status: "none" };
+
+    case "pending":
+      // Mutation handler ran but didn't call any mutation tool
+      // Treat as no mutation
+      return { status: "none" };
+
+    default:
+      // in_flight, needs_reconcile, indeterminate - shouldn't reach next
+      // Return none to be safe
+      return { status: "none" };
+  }
+}
+
+// ============================================================================
+// Phase Reset Rules (exec-10)
+// ============================================================================
+
+/**
+ * Phases where mutation has been applied.
+ * After mutation is applied, retry runs must continue forward (not reset).
+ */
+type ConsumerPhase = Extract<
+  HandlerRunPhase,
+  "pending" | "preparing" | "prepared" | "mutating" | "mutated" | "emitting" | "committed"
+>;
+
+/**
+ * Check if prepare_result and mutation_result should be copied to retry run.
+ *
+ * Per exec-10 spec: After mutation is applied, we must proceed forward
+ * with existing results (can't re-do the mutation).
+ *
+ * @param phase - The phase at which the run failed
+ * @returns true if results should be copied
+ */
+export function shouldCopyResults(phase: HandlerRunPhase): boolean {
+  // After mutation is applied, we must proceed forward with existing results
+  return phase === "mutated" || phase === "emitting";
+}
+
+/**
+ * Get the starting phase for a retry run based on the previous run's phase.
+ *
+ * Per exec-10 spec:
+ * - Before mutation (preparing, prepared, mutating with failed mutation): Start fresh from preparing
+ * - After mutation (mutated, emitting): Resume from emitting with copied results
+ *
+ * @param previousPhase - The phase at which the previous run stopped
+ * @returns The phase the retry run should start at
+ */
+export function getStartPhaseForRetry(previousPhase: HandlerRunPhase): HandlerRunPhase {
+  if (shouldCopyResults(previousPhase)) {
+    // Can't reset - mutation happened, resume from emitting
+    return "emitting";
+  }
+  // Before mutation - start fresh
+  return "preparing";
+}
+
+/**
+ * Reason for creating a retry run.
+ */
+export type RetryReason =
+  | "transient" // Network/rate limit, auto-retry
+  | "logic_fix" // Script error fixed, retry with new script
+  | "crashed_recovery" // Host crashed, recovery run
+  | "user_retry"; // User manually triggered retry
+
+/**
+ * Parameters for creating a retry run.
+ */
+export interface CreateRetryRunParams {
+  /** The previous run that failed/crashed */
+  previousRun: HandlerRun;
+  /** The status to set on the previous run */
+  previousRunStatus: RunStatus;
+  /** Why we're creating a retry */
+  reason: RetryReason;
+  /** The API for database access */
+  api: KeepDbApi;
+}
+
+/**
+ * Create a new retry run linked to a previous failed run.
+ *
+ * Per exec-10 spec:
+ * - Creates a new run with retry_of pointing to previous run
+ * - Applies phase reset rules (fresh start vs continue from emitting)
+ * - Copies prepare_result if mutation was applied
+ * - Atomic: marks previous run + creates new run in single transaction
+ *
+ * @param params - The retry parameters
+ * @returns The newly created retry run
+ */
+export async function createRetryRun(
+  params: CreateRetryRunParams
+): Promise<HandlerRun> {
+  const { previousRun, previousRunStatus, reason, api } = params;
+
+  const startPhase = getStartPhaseForRetry(previousRun.phase);
+  const copyResults = shouldCopyResults(previousRun.phase);
+
+  log(
+    `Creating retry run for ${previousRun.id} (${previousRun.handler_name}): ` +
+    `reason=${reason}, startPhase=${startPhase}, copyResults=${copyResults}`
+  );
+
+  // Atomic: update previous run status AND create new run
+  // Use wrapper object to work around TypeScript closure narrowing limitations
+  const result: { newRun: HandlerRun | null } = { newRun: null };
+
+  await api.db.db.tx(async (tx: DBInterface) => {
+    // 1. Mark previous run with final status
+    await api.handlerRunStore.update(
+      previousRun.id,
+      {
+        status: previousRunStatus,
+        end_timestamp: new Date().toISOString(),
+      },
+      tx
+    );
+
+    // 2. Create new retry run
+    result.newRun = await api.handlerRunStore.create(
+      {
+        script_run_id: previousRun.script_run_id,
+        workflow_id: previousRun.workflow_id,
+        handler_type: previousRun.handler_type,
+        handler_name: previousRun.handler_name,
+        // Link to previous attempt
+        retry_of: previousRun.id,
+        // Phase reset or continue from emitting
+        phase: startPhase,
+        // Copy results if mutation was applied
+        prepare_result: copyResults ? previousRun.prepare_result : undefined,
+        // Same input state
+        input_state: previousRun.input_state,
+      },
+      tx
+    );
+  });
+
+  if (!result.newRun) {
+    throw new Error("Failed to create retry run");
+  }
+
+  const newRun = result.newRun;
+  log(`Created retry run ${newRun.id} with retry_of=${previousRun.id}`);
+  return newRun;
 }
 
 // ============================================================================
@@ -118,6 +356,9 @@ function isDefiniteFailure(error: ClassifiedError): boolean {
 
 /**
  * Mark a handler run as failed with classified error.
+ *
+ * Per exec-09 spec, this sets status based on error type instead of
+ * changing phase. Phase stays at the point of failure.
  */
 async function failRun(
   api: KeepDbApi,
@@ -125,39 +366,129 @@ async function failRun(
   error: ClassifiedError
 ): Promise<void> {
   const errorType = errorTypeToHandlerErrorType(error.type);
+  const status = errorTypeToRunStatus(error.type);
   await api.handlerRunStore.update(run.id, {
-    phase: "failed",
+    // Keep phase at point of failure, set status instead
+    status,
     error: error.message,
     error_type: errorType,
     end_timestamp: new Date().toISOString(),
   });
-  log(`Handler run ${run.id} failed: ${error.message} (${errorType})`);
+  log(`Handler run ${run.id} ${status}: ${error.message} (${errorType})`);
+}
+
+/**
+ * Mark a handler run as paused with a specific status and reason.
+ *
+ * Per exec-09 spec, this sets status without changing phase.
+ */
+async function pauseRun(
+  api: KeepDbApi,
+  run: HandlerRun,
+  status: RunStatus,
+  reason: string
+): Promise<void> {
+  await api.handlerRunStore.update(run.id, {
+    status,
+    error: reason,
+    end_timestamp: new Date().toISOString(),
+  });
+  log(`Handler run ${run.id} ${status}: ${reason}`);
 }
 
 /**
  * Mark a handler run as suspended with reason.
+ *
+ * @deprecated Use pauseRun with appropriate status instead.
+ * Kept for backwards compatibility during migration.
  */
 async function suspendRun(
   api: KeepDbApi,
   run: HandlerRun,
   reason: string
 ): Promise<void> {
-  await api.handlerRunStore.update(run.id, {
-    phase: "suspended",
-    error: reason,
-    end_timestamp: new Date().toISOString(),
-  });
-  log(`Handler run ${run.id} suspended: ${reason}`);
+  await pauseRun(api, run, "paused:reconciliation", reason);
 }
 
 /**
- * Save prepare result and reserve events atomically.
+ * Pause a handler run and its workflow for indeterminate mutation.
+ *
+ * Per exec-14 spec:
+ * - Set run status to paused:reconciliation
+ * - Pause workflow so scheduler doesn't pick it up
+ * - User must manually resolve the indeterminate mutation
+ */
+async function pauseRunForIndeterminate(
+  api: KeepDbApi,
+  run: HandlerRun,
+  reason: string
+): Promise<void> {
+  // Pause the handler run
+  await pauseRun(api, run, "paused:reconciliation", reason);
+
+  // Also pause the workflow (exec-14: workflow paused during indeterminate)
+  await api.scriptStore.updateWorkflowFields(run.workflow_id, {
+    status: "paused",
+  });
+  log(`Workflow ${run.workflow_id} paused due to indeterminate mutation`);
+}
+
+// ============================================================================
+// wakeAt Constants (exec-11)
+// ============================================================================
+
+/** Minimum wakeAt interval: 30 seconds */
+const MIN_WAKE_INTERVAL_MS = 30 * 1000;
+
+/** Maximum wakeAt interval: 24 hours */
+const MAX_WAKE_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Clamp wakeAt to valid range (exec-11).
+ *
+ * Host enforces:
+ * - Minimum: 30 seconds from now
+ * - Maximum: 24 hours from now
+ *
+ * @param wakeAt - Requested wake time in milliseconds
+ * @param now - Current time in milliseconds
+ * @returns Clamped wake time, or 0 if invalid
+ */
+function clampWakeAt(wakeAt: number, now: number): number {
+  if (!wakeAt || isNaN(wakeAt)) {
+    return 0;
+  }
+
+  const min = now + MIN_WAKE_INTERVAL_MS;
+  const max = now + MAX_WAKE_INTERVAL_MS;
+
+  return Math.max(min, Math.min(wakeAt, max));
+}
+
+/**
+ * Save prepare result, reserve events, and record wakeAt atomically.
  */
 async function savePrepareAndReserve(
   api: KeepDbApi,
   run: HandlerRun,
   prepareResult: PrepareResult
 ): Promise<void> {
+  const now = Date.now();
+
+  // Process wakeAt (exec-11)
+  let wakeAtMs = 0;
+  if (prepareResult.wakeAt) {
+    try {
+      const parsed = new Date(prepareResult.wakeAt).getTime();
+      wakeAtMs = clampWakeAt(parsed, now);
+      if (wakeAtMs !== parsed) {
+        log(`Handler run ${run.id} wakeAt clamped: ${prepareResult.wakeAt} → ${new Date(wakeAtMs).toISOString()}`);
+      }
+    } catch {
+      log(`Handler run ${run.id} invalid wakeAt ignored: ${prepareResult.wakeAt}`);
+    }
+  }
+
   await api.db.db.tx(async (tx: DBInterface) => {
     // Save prepare result
     await api.handlerRunStore.update(
@@ -173,13 +504,25 @@ async function savePrepareAndReserve(
     if (prepareResult.reservations && prepareResult.reservations.length > 0) {
       await api.eventStore.reserveEvents(run.id, prepareResult.reservations, tx);
     }
+
+    // Record wakeAt per-consumer (exec-11)
+    // Always update - 0 clears any previous wakeAt
+    await api.handlerStateStore.updateWakeAt(
+      run.workflow_id,
+      run.handler_name,
+      wakeAtMs,
+      tx
+    );
   });
-  log(`Handler run ${run.id} prepared with ${prepareResult.reservations?.length || 0} reservations`);
+
+  const wakeAtInfo = wakeAtMs > 0 ? `, wakeAt=${new Date(wakeAtMs).toISOString()}` : "";
+  log(`Handler run ${run.id} prepared with ${prepareResult.reservations?.length || 0} reservations${wakeAtInfo}`);
 }
 
 /**
  * Commit a producer run atomically.
- * Updates handler state, marks run committed, increments handler count.
+ * Updates handler state, marks run committed, increments handler count,
+ * and updates per-producer schedule (exec-13).
  */
 async function commitProducer(
   api: KeepDbApi,
@@ -203,6 +546,7 @@ async function commitProducer(
       run.id,
       {
         phase: "committed",
+        status: "committed",
         output_state: JSON.stringify(newState),
         end_timestamp: new Date().toISOString(),
       },
@@ -211,6 +555,27 @@ async function commitProducer(
 
     // Update session handler count
     await api.scriptStore.incrementHandlerCount(run.script_run_id, tx);
+
+    // Update per-producer schedule (exec-13)
+    // Get the producer's schedule config and compute next run time
+    const schedule = await api.producerScheduleStore.get(
+      run.workflow_id,
+      run.handler_name,
+      tx
+    );
+    if (schedule) {
+      const nextRunAt = computeNextRunTime(
+        schedule.schedule_type,
+        schedule.schedule_value
+      );
+      await api.producerScheduleStore.updateAfterRun(
+        run.workflow_id,
+        run.handler_name,
+        nextRunAt,
+        tx
+      );
+      log(`Producer ${run.handler_name} next_run_at updated to ${new Date(nextRunAt).toISOString()}`);
+    }
   });
   log(`Handler run ${run.id} (producer) committed`);
 }
@@ -244,6 +609,7 @@ async function commitConsumer(
       run.id,
       {
         phase: "committed",
+        status: "committed",
         output_state: JSON.stringify(newState),
         end_timestamp: new Date().toISOString(),
       },
@@ -406,7 +772,8 @@ return await workflow.producers.${run.handler_name}.handler(__state__);
         await api.handlerRunStore.update(run.id, { logs: JSON.stringify(logs) });
       }
     } catch (error) {
-      const classifiedError = ensureClassified(error, "producer.handler");
+      // Use getRunStatusForError instead of ensureClassified (per exec-12)
+      const { error: classifiedError } = getRunStatusForError(error, "producer.handler");
       await failRun(api, run, classifiedError);
     } finally {
       sandbox.dispose();
@@ -505,7 +872,8 @@ return await workflow.consumers.${run.handler_name}.prepare(__state__);
         await api.handlerRunStore.update(run.id, { logs: JSON.stringify(logs) });
       }
     } catch (error) {
-      const classifiedError = ensureClassified(error, "consumer.prepare");
+      // Use getRunStatusForError instead of ensureClassified (per exec-12)
+      const { error: classifiedError } = getRunStatusForError(error, "consumer.prepare");
       await failRun(api, run, classifiedError);
     } finally {
       sandbox.dispose();
@@ -546,16 +914,18 @@ return await workflow.consumers.${run.handler_name}.prepare(__state__);
       await executeMutate(api, run, context);
     } else if (mutation.status === "in_flight") {
       // Crashed mid-mutation → indeterminate (no reconciliation)
+      // Per exec-14: Mark indeterminate and pause workflow
       await api.mutationStore.markIndeterminate(
         mutation.id,
         "Mutation was in_flight at restart - outcome uncertain"
       );
-      await suspendRun(api, run, "indeterminate_mutation");
+      await pauseRunForIndeterminate(api, run, "indeterminate_mutation");
     } else if (mutation.status === "applied") {
       log(`Handler run ${run.id} (consumer): mutating → mutated`);
       await api.handlerRunStore.updatePhase(run.id, "mutated");
     } else if (mutation.status === "indeterminate") {
-      await suspendRun(api, run, "indeterminate_mutation");
+      // Already indeterminate from previous attempt - ensure workflow paused
+      await pauseRunForIndeterminate(api, run, "indeterminate_mutation");
     } else if (mutation.status === "failed") {
       await failRun(
         api,
@@ -618,13 +988,9 @@ return await workflow.consumers.${run.handler_name}.prepare(__state__);
       ? JSON.parse(run.prepare_result)
       : { reservations: [], data: undefined };
 
+    // Get mutation result for next phase (exec-14)
     const mutation = await api.mutationStore.getByHandlerRunId(run.id);
-    const mutationResult = mutation
-      ? {
-          status: mutation.status,
-          result: mutation.result ? JSON.parse(mutation.result) : null,
-        }
-      : { status: "none" };
+    const mutationResult = getMutationResultForNextPhase(mutation);
 
     const { sandbox, toolWrapper, logs } = await createHandlerSandbox(
       workflow,
@@ -669,7 +1035,8 @@ return await workflow.consumers.${run.handler_name}.next(__prepared__, __mutatio
         await api.handlerRunStore.update(run.id, { logs: JSON.stringify(logs) });
       }
     } catch (error) {
-      const classifiedError = ensureClassified(error, "consumer.next");
+      // Use getRunStatusForError instead of ensureClassified (per exec-12)
+      const { error: classifiedError } = getRunStatusForError(error, "consumer.next");
       await failRun(api, run, classifiedError);
     } finally {
       sandbox.dispose();
@@ -805,7 +1172,8 @@ return await workflow.consumers.${run.handler_name}.mutate(__prepared__);
     }
     // State machine will read mutation status and transition
   } catch (error) {
-    const classifiedError = ensureClassified(error, "consumer.mutate");
+    // Use getRunStatusForError instead of ensureClassified (per exec-12)
+    const { error: classifiedError } = getRunStatusForError(error, "consumer.mutate");
     const updatedMutation = await api.mutationStore.get(mutation.id);
 
     if (updatedMutation) {
@@ -855,14 +1223,17 @@ export async function executeHandler(
     if (!run) {
       return {
         phase: "failed",
+        status: "failed:internal",
         error: `Handler run ${handlerRunId} not found`,
         errorType: "logic",
       };
     }
 
-    if (isTerminal(run.phase)) {
+    // Check if run is done (terminal or paused) using status
+    if (isRunDone(run)) {
       return {
         phase: run.phase,
+        status: run.status,
         error: run.error || undefined,
         errorType: run.error_type || undefined,
       };
@@ -878,13 +1249,14 @@ export async function executeHandler(
     if (!handler) {
       // Unknown phase - this shouldn't happen
       await api.handlerRunStore.update(run.id, {
-        phase: "failed",
+        status: "failed:internal",
         error: `Unknown phase: ${run.phase}`,
         error_type: "logic",
         end_timestamp: new Date().toISOString(),
       });
       return {
-        phase: "failed",
+        phase: run.phase,
+        status: "failed:internal",
         error: `Unknown phase: ${run.phase}`,
         errorType: "logic",
       };
@@ -895,10 +1267,12 @@ export async function executeHandler(
       await handler(api, run, context);
     } catch (error) {
       // Unexpected error in phase handler itself
-      const classifiedError = ensureClassified(error, "handler-state-machine");
+      // Use getRunStatusForError instead of ensureClassified (per exec-12)
+      const { status, error: classifiedError } = getRunStatusForError(error, "handler-state-machine");
       await failRun(api, run, classifiedError);
       return {
-        phase: "failed",
+        phase: run.phase,
+        status,
         error: classifiedError.message,
         errorType: errorTypeToHandlerErrorType(classifiedError.type),
       };

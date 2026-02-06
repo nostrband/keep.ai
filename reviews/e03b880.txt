@@ -1,0 +1,216 @@
+COMMIT: e03b880 - exec-13: Implement per-producer scheduling
+DATE: 2026-02-04
+FILES CHANGED: 10 files, +637/-77 lines
+
+================================================================================
+SUMMARY
+================================================================================
+
+This commit implements per-producer scheduling (exec-13), solving the problem
+where a single workflow-level next_run_timestamp was incorrectly shared by all
+producers. Now each producer has its own independent schedule.
+
+Key changes:
+1. Migration v43: Creates `producer_schedules` table with workflow_id,
+   producer_name, schedule_type, schedule_value, and next_run_at
+2. ProducerScheduleStore: New store class for CRUD operations on producer
+   schedules
+3. schedule-utils.ts: Utility functions for parsing intervals ("5m", "1h")
+   and computing next run times (interval and cron)
+4. producer-schedule-init.ts: Functions for initializing/updating/removing
+   producer schedules during workflow lifecycle
+5. handler-state-machine.ts: commitProducer() now updates per-producer
+   next_run_at after each producer run
+6. Exports added to @app/db and @app/agent
+
+================================================================================
+ISSUES
+================================================================================
+
+ISSUE 1: CRITICAL - Producer schedules not initialized on workflow deploy
+-------------------------------------------------------------------------
+Location: packages/agent/src/producer-schedule-init.ts exports are defined
+but NOT called anywhere in the codebase.
+
+The functions initializeProducerSchedules(), updateProducerSchedules(), and
+removeProducerSchedules() are exported but never actually called during:
+- Workflow deployment
+- Workflow activation
+- Workflow config changes
+- Workflow deletion
+
+This means:
+- New workflows will have NO producer schedules in the database
+- commitProducer() will always find `schedule === null` and skip the update
+- The entire per-producer scheduling feature is NOT FUNCTIONAL
+
+Verification: `grep -r "initializeProducerSchedules|updateProducerSchedules|
+removeProducerSchedules" packages/` only shows the export and definition.
+
+PROPOSAL 1: Integrate schedule initialization into workflow lifecycle:
+- Call initializeProducerSchedules() when workflow is deployed/activated
+- Call updateProducerSchedules() when workflow config changes
+- Call removeProducerSchedules() when workflow is deleted/deactivated
+- Check workflow-worker.ts, script-store.ts, or session-orchestration.ts
+  for appropriate integration points
+
+
+ISSUE 2: HIGH - Scheduler still uses workflow.next_run_timestamp
+----------------------------------------------------------------
+Location: packages/agent/src/workflow-scheduler.ts:289-310, 353-389
+
+The scheduler still checks workflow.next_run_timestamp to determine which
+workflows are due, not per-producer schedules. After execution, it also
+updates workflow.next_run_timestamp from the cron field.
+
+This means the scheduler tick loop does NOT use the new per-producer
+schedule data at all. The per-producer schedules are updated in commitProducer()
+but never queried by the scheduler to determine which producers should run.
+
+PROPOSAL 2: Update scheduler to use per-producer schedules:
+- In processNextWorkflow(), query producer_schedules table for due producers
+  (getDueProducers) instead of checking workflow.next_run_timestamp
+- Execute individual producer runs when their next_run_at has passed
+- Remove or deprecate the workflow.next_run_timestamp updates at lines 353-389
+
+
+ISSUE 3: MEDIUM - Upsert pattern has potential race condition
+-------------------------------------------------------------
+Location: packages/db/src/producer-schedule-store.ts:145-186
+
+The upsert() method uses a read-then-write pattern:
+```typescript
+const existing = await this.get(...);
+if (existing) {
+  await db.exec(`UPDATE ...`);
+} else {
+  await db.exec(`INSERT ...`);
+}
+```
+
+If called outside a transaction, two concurrent upserts for the same
+(workflow_id, producer_name) could both see existing=null and both try
+to INSERT, causing a UNIQUE constraint violation.
+
+Note: This is partially mitigated because most calls are within transactions
+(commitProducer uses db.tx). However, initializeProducerSchedules and
+updateProducerSchedules call upsert without a transaction.
+
+PROPOSAL 3: Use INSERT...ON CONFLICT UPDATE (UPSERT) syntax:
+```sql
+INSERT INTO producer_schedules (id, workflow_id, producer_name, ...)
+VALUES (?, ?, ?, ...)
+ON CONFLICT(workflow_id, producer_name) DO UPDATE SET
+  schedule_type = excluded.schedule_type,
+  ...
+```
+Or wrap all upsert calls in transactions.
+
+
+ISSUE 4: LOW - extractSchedule assumes mutually exclusive interval/cron
+-----------------------------------------------------------------------
+Location: packages/agent/src/schedule-utils.ts:74-84
+
+The extractSchedule() function returns the first found schedule:
+```typescript
+if (producerConfig.interval) return { type: "interval", ... };
+if (producerConfig.cron) return { type: "cron", ... };
+```
+
+If a producer config has BOTH interval and cron, interval wins silently.
+This might be intentional but could lead to confusion.
+
+PROPOSAL 4: Either:
+- Add validation/warning when both interval and cron are provided
+- Document the precedence clearly in the function comment
+- Or throw an error for ambiguous configuration
+
+
+ISSUE 5: LOW - computeNextRunTime returns fallback on invalid cron
+------------------------------------------------------------------
+Location: packages/agent/src/schedule-utils.ts:48-58
+
+When a cron expression is invalid, the function silently returns now + 60000
+(1 minute from now) instead of throwing an error or logging a warning:
+```typescript
+} catch {
+  return now + 60000;
+}
+```
+
+This could mask configuration errors. A workflow with an invalid cron
+expression would run every minute instead of failing loudly.
+
+PROPOSAL 5: At minimum, log a warning when cron parsing fails. Consider
+throwing an error to surface the configuration issue to the user.
+
+
+ISSUE 6: LOW - Cron next run fallback is questionable
+-----------------------------------------------------
+Location: packages/agent/src/schedule-utils.ts:53
+
+When Cron.nextRun() returns null (which can happen for cron expressions
+with no future occurrences), the code falls back to now + 60000:
+```typescript
+return next?.getTime() ?? now + 60000;
+```
+
+A cron expression with no future runs should probably not run again,
+not run in 1 minute.
+
+PROPOSAL 6: Return a very far future timestamp or special value to indicate
+"never run again" instead of falling back to 1 minute.
+
+
+ISSUE 7: LOW - No tests for schedule-utils.ts
+---------------------------------------------
+The new schedule-utils.ts file has no dedicated test coverage. The test
+file tests ProducerScheduleStore but not parseInterval(), computeNextRunTime(),
+or extractSchedule().
+
+PROPOSAL 7: Add unit tests for schedule-utils.ts covering:
+- parseInterval() with valid inputs ("5m", "1h", "30s", "1d")
+- parseInterval() with invalid inputs (should throw)
+- computeNextRunTime() with interval type
+- computeNextRunTime() with valid cron
+- computeNextRunTime() with invalid cron
+- extractSchedule() with interval, cron, both, and neither
+
+
+================================================================================
+POSITIVE ASPECTS
+================================================================================
+
+1. Clean separation of concerns: schedule-utils, producer-schedule-init,
+   and producer-schedule-store have clear single responsibilities
+
+2. Follows existing patterns: ProducerScheduleStore follows the same
+   pattern as HandlerStateStore (similar constructor, get, upsert pattern)
+
+3. Transaction support: All store methods accept optional tx parameter
+   for transactional operations
+
+4. Migration follows conventions: v43.ts follows the same structure as
+   other migrations with proper CRR registration for sync
+
+5. Good TypeScript types: ScheduleType, ProducerSchedule, ProducerScheduleInput
+   are well-defined
+
+6. Comprehensive test coverage in follow-up commit (24 tests)
+
+7. Clear documentation comments explaining the exec-13 spec purpose
+
+================================================================================
+VERDICT
+================================================================================
+
+The implementation is structurally sound but INCOMPLETE. The critical gap is
+that producer schedules are never initialized on workflow deploy, and the
+scheduler doesn't query the new table. The infrastructure is in place but
+not wired up. This needs follow-up work to actually enable per-producer
+scheduling.
+
+Priority:
+- ISSUE 1 (not initialized) - CRITICAL, feature is non-functional
+- ISSUE 2 (scheduler not using) - HIGH, scheduler integration missing
+- ISSUE 3-7 - LOW to MEDIUM, can be addressed later

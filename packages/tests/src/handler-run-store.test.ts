@@ -11,7 +11,7 @@ import { createDBNode } from "@app/node";
 
 /**
  * Helper to create handler_runs table without full migration system.
- * Schema matches packages/db/src/migrations/v36.ts
+ * Schema matches packages/db/src/migrations/v36.ts + v39.ts (status column) + v41.ts (retry_of column)
  */
 async function createHandlerRunsTable(db: DBInterface): Promise<void> {
   await db.exec(`
@@ -22,6 +22,8 @@ async function createHandlerRunsTable(db: DBInterface): Promise<void> {
       handler_type TEXT NOT NULL DEFAULT '',
       handler_name TEXT NOT NULL DEFAULT '',
       phase TEXT NOT NULL DEFAULT 'pending',
+      status TEXT NOT NULL DEFAULT 'active',
+      retry_of TEXT NOT NULL DEFAULT '',
       prepare_result TEXT NOT NULL DEFAULT '',
       input_state TEXT NOT NULL DEFAULT '',
       output_state TEXT NOT NULL DEFAULT '',
@@ -36,6 +38,8 @@ async function createHandlerRunsTable(db: DBInterface): Promise<void> {
   await db.exec(`CREATE INDEX IF NOT EXISTS idx_handler_runs_script_run ON handler_runs(script_run_id)`);
   await db.exec(`CREATE INDEX IF NOT EXISTS idx_handler_runs_workflow ON handler_runs(workflow_id)`);
   await db.exec(`CREATE INDEX IF NOT EXISTS idx_handler_runs_phase ON handler_runs(phase)`);
+  await db.exec(`CREATE INDEX IF NOT EXISTS idx_handler_runs_status ON handler_runs(status)`);
+  await db.exec(`CREATE INDEX IF NOT EXISTS idx_handler_runs_retry_of ON handler_runs(retry_of)`);
 }
 
 describe("HandlerRunStore", () => {
@@ -258,7 +262,8 @@ describe("HandlerRunStore", () => {
         handler_type: "consumer",
         handler_name: "processEmail",
       });
-      await handlerRunStore.updatePhase(run2.id, "committed");
+      // Per exec-09: set both phase and status for committed runs
+      await handlerRunStore.update(run2.id, { phase: "committed", status: "committed" });
 
       const run3 = await handlerRunStore.create({
         script_run_id: "session-1",
@@ -274,14 +279,15 @@ describe("HandlerRunStore", () => {
       expect(incomplete.map(r => r.phase).sort()).toEqual(["pending", "preparing"]);
     });
 
-    it("should exclude suspended and failed runs", async () => {
+    it("should exclude paused and failed runs (by status)", async () => {
       const run1 = await handlerRunStore.create({
         script_run_id: "session-1",
         workflow_id: "workflow-1",
         handler_type: "consumer",
         handler_name: "processEmail",
       });
-      await handlerRunStore.updatePhase(run1.id, "suspended");
+      // Per exec-09: use status for paused runs
+      await handlerRunStore.update(run1.id, { phase: "mutating", status: "paused:reconciliation" });
 
       const run2 = await handlerRunStore.create({
         script_run_id: "session-1",
@@ -289,7 +295,8 @@ describe("HandlerRunStore", () => {
         handler_type: "consumer",
         handler_name: "archiveEmail",
       });
-      await handlerRunStore.updatePhase(run2.id, "failed");
+      // Per exec-09: use status for failed runs
+      await handlerRunStore.update(run2.id, { phase: "executing", status: "failed:logic" });
 
       const incomplete = await handlerRunStore.getIncomplete("workflow-1");
       expect(incomplete).toHaveLength(0);
@@ -311,7 +318,8 @@ describe("HandlerRunStore", () => {
         handler_type: "producer",
         handler_name: "checkEmails",
       });
-      await handlerRunStore.updatePhase(run2.id, "committed");
+      // Per exec-09: set both phase and status for committed runs
+      await handlerRunStore.update(run2.id, { phase: "committed", status: "committed" });
 
       await handlerRunStore.create({
         script_run_id: "session-3",
@@ -365,7 +373,8 @@ describe("HandlerRunStore", () => {
         handler_type: "producer",
         handler_name: "checkEmails",
       });
-      await handlerRunStore.updatePhase(run.id, "committed");
+      // Per exec-09: set both phase and status for committed runs
+      await handlerRunStore.update(run.id, { phase: "committed", status: "committed" });
 
       const hasActive = await handlerRunStore.hasActiveRun("workflow-1");
       expect(hasActive).toBe(false);
@@ -549,6 +558,150 @@ describe("HandlerRunStore", () => {
         await handlerRunStore.updatePhase(run.id, phase);
         expect((await handlerRunStore.get(run.id))?.phase).toBe(phase);
       }
+    });
+  });
+
+  describe("retry chain (exec-10)", () => {
+    it("should create a run with retry_of linking to previous run", async () => {
+      // Create original run
+      const originalRun = await handlerRunStore.create({
+        script_run_id: "session-1",
+        workflow_id: "workflow-1",
+        handler_type: "consumer",
+        handler_name: "processEmail",
+      });
+
+      // Create retry run
+      const retryRun = await handlerRunStore.create({
+        script_run_id: "session-1",
+        workflow_id: "workflow-1",
+        handler_type: "consumer",
+        handler_name: "processEmail",
+        retry_of: originalRun.id,
+      });
+
+      expect(retryRun.retry_of).toBe(originalRun.id);
+      expect(originalRun.retry_of).toBe("");
+    });
+
+    it("should get retry chain in chronological order (oldest first)", async () => {
+      // Create chain: original -> retry1 -> retry2
+      const original = await handlerRunStore.create({
+        script_run_id: "session-1",
+        workflow_id: "workflow-1",
+        handler_type: "consumer",
+        handler_name: "processEmail",
+      });
+
+      const retry1 = await handlerRunStore.create({
+        script_run_id: "session-1",
+        workflow_id: "workflow-1",
+        handler_type: "consumer",
+        handler_name: "processEmail",
+        retry_of: original.id,
+      });
+
+      const retry2 = await handlerRunStore.create({
+        script_run_id: "session-1",
+        workflow_id: "workflow-1",
+        handler_type: "consumer",
+        handler_name: "processEmail",
+        retry_of: retry1.id,
+      });
+
+      // Get chain from latest run
+      const chain = await handlerRunStore.getRetryChain(retry2.id);
+
+      expect(chain).toHaveLength(3);
+      expect(chain[0].id).toBe(original.id);
+      expect(chain[1].id).toBe(retry1.id);
+      expect(chain[2].id).toBe(retry2.id);
+    });
+
+    it("should find latest attempt in retry chain", async () => {
+      // Create chain: original -> retry1 -> retry2
+      const original = await handlerRunStore.create({
+        script_run_id: "session-1",
+        workflow_id: "workflow-1",
+        handler_type: "consumer",
+        handler_name: "processEmail",
+      });
+
+      const retry1 = await handlerRunStore.create({
+        script_run_id: "session-1",
+        workflow_id: "workflow-1",
+        handler_type: "consumer",
+        handler_name: "processEmail",
+        retry_of: original.id,
+      });
+
+      const retry2 = await handlerRunStore.create({
+        script_run_id: "session-1",
+        workflow_id: "workflow-1",
+        handler_type: "consumer",
+        handler_name: "processEmail",
+        retry_of: retry1.id,
+      });
+
+      // Find latest from any point in chain
+      const latestFromOriginal = await handlerRunStore.findLatestInChain(original.id);
+      const latestFromRetry1 = await handlerRunStore.findLatestInChain(retry1.id);
+      const latestFromRetry2 = await handlerRunStore.findLatestInChain(retry2.id);
+
+      expect(latestFromOriginal?.id).toBe(retry2.id);
+      expect(latestFromRetry1?.id).toBe(retry2.id);
+      expect(latestFromRetry2?.id).toBe(retry2.id);
+    });
+
+    it("should get direct retries of a run", async () => {
+      const original = await handlerRunStore.create({
+        script_run_id: "session-1",
+        workflow_id: "workflow-1",
+        handler_type: "consumer",
+        handler_name: "processEmail",
+      });
+
+      // Create two retries of the original (unusual but possible in theory)
+      const retry1 = await handlerRunStore.create({
+        script_run_id: "session-1",
+        workflow_id: "workflow-1",
+        handler_type: "consumer",
+        handler_name: "processEmail",
+        retry_of: original.id,
+      });
+
+      const retries = await handlerRunStore.getRetriesOf(original.id);
+
+      expect(retries).toHaveLength(1);
+      expect(retries[0].id).toBe(retry1.id);
+    });
+
+    it("should create retry run with specified starting phase", async () => {
+      const retryRun = await handlerRunStore.create({
+        script_run_id: "session-1",
+        workflow_id: "workflow-1",
+        handler_type: "consumer",
+        handler_name: "processEmail",
+        retry_of: "original-run-id",
+        phase: "emitting", // Skip to emitting for retries after mutation
+      });
+
+      expect(retryRun.phase).toBe("emitting");
+    });
+
+    it("should copy prepare_result for retry runs after mutation", async () => {
+      const prepareResult = JSON.stringify({ reservations: [{ topic: "emails", ids: ["1", "2"] }] });
+      const retryRun = await handlerRunStore.create({
+        script_run_id: "session-1",
+        workflow_id: "workflow-1",
+        handler_type: "consumer",
+        handler_name: "processEmail",
+        retry_of: "original-run-id",
+        phase: "emitting",
+        prepare_result: prepareResult,
+      });
+
+      expect(retryRun.prepare_result).toBe(prepareResult);
     });
   });
 });

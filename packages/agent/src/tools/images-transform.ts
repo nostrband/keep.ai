@@ -7,7 +7,7 @@ import { fileUtils } from "@app/node";
 import { detectBufferMime, mimeToExt } from "@app/node";
 import fs from "fs";
 import debug from "debug";
-import { AuthError, LogicError, NetworkError, PermissionError, classifyHttpError, classifyGenericError, isClassifiedError, formatUsageForEvent } from "../errors";
+import { AuthError, LogicError, NetworkError, PermissionError, InternalError, classifyHttpError, isClassifiedError, formatUsageForEvent } from "../errors";
 import { defineTool, Tool } from "./types";
 
 const debugImgTransform = debug("ImagesTransform");
@@ -361,7 +361,7 @@ Supports png, jpeg, webp and gif input formats. Returns information about the ge
         if (isClassifiedError(error)) {
           throw error;
         }
-        throw classifyGenericError(error instanceof Error ? error : new Error(String(error)), "Images.transform");
+        throw new InternalError(error instanceof Error ? error.message : String(error), { cause: error instanceof Error ? error : undefined, source: "Images.transform" });
       }
     },
   }) as Tool<Input, Output>;

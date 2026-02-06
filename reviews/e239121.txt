@@ -1,0 +1,80 @@
+COMMIT REVIEW: e239121
+=======================
+exec-12: Complete tool files migration to InternalError
+
+SUMMARY OF CHANGES
+------------------
+This commit completes the exec-12 spec by migrating all 13 tool files from using
+classifyGenericError() to InternalError for unclassified exceptions in catch blocks.
+
+Files Modified:
+1. IMPLEMENTATION_PLAN.md - Updated exec-12 status from PARTIAL (70%) to COMPLETE (100%)
+2. 13 tool files in packages/agent/src/tools/:
+   - get-weather.ts
+   - audio-explain.ts
+   - pdf-explain.ts
+   - text-generate.ts
+   - text-summarize.ts
+   - text-classify.ts
+   - text-extract.ts
+   - images-transform.ts
+   - images-explain.ts
+   - images-generate.ts
+   - web-download.ts
+   - web-fetch.ts
+   - web-search.ts
+
+Change Pattern (all files follow this):
+  BEFORE:
+    if (isClassifiedError(error)) throw error;
+    throw classifyGenericError(error instanceof Error ? error : new Error(String(error)), "Tool.name");
+
+  AFTER:
+    if (isClassifiedError(error)) throw error;
+    throw new InternalError(error instanceof Error ? error.message : String(error), {
+      cause: error instanceof Error ? error : undefined,
+      source: "Tool.name"
+    });
+
+SEMANTIC ANALYSIS
+-----------------
+The change is SEMANTICALLY CORRECT per the exec-12 spec principles:
+
+1. Error Classification Philosophy:
+   - "Errors must be classified at the source, not at consumption"
+   - classifyGenericError() used pattern matching on error messages (unreliable)
+   - Pattern matching could misclassify network/auth/logic errors
+
+2. Correct Error Routing:
+   - LogicError = "script bug, eligible for auto-fix by agent"
+   - InternalError = "bug in our code, contact support"
+   - An unclassified error from a tool is a tool bug, NOT a user script bug
+   - Therefore InternalError is the correct classification
+
+3. Error Type → Run Status Mapping:
+   - auth/permission → paused:approval (user must act)
+   - network → paused:transient (auto-retry with backoff)
+   - logic → failed:logic (auto-fix eligible via agent)
+   - internal → failed:internal (bug in our code, contact support)
+
+ISSUES FOUND
+------------
+None. The migration is clean and follows the established pattern correctly.
+
+Minor Observations (not issues):
+1. The deprecated classifyGenericError() function still exists in codebase for legacy code
+2. All 13 files consistently apply the same transformation
+3. Proper cause chain preservation with { cause: error instanceof Error ? error : undefined }
+4. Source tracking via { source: "Tool.name" } for debugging
+
+PROPOSALS
+---------
+No changes needed. The implementation is correct.
+
+Future Consideration:
+- Consider removing classifyGenericError() entirely once all callers are migrated
+- The function is marked @deprecated but still exported
+
+VERDICT: APPROVED
+-----------------
+Clean, correct implementation following the exec-12 spec.

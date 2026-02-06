@@ -3,7 +3,7 @@ import { Exa } from "exa-js";
 import { getEnv } from "../env";
 import debug from "debug";
 import { EvalContext } from "../sandbox/sandbox";
-import { AuthError, LogicError, classifyGenericError } from "../errors";
+import { AuthError, LogicError, InternalError } from "../errors";
 import { defineReadOnlyTool, Tool } from "./types";
 
 const debugWebSearch = debug("agent:web-search");
@@ -151,8 +151,8 @@ export function makeWebSearchTool(getContext: () => EvalContext): Tool<Input, un
       try {
         result = await exa.search(query, searchOptions);
       } catch (error) {
-        // Classify Exa API errors
-        throw classifyGenericError(error instanceof Error ? error : new Error(String(error)), "Web.search");
+        // Unclassified error from Exa SDK is an internal bug (SDK should classify)
+        throw new InternalError(error instanceof Error ? error.message : String(error), { cause: error instanceof Error ? error : undefined, source: "Web.search" });
       }
 
       // Format the results for better readability

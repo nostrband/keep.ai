@@ -8,16 +8,17 @@
  * See specs/exec-07-session-orchestration.md for design details.
  */
 
-import { KeepDbApi, Workflow, ScriptRun, HandlerRun } from "@app/db";
+import { KeepDbApi, Workflow, ScriptRun, HandlerRun, isFailedStatus, isPausedStatus } from "@app/db";
 import { bytesToHex } from "@noble/ciphers/utils";
 import { randomBytes } from "@noble/ciphers/crypto";
 import {
   executeHandler,
   HandlerExecutionContext,
   HandlerResult,
+  createRetryRun,
 } from "./handler-state-machine";
 import { WorkflowConfig } from "./workflow-validator";
-import { ensureClassified } from "./errors";
+import { getRunStatusForError } from "./failure-handling";
 import debug from "debug";
 
 const log = debug("session-orchestration");
@@ -292,7 +293,8 @@ export async function executeWorkflowSession(
           // Execute handler
           const result = await executeHandler(handlerRun.id, context);
 
-          if (result.phase === "failed") {
+          // Per exec-09: check status instead of phase for failure/paused detection
+          if (isFailedStatus(result.status)) {
             await failSession(
               api,
               session,
@@ -306,7 +308,7 @@ export async function executeWorkflowSession(
             };
           }
 
-          if (result.phase === "suspended") {
+          if (isPausedStatus(result.status)) {
             await suspendSession(
               api,
               session,
@@ -346,20 +348,8 @@ export async function executeWorkflowSession(
       const result = await executeHandler(handlerRun.id, context);
       iterations++;
 
-      if (result.phase === "suspended") {
-        await suspendSession(
-          api,
-          session,
-          result.error || "handler_suspended"
-        );
-        return {
-          status: "suspended",
-          reason: result.error || "handler_suspended",
-          sessionId,
-        };
-      }
-
-      if (result.phase === "failed") {
+      // Per exec-09: check status instead of phase for failure/paused detection
+      if (isFailedStatus(result.status)) {
         await failSession(
           api,
           session,
@@ -369,6 +359,19 @@ export async function executeWorkflowSession(
         return {
           status: "failed",
           error: result.error || "Consumer failed",
+          sessionId,
+        };
+      }
+
+      if (isPausedStatus(result.status)) {
+        await suspendSession(
+          api,
+          session,
+          result.error || "handler_suspended"
+        );
+        return {
+          status: "suspended",
+          reason: result.error || "handler_suspended",
           sessionId,
         };
       }
@@ -383,7 +386,8 @@ export async function executeWorkflowSession(
     await completeSession(api, session);
     return { status: "completed", sessionId };
   } catch (error) {
-    const classifiedError = ensureClassified(error, "session-orchestration");
+    // Use getRunStatusForError instead of ensureClassified (per exec-12)
+    const { error: classifiedError } = getRunStatusForError(error, "session-orchestration");
     await failSession(api, session, classifiedError.message, classifiedError.type);
     return {
       status: "failed",
@@ -433,16 +437,8 @@ async function continueSession(
     const result = await executeHandler(handlerRun.id, context);
     iterations++;
 
-    if (result.phase === "suspended") {
-      await suspendSession(api, session, result.error || "handler_suspended");
-      return {
-        status: "suspended",
-        reason: result.error || "handler_suspended",
-        sessionId: session.id,
-      };
-    }
-
-    if (result.phase === "failed") {
+    // Per exec-09: check status instead of phase for failure/paused detection
+    if (isFailedStatus(result.status)) {
       await failSession(
         api,
         session,
@@ -455,6 +451,15 @@ async function continueSession(
         sessionId: session.id,
       };
     }
+
+    if (isPausedStatus(result.status)) {
+      await suspendSession(api, session, result.error || "handler_suspended");
+      return {
+        status: "suspended",
+        reason: result.error || "handler_suspended",
+        sessionId: session.id,
+      };
+    }
   }
 
   await completeSession(api, session);
@@ -464,11 +469,15 @@ async function continueSession(
 /**
  * Resume incomplete sessions on app restart.
  *
- * This function:
- * 1. Finds all workflows with incomplete handler runs
+ * Per exec-10 spec, this function:
+ * 1. Finds all workflows with incomplete handler runs (status='active')
  * 2. Skips paused/error workflows (they need user attention)
- * 3. Resumes each incomplete handler run
- * 4. Continues sessions that were interrupted
+ * 3. For each incomplete run:
+ *    a. Mark as 'crashed'
+ *    b. Check for indeterminate mutations (don't auto-retry those)
+ *    c. Create recovery run with retry_of pointing to crashed run
+ * 4. Execute the recovery runs
+ * 5. Continue sessions that were interrupted
  *
  * @param api - Database API
  * @param context - Execution context
@@ -495,18 +504,72 @@ export async function resumeIncompleteSessions(
       continue;
     }
 
-    // Resume incomplete handler runs sequentially
+    // Get incomplete handler runs (status='active')
     const incompleteRuns = await api.handlerRunStore.getIncomplete(workflowId);
-    log(`Resuming ${incompleteRuns.length} incomplete runs for workflow ${workflowId}`);
+    log(`Found ${incompleteRuns.length} incomplete runs for workflow ${workflowId}`);
+
+    // Track recovery runs to execute
+    const recoveryRuns: HandlerRun[] = [];
 
     for (const run of incompleteRuns) {
-      log(`Resuming handler run ${run.id} (${run.handler_type}:${run.handler_name} in phase ${run.phase})`);
-      await executeHandler(run.id, context);
+      log(`Processing crashed run ${run.id} (${run.handler_type}:${run.handler_name} in phase ${run.phase})`);
+
+      // Check for in-flight mutation (indeterminate state)
+      if (run.phase === "mutating") {
+        const mutation = await api.mutationStore.getByHandlerRunId(run.id);
+        if (mutation?.status === "in_flight") {
+          // Uncertain outcome - mark indeterminate, don't auto-retry
+          log(`Run ${run.id} has in_flight mutation - marking indeterminate, no auto-retry`);
+          await api.mutationStore.markIndeterminate(
+            mutation.id,
+            "Mutation was in_flight at restart - outcome uncertain"
+          );
+          // Mark run as paused for reconciliation
+          await api.handlerRunStore.update(run.id, {
+            status: "paused:reconciliation",
+            error: "Mutation outcome uncertain - requires user verification",
+            end_timestamp: new Date().toISOString(),
+          });
+          // Per exec-14: Also pause the workflow so scheduler doesn't pick it up
+          await api.scriptStore.updateWorkflowFields(workflowId, {
+            status: "paused",
+          });
+          log(`Workflow ${workflowId} paused due to indeterminate mutation`);
+          // Don't create retry run - needs user reconciliation
+          continue;
+        }
+      }
+
+      // Create recovery run with retry_of linking
+      try {
+        const recoveryRun = await createRetryRun({
+          previousRun: run,
+          previousRunStatus: "crashed",
+          reason: "crashed_recovery",
+          api,
+        });
+        recoveryRuns.push(recoveryRun);
+        log(`Created recovery run ${recoveryRun.id} for crashed run ${run.id}`);
+      } catch (error) {
+        log(`Failed to create recovery run for ${run.id}: ${error}`);
+        // Mark the run as crashed anyway
+        await api.handlerRunStore.update(run.id, {
+          status: "crashed",
+          error: `Failed to create recovery run: ${error}`,
+          end_timestamp: new Date().toISOString(),
+        });
+      }
     }
 
-    // After resuming handlers, check if session should continue
-    if (incompleteRuns.length > 0) {
-      const firstRun = incompleteRuns[0];
+    // Execute recovery runs
+    for (const recoveryRun of recoveryRuns) {
+      log(`Executing recovery run ${recoveryRun.id} (${recoveryRun.handler_type}:${recoveryRun.handler_name})`);
+      await executeHandler(recoveryRun.id, context);
+    }
+
+    // After handling crashed runs, check if session should continue
+    if (recoveryRuns.length > 0) {
+      const firstRun = recoveryRuns[0];
       const session = await api.scriptStore.getScriptRun(firstRun.script_run_id);
 
       if (session && !session.end_timestamp) {

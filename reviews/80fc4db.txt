@@ -1,0 +1,39 @@
+# Review: 80fc4db - Remove 'draft' from scheduler
+
+## Summary
+
+This is a minimal commit that removes the "Draft" marker and status note from the scheduling documentation.
+
+## Changes
+
+**docs/dev/16-scheduling.md** (4 lines changed):
+- Changed title from `# 16. Scheduling (Draft)` to `# 16. Scheduling`
+- Removed the status line: `> **Status**: Draft proposal for v1. Requires review and refinement.`
+
+## Analysis
+
+This commit follows immediately after a1c638e (23 seconds later based on timestamps), which significantly expanded and refined the scheduling chapter. The removal of the "Draft" marker signals that:
+
+1. The scheduling design is considered stable enough for implementation
+2. The comprehensive additions in a1c638e (wakeAt, phase reset, run management, etc.) represent the finalized v1 design
+3. The document is now ready to be used as a spec for implementation
+
+## Potential Issues
+
+### Issue 1: Premature Promotion? (Observation, Not Bug)
+**Location**: docs/dev/16-scheduling.md
+**Observation**: The commit immediately preceding this one (a1c638e) made extensive changes to the document. Marking it "not draft" immediately after a major rewrite might be premature if the changes haven't been reviewed.
+**Context**: However, both commits are by Claude Agent, suggesting this is part of a single coherent documentation session. The "draft" removal is the author signaling completion of their work.
+**Proposal**: N/A - this is reasonable workflow
+
+## Positive Aspects
+
+1. **Clean Finalization**: Good practice to remove draft markers when design is complete
+2. **Atomic Commits**: Separating the content change (a1c638e) from the status update (this commit) makes history cleaner
+3. **Clear Signal**: Indicates to implementers that this spec is implementation-ready
+
+## Conclusion
+
+This is a trivial but intentional housekeeping commit. No issues to address.
+
+Reviewed: 2026-02-06

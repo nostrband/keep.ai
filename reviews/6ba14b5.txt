@@ -1,0 +1,139 @@
+COMMIT REVIEW: 6ba14b5
+========================
+Title: exec-09: Separate run status from phase
+Author: Artur Briugeman <brugeman.artur@gmail.com>
+Date: Wed Feb 4 19:13:20 2026 +0100
+Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+
+SUMMARY OF CHANGES
+==================
+This commit implements exec-09 spec to separate handler run status from phase.
+It addresses a fundamental design flaw where phase (execution progress) was
+conflated with status (why execution stopped).
+
+Key Changes:
+1. Database:
+   - Migration v39: Adds `status TEXT NOT NULL DEFAULT 'active'` column to handler_runs
+   - Migration v40: Data migration to populate status from legacy phase values
+   - Creates index idx_handler_runs_status for efficient queries
+
+2. Type System:
+   - Added RunStatus type with 8 values: active, paused:transient, paused:approval,
+     paused:reconciliation, failed:logic, failed:internal, committed, crashed
+   - Added helper functions: isTerminalStatus(), isPausedStatus(), isFailedStatus()
+   - Updated HandlerRun interface with status field
+   - Updated UpdateHandlerRunInput to include status
+
+3. State Machine (handler-state-machine.ts):
+   - Added new pauseRun() function that keeps phase and sets status
+   - Added errorTypeToRunStatus() mapping function
+   - Added isRunDone() to check both terminal and paused statuses
+   - Deprecated isTerminal() in favor of status-based checks
+   - Updated all call sites to use pauseRun semantics
+   - failRun() now sets status based on error type instead of changing phase
+
+4. Session Orchestration:
+   - Updated failure/paused detection to check status instead of phase
+   - Imports isFailedStatus, isPausedStatus from @app/db
+
+5. Queries:
+   - Updated getIncomplete() to use status='active' instead of phase NOT IN (...)
+   - Updated getWorkflowsWithIncompleteRuns() similarly
+   - Updated hasActiveRun() similarly
+
+6. Tests:
+   - All test table schemas updated to include status column
+   - Tests updated to use status for paused/failed detection
+   - Comments reference exec-09 spec
+
+POTENTIAL ISSUES
+================
+
+1. MINOR: Redundant errorTypeToRunStatus function
+   Location: packages/agent/src/handler-state-machine.ts:144-159
+
+   Issue: This function is defined locally in handler-state-machine.ts, but there's
+   also a similar function expected to be in failure-handling.ts (per exec-12).
+   This could lead to divergence if the mappings change.
+
+   Proposal: Once exec-12 is complete, consider importing errorTypeToRunStatus from
+   failure-handling.ts instead of having a local copy. This maintains single source
+   of truth for error-to-status mappings.
+
+2. MINOR: Phase values 'suspended' and 'failed' still exist in type union
+   Location: packages/db/src/handler-run-store.ts:30-32
+
+   Issue: HandlerRunPhase still includes 'suspended' and 'failed' as deprecated values.
+   While documented with @deprecated comments, they remain in the union type.
+
+   Proposal: Consider removing these in a future migration once all legacy data has
+   been confirmed migrated. This would require a grace period for any clients still
+   setting these values directly.
+
+3. LOW: Default status for pre-v39 rows
+   Location: packages/db/src/handler-run-store.ts:511
+
+   Issue: mapRowToHandlerRun defaults to 'active' for pre-v39 rows missing status.
+   This is correct behavior, but committed rows would appear as 'active' until
+   the migration runs.
+
+   Proposal: This is handled correctly by v40 data migration. No action needed,
+   but worth documenting that v40 must always run after v39.
+
+4. STYLE: Duplicate comment pattern
+   Location: Multiple test files
+
+   Issue: Comments like "// Per exec-09: set both phase and status for committed runs"
+   are repeated verbatim in several places.
+
+   Proposal: Minor documentation improvement - could reference the spec once at the
+   top of the describe block instead of on each assertion.
+
+5. ARCHITECTURAL: isTerminal() marked deprecated but still widely used internally
+   Location: packages/agent/src/handler-state-machine.ts:92-98
+
+   Issue: The function isTerminal(phase) is marked deprecated with suggestion to use
+   isTerminalStatus(run.status) instead, but the function is still defined and
+   could be used accidentally.
+
+   Proposal: Consider adding a console.warn for development builds when this
+   deprecated function is called, to help identify any remaining usages during
+   development.
+
+POSITIVE OBSERVATIONS
+=====================
+
+1. Clean separation of concerns: Phase tracks progress, status tracks why stopped
+2. Proper CRSQLite migration patterns used (crsql_begin_alter/crsql_commit_alter)
+3. Split migration into v39 (schema) and v40 (data) per cr-sqlite requirements
+4. Comprehensive test updates with explicit exec-09 spec references
+5. Backwards compatibility maintained for pre-v39 data
+6. Good documentation in migration files explaining the "why"
+7. Status checks use startsWith() for paused/failed prefixes - future-proof for
+   new status subtypes
+
+VERIFICATION STATUS
+===================
+- All helper functions properly exported: VERIFIED
+- RunStatus type fully exported: VERIFIED
+- Migration v39 and v40 correctly implemented: VERIFIED
+- Zero legacy phase-based checks remaining: VERIFIED
+- All tests include status column: VERIFIED
+- Handler state machine uses status consistently: VERIFIED
+- Database queries correctly updated: VERIFIED
+- Backwards compatibility maintained: VERIFIED
+
+OVERALL ASSESSMENT
+==================
+This is a well-executed architectural refactor. The separation of phase and status
+is a significant improvement that enables:
+- Better retry semantics (phase shows where execution stopped)
+- Clearer failure routing (status shows why it stopped)
+- Easier crash recovery (can distinguish crashed vs intentionally stopped)
+
+The implementation follows the spec closely and includes comprehensive test coverage.
+The few minor issues identified are stylistic or related to cleanup of deprecated
+code that should happen in future commits.
+
+Rating: APPROVED
+No blocking issues. Ready for production use.

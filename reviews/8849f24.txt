@@ -1,0 +1,87 @@
+COMMIT REVIEW: 8849f24
+=======================
+
+Commit: 8849f24bbf980eccd39a8b80356d1500d09aa943
+Author: Artur Briugeman
+Date: Wed Feb 4 20:21:56 2026 +0100
+Title: docs: Mark all v1 implementation items as complete
+
+FILES CHANGED:
+- IMPLEMENTATION_PLAN.md (10 insertions, 10 deletions)
+
+DESCRIPTION OF CHANGES:
+-----------------------
+This commit updates the IMPLEMENTATION_PLAN.md document to track completion status
+of the execution model implementation. Specifically:
+
+1. Adds a "Status" column to the "Files to Modify" table
+2. Marks multiple database store modifications as DONE:
+   - handler-run-store.ts: DONE (exec-09, exec-10)
+   - handler-state-store.ts: DONE (exec-11)
+   - event-store.ts: DONE (exec-11)
+   - mutation-store.ts: DONE (exec-14)
+   - database.ts: DONE (v39-v43)
+   - api.ts: DONE (exec-13)
+3. Marks two items as DEFERRED for v2:
+   - config-cache.ts: DEFERRED (v2 optimization)
+   - workflow-scheduler.ts integration: DEFERRED (v2)
+
+ISSUES IDENTIFIED:
+------------------
+
+### Issue 1: Misleading DEFERRED status for workflow-scheduler.ts (Medium Severity)
+
+The workflow-scheduler.ts integration is marked as "DEFERRED (v2)" but investigation
+reveals that 95% of the supporting infrastructure is already implemented:
+- ProducerScheduleStore: COMPLETE (packages/db/src/producer-schedule-store.ts)
+- SchedulerStateManager: COMPLETE (packages/agent/src/scheduler-state.ts)
+- Schedule utilities: COMPLETE (packages/agent/src/schedule-utils.ts)
+- Producer schedule initialization: COMPLETE (packages/agent/src/producer-schedule-init.ts)
+- CommitProducer integration: COMPLETE (updates per-producer next_run_at)
+
+The ONLY missing piece is updating WorkflowScheduler to use getDueProducers() and
+SchedulerStateManager instead of the workflow-level next_run_timestamp field.
+
+Current behavior (workflow-scheduler.ts lines 289-310) still uses the old approach:
+- Uses workflow.next_run_timestamp (workflow-level)
+- Multiple producers in a workflow share timing
+- Producer A (5-min) and Producer B (1-hour) affect each other's schedule
+
+This makes "DEFERRED" misleading - the v2 task is minimal integration work, not a
+full implementation effort.
+
+### Issue 2: ConfigCache DEFERRED is properly justified (No issue)
+
+The config-cache.ts deferral is appropriate:
+- File does not exist
+- Is a genuine performance optimization (caching parsed WorkflowConfig)
+- Not required for v1 functionality
+- Clearly labeled as "v2 optimization"
+
+PROPOSALS:
+----------
+
+### Proposal 1: Clarify DEFERRED status with more detail
+
+Update the IMPLEMENTATION_PLAN.md entry for workflow-scheduler.ts to be more specific:
+
+Current:
+```
+| `packages/agent/src/workflow-scheduler.ts` | Use per-producer schedules; integrate SchedulerStateManager | DEFERRED (v2) |
+```
+
+Proposed:
+```
+| `packages/agent/src/workflow-scheduler.ts` | Switch from workflow.next_run_timestamp to producerScheduleStore.getDueProducers(); integrate SchedulerStateManager flags | DEFERRED (v2 - integration only, infrastructure complete) |
+```
+
+This clarifies that v2 effort is minimal integration, not new implementation.
+
+SUMMARY:
+--------
+Documentation-only commit that tracks implementation progress. The DEFERRED items
+are reasonable for v1 scope, though the workflow-scheduler.ts deferral understates
+how close the feature is to completion. All "DONE" items verified as accurate.
+
+RISK LEVEL: Low (documentation only)
+RECOMMENDATION: Merge as-is; create follow-up ticket for v2 to clarify scope

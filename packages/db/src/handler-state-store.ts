@@ -13,6 +13,11 @@ export interface HandlerState {
   state: unknown;
   updated_at: number;
   updated_by_run_id: string;
+  /**
+   * Wake time for time-based scheduling (exec-11).
+   * Unix timestamp in milliseconds. 0 means no scheduled wake.
+   */
+  wake_at: number;
 }
 
 /**
@@ -155,6 +160,69 @@ export class HandlerStateStore {
   }
 
   /**
+   * Update just the wake_at field for a handler (exec-11).
+   *
+   * Uses upsert to create the handler state record if it doesn't exist.
+   *
+   * @param workflowId - Workflow ID
+   * @param handlerName - Handler name
+   * @param wakeAt - Wake time in milliseconds (0 to clear)
+   */
+  async updateWakeAt(
+    workflowId: string,
+    handlerName: string,
+    wakeAt: number,
+    tx?: DBInterface
+  ): Promise<void> {
+    const db = tx || this.db.db;
+    const now = Date.now();
+
+    // Check if exists
+    const existing = await this.getRecord(workflowId, handlerName, db);
+
+    if (existing) {
+      // Update only wake_at
+      await db.exec(
+        `UPDATE handler_state SET wake_at = ?, updated_at = ?
+         WHERE workflow_id = ? AND handler_name = ?`,
+        [wakeAt, now, workflowId, handlerName]
+      );
+    } else {
+      // Insert with empty state
+      const id = bytesToHex(randomBytes(16));
+      await db.exec(
+        `INSERT INTO handler_state (
+          id, workflow_id, handler_name, state, updated_at, updated_by_run_id, wake_at
+        ) VALUES (?, ?, ?, '{}', ?, '', ?)`,
+        [id, workflowId, handlerName, now, wakeAt]
+      );
+    }
+  }
+
+  /**
+   * Get all consumers with active wakeAt that is due (exec-11).
+   *
+   * @param workflowId - Workflow ID
+   * @returns Array of handler names with due wakeAt
+   */
+  async getConsumersWithDueWakeAt(
+    workflowId: string,
+    tx?: DBInterface
+  ): Promise<string[]> {
+    const db = tx || this.db.db;
+    const now = Date.now();
+
+    const results = await db.execO<{ handler_name: string }>(
+      `SELECT handler_name FROM handler_state
+       WHERE workflow_id = ? AND wake_at > 0 AND wake_at <= ?`,
+      [workflowId, now]
+    );
+
+    if (!results) return [];
+    return results.map((r) => r.handler_name);
+  }
+
+  /**
    * Map a database row to a HandlerState object.
    */
   private mapRowToHandlerState(row: Record<string, unknown>): HandlerState {
@@ -175,6 +243,7 @@ export class HandlerStateStore {
       state,
       updated_at: row.updated_at as number,
       updated_by_run_id: row.updated_by_run_id as string,
+      wake_at: (row.wake_at as number) || 0,
     };
   }
 }

@@ -142,13 +142,54 @@ export {
   isWorkflowPausedError,
   classifyHttpError,
   classifyFileError,
-  classifyGenericError,
   classifyGoogleApiError,
-  ensureClassified,
   formatUsageForEvent,
   type ErrorType,
   type EventUsageData,
+  /** @deprecated Use getRunStatusForError from failure-handling instead */
+  classifyGenericError,
+  /** @deprecated Use getRunStatusForError from failure-handling instead */
+  ensureClassified,
 } from "./errors";
+
+// Failure handling (exec-12)
+export {
+  errorTypeToRunStatus,
+  getRunStatusForError,
+  isDefiniteFailure,
+  type ClassifiedResult,
+} from "./failure-handling";
+
+// Indeterminate mutation resolution (exec-14)
+export {
+  resolveIndeterminateMutation,
+  getMutationResultForNext,
+  getIndeterminateMutations,
+  getIndeterminateMutationsForWorkflow,
+  type IndeterminateResolution,
+  type ResolutionResult,
+  type MutationResult,
+} from "./indeterminate-resolution";
+
+// Scheduler state management (exec-11)
+export {
+  SchedulerStateManager,
+  type WorkflowConfigForScheduler,
+} from "./scheduler-state";
+
+// Schedule utilities (exec-13)
+export {
+  parseInterval,
+  computeNextRunTime,
+  extractSchedule,
+} from "./schedule-utils";
+
+// Producer schedule initialization (exec-13)
+export {
+  initializeProducerSchedules,
+  updateProducerSchedules,
+  removeProducerSchedules,
+} from "./producer-schedule-init";
 
 export type {
   Sandbox,
