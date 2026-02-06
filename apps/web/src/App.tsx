@@ -21,6 +21,9 @@ import ScriptDetailPage from "./components/ScriptDetailPage";
 import ScriptRunDetailPage from "./components/ScriptRunDetailPage";
 import WorkflowsPage from "./components/WorkflowsPage";
 import WorkflowDetailPage from "./components/WorkflowDetailPage";
+import WorkflowInputsPage from "./components/WorkflowInputsPage";
+import InputDetailPage from "./components/InputDetailPage";
+import WorkflowOutputsPage from "./components/WorkflowOutputsPage";
 import ArchivedPage from "./components/ArchivedPage";
 import NotesPage from "./components/NotesPage";
 import NoteDetailPage from "./components/NoteDetailPage";
@@ -350,6 +353,9 @@ function App() {
         <Route path="/threads/:id" element={<ThreadDetailPage />} />
         <Route path="/workflows" element={<WorkflowsPage />} />
         <Route path="/workflows/:id" element={<WorkflowDetailPage />} />
+        <Route path="/workflow/:id/inputs" element={<WorkflowInputsPage />} />
+        <Route path="/workflow/:id/input/:inputId" element={<InputDetailPage />} />
+        <Route path="/workflow/:id/outputs" element={<WorkflowOutputsPage />} />
         <Route path="/archived" element={<ArchivedPage />} />
         <Route path="/tasks" element={<TasksPage />} />
         <Route path="/tasks/:id" element={<TaskDetailPage />} />

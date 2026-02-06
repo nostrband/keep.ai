@@ -4,6 +4,14 @@ import { KeepDb } from "./database";
 import { DBInterface } from "./interfaces";
 
 /**
+ * Computed input status for UX (exec-16).
+ * - pending: Has unprocessed downstream work
+ * - done: All downstream work complete
+ * - skipped: Manually skipped by user
+ */
+export type InputStatus = "pending" | "done" | "skipped";
+
+/**
  * Input record in the Input Ledger.
  *
  * Inputs track external data that triggered workflow processing.
@@ -19,6 +27,25 @@ export interface Input {
   title: string;          // Human-readable description
   created_by_run_id: string;  // Producer run that registered this input
   created_at: number;
+}
+
+/**
+ * Input with computed status for UX display (exec-16).
+ */
+export interface InputWithStatus extends Input {
+  status: InputStatus;
+}
+
+/**
+ * Aggregated input statistics by source/type (exec-16).
+ */
+export interface InputStats {
+  source: string;
+  type: string;
+  pending_count: number;
+  done_count: number;
+  skipped_count: number;
+  total_count: number;
 }
 
 /**
@@ -147,6 +174,197 @@ export class InputStore {
   }
 
   /**
+   * Get inputs for a workflow with computed status (exec-16).
+   *
+   * Status is computed as:
+   * - pending: Any event with caused_by containing this input has status='pending' or 'reserved'
+   * - done: All events with caused_by containing this input have status='consumed' or 'skipped'
+   * - skipped: (future) Input marked as skipped
+   *
+   * Note: Uses JSON array containment check. SQLite doesn't have native JSON array
+   * containment, so we use LIKE with delimiters for reliable matching.
+   */
+  async getByWorkflowWithStatus(
+    workflowId: string,
+    options: { limit?: number; offset?: number } = {},
+    tx?: DBInterface
+  ): Promise<InputWithStatus[]> {
+    const db = tx || this.db.db;
+
+    // Query inputs with status computed from events
+    // An input is 'pending' if ANY event references it and is pending/reserved
+    // Otherwise it's 'done'
+    let query = `
+      SELECT i.*,
+        CASE
+          WHEN EXISTS (
+            SELECT 1 FROM events e
+            WHERE e.workflow_id = i.workflow_id
+            AND (e.caused_by LIKE '%"' || i.id || '"%')
+            AND e.status IN ('pending', 'reserved')
+          ) THEN 'pending'
+          ELSE 'done'
+        END as computed_status
+      FROM inputs i
+      WHERE i.workflow_id = ?
+      ORDER BY i.created_at DESC
+    `;
+
+    const params: unknown[] = [workflowId];
+
+    if (options.limit) {
+      query += ` LIMIT ?`;
+      params.push(options.limit);
+    }
+
+    if (options.offset) {
+      query += ` OFFSET ?`;
+      params.push(options.offset);
+    }
+
+    const results = await db.execO<Record<string, unknown>>(query, params);
+
+    if (!results) return [];
+    return results.map((row) => this.mapRowToInputWithStatus(row));
+  }
+
+  /**
+   * Get aggregated input statistics by source/type for a workflow (exec-16).
+   *
+   * Returns counts of pending, done, and skipped inputs grouped by source and type.
+   */
+  async getStatsByWorkflow(
+    workflowId: string,
+    tx?: DBInterface
+  ): Promise<InputStats[]> {
+    const db = tx || this.db.db;
+
+    const query = `
+      SELECT
+        i.source,
+        i.type,
+        SUM(CASE
+          WHEN EXISTS (
+            SELECT 1 FROM events e
+            WHERE e.workflow_id = i.workflow_id
+            AND (e.caused_by LIKE '%"' || i.id || '"%')
+            AND e.status IN ('pending', 'reserved')
+          ) THEN 1 ELSE 0
+        END) as pending_count,
+        SUM(CASE
+          WHEN NOT EXISTS (
+            SELECT 1 FROM events e
+            WHERE e.workflow_id = i.workflow_id
+            AND (e.caused_by LIKE '%"' || i.id || '"%')
+            AND e.status IN ('pending', 'reserved')
+          ) THEN 1 ELSE 0
+        END) as done_count,
+        0 as skipped_count,
+        COUNT(*) as total_count
+      FROM inputs i
+      WHERE i.workflow_id = ?
+      GROUP BY i.source, i.type
+      ORDER BY i.source, i.type
+    `;
+
+    const results = await db.execO<Record<string, unknown>>(query, [workflowId]);
+
+    if (!results) return [];
+    return results.map((row) => ({
+      source: row.source as string,
+      type: row.type as string,
+      pending_count: row.pending_count as number,
+      done_count: row.done_count as number,
+      skipped_count: row.skipped_count as number,
+      total_count: row.total_count as number,
+    }));
+  }
+
+  /**
+   * Get stale inputs - inputs pending longer than threshold (exec-16).
+   *
+   * @param workflowId - Workflow ID
+   * @param thresholdMs - Threshold in milliseconds (default: 7 days)
+   * @returns Inputs that have been pending longer than threshold
+   */
+  async getStaleInputs(
+    workflowId: string,
+    thresholdMs: number = 7 * 24 * 60 * 60 * 1000,
+    tx?: DBInterface
+  ): Promise<InputWithStatus[]> {
+    const db = tx || this.db.db;
+    const cutoffTime = Date.now() - thresholdMs;
+
+    const query = `
+      SELECT i.*,
+        'pending' as computed_status
+      FROM inputs i
+      WHERE i.workflow_id = ?
+      AND i.created_at < ?
+      AND EXISTS (
+        SELECT 1 FROM events e
+        WHERE e.workflow_id = i.workflow_id
+        AND (e.caused_by LIKE '%"' || i.id || '"%')
+        AND e.status IN ('pending', 'reserved')
+      )
+      ORDER BY i.created_at ASC
+    `;
+
+    const results = await db.execO<Record<string, unknown>>(query, [workflowId, cutoffTime]);
+
+    if (!results) return [];
+    return results.map((row) => this.mapRowToInputWithStatus(row));
+  }
+
+  /**
+   * Count inputs needing attention for a workflow (exec-16).
+   * This includes stale inputs and any inputs with blocked/indeterminate mutations.
+   */
+  async countNeedsAttention(
+    workflowId: string,
+    staleThresholdMs: number = 7 * 24 * 60 * 60 * 1000,
+    tx?: DBInterface
+  ): Promise<number> {
+    const db = tx || this.db.db;
+    const cutoffTime = Date.now() - staleThresholdMs;
+
+    // Count stale inputs (pending longer than threshold)
+    const staleQuery = `
+      SELECT COUNT(DISTINCT i.id) as count
+      FROM inputs i
+      WHERE i.workflow_id = ?
+      AND i.created_at < ?
+      AND EXISTS (
+        SELECT 1 FROM events e
+        WHERE e.workflow_id = i.workflow_id
+        AND (e.caused_by LIKE '%"' || i.id || '"%')
+        AND e.status IN ('pending', 'reserved')
+      )
+    `;
+
+    const staleResult = await db.execO<{ count: number }>(staleQuery, [workflowId, cutoffTime]);
+    const staleCount = staleResult?.[0]?.count || 0;
+
+    // Count inputs with indeterminate mutations (needs user action)
+    const indeterminateQuery = `
+      SELECT COUNT(DISTINCT i.id) as count
+      FROM inputs i
+      JOIN events e ON e.workflow_id = i.workflow_id
+        AND (e.caused_by LIKE '%"' || i.id || '"%')
+      JOIN handler_runs hr ON hr.id = e.reserved_by_run_id
+      JOIN mutations m ON m.handler_run_id = hr.id
+      WHERE i.workflow_id = ?
+      AND m.status = 'indeterminate'
+      AND m.resolved_by = ''
+    `;
+
+    const indeterminateResult = await db.execO<{ count: number }>(indeterminateQuery, [workflowId]);
+    const indeterminateCount = indeterminateResult?.[0]?.count || 0;
+
+    return staleCount + indeterminateCount;
+  }
+
+  /**
    * Map a database row to an Input object.
    */
   private mapRowToInput(row: Record<string, unknown>): Input {
@@ -159,6 +377,16 @@ export class InputStore {
       title: row.title as string,
       created_by_run_id: row.created_by_run_id as string,
       created_at: row.created_at as number,
+    };
+  }
+
+  /**
+   * Map a database row to an InputWithStatus object.
+   */
+  private mapRowToInputWithStatus(row: Record<string, unknown>): InputWithStatus {
+    return {
+      ...this.mapRowToInput(row),
+      status: (row.computed_status as InputStatus) || "done",
     };
   }
 }

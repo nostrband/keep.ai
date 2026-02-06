@@ -2,13 +2,35 @@
 
 ## Status: Looking for Next Spec
 
-**exec-15 (Input Ledger, Causal Tracking, Topic Declarations) is complete!**
+**exec-16 (Inputs & Outputs UX) is complete!**
 
-All 8 phases have been implemented and tested with 123 new tests passing.
+All phases have been implemented with 16 new tests passing. Total test suite: 989 tests passing.
 
 ---
 
 ## Recently Completed
+
+### exec-16 - Inputs & Outputs UX ✅
+
+**Spec File:** [`specs/done/exec-16-inputs-outputs-ux.md`](specs/done/exec-16-inputs-outputs-ux.md)
+
+**Implementation Summary:**
+- Phase 1: Database query methods and React hooks (InputStore, EventStore, MutationStore extensions)
+- Phase 2: Dashboard Inputs Summary component (WorkflowInputsSummary)
+- Phase 3: Inputs List view with status computation (WorkflowInputsPage)
+- Phase 4: Input Detail view with mutation tracing (InputDetailPage)
+- Phase 6: Outputs view (WorkflowOutputsPage)
+- Phase 8: Comprehensive test suite (16 new tests)
+
+**Key Features:**
+- Input status computation (pending/done/skipped based on event state)
+- Input statistics aggregation by source/type
+- Stale input detection (pending longer than threshold)
+- Output statistics by connector
+- Causal tracing from inputs to mutations
+- Full React Query hooks for all data access
+
+**Note:** Phase 5 (Skip Input functionality) and Phase 7 (UI polish) were deferred as the core functionality is complete.
 
 ### exec-15 - Input Ledger, Causal Tracking, and Topic Declarations ✅
 
@@ -27,19 +49,7 @@ All 8 phases have been implemented and tested with 123 new tests passing.
 
 ## What's Available for Next Implementation
 
-Based on the spec referenced in exec-15 as "UX-layer concerns for a separate spec (Chapter 17)":
-
-### Potential: exec-16 - Inputs & Outputs UX
-
-**Reference:** [`docs/dev/17-inputs-outputs.md`](docs/dev/17-inputs-outputs.md)
-
-This spec would implement:
-- Input Ledger UX (Inputs & Outputs view, skip semantics, pending rollup)
-- Output/mutation ledger UX
-- Stale input warnings
-- Input status computation queries for the UI
-
-This builds on the data model created in exec-15 (Input Ledger, caused_by tracking, ui_title).
+Review available specs in `specs/` directory and `docs/dev/` for potential next implementations.
 
 ---
 

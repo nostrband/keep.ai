@@ -24,6 +24,7 @@ import { API_ENDPOINT } from "../const";
 import { WorkflowErrorAlert } from "./WorkflowErrorAlert";
 import { useUnresolvedWorkflowError } from "../hooks/useNotifications";
 import { getWorkflowTitle } from "../lib/workflowUtils";
+import { WorkflowInputsSummary } from "./WorkflowInputsSummary";
 
 export default function WorkflowDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -464,6 +465,9 @@ export default function WorkflowDetailPage() {
                 )}
               </div>
             )}
+
+            {/* Inputs & Outputs Summary (exec-16) */}
+            <WorkflowInputsSummary workflowId={workflow.id} />
 
             {/* Chat Section */}
             {chat && (

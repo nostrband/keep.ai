@@ -478,6 +478,44 @@ export class EventStore {
   }
 
   /**
+   * Get events that reference an input in their caused_by (exec-16).
+   *
+   * @param inputId - Input ID to search for
+   * @param options - Query options (status filter, limit)
+   * @returns Events that have this input in their caused_by
+   */
+  async getByInputId(
+    inputId: string,
+    options: { status?: EventStatus[]; limit?: number } = {},
+    tx?: DBInterface
+  ): Promise<Event[]> {
+    const db = tx || this.db.db;
+
+    let query = `
+      SELECT * FROM events
+      WHERE (caused_by LIKE '%"' || ? || '"%')
+    `;
+    const params: unknown[] = [inputId];
+
+    if (options.status && options.status.length > 0) {
+      const placeholders = options.status.map(() => "?").join(", ");
+      query += ` AND status IN (${placeholders})`;
+      params.push(...options.status);
+    }
+
+    query += ` ORDER BY created_at DESC`;
+
+    if (options.limit) {
+      query += ` LIMIT ?`;
+      params.push(options.limit);
+    }
+
+    const results = await db.execO<Record<string, unknown>>(query, params);
+    if (!results) return [];
+    return results.map((row) => this.mapRowToEvent(row));
+  }
+
+  /**
    * Get the union of caused_by from all events reserved by a handler run.
    * Used in consumer's next phase to inherit causal tracking (exec-15).
    *
