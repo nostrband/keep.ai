@@ -279,14 +279,15 @@ export async function validateWorkflowScript(
  */
 function extractErrorMessage(error: string): string {
   // QuickJS errors often have format: "Error: 'message' stack:\n..."
-  // Extract just the message part
-  const match = error.match(/Error:\s*'([^']+)'/);
-  if (match) {
-    return match[1];
+  // The message may contain single quotes (e.g., "Producer 'name': ...")
+  // so we match from opening quote to the closing quote before " stack:"
+  const quotedMatch = error.match(/Error:\s*'(.+?)'\s+stack:/s);
+  if (quotedMatch) {
+    return quotedMatch[1];
   }
 
-  // Try to extract from simpler format: "Error: message"
-  const simpleMatch = error.match(/Error:\s*(.+?)(?:\s+stack:|$)/);
+  // Try to extract from simpler format: "Error: message" without stack
+  const simpleMatch = error.match(/Error:\s*(.+?)(?:\s+stack:|$)/s);
   if (simpleMatch) {
     return simpleMatch[1].trim();
   }

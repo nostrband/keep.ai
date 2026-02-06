@@ -497,4 +497,123 @@ describe("EventStore", () => {
       expect(retrieved?.payload).toEqual(complexPayload);
     });
   });
+
+  describe("causedBy tracking (exec-15)", () => {
+    it("should store causedBy when publishing event", async () => {
+      const event = await eventStore.publishEvent(
+        "workflow-1",
+        "emails",
+        { messageId: "msg-1", payload: {}, causedBy: ["input-1", "input-2"] },
+        "run-1"
+      );
+
+      expect(event.caused_by).toEqual(["input-1", "input-2"]);
+
+      const retrieved = await eventStore.get(event.id);
+      expect(retrieved?.caused_by).toEqual(["input-1", "input-2"]);
+    });
+
+    it("should default to empty array when causedBy not provided", async () => {
+      const event = await eventStore.publishEvent(
+        "workflow-1",
+        "emails",
+        { messageId: "msg-1", payload: {} },
+        "run-1"
+      );
+
+      expect(event.caused_by).toEqual([]);
+    });
+
+    it("should update causedBy on idempotent re-publish", async () => {
+      await eventStore.publishEvent(
+        "workflow-1",
+        "emails",
+        { messageId: "msg-1", payload: {}, causedBy: ["input-1"] },
+        "run-1"
+      );
+
+      // Re-publish with different causedBy
+      const event = await eventStore.publishEvent(
+        "workflow-1",
+        "emails",
+        { messageId: "msg-1", payload: {}, causedBy: ["input-2", "input-3"] },
+        "run-2"
+      );
+
+      expect(event.caused_by).toEqual(["input-2", "input-3"]);
+    });
+  });
+
+  describe("getCausedByForRun", () => {
+    it("should return union of causedBy from all reserved events", async () => {
+      // Publish events with different causedBy
+      await eventStore.publishEvent(
+        "workflow-1",
+        "emails",
+        { messageId: "msg-1", payload: {}, causedBy: ["input-1", "input-2"] },
+        "run-1"
+      );
+      await eventStore.publishEvent(
+        "workflow-1",
+        "emails",
+        { messageId: "msg-2", payload: {}, causedBy: ["input-2", "input-3"] },
+        "run-1"
+      );
+
+      // Reserve both events
+      await eventStore.reserveEvents("run-2", [
+        { topic: "emails", ids: ["msg-1", "msg-2"] },
+      ]);
+
+      const causedBy = await eventStore.getCausedByForRun("run-2");
+
+      // Should be deduplicated union: input-1, input-2, input-3
+      expect(causedBy.sort()).toEqual(["input-1", "input-2", "input-3"]);
+    });
+
+    it("should return empty array when no events reserved", async () => {
+      const causedBy = await eventStore.getCausedByForRun("run-1");
+      expect(causedBy).toEqual([]);
+    });
+
+    it("should return empty array when reserved events have no causedBy", async () => {
+      await eventStore.publishEvent(
+        "workflow-1",
+        "emails",
+        { messageId: "msg-1", payload: {} },
+        "run-1"
+      );
+
+      await eventStore.reserveEvents("run-2", [
+        { topic: "emails", ids: ["msg-1"] },
+      ]);
+
+      const causedBy = await eventStore.getCausedByForRun("run-2");
+      expect(causedBy).toEqual([]);
+    });
+
+    it("should only include causedBy from reserved events, not all events", async () => {
+      await eventStore.publishEvent(
+        "workflow-1",
+        "emails",
+        { messageId: "msg-1", payload: {}, causedBy: ["input-1"] },
+        "run-1"
+      );
+      await eventStore.publishEvent(
+        "workflow-1",
+        "emails",
+        { messageId: "msg-2", payload: {}, causedBy: ["input-2"] },
+        "run-1"
+      );
+
+      // Reserve only msg-1
+      await eventStore.reserveEvents("run-2", [
+        { topic: "emails", ids: ["msg-1"] },
+      ]);
+
+      const causedBy = await eventStore.getCausedByForRun("run-2");
+
+      expect(causedBy).toEqual(["input-1"]);
+    });
+  });
 });

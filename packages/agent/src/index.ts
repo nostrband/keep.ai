@@ -17,6 +17,8 @@ export {
   makeTopicsPeekTool,
   makeTopicsGetByIdsTool,
   makeTopicsPublishTool,
+  // Topics registerInput (exec-15)
+  makeTopicsRegisterInputTool,
   // Tool definition helpers
   defineTool,
   defineReadOnlyTool,

@@ -222,55 +222,62 @@ Items are ordered by dependencies - earlier items must be completed before later
     - Add "Cannot Modify": Producer/consumer `publishes` declarations
     - Add "Must Preserve": Input registration logic, inputId linkage
 
-### Phase 8: Testing
+### Phase 8: Testing ✅
 
-- [ ] **8.1 Unit tests for InputStore**
+- [x] **8.1 Unit tests for InputStore**
   - Dependencies: 2.1
   - Details:
     - Idempotent registration (same source/type/external_id returns existing)
     - Unique constraint enforcement
     - Get by ID and by workflow
+  - File: `packages/tests/src/input-store.test.ts` (15 tests)
 
-- [ ] **8.2 Unit tests for EventStore causedBy**
+- [x] **8.2 Unit tests for EventStore causedBy**
   - Dependencies: 2.4, 2.5
   - Details:
     - publishEvent with causedBy stored correctly
     - getCausedByForRun returns union of all reserved events' causedBy
+  - File: `packages/tests/src/event-store.test.ts` (added 5 tests)
 
-- [ ] **8.3 Unit tests for Topics.publish changes**
+- [x] **8.3 Unit tests for Topics.publish changes**
   - Dependencies: 3.3, 3.4, 5.2
   - Details:
     - Multi-topic fan-out
     - inputId required in producer phase
     - inputId forbidden in next phase
     - Topic validation against declarations
+  - File: `packages/tests/src/topics-api.test.ts` (added 10 tests)
 
-- [ ] **8.4 Unit tests for Topics.registerInput**
+- [x] **8.4 Unit tests for Topics.registerInput**
   - Dependencies: 3.2
   - Details:
     - Phase restriction (producer only)
     - Returns inputId
     - Idempotent behavior
+  - File: `packages/tests/src/topics-api.test.ts` (added 5 tests)
 
-- [ ] **8.5 Unit tests for validation updates**
+- [x] **8.5 Unit tests for validation updates**
   - Dependencies: 4.2, 4.3, 4.4
   - Details:
     - New producer format validates (with publishes)
     - New consumer format validates (with optional publishes)
     - Undeclared topic in publishes throws error
+  - File: `packages/tests/src/workflow-validation.test.ts` (25 tests)
 
-- [ ] **8.6 Integration test - full causal chain**
+- [x] **8.6 Integration test - full causal chain**
   - Dependencies: All Phase 1-5 items
   - Details:
     - Producer registerInput -> publish with inputId
     - Consumer peek -> reserve -> next publish -> caused_by inherited
     - 3-stage pipeline traces back to original input
+  - File: `packages/tests/src/topics-api.test.ts` (causal chain test)
 
-- [ ] **8.7 Integration test - title deprecation**
+- [x] **8.7 Integration test - title deprecation**
   - Dependencies: 2.4, 2.7
   - Details:
     - Verify old events with titles are still readable
     - Verify new events have empty title but valid caused_by
+  - File: `packages/tests/src/topics-api.test.ts` (3 title deprecation tests)
 
 ---
 
@@ -312,4 +319,11 @@ Per the spec, the following are UX-layer concerns for a separate spec (Chapter 1
 
 ## Current Database Version: 44
 
-Database foundation complete. Next phase: Topics API Updates (Phase 3).
+**Implementation Complete!** All 8 phases have been implemented and tested:
+- Phase 1 & 2: Database foundation and data access layer
+- Phase 3: Topics API updates (registerInput, multi-topic, inputId/causedBy)
+- Phase 4: WorkflowConfig with publishes declarations
+- Phase 5: Handler context threading
+- Phase 6: PrepareResult.ui and mutation UI title
+- Phase 7: Prompt updates
+- Phase 8: Comprehensive test suite (123 new tests)
