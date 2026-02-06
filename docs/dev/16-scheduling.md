@@ -441,7 +441,7 @@ Users see workflow-level status, not internal handler details:
 | **Issue description** | Human-readable: "Waiting for you to reconnect Gmail" |
 | **Schedule** | "Checks every 5 minutes" / "Next check in 3 min" / "Runs daily at 9am" |
 | **Recent activity** | "Processed 3 emails → added to spreadsheet" |
-| **Pending work** | See Chapter 17 (Event Management UX) |
+| **Pending work** | See Chapter 17 (Inputs & Outputs) |
 
 Internal details (phases, handlers, topics, retry chains) are not exposed to users — they are implementation concerns managed by the host.
 

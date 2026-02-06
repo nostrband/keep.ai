@@ -61,10 +61,65 @@ Where `state` is the consumer's previous state from the last successful run (und
     ids: string[]
   }>,
   data: { ... },     // payload for mutate and next
-  ui?: { ... },      // optional UX metadata (previews, summaries)
+  ui?: {
+    title: string,      // user-facing description of the mutation
+  },
   wakeAt?: string    // optional ISO 8601 datetime for time-based wake (see Chapter 16)
 }
 ```
+
+### The `ui` Field
+
+The `ui` field provides **user-facing metadata for the pending mutation**. This is how the UX learns what this consumer run means to the user, without exposing internal workflow structure.
+
+* `title` — describes what the mutation will do in user terms (semantic description)
+
+**Examples:**
+
+```ts
+// Adding a spreadsheet row
+ui: { title: "Add to Reports sheet" }
+
+// Sending an email
+ui: { title: "Send reply to alice@example.com" }
+
+// Posting to Slack
+ui: { title: "Post summary to #finance" }
+```
+
+**Why this matters:**
+
+The UX shows users an Inputs→Outputs view (see Chapter 17). The input description comes from the producer event's `title`. The output description comes from `prepareResult.ui.title`. This allows users to see "Email from alice → Row added to Reports sheet" without knowing about internal topics, consumers, or phases.
+
+The `ui.title` is attached to the mutation record and displayed in:
+* Pending mutation indicators
+* Completed mutation history
+* Blocked run indicators
+
+### Title vs Preview (Trust Boundary)
+
+The `ui.title` is a **semantic description** — what the mutation means to the user. Scripts are untrusted code, so `ui.title` cannot be fully trusted to match actual behavior.
+
+**What the host provides separately:**
+
+If users need to see the actual mutation payload (for approval prompts or to verify what was attempted), the host formats this from the **actual mutation call parameters**, not from script-declared metadata. This ensures users see what was actually attempted, not what the script claimed it would do.
+
+| Source | Content | Trust Level |
+|--------|---------|-------------|
+| `ui.title` | Semantic description ("Add row for alice") | Script-declared, best-effort |
+| Mutation preview | Actual call parameters | Host-observed, trustworthy |
+
+For approval flows and blocked mutation displays, the host may show both: the semantic title for context, and the actual parameters for verification.
+
+**Prompting guidance for LLMs:**
+
+* Always provide `ui.title` when a mutation will occur
+* Describe what the mutation *means to the user*, not internal details
+* Include key identifiers (email address, row name) for recognition
+* Do not attempt to preview actual data — the host handles that
+
+Good: `Add row for alice@example.com`
+Bad: `Execute sheets.appendRow mutation`
 
 ### Reservations
 
