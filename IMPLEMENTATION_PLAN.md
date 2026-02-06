@@ -121,20 +121,20 @@ Items are ordered by dependencies - earlier items must be completed before later
 
 ### Phase 4: WorkflowConfig and Validation
 
-- [ ] **4.1 Update WorkflowConfig interface to include publishes**
+- [x] **4.1 Update WorkflowConfig interface to include publishes**
   - File: `packages/agent/src/workflow-validator.ts`
   - Details:
     - Add `publishes: string[]` to producer config (required)
     - Add `publishes: string[]` to consumer config (optional, empty array if not provided)
 
-- [ ] **4.2 Update VALIDATION_CODE for new producer format**
+- [x] **4.2 Update VALIDATION_CODE for new producer format**
   - File: `packages/agent/src/workflow-validator.ts`
   - Dependencies: 4.1
   - Details:
     - Require `publishes` array for producers: `if (!Array.isArray(p.publishes) || p.publishes.length === 0) throw ...`
     - Extract `publishes` into `producerConfig[name]`
 
-- [ ] **4.3 Update VALIDATION_CODE for new consumer format**
+- [x] **4.3 Update VALIDATION_CODE for new consumer format**
   - File: `packages/agent/src/workflow-validator.ts`
   - Dependencies: 4.1
   - Details:
@@ -142,7 +142,7 @@ Items are ordered by dependencies - earlier items must be completed before later
     - Warn if `publishes.length > 0` but no `next` function
     - Add `publishes` to `consumerConfig[name]`
 
-- [ ] **4.4 Add topic graph validation**
+- [x] **4.4 Add topic graph validation**
   - File: `packages/agent/src/workflow-validator.ts`
   - Dependencies: 4.2, 4.3
   - Details:
