@@ -473,15 +473,17 @@ topics: {
 \`\`\`
 
 ### Producers
-Poll external systems and publish events:
+Poll external systems, register inputs, and publish events:
 \`\`\`javascript
 producers: {
   producerName: {
+    publishes: ["topic.name"],     // Required: declare target topics
     schedule: { interval: "5m" },  // or { cron: "0 * * * *" }
     handler: async (state) => {
       // 1. Read from external system
-      // 2. Publish events with Topics.publish()
-      // 3. Return new state (cursor, timestamp, etc.)
+      // 2. Register input with Topics.registerInput()
+      // 3. Publish events with Topics.publish() referencing the inputId
+      // 4. Return new state (cursor, timestamp, etc.)
     }
   }
 }
@@ -493,6 +495,7 @@ Process events in three phases:
 consumers: {
   consumerName: {
     subscribe: ["topic.name"],
+    publishes: ["downstream.topic"],  // Optional: topics emitted in next phase
 
     // Phase 1: Select inputs (read-only)
     prepare: async (state) => {
@@ -501,6 +504,7 @@ consumers: {
       return {
         reservations: [{ topic: "topic.name", ids: [events[0].messageId] }],
         data: { /* computed from events */ },
+        ui: { title: "What this mutation does" },  // User-facing description
       };
     },
 
@@ -510,9 +514,10 @@ consumers: {
     },
 
     // Phase 3: Publish downstream events (optional)
+    // No inputId needed - host inherits causedBy from reserved events
     next: async (prepared, mutationResult) => {
       if (mutationResult.status === 'applied') {
-        await Topics.publish({ topic: "downstream.topic", event: { /* ... */ } });
+        await Topics.publish({ topic: "downstream.topic", event: { messageId: "...", payload: {} } });
       }
     },
   }
@@ -530,6 +535,7 @@ const workflow = {
 
   producers: {
     pollEmail: {
+      publishes: ["email.received"],  // Declare target topics
       schedule: { interval: "5m" },
       handler: async (state) => {
         const emails = await Gmail.api({
@@ -545,11 +551,20 @@ const workflow = {
             id: email.id,
           });
 
+          // Register the input in the Input Ledger
+          const inputId = await Topics.registerInput({
+            source: "gmail",
+            type: "email",
+            id: email.id,
+            title: \`Email from \${details.from}: "\${details.subject}"\`,
+          });
+
+          // Publish event with inputId for causal tracking
           await Topics.publish({
             topic: "email.received",
             event: {
               messageId: email.id,
-              title: \`Email from \${details.from}: "\${details.subject}"\`,
+              inputId,  // Required in producer phase
               payload: { id: email.id, from: details.from, subject: details.subject },
             },
           });
@@ -563,6 +578,7 @@ const workflow = {
   consumers: {
     processEmail: {
       subscribe: ["email.received"],
+      publishes: ["row.created"],  // Declare downstream topics
 
       prepare: async (state) => {
         const pending = await Topics.peek({ topic: "email.received", limit: 1 });
@@ -571,6 +587,7 @@ const workflow = {
         return {
           reservations: [{ topic: "email.received", ids: [event.messageId] }],
           data: { emailId: event.payload.id, from: event.payload.from, subject: event.payload.subject },
+          ui: { title: \`Log email from \${event.payload.from} to spreadsheet\` },  // User-facing title
         };
       },
 
@@ -588,11 +605,11 @@ const workflow = {
 
       next: async (prepared, mutationResult) => {
         if (mutationResult.status === 'applied') {
+          // No inputId needed - causedBy inherited from reserved events
           await Topics.publish({
             topic: "row.created",
             event: {
               messageId: \`row:\${prepared.data.emailId}\`,
-              title: \`Row created for email from \${prepared.data.from}\`,
               payload: { emailId: prepared.data.emailId },
             },
           });
@@ -606,26 +623,28 @@ const workflow = {
 ## Phase Rules
 
 ### Producer Phase
-- CAN: Read external systems, publish to topics
-- CANNOT: Mutate external systems, peek topics
+- CAN: Read external systems, publish to declared topics, register inputs
+- CANNOT: Mutate external systems, peek topics, publish to undeclared topics
+- MUST: Call Topics.registerInput() before Topics.publish()
 
 ### Prepare Phase
 - CAN: Read external systems, peek subscribed topics
-- CANNOT: Mutate external systems, publish to topics
+- CANNOT: Mutate external systems, publish to topics, register inputs
 - MUST: Return { reservations, data }
+- SHOULD: Return { ui: { title: "..." } } when mutation will occur
 
 ### Mutate Phase
 - CAN: Perform ONE external mutation
-- CANNOT: Read external systems, peek/publish topics
+- CANNOT: Read external systems, peek/publish topics, register inputs
 - NOTE: Mutation is terminal - no code after the mutation call
 
 ### Next Phase
-- CAN: Publish to topics
-- CANNOT: Read/mutate external systems, peek topics
+- CAN: Publish to declared topics (no inputId needed - causedBy inherited)
+- CANNOT: Read/mutate external systems, peek topics, register inputs
 
 ## Event Design
 
-Events need stable identifiers and descriptive titles:
+Events are internal workflow coordination. User-facing metadata is handled by the Input Ledger.
 
 ### messageId
 - Must be stable and unique within topic
@@ -635,13 +654,35 @@ Events need stable identifiers and descriptive titles:
 Good: \`email.id\`, \`\`row:\${invoice.id}\`\`
 Bad: \`uuid()\`, \`Date.now()\`
 
-### title
-- Human-readable description
-- Include identifying information
-- Shown in UI for observability
+### Input Registration (Producer Phase Only)
+
+Producers must register external inputs BEFORE publishing events:
+
+\`\`\`javascript
+const inputId = await Topics.registerInput({
+  source: "gmail",           // Connector name
+  type: "email",             // Type within source
+  id: email.id,              // External identifier
+  title: \`Email from \${email.from}: "\${email.subject}"\`  // User-facing title
+});
+
+await Topics.publish({
+  topic: "email.received",
+  event: {
+    messageId: email.id,
+    inputId,              // Required in producer phase
+    payload: { ... },
+  },
+});
+\`\`\`
+
+Input titles must:
+- Include a stable external identifier
+- Include a human-recognizable descriptor
+- Describe what the input IS, not how it's processed
 
 Good: \`Email from alice@example.com: "Invoice December"\`
-Bad: \`Processing item\`, \`Email #5\`
+Bad: \`Processing item\`, \`Item #5\`
 
 ## Input format
 - You'll be given script goal and other input from the user
@@ -750,13 +791,16 @@ When fixing workflow scripts:
 - Consumer subscriptions (architectural change)
 - Producer schedules (user expectation)
 - Phase structure (prepare/mutate/next order)
+- Producer/consumer \`publishes\` declarations (would break event routing)
 
 ### Must Preserve
 - Event messageId generation logic (for idempotency)
 - Reservation structure in prepare
 - Single mutation per mutate phase
+- Input registration logic (Topics.registerInput calls)
+- inputId linkage in producer publish calls
 
-If fix requires changing topic names or subscriptions, fail explicitly and explain why re-planning is needed.
+If fix requires changing topic names, subscriptions, or publishes declarations, fail explicitly and explain why re-planning is needed.
 
 ## If You Cannot Fix It
 

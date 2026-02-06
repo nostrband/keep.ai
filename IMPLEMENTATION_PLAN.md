@@ -179,7 +179,7 @@ Items are ordered by dependencies - earlier items must be completed before later
 
 ### Phase 7: Prompt Updates
 
-- [ ] **7.1 Update planner prompt - producer section**
+- [x] **7.1 Update planner prompt - producer section**
   - File: `packages/agent/src/agent-env.ts`
   - Dependencies: 3.2, 3.4
   - Details:
@@ -187,7 +187,7 @@ Items are ordered by dependencies - earlier items must be completed before later
     - Show `Topics.registerInput()` usage
     - Show `inputId` in `Topics.publish()` call
 
-- [ ] **7.2 Update planner prompt - consumer section**
+- [x] **7.2 Update planner prompt - consumer section**
   - File: `packages/agent/src/agent-env.ts`
   - Dependencies: 4.3
   - Details:
@@ -195,7 +195,7 @@ Items are ordered by dependencies - earlier items must be completed before later
     - Show `ui: { title: "..." }` in prepare return
     - Show publish without `inputId` in next phase
 
-- [ ] **7.3 Update planner prompt - event design section**
+- [x] **7.3 Update planner prompt - event design section**
   - File: `packages/agent/src/agent-env.ts`
   - Dependencies: 3.2
   - Details:
@@ -203,7 +203,7 @@ Items are ordered by dependencies - earlier items must be completed before later
     - Add Input Registration section with `Topics.registerInput()` example
     - Explain that user-facing metadata is in Input Ledger
 
-- [ ] **7.4 Update planner prompt - phase rules**
+- [x] **7.4 Update planner prompt - phase rules**
   - File: `packages/agent/src/agent-env.ts`
   - Dependencies: 3.1
   - Details:
@@ -211,12 +211,12 @@ Items are ordered by dependencies - earlier items must be completed before later
     - Prepare: "SHOULD: Return { ui: { title: '...' } } when mutation will occur"
     - Next: "CAN: Publish to declared topics (no inputId needed)"
 
-- [ ] **7.5 Update planner prompt - full workflow example**
+- [x] **7.5 Update planner prompt - full workflow example**
   - File: `packages/agent/src/agent-env.ts`
   - Dependencies: 7.1, 7.2
   - Details: Update the complete example to use `registerInput`, `inputId`, `publishes`, `ui.title`
 
-- [ ] **7.6 Update maintainer prompt - constraints**
+- [x] **7.6 Update maintainer prompt - constraints**
   - File: `packages/agent/src/agent-env.ts`
   - Details:
     - Add "Cannot Modify": Producer/consumer `publishes` declarations
