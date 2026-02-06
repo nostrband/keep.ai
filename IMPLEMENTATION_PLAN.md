@@ -1,8 +1,8 @@
 # Keep.AI v1 Implementation Plan
 
-## Status: Ready for next spec
+## Status: Codebase clean, no pending specs
 
-**Last completed:** exec-19 (Consumer wakeAt Scheduling Integration)
+All specs completed and in `specs/done/`. Ideas from `ideas/` folder verified as already implemented.
 
 ---
 
@@ -29,6 +29,10 @@
 ---
 
 ## Recently Completed
+
+### TypeScript Fix - script-store.test.ts ✅
+
+Fixed 17 workflow test objects missing `intent_spec` property (added in exec-17). Discovered during type-check, all tests now pass.
 
 ### exec-19 - Consumer wakeAt Scheduling Integration ✅
 
@@ -163,5 +167,5 @@ Review available specs in `specs/` directory, `docs/dev/` for design docs, and `
 
 ## Current Database Version: 45
 
-**Latest Tag:** v1.0.0-alpha.125
+**Latest Tag:** v1.0.0-alpha.126
 
