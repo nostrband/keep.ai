@@ -170,7 +170,7 @@ Items are ordered by dependencies - earlier items must be completed before later
 
 ### Phase 6: PrepareResult.ui and Mutation UI Title
 
-- [ ] **6.1 Update handler-state-machine to extract ui.title from PrepareResult**
+- [x] **6.1 Update handler-state-machine to extract ui.title from PrepareResult**
   - File: `packages/agent/src/handler-state-machine.ts`
   - Dependencies: 2.6
   - Details:

@@ -52,6 +52,14 @@ export interface HandlerResult {
 }
 
 /**
+ * UI metadata from prepare result (exec-15).
+ */
+export interface PrepareResultUI {
+  /** User-facing title describing what the mutation will do */
+  title?: string;
+}
+
+/**
  * Prepare result from consumer prepare phase.
  */
 export interface PrepareResult {
@@ -59,8 +67,8 @@ export interface PrepareResult {
   reservations: Array<{ topic: string; ids: string[] }>;
   /** Optional data extracted during prepare */
   data?: unknown;
-  /** Optional UI output */
-  ui?: unknown;
+  /** Optional UI metadata for the mutation (exec-15) */
+  ui?: PrepareResultUI;
   /**
    * Optional wakeAt time for time-based scheduling (exec-11).
    * ISO 8601 datetime string (e.g., "2024-01-16T09:00:00Z").
@@ -1116,11 +1124,13 @@ async function executeMutate(
     : { reservations: [], data: undefined };
 
   // Create mutation record BEFORE executing
+  // Extract ui.title from prepareResult for user-facing display (exec-15)
   let mutation = await api.mutationStore.getByHandlerRunId(run.id);
   if (!mutation) {
     mutation = await api.mutationStore.create({
       handler_run_id: run.id,
       workflow_id: run.workflow_id,
+      ui_title: prepareResult.ui?.title,
     });
   }
 
