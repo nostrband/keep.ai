@@ -29,6 +29,7 @@ async function createTables(db: DBInterface): Promise<void> {
       status TEXT NOT NULL DEFAULT 'pending',
       reserved_by_run_id TEXT NOT NULL DEFAULT '',
       created_by_run_id TEXT NOT NULL DEFAULT '',
+      caused_by TEXT NOT NULL DEFAULT '[]',
       attempt_number INTEGER NOT NULL DEFAULT 1,
       created_at INTEGER NOT NULL DEFAULT 0,
       updated_at INTEGER NOT NULL DEFAULT 0,
@@ -65,7 +66,7 @@ describe("EventStore", () => {
       const event = await eventStore.publishEvent(
         "workflow-1",
         "emails",
-        { messageId: "msg-1", title: "New Email", payload: { from: "test@example.com" } },
+        { messageId: "msg-1", payload: { from: "test@example.com" }, causedBy: ["input-1"] },
         "run-1"
       );
 
@@ -73,10 +74,11 @@ describe("EventStore", () => {
       expect(event.id).toBeDefined();
       expect(event.workflow_id).toBe("workflow-1");
       expect(event.message_id).toBe("msg-1");
-      expect(event.title).toBe("New Email");
+      expect(event.title).toBe("");  // Title is deprecated, always empty for new events
       expect(event.payload).toEqual({ from: "test@example.com" });
       expect(event.status).toBe("pending");
       expect(event.created_by_run_id).toBe("run-1");
+      expect(event.caused_by).toEqual(["input-1"]);
       expect(event.attempt_number).toBe(1);
     });
 
@@ -84,7 +86,7 @@ describe("EventStore", () => {
       await eventStore.publishEvent(
         "workflow-1",
         "emails",
-        { messageId: "msg-1", title: "Test", payload: {} },
+        { messageId: "msg-1", payload: {} },
         "run-1"
       );
 
@@ -96,35 +98,35 @@ describe("EventStore", () => {
       const event1 = await eventStore.publishEvent(
         "workflow-1",
         "emails",
-        { messageId: "msg-1", title: "First", payload: { a: 1 } },
+        { messageId: "msg-1", payload: { a: 1 }, causedBy: ["input-1"] },
         "run-1"
       );
 
       const event2 = await eventStore.publishEvent(
         "workflow-1",
         "emails",
-        { messageId: "msg-1", title: "Second", payload: { b: 2 } },
+        { messageId: "msg-1", payload: { b: 2 }, causedBy: ["input-2"] },
         "run-2"
       );
 
-      // Should return the original event
+      // Same ID (idempotent), but payload and caused_by updated (last-write-wins)
       expect(event2.id).toBe(event1.id);
-      expect(event2.title).toBe("First");
-      expect(event2.payload).toEqual({ a: 1 });
+      expect(event2.payload).toEqual({ b: 2 });
+      expect(event2.caused_by).toEqual(["input-2"]);
     });
 
     it("should allow same messageId in different topics", async () => {
       const event1 = await eventStore.publishEvent(
         "workflow-1",
         "emails",
-        { messageId: "msg-1", title: "Email Event", payload: {} },
+        { messageId: "msg-1", payload: {} },
         "run-1"
       );
 
       const event2 = await eventStore.publishEvent(
         "workflow-1",
         "processed",
-        { messageId: "msg-1", title: "Processed Event", payload: {} },
+        { messageId: "msg-1", payload: {} },
         "run-1"
       );
 
@@ -137,7 +139,7 @@ describe("EventStore", () => {
       const created = await eventStore.publishEvent(
         "workflow-1",
         "emails",
-        { messageId: "msg-1", title: "Test", payload: { data: "value" } },
+        { messageId: "msg-1", payload: { data: "value" } },
         "run-1"
       );
 
@@ -157,7 +159,7 @@ describe("EventStore", () => {
       const created = await eventStore.publishEvent(
         "workflow-1",
         "emails",
-        { messageId: "msg-1", title: "Test", payload: {} },
+        { messageId: "msg-1", payload: {} },
         "run-1"
       );
 
@@ -170,7 +172,7 @@ describe("EventStore", () => {
       const created = await eventStore.publishEvent(
         "workflow-1",
         "emails",
-        { messageId: "msg-1", title: "Test", payload: {} },
+        { messageId: "msg-1", payload: {} },
         "run-1"
       );
 
@@ -185,7 +187,7 @@ describe("EventStore", () => {
       await eventStore.publishEvent(
         "workflow-1",
         "emails",
-        { messageId: "msg-1", title: "Email 1", payload: {} },
+        { messageId: "msg-1", payload: {} },
         "run-1"
       );
       // Add small delay to ensure different timestamps
@@ -193,14 +195,14 @@ describe("EventStore", () => {
       await eventStore.publishEvent(
         "workflow-1",
         "emails",
-        { messageId: "msg-2", title: "Email 2", payload: {} },
+        { messageId: "msg-2", payload: {} },
         "run-1"
       );
       await new Promise(resolve => setTimeout(resolve, 10));
       await eventStore.publishEvent(
         "workflow-1",
         "emails",
-        { messageId: "msg-3", title: "Email 3", payload: {} },
+        { messageId: "msg-3", payload: {} },
         "run-1"
       );
     });
@@ -249,19 +251,19 @@ describe("EventStore", () => {
       await eventStore.publishEvent(
         "workflow-1",
         "emails",
-        { messageId: "msg-1", title: "Email 1", payload: {} },
+        { messageId: "msg-1", payload: {} },
         "run-1"
       );
       await eventStore.publishEvent(
         "workflow-1",
         "emails",
-        { messageId: "msg-2", title: "Email 2", payload: {} },
+        { messageId: "msg-2", payload: {} },
         "run-1"
       );
       await eventStore.publishEvent(
         "workflow-1",
         "emails",
-        { messageId: "msg-3", title: "Email 3", payload: {} },
+        { messageId: "msg-3", payload: {} },
         "run-1"
       );
 
@@ -282,7 +284,7 @@ describe("EventStore", () => {
       const event = await eventStore.publishEvent(
         "workflow-1",
         "emails",
-        { messageId: "msg-1", title: "Test", payload: {} },
+        { messageId: "msg-1", payload: {} },
         "run-1"
       );
 
@@ -297,7 +299,7 @@ describe("EventStore", () => {
       await eventStore.publishEvent(
         "workflow-1",
         "emails",
-        { messageId: "msg-1", title: "Test", payload: {} },
+        { messageId: "msg-1", payload: {} },
         "run-1"
       );
 
@@ -313,8 +315,8 @@ describe("EventStore", () => {
     });
 
     it("should handle multiple reservations", async () => {
-      await eventStore.publishEvent("workflow-1", "emails", { messageId: "msg-1", title: "Test 1", payload: {} }, "run-1");
-      await eventStore.publishEvent("workflow-1", "emails", { messageId: "msg-2", title: "Test 2", payload: {} }, "run-1");
+      await eventStore.publishEvent("workflow-1", "emails", { messageId: "msg-1", payload: {} }, "run-1");
+      await eventStore.publishEvent("workflow-1", "emails", { messageId: "msg-2", payload: {} }, "run-1");
 
       await eventStore.reserveEvents("run-2", [
         { topic: "emails", ids: ["msg-1", "msg-2"] }
@@ -330,7 +332,7 @@ describe("EventStore", () => {
       const event = await eventStore.publishEvent(
         "workflow-1",
         "emails",
-        { messageId: "msg-1", title: "Test", payload: {} },
+        { messageId: "msg-1", payload: {} },
         "run-1"
       );
 
@@ -342,8 +344,8 @@ describe("EventStore", () => {
     });
 
     it("should only consume events reserved by the same run", async () => {
-      await eventStore.publishEvent("workflow-1", "emails", { messageId: "msg-1", title: "Test 1", payload: {} }, "run-1");
-      await eventStore.publishEvent("workflow-1", "emails", { messageId: "msg-2", title: "Test 2", payload: {} }, "run-1");
+      await eventStore.publishEvent("workflow-1", "emails", { messageId: "msg-1", payload: {} }, "run-1");
+      await eventStore.publishEvent("workflow-1", "emails", { messageId: "msg-2", payload: {} }, "run-1");
 
       await eventStore.reserveEvents("run-2", [{ topic: "emails", ids: ["msg-1"] }]);
       await eventStore.reserveEvents("run-3", [{ topic: "emails", ids: ["msg-2"] }]);
@@ -361,7 +363,7 @@ describe("EventStore", () => {
       const event = await eventStore.publishEvent(
         "workflow-1",
         "emails",
-        { messageId: "msg-1", title: "Test", payload: {} },
+        { messageId: "msg-1", payload: {} },
         "run-1"
       );
 
@@ -378,7 +380,7 @@ describe("EventStore", () => {
       const event = await eventStore.publishEvent(
         "workflow-1",
         "emails",
-        { messageId: "msg-1", title: "Test", payload: {} },
+        { messageId: "msg-1", payload: {} },
         "run-1"
       );
 
@@ -394,7 +396,7 @@ describe("EventStore", () => {
       const event = await eventStore.publishEvent(
         "workflow-1",
         "emails",
-        { messageId: "msg-1", title: "Test", payload: {} },
+        { messageId: "msg-1", payload: {} },
         "run-1"
       );
 
@@ -410,9 +412,9 @@ describe("EventStore", () => {
 
   describe("countPending", () => {
     it("should count pending events for a topic", async () => {
-      await eventStore.publishEvent("workflow-1", "emails", { messageId: "msg-1", title: "Test 1", payload: {} }, "run-1");
-      await eventStore.publishEvent("workflow-1", "emails", { messageId: "msg-2", title: "Test 2", payload: {} }, "run-1");
-      await eventStore.publishEvent("workflow-1", "emails", { messageId: "msg-3", title: "Test 3", payload: {} }, "run-1");
+      await eventStore.publishEvent("workflow-1", "emails", { messageId: "msg-1", payload: {} }, "run-1");
+      await eventStore.publishEvent("workflow-1", "emails", { messageId: "msg-2", payload: {} }, "run-1");
+      await eventStore.publishEvent("workflow-1", "emails", { messageId: "msg-3", payload: {} }, "run-1");
 
       // Reserve one
       await eventStore.reserveEvents("run-2", [{ topic: "emails", ids: ["msg-1"] }]);
@@ -429,8 +431,8 @@ describe("EventStore", () => {
 
   describe("getReservedByRun", () => {
     it("should return events reserved by a run", async () => {
-      await eventStore.publishEvent("workflow-1", "emails", { messageId: "msg-1", title: "Test 1", payload: {} }, "run-1");
-      await eventStore.publishEvent("workflow-1", "emails", { messageId: "msg-2", title: "Test 2", payload: {} }, "run-1");
+      await eventStore.publishEvent("workflow-1", "emails", { messageId: "msg-1", payload: {} }, "run-1");
+      await eventStore.publishEvent("workflow-1", "emails", { messageId: "msg-2", payload: {} }, "run-1");
 
       await eventStore.reserveEvents("run-2", [{ topic: "emails", ids: ["msg-1", "msg-2"] }]);
 
@@ -447,8 +449,8 @@ describe("EventStore", () => {
   describe("deleteByTopic", () => {
     it("should delete all events for a topic", async () => {
       const topic = await topicStore.create("workflow-1", "emails");
-      await eventStore.publishEvent("workflow-1", "emails", { messageId: "msg-1", title: "Test 1", payload: {} }, "run-1");
-      await eventStore.publishEvent("workflow-1", "emails", { messageId: "msg-2", title: "Test 2", payload: {} }, "run-1");
+      await eventStore.publishEvent("workflow-1", "emails", { messageId: "msg-1", payload: {} }, "run-1");
+      await eventStore.publishEvent("workflow-1", "emails", { messageId: "msg-2", payload: {} }, "run-1");
 
       await eventStore.deleteByTopic(topic.id);
 
@@ -459,9 +461,9 @@ describe("EventStore", () => {
 
   describe("deleteByWorkflow", () => {
     it("should delete all events for a workflow", async () => {
-      await eventStore.publishEvent("workflow-1", "emails", { messageId: "msg-1", title: "Test 1", payload: {} }, "run-1");
-      await eventStore.publishEvent("workflow-1", "processed", { messageId: "msg-2", title: "Test 2", payload: {} }, "run-1");
-      await eventStore.publishEvent("workflow-2", "emails", { messageId: "msg-3", title: "Test 3", payload: {} }, "run-1");
+      await eventStore.publishEvent("workflow-1", "emails", { messageId: "msg-1", payload: {} }, "run-1");
+      await eventStore.publishEvent("workflow-1", "processed", { messageId: "msg-2", payload: {} }, "run-1");
+      await eventStore.publishEvent("workflow-2", "emails", { messageId: "msg-3", payload: {} }, "run-1");
 
       await eventStore.deleteByWorkflow("workflow-1");
 
@@ -487,7 +489,7 @@ describe("EventStore", () => {
       const event = await eventStore.publishEvent(
         "workflow-1",
         "emails",
-        { messageId: "msg-1", title: "Test", payload: complexPayload },
+        { messageId: "msg-1", payload: complexPayload },
         "run-1"
       );
 

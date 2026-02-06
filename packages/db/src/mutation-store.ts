@@ -54,6 +54,8 @@ export interface Mutation {
   next_reconcile_at: number;
   resolved_by: MutationResolution | "";
   resolved_at: number;
+  /** User-facing title from prepareResult.ui.title (exec-15) */
+  ui_title: string;
   created_at: number;
   updated_at: number;
 }
@@ -64,6 +66,8 @@ export interface Mutation {
 export interface CreateMutationInput {
   handler_run_id: string;
   workflow_id: string;
+  /** User-facing title from prepareResult.ui.title (exec-15) */
+  ui_title?: string;
 }
 
 /**
@@ -142,15 +146,16 @@ export class MutationStore {
     const db = tx || this.db.db;
     const id = bytesToHex(randomBytes(16));
     const now = Date.now();
+    const uiTitle = input.ui_title || "";
 
     await db.exec(
       `INSERT INTO mutations (
         id, handler_run_id, workflow_id, tool_namespace, tool_method,
         params, idempotency_key, status, result, error,
         reconcile_attempts, last_reconcile_at, next_reconcile_at,
-        resolved_by, resolved_at, created_at, updated_at
-      ) VALUES (?, ?, ?, '', '', '', '', 'pending', '', '', 0, 0, 0, '', 0, ?, ?)`,
-      [id, input.handler_run_id, input.workflow_id, now, now]
+        resolved_by, resolved_at, ui_title, created_at, updated_at
+      ) VALUES (?, ?, ?, '', '', '', '', 'pending', '', '', 0, 0, 0, '', 0, ?, ?, ?)`,
+      [id, input.handler_run_id, input.workflow_id, uiTitle, now, now]
     );
 
     return {
@@ -169,6 +174,7 @@ export class MutationStore {
       next_reconcile_at: 0,
       resolved_by: "",
       resolved_at: 0,
+      ui_title: uiTitle,
       created_at: now,
       updated_at: now,
     };
@@ -398,6 +404,7 @@ export class MutationStore {
       next_reconcile_at: row.next_reconcile_at as number,
       resolved_by: row.resolved_by as MutationResolution | "",
       resolved_at: row.resolved_at as number,
+      ui_title: (row.ui_title as string) || "",
       created_at: row.created_at as number,
       updated_at: row.updated_at as number,
     };

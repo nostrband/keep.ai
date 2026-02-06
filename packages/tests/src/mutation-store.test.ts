@@ -30,6 +30,7 @@ async function createMutationsTable(db: DBInterface): Promise<void> {
       next_reconcile_at INTEGER NOT NULL DEFAULT 0,
       resolved_by TEXT NOT NULL DEFAULT '',
       resolved_at INTEGER NOT NULL DEFAULT 0,
+      ui_title TEXT NOT NULL DEFAULT '',
       created_at INTEGER NOT NULL DEFAULT 0,
       updated_at INTEGER NOT NULL DEFAULT 0
     )

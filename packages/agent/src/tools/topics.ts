@@ -27,8 +27,14 @@ const EventSchema = z.object({
 
 const PublishEventSchema = z.object({
   messageId: z.string().describe("Unique ID within topic for idempotent publishing (e.g., external entity ID)"),
-  title: z.string().describe("Human-readable description for observability"),
+  /**
+   * @deprecated Per exec-15, event titles are deprecated. User-facing metadata
+   * should be stored in the Input Ledger via Topics.registerInput().
+   */
+  title: z.string().optional().describe("Deprecated: use Input Ledger for user-facing metadata"),
   payload: z.any().describe("Arbitrary JSON data for downstream consumers"),
+  /** Array of input IDs that caused this event (exec-15 causal tracking) */
+  causedBy: z.array(z.string()).optional().describe("Input IDs for causal tracking"),
 });
 
 // ============================================================================
@@ -215,8 +221,9 @@ Note: Phase-restricted to 'producer' or 'next' phase only.`,
 
       const publishEvent: PublishEvent = {
         messageId: input.event.messageId,
-        title: input.event.title,
+        title: input.event.title,  // Deprecated but accepted for backward compat
         payload: input.event.payload,
+        causedBy: input.event.causedBy,
       };
 
       await eventStore.publishEvent(workflowId, input.topic, publishEvent, handlerRunId);

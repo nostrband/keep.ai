@@ -34,6 +34,7 @@ async function createTables(db: DBInterface): Promise<void> {
       status TEXT NOT NULL DEFAULT 'pending',
       reserved_by_run_id TEXT NOT NULL DEFAULT '',
       created_by_run_id TEXT NOT NULL DEFAULT '',
+      caused_by TEXT NOT NULL DEFAULT '[]',
       attempt_number INTEGER NOT NULL DEFAULT 1,
       created_at INTEGER NOT NULL DEFAULT 0,
       updated_at INTEGER NOT NULL DEFAULT 0,
@@ -69,13 +70,13 @@ describe("Topics API Tools", () => {
       await eventStore.publishEvent(
         "workflow-1",
         "emails",
-        { messageId: "msg-1", title: "Email 1", payload: { from: "alice@example.com" } },
+        { messageId: "msg-1", payload: { from: "alice@example.com" } },
         "run-1"
       );
       await eventStore.publishEvent(
         "workflow-1",
         "emails",
-        { messageId: "msg-2", title: "Email 2", payload: { from: "bob@example.com" } },
+        { messageId: "msg-2", payload: { from: "bob@example.com" } },
         "run-1"
       );
 
@@ -92,7 +93,7 @@ describe("Topics API Tools", () => {
       // Verify
       expect(result).toHaveLength(2);
       expect(result[0].messageId).toBe("msg-1");
-      expect(result[0].title).toBe("Email 1");
+      expect(result[0].title).toBe("");  // Title is deprecated, always empty for new events
       expect(result[0].payload).toEqual({ from: "alice@example.com" });
       expect(result[0].status).toBe("pending");
       expect(result[1].messageId).toBe("msg-2");
@@ -104,7 +105,7 @@ describe("Topics API Tools", () => {
         await eventStore.publishEvent(
           "workflow-1",
           "emails",
-          { messageId: `msg-${i}`, title: `Email ${i}`, payload: {} },
+          { messageId: `msg-${i}`, payload: {} },
           "run-1"
         );
         // Small delay to ensure different timestamps
@@ -142,13 +143,13 @@ describe("Topics API Tools", () => {
       await eventStore.publishEvent(
         "workflow-1",
         "emails",
-        { messageId: "msg-1", title: "Email 1", payload: {} },
+        { messageId: "msg-1", payload: {} },
         "run-1"
       );
       await eventStore.publishEvent(
         "workflow-1",
         "emails",
-        { messageId: "msg-2", title: "Email 2", payload: {} },
+        { messageId: "msg-2", payload: {} },
         "run-1"
       );
 
@@ -185,7 +186,7 @@ describe("Topics API Tools", () => {
         await eventStore.publishEvent(
           "workflow-1",
           "emails",
-          { messageId: `msg-${i}`, title: `Email ${i}`, payload: {} },
+          { messageId: `msg-${i}`, payload: {} },
           "run-1"
         );
       }
@@ -206,14 +207,14 @@ describe("Topics API Tools", () => {
       await eventStore.publishEvent(
         "workflow-1",
         "emails",
-        { messageId: "msg-c", title: "Third", payload: {} },
+        { messageId: "msg-c", payload: {} },
         "run-1"
       );
       await new Promise(resolve => setTimeout(resolve, 10));
       await eventStore.publishEvent(
         "workflow-1",
         "emails",
-        { messageId: "msg-a", title: "Fourth", payload: {} },
+        { messageId: "msg-a", payload: {} },
         "run-1"
       );
 
@@ -248,19 +249,19 @@ describe("Topics API Tools", () => {
       await eventStore.publishEvent(
         "workflow-1",
         "emails",
-        { messageId: "msg-1", title: "Email 1", payload: { value: 1 } },
+        { messageId: "msg-1", payload: { value: 1 } },
         "run-1"
       );
       await eventStore.publishEvent(
         "workflow-1",
         "emails",
-        { messageId: "msg-2", title: "Email 2", payload: { value: 2 } },
+        { messageId: "msg-2", payload: { value: 2 } },
         "run-1"
       );
       await eventStore.publishEvent(
         "workflow-1",
         "emails",
-        { messageId: "msg-3", title: "Email 3", payload: { value: 3 } },
+        { messageId: "msg-3", payload: { value: 3 } },
         "run-1"
       );
 
@@ -297,7 +298,7 @@ describe("Topics API Tools", () => {
       await eventStore.publishEvent(
         "workflow-1",
         "emails",
-        { messageId: "msg-1", title: "Email 1", payload: {} },
+        { messageId: "msg-1", payload: {} },
         "run-1"
       );
 
@@ -320,19 +321,19 @@ describe("Topics API Tools", () => {
       await eventStore.publishEvent(
         "workflow-1",
         "emails",
-        { messageId: "msg-pending", title: "Pending", payload: {} },
+        { messageId: "msg-pending", payload: {} },
         "run-1"
       );
       await eventStore.publishEvent(
         "workflow-1",
         "emails",
-        { messageId: "msg-reserved", title: "Reserved", payload: {} },
+        { messageId: "msg-reserved", payload: {} },
         "run-1"
       );
       await eventStore.publishEvent(
         "workflow-1",
         "emails",
-        { messageId: "msg-consumed", title: "Consumed", payload: {} },
+        { messageId: "msg-consumed", payload: {} },
         "run-1"
       );
 
@@ -373,13 +374,13 @@ describe("Topics API Tools", () => {
       await eventStore.publishEvent(
         "workflow-1",
         "emails",
-        { messageId: "msg-1", title: "In Emails", payload: { topic: "emails" } },
+        { messageId: "msg-1", payload: { topic: "emails" } },
         "run-1"
       );
       await eventStore.publishEvent(
         "workflow-1",
         "processed",
-        { messageId: "msg-1", title: "In Processed", payload: { topic: "processed" } },
+        { messageId: "msg-1", payload: { topic: "processed" } },
         "run-1"
       );
 
@@ -420,7 +421,6 @@ describe("Topics API Tools", () => {
         topic: "emails",
         event: {
           messageId: "msg-1",
-          title: "New Email from Alice",
           payload: { from: "alice@example.com", subject: "Hello" },
         },
       });
@@ -429,7 +429,7 @@ describe("Topics API Tools", () => {
       const events = await eventStore.peekEvents("workflow-1", "emails");
       expect(events).toHaveLength(1);
       expect(events[0].message_id).toBe("msg-1");
-      expect(events[0].title).toBe("New Email from Alice");
+      expect(events[0].title).toBe("");  // Title is deprecated, always empty for new events
       expect(events[0].payload).toEqual({ from: "alice@example.com", subject: "Hello" });
       expect(events[0].status).toBe("pending");
       expect(events[0].created_by_run_id).toBe("run-1");
@@ -446,7 +446,6 @@ describe("Topics API Tools", () => {
         topic: "new-topic",
         event: {
           messageId: "msg-1",
-          title: "First Event",
           payload: {},
         },
       });
@@ -468,7 +467,6 @@ describe("Topics API Tools", () => {
         topic: "emails",
         event: {
           messageId: "msg-1",
-          title: "Original Title",
           payload: { original: true },
         },
       });
@@ -478,16 +476,14 @@ describe("Topics API Tools", () => {
         topic: "emails",
         event: {
           messageId: "msg-1",
-          title: "New Title",
           payload: { new: true },
         },
       });
 
-      // Should only have one event with original content
+      // Should have one event with updated content (last-write-wins per exec-15)
       const events = await eventStore.peekEvents("workflow-1", "emails");
       expect(events).toHaveLength(1);
-      expect(events[0].title).toBe("Original Title");
-      expect(events[0].payload).toEqual({ original: true });
+      expect(events[0].payload).toEqual({ new: true });
     });
 
     it("should allow same messageId in different topics", async () => {
@@ -499,12 +495,12 @@ describe("Topics API Tools", () => {
 
       await publishTool.execute({
         topic: "emails",
-        event: { messageId: "msg-1", title: "In Emails", payload: {} },
+        event: { messageId: "msg-1", payload: {} },
       });
 
       await publishTool.execute({
         topic: "processed",
-        event: { messageId: "msg-1", title: "In Processed", payload: {} },
+        event: { messageId: "msg-1", payload: {} },
       });
 
       const emailEvents = await eventStore.peekEvents("workflow-1", "emails");
@@ -523,7 +519,7 @@ describe("Topics API Tools", () => {
 
       await expect(publishTool.execute({
         topic: "emails",
-        event: { messageId: "msg-1", title: "Test", payload: {} },
+        event: { messageId: "msg-1", payload: {} },
       })).rejects.toThrow("Topics.publish requires a workflow context");
     });
 
@@ -536,7 +532,7 @@ describe("Topics API Tools", () => {
 
       await publishTool.execute({
         topic: "emails",
-        event: { messageId: "msg-1", title: "Test", payload: {} },
+        event: { messageId: "msg-1", payload: {} },
       });
 
       const events = await eventStore.peekEvents("workflow-1", "emails");
@@ -563,7 +559,6 @@ describe("Topics API Tools", () => {
         topic: "emails",
         event: {
           messageId: "msg-1",
-          title: "Complex Payload",
           payload: complexPayload,
         },
       });
@@ -592,7 +587,7 @@ describe("Topics API Tools", () => {
 
       await publishTool.execute({
         topic: "emails",
-        event: { messageId: "msg-1", title: "Test", payload: {} },
+        event: { messageId: "msg-1", payload: {} },
       });
 
       const events = await eventStore.peekEvents("workflow-1", "emails");
@@ -649,7 +644,6 @@ describe("Topics API Tools", () => {
         topic: "incoming-emails",
         event: {
           messageId: "email-123",
-          title: "Email from alice@example.com: Meeting Tomorrow",
           payload: { emailId: "123", from: "alice@example.com", subject: "Meeting Tomorrow" },
         },
       });
@@ -658,7 +652,6 @@ describe("Topics API Tools", () => {
         topic: "incoming-emails",
         event: {
           messageId: "email-456",
-          title: "Email from bob@example.com: Project Update",
           payload: { emailId: "456", from: "bob@example.com", subject: "Project Update" },
         },
       });
@@ -701,7 +694,7 @@ describe("Topics API Tools", () => {
       await eventStore.publishEvent(
         "workflow-1",
         "raw-emails",
-        { messageId: "email-1", title: "Raw Email", payload: { emailId: "1" } },
+        { messageId: "email-1", payload: { emailId: "1" } },
         "producer-run"
       );
 
@@ -716,7 +709,6 @@ describe("Topics API Tools", () => {
         topic: "processed-emails",
         event: {
           messageId: "processed:email-1",
-          title: "Processed: Raw Email",
           payload: { originalEmailId: "1", processed: true },
         },
       });

@@ -20,11 +20,18 @@ export interface Event {
   topic_id: string;
   workflow_id: string;
   message_id: string;
+  /**
+   * @deprecated Event titles are deprecated per exec-15. User-facing metadata
+   * lives in the Input Ledger. This field is preserved for backward compatibility
+   * with existing events but should not be used for new events.
+   */
   title: string;
   payload: unknown;
   status: EventStatus;
   reserved_by_run_id: string;
   created_by_run_id: string;
+  /** Array of input IDs that caused this event (exec-15 causal tracking) */
+  caused_by: string[];
   attempt_number: number;
   created_at: number;
   updated_at: number;
@@ -35,8 +42,15 @@ export interface Event {
  */
 export interface PublishEvent {
   messageId: string;
-  title: string;
+  /**
+   * @deprecated Event titles are deprecated per exec-15. User-facing metadata
+   * lives in the Input Ledger. This field is accepted for backward compatibility
+   * but will be ignored for new events (stored as empty string).
+   */
+  title?: string;
   payload: unknown;
+  /** Array of input IDs that caused this event (exec-15 causal tracking) */
+  causedBy?: string[];
 }
 
 /**
@@ -163,13 +177,13 @@ export class EventStore {
 
   /**
    * Publish an event to a topic.
-   * Idempotent by messageId - duplicates are silently ignored.
+   * Idempotent by messageId - on conflict, updates payload and caused_by.
    *
    * @param workflowId - Workflow ID
    * @param topicName - Topic name
    * @param event - Event to publish
    * @param createdByRunId - Handler run that created this event
-   * @returns The created event, or existing event if duplicate
+   * @returns The created event, or updated event if duplicate
    */
   async publishEvent(
     workflowId: string,
@@ -200,28 +214,44 @@ export class EventStore {
       topicId = topicResults[0].id as string;
     }
 
+    // Per exec-15: title is deprecated, new events have empty title
+    // caused_by is the new causal tracking field
+    const causedBy = event.causedBy || [];
+    const causedByJson = JSON.stringify(causedBy);
+
     // Check for existing event with same messageId (idempotency)
     const existing = await this.getByMessageId(topicId, event.messageId, db);
     if (existing) {
-      return existing;
+      // Update payload and caused_by on conflict (last-write-wins per spec)
+      await db.exec(
+        `UPDATE events SET payload = ?, caused_by = ?, updated_at = ?
+         WHERE topic_id = ? AND message_id = ?`,
+        [JSON.stringify(event.payload), causedByJson, now, topicId, event.messageId]
+      );
+      return {
+        ...existing,
+        payload: event.payload,
+        caused_by: causedBy,
+        updated_at: now,
+      };
     }
 
-    // Create new event
+    // Create new event with empty title (deprecated) and caused_by
     const id = bytesToHex(randomBytes(16));
     await db.exec(
       `INSERT INTO events (
         id, topic_id, workflow_id, message_id, title, payload, status,
-        reserved_by_run_id, created_by_run_id, attempt_number,
+        reserved_by_run_id, created_by_run_id, caused_by, attempt_number,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, 'pending', '', ?, 1, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, '', ?, 'pending', '', ?, ?, 1, ?, ?)`,
       [
         id,
         topicId,
         workflowId,
         event.messageId,
-        event.title,
         JSON.stringify(event.payload),
         createdByRunId,
+        causedByJson,
         now,
         now,
       ]
@@ -232,11 +262,12 @@ export class EventStore {
       topic_id: topicId,
       workflow_id: workflowId,
       message_id: event.messageId,
-      title: event.title,
+      title: "",  // Deprecated, always empty for new events
       payload: event.payload,
       status: "pending",
       reserved_by_run_id: "",
       created_by_run_id: createdByRunId,
+      caused_by: causedBy,
       attempt_number: 1,
       created_at: now,
       updated_at: now,
@@ -447,6 +478,45 @@ export class EventStore {
   }
 
   /**
+   * Get the union of caused_by from all events reserved by a handler run.
+   * Used in consumer's next phase to inherit causal tracking (exec-15).
+   *
+   * @param handlerRunId - Handler run ID
+   * @returns Deduplicated array of input IDs from all reserved events
+   */
+  async getCausedByForRun(
+    handlerRunId: string,
+    tx?: DBInterface
+  ): Promise<string[]> {
+    const db = tx || this.db.db;
+
+    const results = await db.execO<{ caused_by: string }>(
+      `SELECT caused_by FROM events WHERE reserved_by_run_id = ?`,
+      [handlerRunId]
+    );
+
+    if (!results) return [];
+
+    const inputIds = new Set<string>();
+    for (const row of results) {
+      try {
+        const causedBy = JSON.parse(row.caused_by || "[]");
+        if (Array.isArray(causedBy)) {
+          for (const id of causedBy) {
+            if (typeof id === "string" && id) {
+              inputIds.add(id);
+            }
+          }
+        }
+      } catch {
+        // Skip invalid JSON
+      }
+    }
+
+    return [...inputIds];
+  }
+
+  /**
    * Delete all events for a topic.
    */
   async deleteByTopic(topicId: string, tx?: DBInterface): Promise<void> {
@@ -476,16 +546,31 @@ export class EventStore {
       // Keep empty object if parsing fails
     }
 
+    // Parse caused_by JSON array
+    let causedBy: string[] = [];
+    try {
+      const causedByStr = row.caused_by as string;
+      if (causedByStr) {
+        const parsed = JSON.parse(causedByStr);
+        if (Array.isArray(parsed)) {
+          causedBy = parsed.filter((id): id is string => typeof id === "string");
+        }
+      }
+    } catch {
+      // Keep empty array if parsing fails
+    }
+
     return {
       id: row.id as string,
       topic_id: row.topic_id as string,
       workflow_id: row.workflow_id as string,
       message_id: row.message_id as string,
-      title: row.title as string,
+      title: (row.title as string) || "",
       payload,
       status: row.status as EventStatus,
       reserved_by_run_id: row.reserved_by_run_id as string,
       created_by_run_id: row.created_by_run_id as string,
+      caused_by: causedBy,
       attempt_number: row.attempt_number as number,
       created_at: row.created_at as number,
       updated_at: row.updated_at as number,

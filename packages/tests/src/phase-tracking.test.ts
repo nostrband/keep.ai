@@ -195,6 +195,7 @@ describe("ToolWrapper Phase Tracking", () => {
         next_reconcile_at: 0,
         resolved_by: "",
         resolved_at: 0,
+        ui_title: "",
         created_at: Date.now(),
         updated_at: Date.now(),
       };
@@ -231,6 +232,7 @@ describe("ToolWrapper Phase Tracking", () => {
         next_reconcile_at: 0,
         resolved_by: "",
         resolved_at: 0,
+        ui_title: "",
         created_at: Date.now(),
         updated_at: Date.now(),
       };
@@ -262,6 +264,7 @@ describe("ToolWrapper Phase Tracking", () => {
         next_reconcile_at: 0,
         resolved_by: "",
         resolved_at: 0,
+        ui_title: "",
         created_at: Date.now(),
         updated_at: Date.now(),
       };

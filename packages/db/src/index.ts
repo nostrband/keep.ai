@@ -77,5 +77,9 @@ export type { HandlerState } from "./handler-state-store";
 export { ProducerScheduleStore } from "./producer-schedule-store";
 export type { ProducerSchedule, ScheduleType } from "./producer-schedule-store";
 
+// Input store (execution model - Input Ledger, exec-15)
+export { InputStore } from "./input-store";
+export type { Input, RegisterInputParams } from "./input-store";
+
 // Api
 export * from "./api";

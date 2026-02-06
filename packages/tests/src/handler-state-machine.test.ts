@@ -116,6 +116,7 @@ async function createTables(db: DBInterface): Promise<void> {
       next_reconcile_at INTEGER NOT NULL DEFAULT 0,
       resolved_by TEXT NOT NULL DEFAULT '',
       resolved_at INTEGER NOT NULL DEFAULT 0,
+      ui_title TEXT NOT NULL DEFAULT '',
       created_at INTEGER NOT NULL DEFAULT 0,
       updated_at INTEGER NOT NULL DEFAULT 0
     )
@@ -159,6 +160,7 @@ async function createTables(db: DBInterface): Promise<void> {
       status TEXT NOT NULL DEFAULT 'pending',
       reserved_by_run_id TEXT NOT NULL DEFAULT '',
       created_by_run_id TEXT NOT NULL DEFAULT '',
+      caused_by TEXT NOT NULL DEFAULT '[]',
       attempt_number INTEGER NOT NULL DEFAULT 1,
       created_at INTEGER NOT NULL DEFAULT 0,
       updated_at INTEGER NOT NULL DEFAULT 0,
