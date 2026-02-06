@@ -656,7 +656,20 @@ async function createHandlerSandbox(
   };
   sandbox.context = evalContext;
 
-  // Create workflow tools
+  // Parse workflow config for topic validation (exec-15)
+  let workflowConfig: WorkflowConfig | undefined;
+  if (workflow.handler_config) {
+    try {
+      workflowConfig = JSON.parse(workflow.handler_config) as WorkflowConfig;
+    } catch {
+      // Invalid config - will skip topic validation
+    }
+  }
+
+  // Use a ref object so tools can access the toolWrapper's phase after it's created
+  const toolWrapperRef: { current: ToolWrapper | null } = { current: null };
+
+  // Create workflow tools with phase, handler name, and config getters for topic validation
   const tools = createWorkflowTools({
     api: context.api,
     getContext: () => sandbox.context!,
@@ -665,9 +678,17 @@ async function createHandlerSandbox(
     workflowId: workflow.id,
     scriptRunId: run.script_run_id,
     handlerRunId: run.id,
+    getPhase: () => {
+      const phase = toolWrapperRef.current?.getPhase();
+      // Only return producer/next for topic validation; other phases don't publish
+      if (phase === 'producer' || phase === 'next') return phase;
+      return null;
+    },
+    getHandlerName: () => run.handler_name,
+    getWorkflowConfig: () => workflowConfig,
   });
 
-  // Create tool wrapper
+  // Create tool wrapper with the tools
   const toolWrapper = new ToolWrapper({
     tools,
     api: context.api,
@@ -679,6 +700,9 @@ async function createHandlerSandbox(
     handlerRunId: run.id,
     abortController: context.abortController,
   });
+
+  // Set the ref so getPhase callback can access the wrapper
+  toolWrapperRef.current = toolWrapper;
 
   // Inject tools into sandbox
   const global = await toolWrapper.createGlobal();

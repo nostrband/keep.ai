@@ -10,6 +10,7 @@ import { KeepDbApi } from "@app/db";
 import type { ConnectionManager } from "@app/connectors";
 import { EvalContext } from "./sandbox";
 import { Tool } from "../tools/types";
+import { WorkflowConfig } from "../workflow-validator";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyTool = Tool<any, any>;
@@ -73,6 +74,10 @@ export interface ToolListConfig {
   handlerRunId?: string;
   /** Function to get current execution phase (for Topics.publish phase validation) */
   getPhase?: () => 'producer' | 'next' | null;
+  /** Function to get current handler name (for topic validation) */
+  getHandlerName?: () => string | undefined;
+  /** Function to get workflow config (for topic validation) */
+  getWorkflowConfig?: () => WorkflowConfig | undefined;
 }
 
 /**
@@ -96,7 +101,7 @@ export interface ToolListConfig {
  * @returns Array of Tool instances for workflow execution
  */
 export function createWorkflowTools(config: ToolListConfig): AnyTool[] {
-  const { api, getContext, connectionManager, userPath, workflowId, scriptRunId, handlerRunId, getPhase } = config;
+  const { api, getContext, connectionManager, userPath, workflowId, scriptRunId, handlerRunId, getPhase, getHandlerName, getWorkflowConfig } = config;
 
   // Create workflow ID and handler run ID getters for Topics tools
   const getWorkflowId = () => workflowId;
@@ -161,7 +166,7 @@ export function createWorkflowTools(config: ToolListConfig): AnyTool[] {
     // Topics API (exec-03, exec-15)
     makeTopicsPeekTool(api.eventStore, getWorkflowId, getHandlerRunId),
     makeTopicsGetByIdsTool(api.eventStore, getWorkflowId),
-    makeTopicsPublishTool(api.eventStore, getWorkflowId, getHandlerRunId, getPhase),
+    makeTopicsPublishTool(api.eventStore, getWorkflowId, getHandlerRunId, getPhase, getHandlerName, getWorkflowConfig),
     makeTopicsRegisterInputTool(api.inputStore, getWorkflowId, getHandlerRunId),
   ];
 

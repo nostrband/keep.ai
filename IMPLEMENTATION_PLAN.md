@@ -152,7 +152,7 @@ Items are ordered by dependencies - earlier items must be completed before later
 
 ### Phase 5: Handler Context Threading
 
-- [ ] **5.1 Pass workflowConfig and handlerName to ToolContext**
+- [x] **5.1 Pass workflowConfig and handlerName to ToolContext**
   - Files: `packages/agent/src/handler-state-machine.ts`, `packages/agent/src/sandbox/tool-lists.ts`
   - Dependencies: 4.1
   - Details:
@@ -160,7 +160,7 @@ Items are ordered by dependencies - earlier items must be completed before later
     - Update `createWorkflowTools()` signature to accept `{ workflowConfig, handlerName }`
     - Pass these to Topics tool factories for topic validation
 
-- [ ] **5.2 Implement topic validation in Topics.publish**
+- [x] **5.2 Implement topic validation in Topics.publish**
   - File: `packages/agent/src/tools/topics.ts`
   - Dependencies: 5.1
   - Details:

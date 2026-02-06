@@ -12,6 +12,7 @@
 import { z } from "zod";
 import { defineReadOnlyTool, defineTool, Tool } from "./types";
 import { EventStore, Event, PublishEvent, PeekEventsOptions, InputStore } from "@app/db";
+import { WorkflowConfig } from "../workflow-validator";
 
 // ============================================================================
 // Schemas
@@ -187,21 +188,27 @@ type PublishOutput = void;
  * In producer phase:
  * - inputId is required (from Topics.registerInput())
  * - causedBy is set to [inputId]
+ * - Topics must be in producer's publishes declaration
  *
  * In next phase:
  * - inputId is forbidden
  * - causedBy is inherited from reserved events (via getCausedByForRun)
+ * - Topics must be in consumer's publishes declaration
  *
  * @param eventStore - EventStore for publishing events
  * @param getWorkflowId - Function to get current workflow ID
  * @param getHandlerRunId - Function to get current handler run ID
  * @param getPhase - Optional function to get current phase for validation
+ * @param getHandlerName - Optional function to get current handler name for topic validation
+ * @param getWorkflowConfig - Optional function to get workflow config for topic validation
  */
 export function makeTopicsPublishTool(
   eventStore: EventStore,
   getWorkflowId: () => string | undefined,
   getHandlerRunId: () => string | undefined,
-  getPhase?: () => 'producer' | 'next' | null
+  getPhase?: () => 'producer' | 'next' | null,
+  getHandlerName?: () => string | undefined,
+  getWorkflowConfig?: () => WorkflowConfig | undefined
 ): Tool<PublishInput, PublishOutput> {
   return defineTool({
     namespace: "Topics",
@@ -249,9 +256,33 @@ Note: Phase-restricted to 'producer' or 'next' phase only.`,
 
       const handlerRunId = getHandlerRunId() || "";
       const phase = getPhase?.() ?? null;
+      const handlerName = getHandlerName?.();
+      const workflowConfig = getWorkflowConfig?.();
 
       // Normalize topic to array for multi-topic support
       const topics = Array.isArray(input.topic) ? input.topic : [input.topic];
+
+      // Validate topics against declarations if we have config context (exec-15)
+      if (handlerName && workflowConfig && phase) {
+        let declaredTopics: string[] | undefined;
+
+        if (phase === 'producer') {
+          declaredTopics = workflowConfig.producers?.[handlerName]?.publishes;
+        } else if (phase === 'next') {
+          declaredTopics = workflowConfig.consumers?.[handlerName]?.publishes;
+        }
+
+        if (declaredTopics) {
+          for (const topic of topics) {
+            if (!declaredTopics.includes(topic)) {
+              throw new Error(
+                `Cannot publish to undeclared topic '${topic}'. ` +
+                `Handler '${handlerName}' declares: [${declaredTopics.join(', ')}]`
+              );
+            }
+          }
+        }
+      }
 
       // Determine causedBy based on phase and inputId
       let causedBy: string[] | undefined;
