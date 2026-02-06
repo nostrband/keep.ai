@@ -32,6 +32,10 @@ import { ToolWrapper, ExecutionPhase } from "./sandbox/tool-wrapper";
 import { createWorkflowTools } from "./sandbox/tool-lists";
 import { WorkflowConfig } from "./workflow-validator";
 import { computeNextRunTime } from "./schedule-utils";
+import {
+  ReconciliationRegistry,
+  type MutationParams,
+} from "./reconciliation";
 import type { ConnectionManager } from "@app/connectors";
 import debug from "debug";
 
@@ -439,6 +443,94 @@ async function pauseRunForIndeterminate(
     status: "paused",
   });
   log(`Workflow ${run.workflow_id} paused due to indeterminate mutation`);
+}
+
+// ============================================================================
+// Immediate Reconciliation (exec-18)
+// ============================================================================
+
+/**
+ * Handle uncertain mutation outcome with immediate reconciliation.
+ *
+ * Per docs/dev/13-reconciliation.md §13.7.2:
+ * 1. If no reconcile method available → indeterminate immediately
+ * 2. Try immediate reconciliation
+ * 3. If reconcile returns applied → mark applied, proceed
+ * 4. If reconcile returns failed → mark failed (can retry mutate)
+ * 5. If reconcile returns retry → mark needs_reconcile (background job handles)
+ *
+ * @returns true if mutation resolved (applied/failed), false if needs background reconciliation
+ */
+async function handleUncertainOutcome(
+  api: KeepDbApi,
+  mutation: Mutation,
+  errorMessage: string
+): Promise<"applied" | "failed" | "needs_reconcile" | "indeterminate"> {
+  log(`Handling uncertain outcome for mutation ${mutation.id}`);
+
+  // Build mutation params for reconciliation
+  const mutationParams: MutationParams = {
+    toolNamespace: mutation.tool_namespace,
+    toolMethod: mutation.tool_method,
+    params: mutation.params,
+    idempotencyKey: mutation.idempotency_key || undefined,
+  };
+
+  // Check if reconcile method exists
+  if (!ReconciliationRegistry.hasReconcileMethod(
+    mutationParams.toolNamespace,
+    mutationParams.toolMethod
+  )) {
+    // No reconcile method - immediately indeterminate
+    log(`No reconcile method for ${mutationParams.toolNamespace}:${mutationParams.toolMethod}`);
+    await api.mutationStore.markIndeterminate(mutation.id, errorMessage);
+    return "indeterminate";
+  }
+
+  // Attempt immediate reconciliation
+  log(`Attempting immediate reconciliation for ${mutationParams.toolNamespace}:${mutationParams.toolMethod}`);
+  try {
+    const result = await ReconciliationRegistry.reconcile(mutationParams);
+
+    if (!result) {
+      // Registry returned null (shouldn't happen since we checked hasReconcileMethod)
+      await api.mutationStore.markIndeterminate(mutation.id, errorMessage);
+      return "indeterminate";
+    }
+
+    switch (result.status) {
+      case "applied":
+        // Mutation confirmed as committed
+        log(`Immediate reconciliation confirmed applied for mutation ${mutation.id}`);
+        await api.mutationStore.markApplied(
+          mutation.id,
+          result.result ? JSON.stringify(result.result) : ""
+        );
+        return "applied";
+
+      case "failed":
+        // Mutation confirmed as not committed - safe to retry
+        log(`Immediate reconciliation confirmed failed for mutation ${mutation.id}`);
+        await api.mutationStore.markFailed(mutation.id, errorMessage);
+        return "failed";
+
+      case "retry":
+        // Reconciliation inconclusive - hand off to background
+        log(`Immediate reconciliation returned retry for mutation ${mutation.id}`);
+        await api.mutationStore.markNeedsReconcile(mutation.id, errorMessage);
+        return "needs_reconcile";
+
+      default:
+        // Unknown status - treat as indeterminate
+        await api.mutationStore.markIndeterminate(mutation.id, errorMessage);
+        return "indeterminate";
+    }
+  } catch (error) {
+    // Reconciliation attempt itself failed - treat as needs_reconcile
+    log(`Immediate reconciliation threw error: ${error}`);
+    await api.mutationStore.markNeedsReconcile(mutation.id, errorMessage);
+    return "needs_reconcile";
+  }
 }
 
 // ============================================================================
@@ -945,16 +1037,36 @@ return await workflow.consumers.${run.handler_name}.prepare(__state__);
       // Not started yet, execute mutate handler
       await executeMutate(api, run, context);
     } else if (mutation.status === "in_flight") {
-      // Crashed mid-mutation → indeterminate (no reconciliation)
-      // Per exec-14: Mark indeterminate and pause workflow
-      await api.mutationStore.markIndeterminate(
-        mutation.id,
+      // Crashed mid-mutation → uncertain outcome
+      // Per exec-18: Attempt immediate reconciliation before marking indeterminate
+      const outcome = await handleUncertainOutcome(
+        api,
+        mutation,
         "Mutation was in_flight at restart - outcome uncertain"
       );
-      await pauseRunForIndeterminate(api, run, "indeterminate_mutation");
+      if (outcome === "applied") {
+        // Reconciliation confirmed mutation succeeded
+        log(`Handler run ${run.id} (consumer): mutating → mutated (reconciliation confirmed)`);
+        await api.handlerRunStore.updatePhase(run.id, "mutated");
+      } else if (outcome === "failed") {
+        // Reconciliation confirmed mutation did not happen
+        // State machine will restart mutate phase on next iteration
+        log(`Handler run ${run.id} (consumer): reconciliation confirmed mutation failed, will retry`);
+      } else if (outcome === "needs_reconcile") {
+        // Reconciliation pending - pause for background reconciliation
+        log(`Handler run ${run.id} (consumer): needs background reconciliation`);
+        await pauseRun(api, run, "paused:reconciliation", "needs_reconcile");
+      } else {
+        // Indeterminate - pause workflow for user resolution
+        await pauseRunForIndeterminate(api, run, "indeterminate_mutation");
+      }
     } else if (mutation.status === "applied") {
       log(`Handler run ${run.id} (consumer): mutating → mutated`);
       await api.handlerRunStore.updatePhase(run.id, "mutated");
+    } else if (mutation.status === "needs_reconcile") {
+      // Awaiting background reconciliation - ensure run is paused
+      log(`Handler run ${run.id} (consumer): awaiting reconciliation`);
+      await pauseRun(api, run, "paused:reconciliation", "needs_reconcile");
     } else if (mutation.status === "indeterminate") {
       // Already indeterminate from previous attempt - ensure workflow paused
       await pauseRunForIndeterminate(api, run, "indeterminate_mutation");
@@ -1175,11 +1287,8 @@ return await workflow.consumers.${run.handler_name}.mutate(__prepared__);
             classifiedError.message
           );
         } else if (updatedMutation.status === "in_flight") {
-          // Uncertain outcome
-          await api.mutationStore.markIndeterminate(
-            updatedMutation.id,
-            classifiedError.message
-          );
+          // Uncertain outcome - attempt immediate reconciliation (exec-18)
+          await handleUncertainOutcome(api, updatedMutation, classifiedError.message);
         }
       }
       // State machine will read mutation status on next iteration
@@ -1217,10 +1326,8 @@ return await workflow.consumers.${run.handler_name}.mutate(__prepared__);
           classifiedError.message
         );
       } else if (updatedMutation.status === "in_flight") {
-        await api.mutationStore.markIndeterminate(
-          updatedMutation.id,
-          classifiedError.message
-        );
+        // Uncertain outcome - attempt immediate reconciliation (exec-18)
+        await handleUncertainOutcome(api, updatedMutation, classifiedError.message);
       }
     }
     // State machine will read mutation status on next iteration

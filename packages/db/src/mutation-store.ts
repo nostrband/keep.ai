@@ -9,8 +9,8 @@ import { DBInterface } from "./interfaces";
  * - in_flight: External call started (for crash detection)
  * - applied: External call completed successfully
  * - failed: External call failed definitively
- * - needs_reconcile: Needs reconciliation (future use)
- * - indeterminate: Uncertain outcome (crash during external call)
+ * - needs_reconcile: Uncertain outcome, reconciliation in progress
+ * - indeterminate: Uncertain outcome, reconciliation exhausted or unavailable
  */
 export type MutationStatus =
   | "pending"
@@ -19,6 +19,19 @@ export type MutationStatus =
   | "failed"
   | "needs_reconcile"
   | "indeterminate";
+
+/**
+ * Result from a connector's reconcile() method.
+ * Per docs/dev/13-reconciliation.md §13.6.2:
+ * - applied: Mutation confirmed as committed
+ * - failed: Mutation confirmed as not committed (safe to retry)
+ * - retry: Reconciliation inconclusive, should retry later
+ */
+export interface ReconcileResult {
+  status: "applied" | "failed" | "retry";
+  /** Tool-specific result (e.g., message ID for email) - only when status=applied */
+  result?: unknown;
+}
 
 /**
  * User resolution for indeterminate mutations.
@@ -299,6 +312,98 @@ export class MutationStore {
     tx?: DBInterface
   ): Promise<void> {
     await this.update(id, { status: "indeterminate", error }, tx);
+  }
+
+  /**
+   * Mark mutation as needs_reconcile (uncertain outcome, will retry).
+   * Per docs/dev/13-reconciliation.md §13.7.2.
+   */
+  async markNeedsReconcile(
+    id: string,
+    error: string,
+    tx?: DBInterface
+  ): Promise<void> {
+    const now = Date.now();
+    await this.update(
+      id,
+      {
+        status: "needs_reconcile",
+        error,
+        last_reconcile_at: now,
+        // Schedule first reconciliation attempt immediately (scheduler will pick up)
+        next_reconcile_at: now,
+      },
+      tx
+    );
+  }
+
+  /**
+   * Get mutations due for reconciliation.
+   * Per docs/dev/13-reconciliation.md §13.7.4.
+   */
+  async getDueForReconciliation(tx?: DBInterface): Promise<Mutation[]> {
+    const db = tx || this.db.db;
+    const now = Date.now();
+    const results = await db.execO<Record<string, unknown>>(
+      `SELECT * FROM mutations
+       WHERE status = 'needs_reconcile'
+       AND next_reconcile_at <= ?
+       ORDER BY next_reconcile_at ASC`,
+      [now]
+    );
+
+    if (!results) return [];
+    return results.map((row) => this.mapRowToMutation(row));
+  }
+
+  /**
+   * Increment reconcile attempts and schedule next attempt.
+   * Per docs/dev/13-reconciliation.md §13.7.4.
+   *
+   * @param id - Mutation ID
+   * @param nextAttemptDelayMs - Delay before next attempt (for exponential backoff)
+   */
+  async scheduleNextReconcile(
+    id: string,
+    nextAttemptDelayMs: number,
+    tx?: DBInterface
+  ): Promise<void> {
+    const now = Date.now();
+    const db = tx || this.db.db;
+
+    // Atomically increment attempts and schedule next
+    await db.exec(
+      `UPDATE mutations SET
+        reconcile_attempts = reconcile_attempts + 1,
+        last_reconcile_at = ?,
+        next_reconcile_at = ?,
+        updated_at = ?
+       WHERE id = ?`,
+      [now, now + nextAttemptDelayMs, now, id]
+    );
+  }
+
+  /**
+   * Get mutations in needs_reconcile state for a workflow.
+   */
+  async getNeedsReconcile(
+    workflowId?: string,
+    tx?: DBInterface
+  ): Promise<Mutation[]> {
+    const db = tx || this.db.db;
+    let query = `SELECT * FROM mutations WHERE status = 'needs_reconcile'`;
+    const params: unknown[] = [];
+
+    if (workflowId) {
+      query += ` AND workflow_id = ?`;
+      params.push(workflowId);
+    }
+
+    query += ` ORDER BY next_reconcile_at ASC`;
+
+    const results = await db.execO<Record<string, unknown>>(query, params);
+    if (!results) return [];
+    return results.map((row) => this.mapRowToMutation(row));
   }
 
   /**

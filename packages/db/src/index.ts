@@ -67,7 +67,7 @@ export type { HandlerRun, HandlerType, HandlerRunPhase, HandlerErrorType, RunSta
 
 // Mutation store (execution model - mutations)
 export { MutationStore } from "./mutation-store";
-export type { Mutation, MutationStatus, MutationResolution, CreateMutationInput, UpdateMutationInput } from "./mutation-store";
+export type { Mutation, MutationStatus, MutationResolution, ReconcileResult, CreateMutationInput, UpdateMutationInput } from "./mutation-store";
 
 // Handler state store (execution model - handler state)
 export { HandlerStateStore } from "./handler-state-store";

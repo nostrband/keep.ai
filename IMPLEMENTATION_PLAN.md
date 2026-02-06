@@ -1,12 +1,70 @@
 # Keep.AI v1 Implementation Plan
 
-## Status: Ready for Next Spec
+## Status: Ready for next spec
 
-**exec-17 (Intent Contract) implementation complete.**
+**Last completed:** exec-18 (Mutation Reconciliation Runtime)
+
+---
+
+## Codebase Architecture Summary
+
+### Execution Model (discovered during analysis)
+
+**Dual Execution Paths:**
+1. **Legacy**: Direct script execution via `WorkflowWorker.executeWorkflow()`
+2. **New (exec-07)**: Session-based execution via `session-orchestration.ts`
+
+**Key Components:**
+- `WorkflowScheduler` - 10s interval loop, cron-based scheduling, retry management
+- `TaskScheduler` - Inbox-driven agent task execution
+- `handler-state-machine.ts` - Consumer three-phase model (prepare/mutate/next)
+- `MutationStore` - Mutation ledger with status tracking
+- `ReconciliationScheduler` - Background reconciliation for uncertain mutations
+
+**Scheduler Runtime Notes:**
+- Producer schedules stored in `producer_schedules` table (v43 migration)
+- Consumer wakeAt stored in `handler_state` table (v42 migration)
+- Reconciliation scheduler processes `needs_reconcile` mutations with exponential backoff
 
 ---
 
 ## Recently Completed
+
+### exec-18 - Mutation Reconciliation Runtime ✅
+
+**Spec File:** [`specs/done/exec-18-mutation-reconciliation-runtime.md`](specs/done/exec-18-mutation-reconciliation-runtime.md)
+
+**Why Critical:** Per `docs/dev/13-reconciliation.md`, mutation reconciliation is "the foundation for idempotent execution guarantees." Without it, the system cannot recover from transient failures (timeouts, network issues, crashes during external calls).
+
+**Implementation Summary:**
+- Phase 1: Connector reconcile interface - ReconcileResult, MutationParams, ReconcilableTool types
+- Phase 2: Gmail connector reconcile - Search sent folder by idempotency key
+- Phase 3: Mutation wrapper updates - handleUncertainOutcome in handler-state-machine
+- Phase 4: Background reconciliation job - ReconciliationScheduler with exponential backoff
+- Phase 5: MutationStore extensions - markNeedsReconcile, getDueForReconciliation, scheduleNextReconcile
+- Phase 6: Handler state machine integration - needs_reconcile status handling
+- Phase 7: Tests - 19 new tests for reconciliation functionality
+
+**Key Features:**
+- ReconciliationRegistry singleton for tool reconcile method registration
+- Immediate reconciliation on uncertain outcomes (timeout/network errors)
+- Background reconciliation with configurable policy (max attempts, backoff)
+- ReconciliationScheduler with 10s default check interval
+- Exhausted reconciliation → indeterminate status → workflow paused
+- Gmail send reconciliation via sent folder search
+
+**Files Created:**
+- `packages/agent/src/reconciliation/types.ts`
+- `packages/agent/src/reconciliation/registry.ts`
+- `packages/agent/src/reconciliation/gmail-reconcile.ts`
+- `packages/agent/src/reconciliation/scheduler.ts`
+- `packages/agent/src/reconciliation/index.ts`
+- `packages/tests/src/reconciliation.test.ts`
+
+**Files Modified:**
+- `packages/db/src/mutation-store.ts` - Added reconciliation methods
+- `packages/agent/src/handler-state-machine.ts` - Immediate reconciliation integration
+- `packages/agent/src/index.ts` - Export reconciliation module
 
 ### exec-17 - Intent Contract ✅
 
@@ -76,3 +134,4 @@ Review available specs in `specs/` directory, `docs/dev/` for design docs, and `
 ## Current Database Version: 45
 
 **Latest Tag:** v1.0.0-alpha.124
+

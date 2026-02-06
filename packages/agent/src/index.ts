@@ -200,6 +200,21 @@ export {
   formatIntentForPrompt,
 } from "./intent-extract";
 
+// Reconciliation (exec-18)
+export {
+  ReconciliationRegistry,
+  ReconciliationScheduler,
+  registerGmailReconcileMethods,
+  DEFAULT_RECONCILIATION_POLICY,
+  calculateBackoff,
+  type ReconcileResult,
+  type MutationParams,
+  type ReconcileMethod,
+  type ReconcilableTool,
+  type ReconciliationPolicy,
+  type ReconciliationSchedulerConfig,
+} from "./reconciliation";
+
 export type {
   Sandbox,
   SandboxOptions,
