@@ -1192,6 +1192,7 @@ describe("ScriptStore", () => {
         maintenance_fix_count: 0,
         active_script_id: "",
         handler_config: "",
+        intent_spec: "",
       });
 
       // Create a recent draft workflow
@@ -1213,6 +1214,7 @@ describe("ScriptStore", () => {
         maintenance_fix_count: 0,
         active_script_id: "",
         handler_config: "",
+        intent_spec: "",
       });
 
       const abandoned = await scriptStore.getAbandonedDrafts(7);
@@ -1255,6 +1257,7 @@ describe("ScriptStore", () => {
         maintenance_fix_count: 0,
         active_script_id: "",
         handler_config: "",
+        intent_spec: "",
       });
 
       // Abandoned draft (10 days old)
@@ -1273,6 +1276,7 @@ describe("ScriptStore", () => {
         maintenance_fix_count: 0,
         active_script_id: "",
         handler_config: "",
+        intent_spec: "",
       });
 
       // Recent draft (1 day old)
@@ -1291,6 +1295,7 @@ describe("ScriptStore", () => {
         maintenance_fix_count: 0,
         active_script_id: "",
         handler_config: "",
+        intent_spec: "",
       });
 
       const summary = await scriptStore.getDraftActivitySummary();
@@ -1328,6 +1333,7 @@ describe("ScriptStore", () => {
         maintenance_fix_count: 0,
         active_script_id: "",
         handler_config: "",
+        intent_spec: "",
       });
 
       const abandoned = await scriptStore.getAbandonedDrafts(7);
@@ -1360,6 +1366,7 @@ describe("ScriptStore", () => {
         maintenance_fix_count: 0,
         active_script_id: "",
         handler_config: "",
+        intent_spec: "",
       });
 
       const abandoned = await scriptStore.getAbandonedDrafts(7);
@@ -1391,6 +1398,7 @@ describe("ScriptStore", () => {
         maintenance_fix_count: 0,
         active_script_id: "",
         handler_config: "",
+        intent_spec: "",
       });
 
       // Add a recent script (2 days ago) - should update last_activity via COALESCE
@@ -1444,6 +1452,7 @@ describe("ScriptStore", () => {
         maintenance_fix_count: 0,
         active_script_id: "",
         handler_config: "",
+        intent_spec: "",
       });
 
       const abandoned = await scriptStore.getAbandonedDrafts(7);
@@ -1479,6 +1488,7 @@ describe("ScriptStore", () => {
         maintenance_fix_count: 0,
         active_script_id: "",
         handler_config: "",
+        intent_spec: "",
       });
 
       // Medium-old script (10 days ago)
@@ -1544,6 +1554,7 @@ describe("ScriptStore", () => {
         maintenance_fix_count: 0,
         active_script_id: "",
         handler_config: "",
+        intent_spec: "",
       });
 
       // Old chat message (15 days ago)
@@ -1600,6 +1611,7 @@ describe("ScriptStore", () => {
         maintenance_fix_count: 0,
         active_script_id: "",
         handler_config: "",
+        intent_spec: "",
       });
 
       // Should be abandoned based on workflow timestamp
@@ -1642,6 +1654,7 @@ describe("ScriptStore", () => {
         maintenance_fix_count: 0,
         active_script_id: "",
         handler_config: "",
+        intent_spec: "",
       });
 
       // Abandoned draft (10 days old - should only be in abandonedDrafts)
@@ -1660,6 +1673,7 @@ describe("ScriptStore", () => {
         maintenance_fix_count: 0,
         active_script_id: "",
         handler_config: "",
+        intent_spec: "",
       });
 
       // Recent draft (5 days old - should only be in staleDrafts)
@@ -1678,6 +1692,7 @@ describe("ScriptStore", () => {
         maintenance_fix_count: 0,
         active_script_id: "",
         handler_config: "",
+        intent_spec: "",
       });
 
       const summary = await scriptStore.getDraftActivitySummary();
@@ -1716,6 +1731,7 @@ describe("ScriptStore", () => {
         maintenance_fix_count: 0,
         active_script_id: "",
         handler_config: "",
+        intent_spec: "",
       });
 
       // Workflow exactly 30 days - 1 second ago (should NOT be archivable)
@@ -1734,6 +1750,7 @@ describe("ScriptStore", () => {
         maintenance_fix_count: 0,
         active_script_id: "",
         handler_config: "",
+        intent_spec: "",
       });
 
       const summary = await scriptStore.getDraftActivitySummary();
