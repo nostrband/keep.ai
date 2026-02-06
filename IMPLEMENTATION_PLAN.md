@@ -2,7 +2,7 @@
 
 ## Status: Ready for next spec
 
-**Last completed:** exec-18 (Mutation Reconciliation Runtime)
+**Last completed:** exec-19 (Consumer wakeAt Scheduling Integration)
 
 ---
 
@@ -29,6 +29,36 @@
 ---
 
 ## Recently Completed
+
+### exec-19 - Consumer wakeAt Scheduling Integration ✅
+
+**Spec Reference:** `docs/dev/16-scheduling.md` §Consumer Scheduling
+
+**Why Critical:** Per docs/dev/16-scheduling.md, time-based patterns (daily digests, delayed processing, batch timeouts) require the host to wake consumers at scheduled times, not just on new events. Without wakeAt integration, consumers could only be triggered by events, making time-based workflows impossible.
+
+**Implementation Summary:**
+- Phase 1: Fixed TypeScript build error in ReconciliationScheduler (NodeJS.Timer → ReturnType<typeof setInterval>)
+- Phase 2: Updated `findConsumerWithPendingWork()` in session-orchestration.ts to check for due wakeAt
+- Phase 3: Added 5 comprehensive tests for wakeAt scheduling behavior
+
+**Key Features:**
+- Events take priority over wakeAt (if both are present, events trigger first)
+- wakeAt only triggers consumers defined in handler_config
+- wakeAt=0 means no scheduled wake
+- Existing infrastructure (v42 migration, handlerStateStore.getConsumersWithDueWakeAt) now integrated into scheduler
+- wakeAt is cleared when PrepareResult doesn't include it (already implemented in handler-state-machine.ts)
+
+**Files Modified:**
+- `packages/agent/src/session-orchestration.ts` - Added wakeAt check to findConsumerWithPendingWork
+- `packages/agent/src/reconciliation/scheduler.ts` - Fixed TypeScript type error
+- `packages/tests/src/session-orchestration.test.ts` - Added 5 new tests, updated schema
+
+**Test Coverage:** 5 new tests covering:
+- Consumer not triggered when wakeAt is in the future
+- Consumer triggered when wakeAt is due
+- Events prioritized over wakeAt
+- wakeAt ignored for consumers not in config
+- wakeAt=0 means no scheduled wake
 
 ### exec-18 - Mutation Reconciliation Runtime ✅
 
@@ -133,5 +163,5 @@ Review available specs in `specs/` directory, `docs/dev/` for design docs, and `
 
 ## Current Database Version: 45
 
-**Latest Tag:** v1.0.0-alpha.124
+**Latest Tag:** v1.0.0-alpha.125
 

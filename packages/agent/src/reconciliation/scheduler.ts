@@ -42,7 +42,7 @@ export class ReconciliationScheduler {
   private api: KeepDbApi;
   private policy: ReconciliationPolicy;
   private checkIntervalMs: number;
-  private interval: NodeJS.Timer | null = null;
+  private interval: ReturnType<typeof setInterval> | null = null;
   private isRunning: boolean = false;
 
   constructor(config: ReconciliationSchedulerConfig) {
