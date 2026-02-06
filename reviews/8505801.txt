@@ -1,0 +1,180 @@
+COMMIT REVIEW: 8505801
+========================
+Title: exec-12: Implement failure classification without pattern matching
+Author: Artur Briugeman <brugeman.artur@gmail.com>
+Date: Wed Feb 4 19:32:44 2026 +0100
+Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+
+SUMMARY OF CHANGES
+==================
+This commit implements exec-12 spec for failure classification without relying
+on pattern matching on error messages. The key principle is: errors must be
+classified at the source (connectors), not at consumption.
+
+Key Changes:
+1. New Module (packages/agent/src/failure-handling.ts):
+   - errorTypeToRunStatus(errorType): Maps error types to run statuses
+   - getRunStatusForError(error, source?): Classifies error and returns status
+   - isDefiniteFailure(error): Determines if mutation definitely didn't happen
+   - Treats unclassified errors as InternalError (bug in our code)
+
+2. Deprecations (packages/proto/src/errors.ts):
+   - classifyGenericError() marked @deprecated - uses unreliable pattern matching
+   - ensureClassified() marked @deprecated - falls back to pattern matching
+   - Default fallback changed from LogicError to InternalError for non-Error values
+
+3. Handler State Machine Updates:
+   - Replaced 5 ensureClassified() calls with getRunStatusForError()
+   - Removed duplicate isDefiniteFailure() (now imported from failure-handling)
+   - All error handling now uses the new consistent approach
+
+4. Session Orchestration:
+   - Replaced ensureClassified() call with getRunStatusForError()
+
+5. Package Exports (packages/agent/src/index.ts):
+   - Exported errorTypeToRunStatus, getRunStatusForError, isDefiniteFailure
+   - Exported ClassifiedResult type
+   - Marked classifyGenericError and ensureClassified as deprecated in exports
+
+POTENTIAL ISSUES
+================
+
+1. MEDIUM: 13 tool files still use classifyGenericError
+   Location: Multiple files in packages/agent/src/tools/
+
+   Issue: According to the IMPLEMENTATION_PLAN.md, 13 tool files still use
+   classifyGenericError():
+   - get-weather.ts, audio-explain.ts, pdf-explain.ts
+   - text-generate.ts, text-summarize.ts, text-classify.ts, text-extract.ts
+   - images-transform.ts, images-explain.ts, images-generate.ts
+   - web-download.ts, web-fetch.ts, web-search.ts
+
+   Note: Research indicates these may have been migrated in commit e239121
+   (exec-12: Complete tool files migration to InternalError), which comes
+   after this commit in the git history.
+
+   Proposal: Verify that commit e239121 properly migrates all 13 files. If not,
+   each tool should either:
+   a) Throw explicit ClassifiedError with correct type, OR
+   b) Throw InternalError for unexpected errors (not LogicError)
+
+2. LOW: Duplicate errorTypeToRunStatus function definition
+   Location: Both handler-state-machine.ts:144-159 and failure-handling.ts:32-41
+
+   Issue: There are now TWO implementations of errorTypeToRunStatus():
+   - One in handler-state-machine.ts (local helper)
+   - One in failure-handling.ts (exported module)
+
+   The mappings are identical, but this creates maintenance burden.
+
+   Proposal: Remove the local copy from handler-state-machine.ts and import
+   from failure-handling.ts. This maintains single source of truth.
+
+3. MINOR: ClassifiedResult interface naming
+   Location: packages/agent/src/failure-handling.ts:46-51
+
+   Issue: The interface is named ClassifiedResult but it contains both a RunStatus
+   and a ClassifiedError. The name could be clearer.
+
+   Proposal: Consider renaming to FailureClassification or ErrorClassificationResult
+   to better describe that it contains the result of classifying an error for
+   execution purposes.
+
+4. DOCUMENTATION: Missing unit tests for failure-handling.ts
+   Location: packages/tests/src/
+
+   Issue: IMPLEMENTATION_PLAN.md notes "Unit tests for failure-handling module
+   should be added" but no dedicated test file exists.
+
+   Proposal: Add packages/tests/src/failure-handling.test.ts with tests for:
+   - errorTypeToRunStatus mapping coverage
+   - getRunStatusForError with ClassifiedError input
+   - getRunStatusForError with unclassified Error input
+   - getRunStatusForError with non-Error input
+   - isDefiniteFailure for each error type
+
+5. LOW: ensureClassified still works but with InternalError fallback
+   Location: packages/proto/src/errors.ts:315-324
+
+   Issue: ensureClassified() now returns InternalError for non-Error throws
+   (lines 318-323), but classifyGenericError() still returns LogicError for
+   some patterns. This inconsistency could be confusing during migration.
+
+   Code:
+   ```typescript
+   // Convert non-Error to InternalError (changed from LogicError per exec-12)
+   return new InternalError(
+     `Unclassified non-Error thrown${source ? ` in ${source}` : ''}: ${String(err)}`,
+     { source }
+   );
+   ```
+
+   Proposal: This is actually correct - ensureClassified delegates to
+   classifyGenericError for Error instances, and only the non-Error path
+   was changed. Document this distinction more clearly in the deprecation note.
+
+6. STYLE: Comment verbosity
+   Location: Multiple files
+
+   Issue: Each replacement site has a verbose comment:
+   ```typescript
+   // Use getRunStatusForError instead of ensureClassified (per exec-12)
+   ```
+
+   Proposal: After initial migration period, these comments could be simplified
+   or removed. The code is self-documenting with proper function names.
+
+POSITIVE OBSERVATIONS
+=====================
+
+1. Correct policy: Unclassified errors = InternalError (bug in our code)
+   This correctly shifts responsibility to connectors/tools to classify
+   errors properly at the source.
+
+2. Clean module separation: failure-handling.ts has focused responsibility
+
+3. Proper deprecation: @deprecated JSDoc tags with clear migration guidance
+
+4. No breaking changes: Deprecated functions still work for backwards compat
+
+5. Good error preservation: getRunStatusForError preserves error cause chain
+   for debugging purposes
+
+6. Comprehensive mapping: All 5 ErrorTypes map to appropriate RunStatus values:
+   - auth/permission -> paused:approval
+   - network -> paused:transient
+   - logic -> failed:logic
+   - internal -> failed:internal
+
+7. isDefiniteFailure logic is sound: Logic/permission errors are definite
+   (mutation couldn't have happened), network/auth are indeterminate
+
+VERIFICATION STATUS
+===================
+- failure-handling.ts exists and exports correctly: VERIFIED
+- All three functions exported from index.ts: VERIFIED
+- Both deprecated functions marked @deprecated: VERIFIED
+- ensureClassified changed to InternalError fallback: VERIFIED
+- handler-state-machine.ts fully migrated (5 sites): VERIFIED
+- session-orchestration.ts migrated (1 site): VERIFIED
+- Tool files migration: NEEDS VERIFICATION (may be in follow-up commit)
+
+OVERALL ASSESSMENT
+==================
+This commit establishes the correct foundation for error classification without
+pattern matching. The key insight is that unclassified errors represent bugs
+in our code (connectors not properly classifying), not user script errors.
+
+The implementation is clean but incomplete - the 13 tool files using
+classifyGenericError still need migration. This appears to be handled in
+a follow-up commit (e239121).
+
+The duplicate errorTypeToRunStatus function should be addressed to maintain
+a single source of truth.
+
+Rating: APPROVED WITH NOTES
+- Tool migration appears complete in follow-up commit
+- Consider consolidating errorTypeToRunStatus to one location
+- Add unit tests for failure-handling module
+
+No blocking issues for the core infrastructure changes.

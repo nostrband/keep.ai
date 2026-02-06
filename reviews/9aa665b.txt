@@ -1,0 +1,102 @@
+COMMIT: 9aa665b - exec-13: Add producer schedule store tests
+DATE: 2026-02-04
+FILES CHANGED: 2 files, +589/-1 lines
+
+================================================================================
+SUMMARY
+================================================================================
+
+This commit adds comprehensive test coverage for ProducerScheduleStore (24 tests).
+The tests cover:
+
+1. CRUD operations (upsert, get, delete)
+2. Workflow-scoped queries (getForWorkflow, getDueProducers)
+3. Independent scheduling verification per exec-13 spec
+4. Timestamp and edge case handling
+
+Test categories:
+- upsert and get (6 tests)
+- getForWorkflow (2 tests)
+- getDueProducers (3 tests)
+- getNextScheduledTime (3 tests)
+- updateAfterRun (2 tests)
+- delete (2 tests)
+- deleteByWorkflow (2 tests)
+- independent producer scheduling (2 tests)
+- timestamp handling (2 tests)
+
+================================================================================
+ISSUES
+================================================================================
+
+ISSUE 1: LOW - Tests use manual table creation instead of migration
+-------------------------------------------------------------------
+Location: packages/tests/src/producer-schedule-store.test.ts:10-34
+
+The tests create the producer_schedules table manually via
+createProducerSchedulesTable() helper instead of using the migration system.
+While this is acceptable for unit tests, it means:
+
+1. Schema could drift from actual migration v43.ts
+2. CRR registration (crsql_as_crr) is skipped in tests
+3. If migration schema changes, tests won't catch it
+
+Note: The schema DOES match v43.ts currently, this is just a maintenance risk.
+
+PROPOSAL 1: Consider either:
+- Adding a comment documenting the need to keep in sync with v43.ts
+- Or use a test helper that runs the actual migration
+
+
+ISSUE 2: VERY LOW - Missing tests for schedule-utils.ts
+-------------------------------------------------------
+This test file only tests ProducerScheduleStore, not the schedule utility
+functions (parseInterval, computeNextRunTime, extractSchedule) from
+schedule-utils.ts that were added in the same feature.
+
+PROPOSAL 2: Add separate tests for schedule-utils.ts (mentioned in
+e03b880 review as ISSUE 7)
+
+
+ISSUE 3: VERY LOW - No test for transaction behavior
+----------------------------------------------------
+The tests don't verify that store methods work correctly when called
+with an explicit transaction (tx parameter). All tests use the default
+(no tx).
+
+PROPOSAL 3: Add at least one test that performs multiple operations
+within a transaction to verify the tx parameter works correctly.
+
+
+================================================================================
+POSITIVE ASPECTS
+================================================================================
+
+1. Comprehensive coverage: 24 tests cover all public methods of the store
+
+2. Tests the core spec requirement: "independent producer scheduling" tests
+   explicitly verify that updating one producer doesn't affect another
+
+3. Good edge cases: Tests handle non-existent items, empty results,
+   zero timestamps, and millisecond precision
+
+4. Proper isolation: Each test uses in-memory SQLite with proper
+   beforeEach/afterEach setup and teardown
+
+5. Clear test organization: Describe blocks group related tests logically
+
+6. Tests ordering behavior: getForWorkflow ordering by next_run_at is tested
+
+7. Tests workflow scoping: Multiple tests verify that operations are
+   properly scoped to the correct workflow_id
+
+================================================================================
+VERDICT
+================================================================================
+
+Good test coverage for the ProducerScheduleStore. The tests are well-organized,
+cover all public methods, and specifically test the exec-13 spec requirement
+of independent producer schedules. Minor issues around schema sync and
+missing transaction tests are very low priority.
+
+All 905 tests pass as noted in commit message.

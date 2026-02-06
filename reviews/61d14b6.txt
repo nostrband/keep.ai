@@ -1,0 +1,177 @@
+COMMIT REVIEW: 61d14b6
+========================
+Title: exec-10: Implement retry chain and phase reset rules
+Author: Artur Briugeman <brugeman.artur@gmail.com>
+Date: Wed Feb 4 19:25:11 2026 +0100
+Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+
+SUMMARY OF CHANGES
+==================
+This commit implements exec-10 spec for retry chain tracking and phase reset rules.
+It enables full observability of retry attempts and proper crash recovery.
+
+Key Changes:
+1. Database:
+   - Migration v41: Adds `retry_of TEXT NOT NULL DEFAULT ''` column to handler_runs
+   - Creates index idx_handler_runs_retry_of for retry chain queries
+
+2. Type System (handler-run-store.ts):
+   - Added retry_of field to HandlerRun interface
+   - Added retry_of, phase, prepare_result optional fields to CreateHandlerRunInput
+   - Updated create() to handle new fields
+   - Updated mapRowToHandlerRun() to include retry_of with default for pre-v41 rows
+
+3. Store Methods (handler-run-store.ts):
+   - getRetryChain(runId): Returns all runs in chain, oldest first
+   - findLatestInChain(runId): Gets most recent attempt from any point in chain
+   - getRetriesOf(runId): Gets direct children only
+
+4. Phase Reset Rules (handler-state-machine.ts):
+   - shouldCopyResults(phase): Returns true if phase is 'mutated' or 'emitting'
+   - getStartPhaseForRetry(previousPhase): Returns 'emitting' if mutation applied,
+     else 'preparing' for fresh start
+   - RetryReason type: 'transient' | 'logic_fix' | 'crashed_recovery' | 'user_retry'
+   - CreateRetryRunParams interface
+   - createRetryRun(): Atomic operation - marks previous run + creates new with retry_of
+
+5. Crash Recovery (session-orchestration.ts):
+   - resumeIncompleteSessions() now:
+     - Finds active runs, marks as 'crashed'
+     - Checks for in_flight mutations (indeterminate state)
+     - Creates recovery runs with retry_of linking
+     - Skips auto-retry for indeterminate mutations (needs user reconciliation)
+
+6. Tests:
+   - 6 new tests for retry chain functionality
+   - Tests for retry_of linking, getRetryChain, findLatestInChain, getRetriesOf
+   - Tests for starting phase and prepare_result copying
+
+POTENTIAL ISSUES
+================
+
+1. MEDIUM: Transaction type casting in createRetryRun
+   Location: packages/agent/src/handler-state-machine.ts:313
+
+   Issue: The code uses `api.db.db.tx(async (tx: DBInterface) => {...})` which
+   accesses api.db.db directly rather than going through the KeepDbApi abstraction.
+   This tightly couples to the implementation detail that KeepDbApi wraps a KeepDb.
+
+   Code:
+   ```typescript
+   await api.db.db.tx(async (tx: DBInterface) => {
+   ```
+
+   Proposal: Consider adding a tx() method to KeepDbApi to properly abstract
+   transaction access: `await api.tx(async (tx) => {...})`. This would make
+   the code less dependent on internal structure.
+
+2. MINOR: Wrapper object pattern for TypeScript closure
+   Location: packages/agent/src/handler-state-machine.ts:311-312
+
+   Issue: Uses a wrapper object pattern to work around TypeScript narrowing:
+   ```typescript
+   const result: { newRun: HandlerRun | null } = { newRun: null };
+   ```
+   Then later checks `if (!result.newRun)` and assigns `const newRun = result.newRun`.
+
+   Proposal: This is a valid workaround but could be cleaner. Consider using
+   let with assertion: `let newRun!: HandlerRun;` since we know the transaction
+   will either succeed or throw.
+
+3. LOW: getRetryChain walks backwards then reverses
+   Location: packages/db/src/handler-run-store.ts:426-439
+
+   Issue: The function walks backwards through retry_of links and unshifts to
+   build the array in order. This is O(n^2) for unshift operations.
+
+   Code:
+   ```typescript
+   while (currentId) {
+     const run = await this.get(currentId, tx);
+     if (!run) break;
+     chain.unshift(run); // O(n) operation
+     currentId = run.retry_of || null;
+   }
+   ```
+
+   Proposal: Push to array then reverse at the end for O(n) total:
+   ```typescript
+   chain.push(run);
+   // after loop:
+   return chain.reverse();
+   ```
+   For small chains (typical: 1-3 retries), this is negligible, but good practice.
+
+4. LOW: findLatestInChain has two separate loops
+   Location: packages/db/src/handler-run-store.ts:447-483
+
+   Issue: The function first walks backwards to find the original, then walks
+   forward to find the latest. This could be simplified.
+
+   Proposal: Since we're already doing a backward walk, we could keep track of
+   the "latest seen" as we go if we track forward pointers. However, the current
+   approach is clear and correct - this is just a minor optimization opportunity.
+
+5. MINOR: Recovery run creation error handling
+   Location: packages/agent/src/session-orchestration.ts:554-562
+
+   Issue: When recovery run creation fails, the original run is marked as crashed
+   but with a potentially unhelpful error message:
+   ```typescript
+   error: `Failed to create recovery run: ${error}`,
+   ```
+   The error might be an object, not a string.
+
+   Proposal: Use proper error message extraction:
+   ```typescript
+   error: `Failed to create recovery run: ${error instanceof Error ? error.message : String(error)}`,
+   ```
+
+6. ARCHITECTURAL: createRetryRun not exported from public API
+   Location: packages/agent/src/index.ts
+
+   Issue: The createRetryRun function is not exported from the package's public API.
+   It's used internally by session-orchestration.ts and indeterminate-resolution.ts.
+
+   Assessment: This is CORRECT design. The function is an internal execution engine
+   detail and should not be part of the public API. External consumers should not
+   be creating retry runs directly.
+
+POSITIVE OBSERVATIONS
+=====================
+
+1. Proper atomic transactions: createRetryRun uses transaction to ensure both
+   operations (mark previous, create new) succeed or fail together
+2. Clear phase reset rules: Before mutation = fresh start, after mutation =
+   continue from emitting with copied results
+3. Indeterminate mutation handling: Correctly skips auto-retry for in_flight
+   mutations - requires user reconciliation
+4. Comprehensive query methods: getRetryChain, findLatestInChain, getRetriesOf
+   cover all observability needs
+5. Good test coverage: Tests cover happy path, edge cases, and phase copying
+6. CRSQLite migration pattern followed correctly
+7. Default value for pre-v41 rows handles backwards compatibility
+
+VERIFICATION STATUS
+===================
+- Migration v41 correctly adds retry_of column: VERIFIED
+- HandlerRunStore has all three required methods: VERIFIED
+- Phase reset functions correctly implemented: VERIFIED
+- createRetryRun uses atomic transaction: VERIFIED
+- Crash recovery handles indeterminate mutations: VERIFIED
+- Test coverage comprehensive: VERIFIED
+
+OVERALL ASSESSMENT
+==================
+This is a solid implementation of retry chain tracking. The key design decisions
+are correct:
+- Separate run records for each attempt (vs. modifying same record)
+- Proper linking via retry_of for full audit trail
+- Phase reset rules correctly distinguish before/after mutation
+- Crash recovery properly handles uncertain states
+
+The few issues identified are minor performance and code clarity improvements,
+none of which affect correctness.
+
+Rating: APPROVED
+No blocking issues. Ready for production use.

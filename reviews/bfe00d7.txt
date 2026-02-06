@@ -1,0 +1,147 @@
+# Review: bfe00d7 - New impl specs for new scheduler and updated exec model
+
+## Summary
+
+This commit introduces 6 new implementation specs (exec-09 through exec-14) that address gaps between the updated documentation (from a1c638e) and the existing implementation. It also moves completed specs (exec-01 through exec-08) to the `specs/done/` folder and creates a comprehensive updated overview.
+
+## Changes
+
+### Files Created
+- **specs/done/exec-00-overview.md**: Archived original overview (83 lines)
+- **specs/exec-00-overview.md**: Updated overview with new specs (205 lines)
+- **specs/exec-09-run-status-separation.md**: Separate status from phase (193 lines)
+- **specs/exec-10-retry-chain.md**: Add retry_of column and phase reset rules (252 lines)
+- **specs/exec-11-scheduler-state.md**: Implement wakeAt, dirty/queued flags (556 lines)
+- **specs/exec-12-failure-classification.md**: Map errors to run statuses (419 lines)
+- **specs/exec-13-producer-scheduling.md**: Per-producer schedules (398 lines)
+- **specs/exec-14-indeterminate-mutations.md**: Handle uncertain mutations (305 lines)
+
+### Files Moved
+- specs/exec-01 through exec-08.md → specs/done/ (completed specs)
+
+## Key Gaps Identified and Addressed
+
+| Gap | Problem | Solution Spec |
+|-----|---------|---------------|
+| Phase/Status conflation | `phase` includes 'failed', 'suspended' | exec-09: Add separate `status` column |
+| No retry chain | Runs updated in place | exec-10: Add `retry_of` column |
+| No wakeAt | PrepareResult lacks time-based scheduling | exec-11: Add `wakeAt` per-consumer |
+| No scheduler flags | No dirty/queued tracking | exec-11: In-memory state manager |
+| Pattern-matching errors | Unreliable classification | exec-12: Classify at source only |
+| Single workflow schedule | All producers share one timestamp | exec-13: Per-producer `producer_schedules` table |
+| No indeterminate handling | Uncertain mutations not tracked | exec-14: User resolution flow |
+
+## Detailed Analysis by Spec
+
+### exec-09: Run Status Separation
+- **Quality**: Excellent. Clear separation of concerns.
+- **Key insight**: Phase only moves forward; status explains why paused/stopped
+- **Database**: Adds `status` column to `handler_runs`
+- **Migration path**: Existing phase='failed' → status='failed:logic' + preserve original phase
+
+### exec-10: Retry Chain and Phase Reset
+- **Quality**: Excellent. Well-defined rules for when to copy results vs start fresh.
+- **Critical invariant**: `phase >= mutated` means mutation was applied, can't reset
+- **Database**: Adds `retry_of` column with index
+- **Atomicity**: Previous run status update + new run creation in single transaction
+
+### exec-11: Scheduler State and wakeAt
+- **Quality**: Very good. Comprehensive implementation.
+- **Per-consumer wakeAt**: Stored in `handler_state.wake_at` (correct granularity)
+- **In-memory flags**: `dirty` (consumer), `queued` (producer) - recovered from DB on restart
+- **Batch queries**: Avoids N+1 problems with `getForWorkflow()` and `countPendingByTopic()`
+- **ConfigCache**: Good optimization for avoiding repeated JSON.parse
+
+### exec-12: Failure Classification
+- **Quality**: Excellent. Strict policy against pattern matching.
+- **Key principle**: Unclassified errors = InternalError (our bug), not LogicError (script bug)
+- **Clear mapping**: ErrorType → RunStatus is a simple lookup table
+- **Deprecation**: Marks `classifyGenericError` and `ensureClassified` as deprecated
+
+### exec-13: Per-Producer Scheduling
+- **Quality**: Very good. Addresses real problem.
+- **New table**: `producer_schedules` with per-producer `next_run_at`
+- **Integration**: Uses SchedulerStateManager from exec-11
+- **Manual trigger**: Queues all producers, rejects if workflow busy
+
+### exec-14: Indeterminate Mutations
+- **Quality**: Good. Practical approach without full reconciliation.
+- **Scope**: Handle uncertain outcomes by escalating to user
+- **User options**: "happened" / "didn't happen" / "skip"
+- **Explicit deferral**: Reconciliation logic (Chapter 13) not implemented
+
+## Potential Issues
+
+### Issue 1: Large Spec Size Creates Implementation Risk (Observation)
+**Location**: exec-11 (556 lines), exec-12 (419 lines), exec-13 (398 lines)
+**Problem**: Large specs with detailed code examples are harder to implement exactly as specified
+**Proposal**: Consider splitting exec-11 into two specs: one for wakeAt, one for SchedulerStateManager
+
+### Issue 2: Deprecation Without Removal Timeline
+**Location**: exec-12, deprecation of `classifyGenericError` and `ensureClassified`
+**Problem**: Deprecation without removal timeline can lead to code rot
+**Proposal**: Add timeline or migration sprint to actually remove deprecated functions
+
+### Issue 3: ConfigCache Invalidation Strategy
+**Location**: exec-11, ConfigCache class
+**Problem**: Cache invalidated by `workflow.updated_at` but this may not catch all cases (e.g., handler_config changes without updated_at change)
+**Proposal**: Ensure workflow.updated_at is always updated when handler_config changes, or add explicit cache invalidation on config save
+
+### Issue 4: Batch Query Result Handling
+**Location**: exec-11, `countPendingByTopic` returns Map
+**Problem**: Empty topics return nothing in the Map, requiring `?? 0` everywhere
+**Proposal**: Consider returning a complete Map with 0 for topics with no pending events
+
+### Issue 5: Restart Recovery May Cause Extra Runs
+**Location**: exec-11, recoverConsumerState
+**Problem**: Setting dirty=true on restart may cause an extra prepare that finds nothing to do
+**Impact**: Minor - prepare is idempotent and side-effect-free
+**Proposal**: Accept this as documented behavior (doc already notes this)
+
+### Issue 6: Manual Trigger Queues ALL Producers
+**Location**: exec-13, triggerManualRun
+**Problem**: Queuing all producers may not match user expectation if they only want one to run
+**Proposal**: Consider allowing selection of specific producer, or document that "Run now" runs all producers
+
+### Issue 7: wakeAt Clamping Silently Modifies Script Intent
+**Location**: exec-11, wakeAt processing
+**Problem**: Script requests wakeAt="1970-01-01" (in the past), host clamps to now+30s, script doesn't know
+**Impact**: Minor - scripts can't observe the clamping, they just run at the clamped time
+**Proposal**: Log when clamping occurs for debugging
+
+## Positive Aspects
+
+1. **Thorough Gap Analysis**: Systematically identified all discrepancies between docs and implementation
+2. **Clear Dependencies**: Specs properly ordered with dependencies noted
+3. **Practical Decisions**: Key decisions (status column vs table, per-consumer wakeAt, in-memory flags) are well-reasoned
+4. **Testing Strategy**: Each spec includes testing requirements
+5. **Database Changes Summary**: Clean SQL migrations provided
+6. **No Over-Engineering**: Reconciliation explicitly deferred rather than partially implemented
+7. **Batch Query Optimization**: Addresses N+1 query problems proactively
+8. **Unified State Manager**: SchedulerStateManager handles both consumer and producer state
+
+## Architectural Observations
+
+### Strong Points
+- Single-threaded scheduler as locking mechanism (simple and correct)
+- Atomic transaction boundaries clearly specified
+- Restart recovery designed into each component
+- Config caching with proper invalidation
+
+### Areas to Watch
+- Growing complexity of scheduler state (dirty, queued, wakeAt, next_run_at)
+- Multiple places to update when adding new handler types
+- Testing strategy relies heavily on unit tests; integration tests mentioned but not detailed
+
+## Conclusion
+
+This is a well-structured set of implementation specs that properly bridges the gap between the execution model documentation (from a1c638e) and the actual implementation. The specs are detailed enough to implement but flexible enough to allow reasonable implementation choices.
+
+The main risk is the scope - 6 specs with ~2000 lines of specification creates significant implementation work. The phased implementation order (Foundation → Retry → Scheduler) is sensible for managing this complexity.
+
+Recommended implementation priority:
+1. exec-09 + exec-12 first (foundation)
+2. exec-10 + exec-14 (retry mechanics)
+3. exec-11 + exec-13 (scheduler enhancements)
+
+Reviewed: 2026-02-06

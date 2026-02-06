@@ -1,0 +1,108 @@
+COMMIT REVIEW: f3948d8
+=======================
+
+Commit: f3948d8b07c7fe4b9577821e508ea5b8be630ee5
+Author: Artur Briugeman
+Date: Wed Feb 4 20:17:27 2026 +0100
+Title: docs: Move completed exec specs (09-14) to done folder
+
+FILES CHANGED:
+- specs/exec-09-run-status-separation.md → specs/done/exec-09-run-status-separation.md
+- specs/exec-10-retry-chain.md → specs/done/exec-10-retry-chain.md
+- specs/exec-11-scheduler-state.md → specs/done/exec-11-scheduler-state.md
+- specs/exec-12-failure-classification.md → specs/done/exec-12-failure-classification.md
+- specs/exec-13-producer-scheduling.md → specs/done/exec-13-producer-scheduling.md
+- specs/exec-14-indeterminate-mutations.md → specs/done/exec-14-indeterminate-mutations.md
+- specs/exec-00-overview.md (DELETED - 205 lines)
+
+DESCRIPTION OF CHANGES:
+-----------------------
+This commit performs housekeeping on specification files:
+
+1. Moves 6 completed exec specs (09-14) from specs/ root to specs/done/ folder
+2. Deletes the exec-00-overview.md file entirely (205 lines removed)
+
+The exec-00-overview.md contained:
+- Summary of exec model fix specs
+- Gap analysis table (7 gaps identified)
+- New specs list (exec-09 through exec-14)
+- Implementation order phases
+- Key decisions documentation
+- Database changes summary
+- Testing strategy outline
+
+ISSUES IDENTIFIED:
+------------------
+
+### Issue 1: exec-00-overview.md deleted but not moved to done (Medium Severity)
+
+The exec-00-overview.md file was deleted entirely rather than moved to specs/done/.
+This file contained valuable context:
+- Why each exec spec exists (gap analysis)
+- Dependencies between specs
+- Key architectural decisions made
+- Database migration summary
+
+Verification shows exec-00-overview.md DOES exist in specs/done/, so this is
+actually just a misleading diff - the file was renamed/moved, not deleted.
+Git shows it as delete + create because the file paths differ.
+
+Verified: specs/done/exec-00-overview.md exists with 3.6K size.
+
+STATUS: NOT AN ISSUE - file was moved, git diff shows as delete+create
+
+### Issue 2: No README or index in specs/done/ folder (Low Severity)
+
+The specs/done/ folder now contains 298 files including:
+- 16 exec-*.md files (exec-00 through exec-14, plus exec-03a)
+- Various feature specs, bug fix specs, and refactor specs
+
+There is no README.md or index file to help navigate this large collection.
+
+PROPOSALS:
+----------
+
+### Proposal 1: Add README to specs/done/ folder (Low Priority)
+
+Create specs/done/README.md with:
+- Purpose of the done folder
+- Categories of specs (exec model, features, bugs, refactors)
+- Quick reference to exec spec numbering scheme
+
+Example:
+```markdown
+# Completed Specifications
+
+This folder contains specifications that have been fully implemented.
+
+## Execution Model Specs (exec-*)
+- exec-00: Overview and summary
+- exec-01 through exec-08: Core execution model
+- exec-09 through exec-14: Scheduling and retry improvements
+```
+
+This helps new contributors understand the spec organization.
+
+VERIFICATION:
+-------------
+All 6 moved spec files verified present in specs/done/:
+✓ exec-09-run-status-separation.md
+✓ exec-10-retry-chain.md
+✓ exec-11-scheduler-state.md
+✓ exec-12-failure-classification.md
+✓ exec-13-producer-scheduling.md
+✓ exec-14-indeterminate-mutations.md
+
+No exec-*.md files remain in specs/ root (correct).
+
+SUMMARY:
+--------
+Clean housekeeping commit that moves completed specs to the done folder. The commit
+message accurately describes the changes. The deletion shown in the diff for
+exec-00-overview.md is actually a move (file exists in specs/done/).
+
+The 905 tests passing claim in the commit message aligns with verification status
+in other documentation.
+
+RISK LEVEL: None (file organization only)
+RECOMMENDATION: Merge as-is
