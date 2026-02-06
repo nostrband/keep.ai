@@ -11,7 +11,7 @@
  */
 import { z } from "zod";
 import { defineReadOnlyTool, defineTool, Tool } from "./types";
-import { EventStore, Event, PublishEvent, PeekEventsOptions } from "@app/db";
+import { EventStore, Event, PublishEvent, PeekEventsOptions, InputStore } from "@app/db";
 
 // ============================================================================
 // Schemas
@@ -33,8 +33,13 @@ const PublishEventSchema = z.object({
    */
   title: z.string().optional().describe("Deprecated: use Input Ledger for user-facing metadata"),
   payload: z.any().describe("Arbitrary JSON data for downstream consumers"),
-  /** Array of input IDs that caused this event (exec-15 causal tracking) */
-  causedBy: z.array(z.string()).optional().describe("Input IDs for causal tracking"),
+  /**
+   * Input ID from Topics.registerInput(). Required in producer phase,
+   * forbidden in next phase (causedBy is inherited from reserved events).
+   */
+  inputId: z.string().optional().describe("Input ID for causal tracking (required in producer phase)"),
+  /** Array of input IDs that caused this event (exec-15 causal tracking) - internal use */
+  causedBy: z.array(z.string()).optional().describe("Input IDs for causal tracking (set automatically)"),
 });
 
 // ============================================================================
@@ -159,7 +164,10 @@ Note: Phase-restricted to 'prepare' phase only.`,
 // ============================================================================
 
 const publishInputSchema = z.object({
-  topic: z.string().describe("Topic name to publish to"),
+  topic: z.union([
+    z.string(),
+    z.array(z.string()),
+  ]).describe("Topic name(s) to publish to - can be single topic or array for fan-out"),
   event: PublishEventSchema,
 });
 
@@ -171,28 +179,50 @@ type PublishOutput = void;
 /**
  * Create the Topics.publish tool.
  *
- * Publishes an event to a topic. Idempotent by messageId - duplicate
+ * Publishes an event to one or more topics. Idempotent by messageId - duplicate
  * messageIds are silently ignored.
  *
  * Phase: producer or next only (enforced by caller)
+ *
+ * In producer phase:
+ * - inputId is required (from Topics.registerInput())
+ * - causedBy is set to [inputId]
+ *
+ * In next phase:
+ * - inputId is forbidden
+ * - causedBy is inherited from reserved events (via getCausedByForRun)
+ *
+ * @param eventStore - EventStore for publishing events
+ * @param getWorkflowId - Function to get current workflow ID
+ * @param getHandlerRunId - Function to get current handler run ID
+ * @param getPhase - Optional function to get current phase for validation
  */
 export function makeTopicsPublishTool(
   eventStore: EventStore,
   getWorkflowId: () => string | undefined,
-  getHandlerRunId: () => string | undefined
+  getHandlerRunId: () => string | undefined,
+  getPhase?: () => 'producer' | 'next' | null
 ): Tool<PublishInput, PublishOutput> {
   return defineTool({
     namespace: "Topics",
     name: "publish",
-    description: `Publish an event to a topic.
+    description: `Publish an event to one or more topics.
 Idempotent by messageId - duplicates are silently ignored.
+Supports multi-topic fan-out for a single event.
 
-Example (in producer handler):
+Example (in producer handler with Input Ledger):
+  const inputId = await Topics.registerInput({
+    source: "gmail",
+    type: "email",
+    id: email.id,
+    title: \`Email from \${email.from}: "\${email.subject}"\`
+  });
+
   await Topics.publish({
-    topic: "email.received",
+    topic: "email.received",  // or ["email.received", "audit.log"] for fan-out
     event: {
-      messageId: email.id,  // Stable ID for idempotency
-      title: \`Email from \${email.from}: "\${email.subject}"\`,
+      messageId: email.id,
+      inputId,  // Required in producer phase
       payload: { id: email.id, from: email.from, subject: email.subject }
     }
   });
@@ -202,7 +232,7 @@ Example (in next phase):
     topic: "row.created",
     event: {
       messageId: \`row:\${emailId}\`,
-      title: \`Row created for email from \${from}\`,
+      // No inputId needed - causedBy inherited from reserved events
       payload: { emailId }
     }
   });
@@ -218,17 +248,141 @@ Note: Phase-restricted to 'producer' or 'next' phase only.`,
       }
 
       const handlerRunId = getHandlerRunId() || "";
+      const phase = getPhase?.() ?? null;
 
+      // Normalize topic to array for multi-topic support
+      const topics = Array.isArray(input.topic) ? input.topic : [input.topic];
+
+      // Determine causedBy based on phase and inputId
+      let causedBy: string[] | undefined;
+
+      if (phase === 'producer') {
+        // Producer phase: inputId is required
+        if (!input.event.inputId) {
+          throw new Error(
+            "Topics.publish in producer phase requires inputId. " +
+            "Call Topics.registerInput() first and pass the returned inputId."
+          );
+        }
+        causedBy = [input.event.inputId];
+      } else if (phase === 'next') {
+        // Next phase: inputId is forbidden, inherit from reserved events
+        if (input.event.inputId) {
+          throw new Error(
+            "Topics.publish in next phase must not provide inputId. " +
+            "Causal tracking is inherited from reserved events."
+          );
+        }
+        // Get causedBy from all events reserved by this handler run
+        causedBy = await eventStore.getCausedByForRun(handlerRunId);
+      } else {
+        // No phase info available (task mode or legacy) - use provided values
+        if (input.event.inputId) {
+          causedBy = [input.event.inputId];
+        } else if (input.event.causedBy) {
+          causedBy = input.event.causedBy;
+        }
+      }
+
+      // Build the publish event
       const publishEvent: PublishEvent = {
         messageId: input.event.messageId,
-        title: input.event.title,  // Deprecated but accepted for backward compat
+        title: input.event.title, // Deprecated but accepted for backward compat
         payload: input.event.payload,
-        causedBy: input.event.causedBy,
+        causedBy,
       };
 
-      await eventStore.publishEvent(workflowId, input.topic, publishEvent, handlerRunId);
+      // Publish to each topic
+      for (const topicName of topics) {
+        await eventStore.publishEvent(workflowId, topicName, publishEvent, handlerRunId);
+      }
     },
   }) as Tool<PublishInput, PublishOutput>;
+}
+
+// ============================================================================
+// Topics.registerInput
+// ============================================================================
+
+const registerInputInputSchema = z.object({
+  source: z.string().describe("Connector name (e.g., 'gmail', 'slack', 'sheets')"),
+  type: z.string().describe("Type within source (e.g., 'email', 'message', 'row')"),
+  id: z.string().describe("External identifier from source system"),
+  title: z.string().describe("Human-readable description for user display"),
+});
+
+const registerInputOutputSchema = z.string().describe("The generated inputId");
+
+type RegisterInputInput = z.infer<typeof registerInputInputSchema>;
+type RegisterInputOutput = string;
+
+/**
+ * Create the Topics.registerInput tool.
+ *
+ * Registers an external input in the Input Ledger. Idempotent by
+ * (workflow_id, source, type, external_id) - re-registering returns existing inputId.
+ *
+ * The returned inputId must be passed to Topics.publish() in producer phase
+ * to establish causal tracking.
+ *
+ * Phase: producer only (enforced by caller)
+ */
+export function makeTopicsRegisterInputTool(
+  inputStore: InputStore,
+  getWorkflowId: () => string | undefined,
+  getHandlerRunId: () => string | undefined
+): Tool<RegisterInputInput, RegisterInputOutput> {
+  return defineTool({
+    namespace: "Topics",
+    name: "registerInput",
+    description: `Register an external input in the Input Ledger.
+Idempotent by (source, type, id) - re-registering returns existing inputId.
+
+The returned inputId must be passed to Topics.publish() to establish causal tracking.
+
+Example:
+  const inputId = await Topics.registerInput({
+    source: "gmail",
+    type: "email",
+    id: email.id,
+    title: \`Email from \${email.from}: "\${email.subject}"\`
+  });
+
+  await Topics.publish({
+    topic: "email.received",
+    event: {
+      messageId: email.id,
+      inputId,  // Required in producer phase
+      payload: { id: email.id, from: email.from, subject: email.subject }
+    }
+  });
+
+Note: Phase-restricted to 'producer' phase only.`,
+    inputSchema: registerInputInputSchema,
+    outputSchema: registerInputOutputSchema,
+    isReadOnly: () => false, // This creates records in the input ledger
+    execute: async (input: RegisterInputInput): Promise<RegisterInputOutput> => {
+      const workflowId = getWorkflowId();
+      if (!workflowId) {
+        throw new Error("Topics.registerInput requires a workflow context");
+      }
+
+      const handlerRunId = getHandlerRunId() || "";
+
+      const inputId = await inputStore.register(
+        workflowId,
+        {
+          source: input.source,
+          type: input.type,
+          id: input.id,
+          title: input.title,
+        },
+        handlerRunId
+      );
+
+      return inputId;
+    },
+  }) as Tool<RegisterInputInput, RegisterInputOutput>;
 }
 
 // ============================================================================

@@ -23,7 +23,7 @@ export type ExecutionPhase = 'producer' | 'prepare' | 'mutate' | 'next' | null;
 /**
  * Operation types for phase restriction checks.
  */
-export type OperationType = 'read' | 'mutate' | 'topic_peek' | 'topic_publish';
+export type OperationType = 'read' | 'mutate' | 'topic_peek' | 'topic_publish' | 'register_input';
 
 export interface ToolWrapperConfig {
   /** Array of tools to register */
@@ -56,12 +56,14 @@ export interface ToolWrapperConfig {
 /**
  * Phase restriction matrix.
  * Defines which operations are allowed in each execution phase.
+ *
+ * register_input is only allowed in producer phase per exec-15.
  */
 const PHASE_RESTRICTIONS: Record<Exclude<ExecutionPhase, null>, Record<OperationType, boolean>> = {
-  producer: { read: true, mutate: false, topic_peek: false, topic_publish: true },
-  prepare:  { read: true, mutate: false, topic_peek: true, topic_publish: false },
-  mutate:   { read: false, mutate: true, topic_peek: false, topic_publish: false },
-  next:     { read: false, mutate: false, topic_peek: false, topic_publish: true },
+  producer: { read: true, mutate: false, topic_peek: false, topic_publish: true, register_input: true },
+  prepare:  { read: true, mutate: false, topic_peek: true, topic_publish: false, register_input: false },
+  mutate:   { read: false, mutate: true, topic_peek: false, topic_publish: false, register_input: false },
+  next:     { read: false, mutate: false, topic_peek: false, topic_publish: true, register_input: false },
 };
 
 /**
@@ -199,6 +201,9 @@ export class ToolWrapper {
       }
       if (tool.name === 'publish') {
         return 'topic_publish';
+      }
+      if (tool.name === 'registerInput') {
+        return 'register_input';
       }
     }
 

@@ -82,13 +82,13 @@ Items are ordered by dependencies - earlier items must be completed before later
 
 ### Phase 3: Topics API Updates
 
-- [ ] **3.1 Add register_input to OperationType and PHASE_RESTRICTIONS**
+- [x] **3.1 Add register_input to OperationType and PHASE_RESTRICTIONS**
   - File: `packages/agent/src/sandbox/tool-wrapper.ts`
   - Details:
     - Add `'register_input'` to `OperationType` union
     - Add `register_input: true` to producer row, `false` to all others
 
-- [ ] **3.2 Create Topics.registerInput tool**
+- [x] **3.2 Create Topics.registerInput tool**
   - File: `packages/agent/src/tools/topics.ts` (or new file)
   - Dependencies: 2.1, 2.2, 3.1
   - Details:
@@ -98,14 +98,14 @@ Items are ordered by dependencies - earlier items must be completed before later
     - Call `inputStore.register(workflowId, params, handlerRunId)`
     - Return the inputId
 
-- [ ] **3.3 Update Topics.publish for multi-topic support**
+- [x] **3.3 Update Topics.publish for multi-topic support**
   - File: `packages/agent/src/tools/topics.ts`
   - Details:
     - Change input schema `topic` to `z.union([z.string(), z.array(z.string())])`
     - Normalize to array before processing
     - Loop over topics and call `eventStore.publishEvent` for each
 
-- [ ] **3.4 Update Topics.publish for inputId/causedBy**
+- [x] **3.4 Update Topics.publish for inputId/causedBy**
   - File: `packages/agent/src/tools/topics.ts`
   - Dependencies: 2.4, 2.5, 3.1
   - Details:
@@ -114,7 +114,7 @@ Items are ordered by dependencies - earlier items must be completed before later
     - In producer phase: require `inputId`, set `causedBy = [inputId]`
     - In next phase: forbid `inputId`, call `eventStore.getCausedByForRun(handlerRunId)` to inherit
 
-- [ ] **3.5 Add Topics.registerInput to sandbox globals**
+- [x] **3.5 Add Topics.registerInput to sandbox globals**
   - File: `packages/agent/src/sandbox/tool-lists.ts`
   - Dependencies: 3.2
   - Details: Add `makeRegisterInputTool` to workflow tools creation
