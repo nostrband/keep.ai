@@ -68,6 +68,27 @@ export interface ScriptRun {
   cost: number;         // Total cost in microdollars (cost * 1,000,000) accumulated from tool calls
 }
 
+/**
+ * Intent Spec structure per exec-17.
+ * Stores structured intent extracted from planner conversations.
+ */
+export interface IntentSpec {
+  version: number;              // Schema version for future evolution
+  extractedAt: string;          // ISO timestamp of extraction
+  extractedFromTaskId: string;  // The task ID whose messages were used
+
+  // Core intent fields (from docs/dev/10-intent-spec.md)
+  goal: string;                 // The intended outcome in plain language
+  inputs: string[];             // What information is consumed
+  outputs: string[];            // What effects are expected
+  assumptions: string[];        // Choices made when user didn't specify
+  nonGoals: string[];           // Things explicitly NOT meant to do
+  semanticConstraints: string[]; // Behavioral rules in human language
+
+  // Metadata
+  title: string;                // User-facing workflow title (extracted here)
+}
+
 export interface Workflow {
   id: string;
   title: string;
@@ -82,6 +103,7 @@ export interface Workflow {
   maintenance_fix_count: number;  // Tracks consecutive fix attempts in maintenance mode
   active_script_id: string;       // ID of the script version that should execute when workflow runs
   handler_config: string;         // JSON WorkflowConfig from exec-05 validation (topics, producers, consumers)
+  intent_spec: string;            // JSON IntentSpec from exec-17 (empty string if not yet extracted)
 }
 
 export class ScriptStore {
@@ -599,9 +621,9 @@ export class ScriptStore {
   async addWorkflow(workflow: Workflow, tx?: DBInterface): Promise<void> {
     const db = tx || this.db.db;
     await db.exec(
-      `INSERT INTO workflows (id, title, task_id, chat_id, timestamp, cron, events, status, next_run_timestamp, maintenance, maintenance_fix_count, active_script_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [workflow.id, workflow.title, workflow.task_id, workflow.chat_id || '', workflow.timestamp, workflow.cron, workflow.events, workflow.status, workflow.next_run_timestamp, workflow.maintenance ? 1 : 0, workflow.maintenance_fix_count || 0, workflow.active_script_id || '']
+      `INSERT INTO workflows (id, title, task_id, chat_id, timestamp, cron, events, status, next_run_timestamp, maintenance, maintenance_fix_count, active_script_id, handler_config, intent_spec)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [workflow.id, workflow.title, workflow.task_id, workflow.chat_id || '', workflow.timestamp, workflow.cron, workflow.events, workflow.status, workflow.next_run_timestamp, workflow.maintenance ? 1 : 0, workflow.maintenance_fix_count || 0, workflow.active_script_id || '', workflow.handler_config || '', workflow.intent_spec || '']
     );
   }
 
@@ -620,7 +642,7 @@ export class ScriptStore {
   // Get a workflow by ID
   async getWorkflow(id: string): Promise<Workflow | null> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, title, task_id, chat_id, timestamp, cron, events, status, next_run_timestamp, maintenance, maintenance_fix_count, active_script_id, handler_config
+      `SELECT id, title, task_id, chat_id, timestamp, cron, events, status, next_run_timestamp, maintenance, maintenance_fix_count, active_script_id, handler_config, intent_spec
        FROM workflows
        WHERE id = ?`,
       [id]
@@ -645,13 +667,14 @@ export class ScriptStore {
       maintenance_fix_count: (row.maintenance_fix_count as number) || 0,
       active_script_id: (row.active_script_id as string) || '',
       handler_config: (row.handler_config as string) || '',
+      intent_spec: (row.intent_spec as string) || '',
     };
   }
 
   // Get workflow by task_id
   async getWorkflowByTaskId(task_id: string): Promise<Workflow | null> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, title, task_id, chat_id, timestamp, cron, events, status, next_run_timestamp, maintenance, maintenance_fix_count, active_script_id, handler_config
+      `SELECT id, title, task_id, chat_id, timestamp, cron, events, status, next_run_timestamp, maintenance, maintenance_fix_count, active_script_id, handler_config, intent_spec
        FROM workflows
        WHERE task_id = ?
        LIMIT 1`,
@@ -677,13 +700,14 @@ export class ScriptStore {
       maintenance_fix_count: (row.maintenance_fix_count as number) || 0,
       active_script_id: (row.active_script_id as string) || '',
       handler_config: (row.handler_config as string) || '',
+      intent_spec: (row.intent_spec as string) || '',
     };
   }
 
   // Get workflow by chat_id (Spec 09)
   async getWorkflowByChatId(chat_id: string): Promise<Workflow | null> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, title, task_id, chat_id, timestamp, cron, events, status, next_run_timestamp, maintenance, maintenance_fix_count, active_script_id, handler_config
+      `SELECT id, title, task_id, chat_id, timestamp, cron, events, status, next_run_timestamp, maintenance, maintenance_fix_count, active_script_id, handler_config, intent_spec
        FROM workflows
        WHERE chat_id = ?
        LIMIT 1`,
@@ -709,6 +733,7 @@ export class ScriptStore {
       maintenance_fix_count: (row.maintenance_fix_count as number) || 0,
       active_script_id: (row.active_script_id as string) || '',
       handler_config: (row.handler_config as string) || '',
+      intent_spec: (row.intent_spec as string) || '',
     };
   }
 
@@ -718,7 +743,7 @@ export class ScriptStore {
     offset: number = 0
   ): Promise<Workflow[]> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, title, task_id, chat_id, timestamp, cron, events, status, next_run_timestamp, maintenance, maintenance_fix_count, active_script_id, handler_config
+      `SELECT id, title, task_id, chat_id, timestamp, cron, events, status, next_run_timestamp, maintenance, maintenance_fix_count, active_script_id, handler_config, intent_spec
        FROM workflows
        ORDER BY timestamp DESC
        LIMIT ? OFFSET ?`,
@@ -741,6 +766,7 @@ export class ScriptStore {
       maintenance_fix_count: (row.maintenance_fix_count as number) || 0,
       active_script_id: (row.active_script_id as string) || '',
       handler_config: (row.handler_config as string) || '',
+      intent_spec: (row.intent_spec as string) || '',
     }));
   }
 
@@ -778,7 +804,7 @@ export class ScriptStore {
   // Note: timestamp is NOT included - it's the creation timestamp and should never be updated
   async updateWorkflowFields(
     workflowId: string,
-    fields: Partial<Pick<Workflow, 'next_run_timestamp' | 'status' | 'cron' | 'maintenance' | 'maintenance_fix_count' | 'active_script_id' | 'title' | 'handler_config'>>,
+    fields: Partial<Pick<Workflow, 'next_run_timestamp' | 'status' | 'cron' | 'maintenance' | 'maintenance_fix_count' | 'active_script_id' | 'title' | 'handler_config' | 'intent_spec'>>,
     tx?: DBInterface
   ): Promise<void> {
     const db = tx || this.db.db;
@@ -817,6 +843,10 @@ export class ScriptStore {
     if (fields.handler_config !== undefined) {
       setClauses.push('handler_config = ?');
       values.push(fields.handler_config);
+    }
+    if (fields.intent_spec !== undefined) {
+      setClauses.push('intent_spec = ?');
+      values.push(fields.intent_spec);
     }
 
     if (setClauses.length === 0) return;
@@ -882,7 +912,7 @@ export class ScriptStore {
     const results = await this.db.db.execO<Record<string, unknown>>(
       `SELECT
         w.id, w.title, w.task_id, w.chat_id, w.timestamp, w.cron, w.events, w.status,
-        w.next_run_timestamp, w.maintenance, w.maintenance_fix_count, w.active_script_id,
+        w.next_run_timestamp, w.maintenance, w.maintenance_fix_count, w.active_script_id, w.handler_config, w.intent_spec,
         CASE
           WHEN MAX(cm.timestamp) IS NOT NULL
                AND MAX(cm.timestamp) > COALESCE(MAX(s.timestamp), w.timestamp)
@@ -922,6 +952,7 @@ export class ScriptStore {
         maintenance_fix_count: (row.maintenance_fix_count as number) || 0,
         active_script_id: (row.active_script_id as string) || '',
         handler_config: (row.handler_config as string) || '',
+        intent_spec: (row.intent_spec as string) || '',
       };
 
       const lastActivity = row.last_activity as string;

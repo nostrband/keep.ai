@@ -75,4 +75,15 @@ export const qk = {
 
   // Agent status queries
   agentStatus: () => [{ scope: "agentStatus" }] as const,
+
+  // Input/Output queries (exec-16)
+  workflowInputs: (workflowId: string) => [{ scope: "workflowInputs", workflowId }] as const,
+  workflowInputStats: (workflowId: string) => [{ scope: "workflowInputStats", workflowId }] as const,
+  workflowOutputStats: (workflowId: string) => [{ scope: "workflowOutputStats", workflowId }] as const,
+  workflowStaleInputs: (workflowId: string, thresholdMs: number) => [{ scope: "workflowStaleInputs", workflowId, thresholdMs }] as const,
+  workflowNeedsAttention: (workflowId: string) => [{ scope: "workflowNeedsAttention", workflowId }] as const,
+  input: (inputId: string) => [{ scope: "input", inputId }] as const,
+  inputMutations: (inputId: string) => [{ scope: "inputMutations", inputId }] as const,
+  inputEvents: (inputId: string) => [{ scope: "inputEvents", inputId }] as const,
+  workflowMutations: (workflowId: string) => [{ scope: "workflowMutations", workflowId }] as const,
 };

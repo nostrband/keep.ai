@@ -24,6 +24,7 @@ import { fileUtils } from "@app/node";
 import { ERROR_BAD_REQUEST, ERROR_PAYMENT_REQUIRED } from "./agent";
 import { TaskSignalHandler } from "./task-worker-signal";
 import type { ConnectionManager } from "@app/connectors";
+import { formatIntentForPrompt, parseIntentSpec } from "./intent-extract";
 
 /**
  * Generate a concise title from the first user message.
@@ -602,6 +603,7 @@ export class TaskWorker {
       scriptCode: scriptToUse.code,
       scriptVersion: formatVersion(scriptToUse.major_version, scriptToUse.minor_version),
       changelog,
+      intentSpec: workflow.intent_spec || undefined,  // exec-17: Include intent for repair context
     };
   }
 
@@ -618,10 +620,23 @@ export class TaskWorker {
       ? context.changelog.map(c => `- v${c.version}: ${c.comment}`).join("\n")
       : "(no prior minor versions)";
 
+    // Format intent spec if present (exec-17)
+    let intentSection = "";
+    if (context.intentSpec) {
+      const intentSpec = parseIntentSpec(context.intentSpec);
+      if (intentSpec) {
+        intentSection = `
+## User's Intent
+${formatIntentForPrompt(intentSpec)}
+
+`;
+      }
+    }
+
     const contextMessage = `# Script Fix Request
 
 A logic error occurred during script execution. Please analyze and fix the issue.
-
+${intentSection}
 ## Error Details
 - **Type:** ${context.error.type}
 - **Message:** ${context.error.message}

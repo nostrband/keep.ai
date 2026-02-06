@@ -10,6 +10,7 @@ import { KeepDbApi } from "@app/db";
 import type { ConnectionManager } from "@app/connectors";
 import { EvalContext } from "./sandbox";
 import { Tool } from "../tools/types";
+import { WorkflowConfig } from "../workflow-validator";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyTool = Tool<any, any>;
@@ -51,7 +52,7 @@ import { makeListScriptsTool } from "../tools/list-scripts";
 import { makeScriptHistoryTool } from "../tools/script-history";
 import { makeListScriptRunsTool } from "../tools/list-script-runs";
 import { makeGetScriptRunTool } from "../tools/get-script-run";
-import { makeTopicsPeekTool, makeTopicsGetByIdsTool, makeTopicsPublishTool } from "../tools/topics";
+import { makeTopicsPeekTool, makeTopicsGetByIdsTool, makeTopicsPublishTool, makeTopicsRegisterInputTool } from "../tools/topics";
 
 /**
  * Configuration for creating tool lists.
@@ -71,6 +72,12 @@ export interface ToolListConfig {
   scriptRunId?: string;
   /** Handler run ID (for Topics.publish tracking) */
   handlerRunId?: string;
+  /** Function to get current execution phase (for Topics.publish phase validation) */
+  getPhase?: () => 'producer' | 'next' | null;
+  /** Function to get current handler name (for topic validation) */
+  getHandlerName?: () => string | undefined;
+  /** Function to get workflow config (for topic validation) */
+  getWorkflowConfig?: () => WorkflowConfig | undefined;
 }
 
 /**
@@ -94,7 +101,7 @@ export interface ToolListConfig {
  * @returns Array of Tool instances for workflow execution
  */
 export function createWorkflowTools(config: ToolListConfig): AnyTool[] {
-  const { api, getContext, connectionManager, userPath, workflowId, scriptRunId, handlerRunId } = config;
+  const { api, getContext, connectionManager, userPath, workflowId, scriptRunId, handlerRunId, getPhase, getHandlerName, getWorkflowConfig } = config;
 
   // Create workflow ID and handler run ID getters for Topics tools
   const getWorkflowId = () => workflowId;
@@ -156,10 +163,11 @@ export function createWorkflowTools(config: ToolListConfig): AnyTool[] {
     // User notifications
     makeUserSendTool(api, userSendContext),
 
-    // Topics API (exec-03)
+    // Topics API (exec-03, exec-15)
     makeTopicsPeekTool(api.eventStore, getWorkflowId, getHandlerRunId),
     makeTopicsGetByIdsTool(api.eventStore, getWorkflowId),
-    makeTopicsPublishTool(api.eventStore, getWorkflowId, getHandlerRunId),
+    makeTopicsPublishTool(api.eventStore, getWorkflowId, getHandlerRunId, getPhase, getHandlerName, getWorkflowConfig),
+    makeTopicsRegisterInputTool(api.inputStore, getWorkflowId, getHandlerRunId),
   ];
 
   // Add Google service tools if connection manager is available

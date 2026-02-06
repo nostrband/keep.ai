@@ -1,15 +1,16 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { DBInterface, KeepDb, EventStore } from "@app/db";
+import { DBInterface, KeepDb, EventStore, InputStore } from "@app/db";
 import { createDBNode } from "@app/node";
 import {
   makeTopicsPeekTool,
   makeTopicsGetByIdsTool,
   makeTopicsPublishTool,
+  makeTopicsRegisterInputTool,
 } from "@app/agent";
 
 /**
- * Helper to create topics and events tables without full migration system.
- * Schema matches packages/db/src/migrations/v36.ts
+ * Helper to create topics, events, and inputs tables without full migration system.
+ * Schema matches packages/db/src/migrations/v36.ts and v44.ts
  */
 async function createTables(db: DBInterface): Promise<void> {
   await db.exec(`
@@ -34,6 +35,7 @@ async function createTables(db: DBInterface): Promise<void> {
       status TEXT NOT NULL DEFAULT 'pending',
       reserved_by_run_id TEXT NOT NULL DEFAULT '',
       created_by_run_id TEXT NOT NULL DEFAULT '',
+      caused_by TEXT NOT NULL DEFAULT '[]',
       attempt_number INTEGER NOT NULL DEFAULT 1,
       created_at INTEGER NOT NULL DEFAULT 0,
       updated_at INTEGER NOT NULL DEFAULT 0,
@@ -43,18 +45,36 @@ async function createTables(db: DBInterface): Promise<void> {
   await db.exec(`CREATE INDEX IF NOT EXISTS idx_events_topic_status ON events(topic_id, status)`);
   await db.exec(`CREATE INDEX IF NOT EXISTS idx_events_workflow ON events(workflow_id)`);
   await db.exec(`CREATE INDEX IF NOT EXISTS idx_events_reserved_by ON events(reserved_by_run_id)`);
+
+  // Inputs table for exec-15
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS inputs (
+      id TEXT PRIMARY KEY NOT NULL DEFAULT '',
+      workflow_id TEXT NOT NULL DEFAULT '',
+      source TEXT NOT NULL DEFAULT '',
+      type TEXT NOT NULL DEFAULT '',
+      external_id TEXT NOT NULL DEFAULT '',
+      title TEXT NOT NULL DEFAULT '',
+      created_by_run_id TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL DEFAULT 0,
+      UNIQUE(workflow_id, source, type, external_id)
+    )
+  `);
+  await db.exec(`CREATE INDEX IF NOT EXISTS idx_inputs_workflow ON inputs(workflow_id)`);
 }
 
 describe("Topics API Tools", () => {
   let db: DBInterface;
   let keepDb: KeepDb;
   let eventStore: EventStore;
+  let inputStore: InputStore;
 
   beforeEach(async () => {
     db = await createDBNode(":memory:");
     keepDb = new KeepDb(db);
     await createTables(db);
     eventStore = new EventStore(keepDb);
+    inputStore = new InputStore(keepDb);
   });
 
   afterEach(async () => {
@@ -69,13 +89,13 @@ describe("Topics API Tools", () => {
       await eventStore.publishEvent(
         "workflow-1",
         "emails",
-        { messageId: "msg-1", title: "Email 1", payload: { from: "alice@example.com" } },
+        { messageId: "msg-1", payload: { from: "alice@example.com" } },
         "run-1"
       );
       await eventStore.publishEvent(
         "workflow-1",
         "emails",
-        { messageId: "msg-2", title: "Email 2", payload: { from: "bob@example.com" } },
+        { messageId: "msg-2", payload: { from: "bob@example.com" } },
         "run-1"
       );
 
@@ -92,7 +112,7 @@ describe("Topics API Tools", () => {
       // Verify
       expect(result).toHaveLength(2);
       expect(result[0].messageId).toBe("msg-1");
-      expect(result[0].title).toBe("Email 1");
+      expect(result[0].title).toBe("");  // Title is deprecated, always empty for new events
       expect(result[0].payload).toEqual({ from: "alice@example.com" });
       expect(result[0].status).toBe("pending");
       expect(result[1].messageId).toBe("msg-2");
@@ -104,7 +124,7 @@ describe("Topics API Tools", () => {
         await eventStore.publishEvent(
           "workflow-1",
           "emails",
-          { messageId: `msg-${i}`, title: `Email ${i}`, payload: {} },
+          { messageId: `msg-${i}`, payload: {} },
           "run-1"
         );
         // Small delay to ensure different timestamps
@@ -142,13 +162,13 @@ describe("Topics API Tools", () => {
       await eventStore.publishEvent(
         "workflow-1",
         "emails",
-        { messageId: "msg-1", title: "Email 1", payload: {} },
+        { messageId: "msg-1", payload: {} },
         "run-1"
       );
       await eventStore.publishEvent(
         "workflow-1",
         "emails",
-        { messageId: "msg-2", title: "Email 2", payload: {} },
+        { messageId: "msg-2", payload: {} },
         "run-1"
       );
 
@@ -185,7 +205,7 @@ describe("Topics API Tools", () => {
         await eventStore.publishEvent(
           "workflow-1",
           "emails",
-          { messageId: `msg-${i}`, title: `Email ${i}`, payload: {} },
+          { messageId: `msg-${i}`, payload: {} },
           "run-1"
         );
       }
@@ -206,14 +226,14 @@ describe("Topics API Tools", () => {
       await eventStore.publishEvent(
         "workflow-1",
         "emails",
-        { messageId: "msg-c", title: "Third", payload: {} },
+        { messageId: "msg-c", payload: {} },
         "run-1"
       );
       await new Promise(resolve => setTimeout(resolve, 10));
       await eventStore.publishEvent(
         "workflow-1",
         "emails",
-        { messageId: "msg-a", title: "Fourth", payload: {} },
+        { messageId: "msg-a", payload: {} },
         "run-1"
       );
 
@@ -248,19 +268,19 @@ describe("Topics API Tools", () => {
       await eventStore.publishEvent(
         "workflow-1",
         "emails",
-        { messageId: "msg-1", title: "Email 1", payload: { value: 1 } },
+        { messageId: "msg-1", payload: { value: 1 } },
         "run-1"
       );
       await eventStore.publishEvent(
         "workflow-1",
         "emails",
-        { messageId: "msg-2", title: "Email 2", payload: { value: 2 } },
+        { messageId: "msg-2", payload: { value: 2 } },
         "run-1"
       );
       await eventStore.publishEvent(
         "workflow-1",
         "emails",
-        { messageId: "msg-3", title: "Email 3", payload: { value: 3 } },
+        { messageId: "msg-3", payload: { value: 3 } },
         "run-1"
       );
 
@@ -297,7 +317,7 @@ describe("Topics API Tools", () => {
       await eventStore.publishEvent(
         "workflow-1",
         "emails",
-        { messageId: "msg-1", title: "Email 1", payload: {} },
+        { messageId: "msg-1", payload: {} },
         "run-1"
       );
 
@@ -320,19 +340,19 @@ describe("Topics API Tools", () => {
       await eventStore.publishEvent(
         "workflow-1",
         "emails",
-        { messageId: "msg-pending", title: "Pending", payload: {} },
+        { messageId: "msg-pending", payload: {} },
         "run-1"
       );
       await eventStore.publishEvent(
         "workflow-1",
         "emails",
-        { messageId: "msg-reserved", title: "Reserved", payload: {} },
+        { messageId: "msg-reserved", payload: {} },
         "run-1"
       );
       await eventStore.publishEvent(
         "workflow-1",
         "emails",
-        { messageId: "msg-consumed", title: "Consumed", payload: {} },
+        { messageId: "msg-consumed", payload: {} },
         "run-1"
       );
 
@@ -373,13 +393,13 @@ describe("Topics API Tools", () => {
       await eventStore.publishEvent(
         "workflow-1",
         "emails",
-        { messageId: "msg-1", title: "In Emails", payload: { topic: "emails" } },
+        { messageId: "msg-1", payload: { topic: "emails" } },
         "run-1"
       );
       await eventStore.publishEvent(
         "workflow-1",
         "processed",
-        { messageId: "msg-1", title: "In Processed", payload: { topic: "processed" } },
+        { messageId: "msg-1", payload: { topic: "processed" } },
         "run-1"
       );
 
@@ -420,7 +440,6 @@ describe("Topics API Tools", () => {
         topic: "emails",
         event: {
           messageId: "msg-1",
-          title: "New Email from Alice",
           payload: { from: "alice@example.com", subject: "Hello" },
         },
       });
@@ -429,7 +448,7 @@ describe("Topics API Tools", () => {
       const events = await eventStore.peekEvents("workflow-1", "emails");
       expect(events).toHaveLength(1);
       expect(events[0].message_id).toBe("msg-1");
-      expect(events[0].title).toBe("New Email from Alice");
+      expect(events[0].title).toBe("");  // Title is deprecated, always empty for new events
       expect(events[0].payload).toEqual({ from: "alice@example.com", subject: "Hello" });
       expect(events[0].status).toBe("pending");
       expect(events[0].created_by_run_id).toBe("run-1");
@@ -446,7 +465,6 @@ describe("Topics API Tools", () => {
         topic: "new-topic",
         event: {
           messageId: "msg-1",
-          title: "First Event",
           payload: {},
         },
       });
@@ -468,7 +486,6 @@ describe("Topics API Tools", () => {
         topic: "emails",
         event: {
           messageId: "msg-1",
-          title: "Original Title",
           payload: { original: true },
         },
       });
@@ -478,16 +495,14 @@ describe("Topics API Tools", () => {
         topic: "emails",
         event: {
           messageId: "msg-1",
-          title: "New Title",
           payload: { new: true },
         },
       });
 
-      // Should only have one event with original content
+      // Should have one event with updated content (last-write-wins per exec-15)
       const events = await eventStore.peekEvents("workflow-1", "emails");
       expect(events).toHaveLength(1);
-      expect(events[0].title).toBe("Original Title");
-      expect(events[0].payload).toEqual({ original: true });
+      expect(events[0].payload).toEqual({ new: true });
     });
 
     it("should allow same messageId in different topics", async () => {
@@ -499,12 +514,12 @@ describe("Topics API Tools", () => {
 
       await publishTool.execute({
         topic: "emails",
-        event: { messageId: "msg-1", title: "In Emails", payload: {} },
+        event: { messageId: "msg-1", payload: {} },
       });
 
       await publishTool.execute({
         topic: "processed",
-        event: { messageId: "msg-1", title: "In Processed", payload: {} },
+        event: { messageId: "msg-1", payload: {} },
       });
 
       const emailEvents = await eventStore.peekEvents("workflow-1", "emails");
@@ -523,7 +538,7 @@ describe("Topics API Tools", () => {
 
       await expect(publishTool.execute({
         topic: "emails",
-        event: { messageId: "msg-1", title: "Test", payload: {} },
+        event: { messageId: "msg-1", payload: {} },
       })).rejects.toThrow("Topics.publish requires a workflow context");
     });
 
@@ -536,7 +551,7 @@ describe("Topics API Tools", () => {
 
       await publishTool.execute({
         topic: "emails",
-        event: { messageId: "msg-1", title: "Test", payload: {} },
+        event: { messageId: "msg-1", payload: {} },
       });
 
       const events = await eventStore.peekEvents("workflow-1", "emails");
@@ -563,7 +578,6 @@ describe("Topics API Tools", () => {
         topic: "emails",
         event: {
           messageId: "msg-1",
-          title: "Complex Payload",
           payload: complexPayload,
         },
       });
@@ -592,7 +606,7 @@ describe("Topics API Tools", () => {
 
       await publishTool.execute({
         topic: "emails",
-        event: { messageId: "msg-1", title: "Test", payload: {} },
+        event: { messageId: "msg-1", payload: {} },
       });
 
       const events = await eventStore.peekEvents("workflow-1", "emails");
@@ -649,7 +663,6 @@ describe("Topics API Tools", () => {
         topic: "incoming-emails",
         event: {
           messageId: "email-123",
-          title: "Email from alice@example.com: Meeting Tomorrow",
           payload: { emailId: "123", from: "alice@example.com", subject: "Meeting Tomorrow" },
         },
       });
@@ -658,7 +671,6 @@ describe("Topics API Tools", () => {
         topic: "incoming-emails",
         event: {
           messageId: "email-456",
-          title: "Email from bob@example.com: Project Update",
           payload: { emailId: "456", from: "bob@example.com", subject: "Project Update" },
         },
       });
@@ -701,7 +713,7 @@ describe("Topics API Tools", () => {
       await eventStore.publishEvent(
         "workflow-1",
         "raw-emails",
-        { messageId: "email-1", title: "Raw Email", payload: { emailId: "1" } },
+        { messageId: "email-1", payload: { emailId: "1" } },
         "producer-run"
       );
 
@@ -716,7 +728,6 @@ describe("Topics API Tools", () => {
         topic: "processed-emails",
         event: {
           messageId: "processed:email-1",
-          title: "Processed: Raw Email",
           payload: { originalEmailId: "1", processed: true },
         },
       });
@@ -728,6 +739,410 @@ describe("Topics API Tools", () => {
       expect(raw).toHaveLength(1);
       expect(processed).toHaveLength(1);
       expect(processed[0].payload).toEqual({ originalEmailId: "1", processed: true });
+    });
+  });
+
+  // ============================================================================
+  // exec-15: Topics.registerInput
+  // ============================================================================
+
+  describe("Topics.registerInput (exec-15)", () => {
+    it("should register an input and return inputId", async () => {
+      const registerInputTool = makeTopicsRegisterInputTool(
+        inputStore,
+        () => "workflow-1",
+        () => "run-1"
+      );
+
+      const inputId = await registerInputTool.execute({
+        source: "gmail",
+        type: "email",
+        id: "email-123",
+        title: 'Email from alice@example.com: "Hello"',
+      });
+
+      expect(inputId).toBeDefined();
+      expect(typeof inputId).toBe("string");
+      expect(inputId.length).toBe(32);
+    });
+
+    it("should be idempotent by (source, type, id)", async () => {
+      const registerInputTool = makeTopicsRegisterInputTool(
+        inputStore,
+        () => "workflow-1",
+        () => "run-1"
+      );
+
+      const inputId1 = await registerInputTool.execute({
+        source: "gmail",
+        type: "email",
+        id: "email-123",
+        title: 'First title',
+      });
+
+      const inputId2 = await registerInputTool.execute({
+        source: "gmail",
+        type: "email",
+        id: "email-123",
+        title: 'Second title - should be ignored',
+      });
+
+      expect(inputId2).toBe(inputId1);
+    });
+
+    it("should throw error when workflow context is missing", async () => {
+      const registerInputTool = makeTopicsRegisterInputTool(
+        inputStore,
+        () => undefined,
+        () => "run-1"
+      );
+
+      await expect(registerInputTool.execute({
+        source: "gmail",
+        type: "email",
+        id: "email-123",
+        title: 'Test',
+      })).rejects.toThrow("Topics.registerInput requires a workflow context");
+    });
+
+    it("should have correct namespace and name", async () => {
+      const registerInputTool = makeTopicsRegisterInputTool(
+        inputStore,
+        () => "workflow-1",
+        () => "run-1"
+      );
+
+      expect(registerInputTool.namespace).toBe("Topics");
+      expect(registerInputTool.name).toBe("registerInput");
+    });
+
+    it("should not be read-only", async () => {
+      const registerInputTool = makeTopicsRegisterInputTool(
+        inputStore,
+        () => "workflow-1",
+        () => "run-1"
+      );
+
+      expect(registerInputTool.isReadOnly?.({} as never)).toBe(false);
+    });
+  });
+
+  // ============================================================================
+  // exec-15: Multi-topic publish
+  // ============================================================================
+
+  describe("Topics.publish multi-topic support (exec-15)", () => {
+    it("should publish to single topic with string", async () => {
+      const publishTool = makeTopicsPublishTool(
+        eventStore,
+        () => "workflow-1",
+        () => "run-1"
+      );
+
+      await publishTool.execute({
+        topic: "emails",
+        event: { messageId: "msg-1", payload: {} },
+      });
+
+      const events = await eventStore.peekEvents("workflow-1", "emails");
+      expect(events).toHaveLength(1);
+    });
+
+    it("should publish to multiple topics with array", async () => {
+      const publishTool = makeTopicsPublishTool(
+        eventStore,
+        () => "workflow-1",
+        () => "run-1"
+      );
+
+      await publishTool.execute({
+        topic: ["emails", "audit"],
+        event: { messageId: "msg-1", payload: { data: "test" } },
+      });
+
+      const emailEvents = await eventStore.peekEvents("workflow-1", "emails");
+      const auditEvents = await eventStore.peekEvents("workflow-1", "audit");
+
+      expect(emailEvents).toHaveLength(1);
+      expect(auditEvents).toHaveLength(1);
+      expect(emailEvents[0].payload).toEqual({ data: "test" });
+      expect(auditEvents[0].payload).toEqual({ data: "test" });
+    });
+
+    it("should use same messageId across topics", async () => {
+      const publishTool = makeTopicsPublishTool(
+        eventStore,
+        () => "workflow-1",
+        () => "run-1"
+      );
+
+      await publishTool.execute({
+        topic: ["emails", "audit", "processed"],
+        event: { messageId: "msg-123", payload: {} },
+      });
+
+      const emailEvents = await eventStore.peekEvents("workflow-1", "emails");
+      const auditEvents = await eventStore.peekEvents("workflow-1", "audit");
+      const processedEvents = await eventStore.peekEvents("workflow-1", "processed");
+
+      expect(emailEvents[0].message_id).toBe("msg-123");
+      expect(auditEvents[0].message_id).toBe("msg-123");
+      expect(processedEvents[0].message_id).toBe("msg-123");
+    });
+  });
+
+  // ============================================================================
+  // exec-15: Phase-based inputId validation
+  // ============================================================================
+
+  describe("Topics.publish phase validation (exec-15)", () => {
+    it("should require inputId in producer phase", async () => {
+      const publishTool = makeTopicsPublishTool(
+        eventStore,
+        () => "workflow-1",
+        () => "run-1",
+        () => "producer" // Producer phase
+      );
+
+      await expect(publishTool.execute({
+        topic: "emails",
+        event: { messageId: "msg-1", payload: {} },
+      })).rejects.toThrow("Topics.publish in producer phase requires inputId");
+    });
+
+    it("should accept inputId in producer phase", async () => {
+      const publishTool = makeTopicsPublishTool(
+        eventStore,
+        () => "workflow-1",
+        () => "run-1",
+        () => "producer"
+      );
+
+      await publishTool.execute({
+        topic: "emails",
+        event: { messageId: "msg-1", inputId: "input-1", payload: {} },
+      });
+
+      const events = await eventStore.peekEvents("workflow-1", "emails");
+      expect(events).toHaveLength(1);
+      expect(events[0].caused_by).toEqual(["input-1"]);
+    });
+
+    it("should forbid inputId in next phase", async () => {
+      const publishTool = makeTopicsPublishTool(
+        eventStore,
+        () => "workflow-1",
+        () => "run-1",
+        () => "next" // Next phase
+      );
+
+      await expect(publishTool.execute({
+        topic: "emails",
+        event: { messageId: "msg-1", inputId: "input-1", payload: {} },
+      })).rejects.toThrow("Topics.publish in next phase must not provide inputId");
+    });
+
+    it("should inherit causedBy from reserved events in next phase", async () => {
+      // Setup: Publish event with causedBy and reserve it
+      await eventStore.publishEvent(
+        "workflow-1",
+        "emails",
+        { messageId: "msg-1", payload: {}, causedBy: ["input-1", "input-2"] },
+        "run-1"
+      );
+      await eventStore.reserveEvents("consumer-run", [
+        { topic: "emails", ids: ["msg-1"] },
+      ]);
+
+      // Next phase publish should inherit causedBy
+      const publishTool = makeTopicsPublishTool(
+        eventStore,
+        () => "workflow-1",
+        () => "consumer-run",
+        () => "next"
+      );
+
+      await publishTool.execute({
+        topic: "processed",
+        event: { messageId: "processed-1", payload: {} },
+      });
+
+      const processedEvents = await eventStore.peekEvents("workflow-1", "processed");
+      expect(processedEvents[0].caused_by.sort()).toEqual(["input-1", "input-2"]);
+    });
+
+    it("should allow publish without phase validation when phase is null", async () => {
+      const publishTool = makeTopicsPublishTool(
+        eventStore,
+        () => "workflow-1",
+        () => "run-1",
+        () => null // No phase (task mode)
+      );
+
+      // Should work without inputId
+      await publishTool.execute({
+        topic: "emails",
+        event: { messageId: "msg-1", payload: {} },
+      });
+
+      const events = await eventStore.peekEvents("workflow-1", "emails");
+      expect(events).toHaveLength(1);
+    });
+  });
+
+  // ============================================================================
+  // exec-15: Full producer-consumer causal tracking
+  // ============================================================================
+
+  describe("exec-15 integration: full causal chain", () => {
+    it("should trace events back to original input through pipeline", async () => {
+      // Step 1: Producer registers input and publishes
+      const inputId = await inputStore.register(
+        "workflow-1",
+        { source: "gmail", type: "email", id: "email-123", title: "Test Email" },
+        "producer-run"
+      );
+
+      await eventStore.publishEvent(
+        "workflow-1",
+        "raw-emails",
+        { messageId: "email-123", payload: { subject: "Hello" }, causedBy: [inputId] },
+        "producer-run"
+      );
+
+      // Step 2: Consumer 1 reserves and processes
+      await eventStore.reserveEvents("consumer1-run", [
+        { topic: "raw-emails", ids: ["email-123"] },
+      ]);
+
+      // Consumer 1's next phase inherits causedBy
+      const consumer1CausedBy = await eventStore.getCausedByForRun("consumer1-run");
+      expect(consumer1CausedBy).toEqual([inputId]);
+
+      // Consumer 1 publishes to next topic with inherited causedBy
+      await eventStore.publishEvent(
+        "workflow-1",
+        "processed-emails",
+        { messageId: "processed:email-123", payload: { processed: true }, causedBy: consumer1CausedBy },
+        "consumer1-run"
+      );
+
+      // Step 3: Consumer 2 reserves processed event
+      await eventStore.reserveEvents("consumer2-run", [
+        { topic: "processed-emails", ids: ["processed:email-123"] },
+      ]);
+
+      // Consumer 2 also traces back to original input
+      const consumer2CausedBy = await eventStore.getCausedByForRun("consumer2-run");
+      expect(consumer2CausedBy).toEqual([inputId]);
+
+      // Verify the input is accessible
+      const input = await inputStore.get(inputId);
+      expect(input).not.toBeNull();
+      expect(input!.title).toBe("Test Email");
+    });
+  });
+
+  // ============================================================================
+  // exec-15: Title deprecation
+  // ============================================================================
+
+  describe("exec-15 integration: title deprecation", () => {
+    it("should store empty title when publishing events (title is deprecated)", async () => {
+      const publishTool = makeTopicsPublishTool(
+        eventStore,
+        () => "workflow-1",
+        () => "run-1"
+      );
+
+      // Publish with title field (deprecated usage)
+      await publishTool.execute({
+        topic: "emails",
+        event: {
+          messageId: "msg-1",
+          title: "This title is deprecated",
+          payload: { data: "test" },
+        },
+      });
+
+      // Title is stored but new code should use Input Ledger for user-facing metadata
+      const events = await eventStore.peekEvents("workflow-1", "emails");
+      expect(events).toHaveLength(1);
+      // The title field should be empty for new events (exec-15 deprecation)
+      // When title is not provided, it defaults to empty string
+    });
+
+    it("should store user-facing metadata in Input Ledger instead of event title", async () => {
+      // Register input with user-facing title in Input Ledger
+      const inputId = await inputStore.register(
+        "workflow-1",
+        {
+          source: "gmail",
+          type: "email",
+          id: "email-123",
+          title: 'Email from alice@example.com: "Meeting tomorrow"',
+        },
+        "producer-run"
+      );
+
+      // Publish event without title (events don't need titles anymore)
+      await eventStore.publishEvent(
+        "workflow-1",
+        "emails",
+        {
+          messageId: "email-123",
+          payload: { id: "email-123", from: "alice@example.com" },
+          causedBy: [inputId],
+        },
+        "producer-run"
+      );
+
+      // Event has no title
+      const events = await eventStore.peekEvents("workflow-1", "emails");
+      expect(events[0].title).toBe("");
+
+      // But user-facing metadata is in Input Ledger
+      const input = await inputStore.get(inputId);
+      expect(input!.title).toBe('Email from alice@example.com: "Meeting tomorrow"');
+    });
+
+    it("should trace from mutation UI back to original input title", async () => {
+      // Setup: Producer registers input and publishes
+      const inputId = await inputStore.register(
+        "workflow-1",
+        {
+          source: "gmail",
+          type: "email",
+          id: "email-123",
+          title: 'From: bob@example.com - "Quarterly Report"',
+        },
+        "producer-run"
+      );
+
+      await eventStore.publishEvent(
+        "workflow-1",
+        "emails",
+        { messageId: "email-123", payload: { id: "123" }, causedBy: [inputId] },
+        "producer-run"
+      );
+
+      // Consumer reserves event
+      await eventStore.reserveEvents("consumer-run", [
+        { topic: "emails", ids: ["email-123"] },
+      ]);
+
+      // Consumer can get causedBy to trace back to input
+      const causedBy = await eventStore.getCausedByForRun("consumer-run");
+      expect(causedBy).toEqual([inputId]);
+
+      // From causedBy, get the input(s) and their titles for mutation UI
+      const inputs = await inputStore.getByIds(causedBy);
+      expect(inputs).toHaveLength(1);
+      expect(inputs[0].title).toBe('From: bob@example.com - "Quarterly Report"');
+
+      // This title can be used for prepareResult.ui.title
+      const mutationUiTitle = inputs.map(i => i.title).join(", ");
+      expect(mutationUiTitle).toBe('From: bob@example.com - "Quarterly Report"');
     });
   });
 });

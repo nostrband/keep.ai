@@ -1,7 +1,11 @@
 import { z } from "zod";
 import { generateId, tool } from "ai";
-import { Script, ScriptStore } from "@app/db";
+import { Script, ScriptStore, ChatStore } from "@app/db";
 import { validateWorkflowScript, isWorkflowFormatScript } from "../workflow-validator";
+import { extractIntent } from "../intent-extract";
+import debug from "debug";
+
+const log = debug("save-tool");
 
 const SaveInfoSchema = z.object({
   code: z.string().describe("Script code to save"),
@@ -33,6 +37,7 @@ export function makeSaveTool(opts: {
   taskRunId: string;
   chatId: string;
   scriptStore: ScriptStore;
+  chatStore?: ChatStore;  // Optional: for intent extraction (exec-17)
 }) {
   return tool({
     execute: async (info: SaveInfo): Promise<SaveResult> => {
@@ -133,6 +138,46 @@ export function makeSaveTool(opts: {
           maintenance: false,
           next_run_timestamp: new Date().toISOString(),
         });
+      }
+
+      // Intent extraction (exec-17)
+      // Extract intent from user messages on first major version (when no intent exists yet)
+      // Run asynchronously to avoid blocking the save operation
+      if (opts.chatStore && !workflow.intent_spec) {
+        // Fire-and-forget intent extraction
+        (async () => {
+          try {
+            log(`Extracting intent for workflow ${workflow.id}`);
+
+            // Get user messages from the chat
+            const messages = await opts.chatStore!.getNewChatMessages({ chatId: opts.chatId, limit: 100 });
+            const userMessages = messages
+              .filter((m: { role: string }) => m.role === "user")
+              .map((m: { content: string }) => m.content)
+              .filter((c: string) => c && c.trim());
+
+            if (userMessages.length > 0) {
+              const intentSpec = await extractIntent(userMessages, opts.taskId);
+              const intentSpecJson = JSON.stringify(intentSpec);
+
+              // Update workflow with extracted intent and optionally the title
+              const intentUpdates: { intent_spec: string; title?: string } = {
+                intent_spec: intentSpecJson,
+              };
+
+              // Use intent's title if workflow doesn't have one
+              if (!workflow.title || workflow.title.trim() === '') {
+                intentUpdates.title = intentSpec.title;
+              }
+
+              await opts.scriptStore.updateWorkflowFields(workflow.id, intentUpdates);
+              log(`Intent extracted successfully for workflow ${workflow.id}: "${intentSpec.title}"`);
+            }
+          } catch (error) {
+            // Log but don't fail the save operation
+            log(`Intent extraction failed for workflow ${workflow.id}:`, error);
+          }
+        })();
       }
 
       // Return both the script and whether this was a maintenance fix

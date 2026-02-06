@@ -49,7 +49,7 @@ async function createScriptTables(db: DBInterface): Promise<void> {
   await db.exec(`CREATE INDEX IF NOT EXISTS idx_script_runs_script_id ON script_runs(script_id)`);
   await db.exec(`CREATE INDEX IF NOT EXISTS idx_script_runs_workflow_id ON script_runs(workflow_id)`);
 
-  // Create workflows table (matches production v16 + later migrations)
+  // Create workflows table (matches production v16 + v45 migrations)
   await db.exec(`
     CREATE TABLE IF NOT EXISTS workflows (
       id TEXT PRIMARY KEY NOT NULL,
@@ -64,7 +64,8 @@ async function createScriptTables(db: DBInterface): Promise<void> {
       maintenance INTEGER NOT NULL DEFAULT 0,
       maintenance_fix_count INTEGER NOT NULL DEFAULT 0,
       active_script_id TEXT NOT NULL DEFAULT '',
-      handler_config TEXT NOT NULL DEFAULT ''
+      handler_config TEXT NOT NULL DEFAULT '',
+      intent_spec TEXT NOT NULL DEFAULT ''
     )
   `);
   await db.exec(`CREATE INDEX IF NOT EXISTS idx_workflows_task_id ON workflows(task_id)`);
@@ -536,6 +537,7 @@ describe("ScriptStore", () => {
       maintenance_fix_count: 0,
       active_script_id: "",
       handler_config: "",
+      intent_spec: "",
       ...overrides,
     });
 
@@ -1190,6 +1192,7 @@ describe("ScriptStore", () => {
         maintenance_fix_count: 0,
         active_script_id: "",
         handler_config: "",
+        intent_spec: "",
       });
 
       // Create a recent draft workflow
@@ -1211,6 +1214,7 @@ describe("ScriptStore", () => {
         maintenance_fix_count: 0,
         active_script_id: "",
         handler_config: "",
+        intent_spec: "",
       });
 
       const abandoned = await scriptStore.getAbandonedDrafts(7);
@@ -1253,6 +1257,7 @@ describe("ScriptStore", () => {
         maintenance_fix_count: 0,
         active_script_id: "",
         handler_config: "",
+        intent_spec: "",
       });
 
       // Abandoned draft (10 days old)
@@ -1271,6 +1276,7 @@ describe("ScriptStore", () => {
         maintenance_fix_count: 0,
         active_script_id: "",
         handler_config: "",
+        intent_spec: "",
       });
 
       // Recent draft (1 day old)
@@ -1289,6 +1295,7 @@ describe("ScriptStore", () => {
         maintenance_fix_count: 0,
         active_script_id: "",
         handler_config: "",
+        intent_spec: "",
       });
 
       const summary = await scriptStore.getDraftActivitySummary();
@@ -1326,6 +1333,7 @@ describe("ScriptStore", () => {
         maintenance_fix_count: 0,
         active_script_id: "",
         handler_config: "",
+        intent_spec: "",
       });
 
       const abandoned = await scriptStore.getAbandonedDrafts(7);
@@ -1358,6 +1366,7 @@ describe("ScriptStore", () => {
         maintenance_fix_count: 0,
         active_script_id: "",
         handler_config: "",
+        intent_spec: "",
       });
 
       const abandoned = await scriptStore.getAbandonedDrafts(7);
@@ -1389,6 +1398,7 @@ describe("ScriptStore", () => {
         maintenance_fix_count: 0,
         active_script_id: "",
         handler_config: "",
+        intent_spec: "",
       });
 
       // Add a recent script (2 days ago) - should update last_activity via COALESCE
@@ -1442,6 +1452,7 @@ describe("ScriptStore", () => {
         maintenance_fix_count: 0,
         active_script_id: "",
         handler_config: "",
+        intent_spec: "",
       });
 
       const abandoned = await scriptStore.getAbandonedDrafts(7);
@@ -1477,6 +1488,7 @@ describe("ScriptStore", () => {
         maintenance_fix_count: 0,
         active_script_id: "",
         handler_config: "",
+        intent_spec: "",
       });
 
       // Medium-old script (10 days ago)
@@ -1542,6 +1554,7 @@ describe("ScriptStore", () => {
         maintenance_fix_count: 0,
         active_script_id: "",
         handler_config: "",
+        intent_spec: "",
       });
 
       // Old chat message (15 days ago)
@@ -1598,6 +1611,7 @@ describe("ScriptStore", () => {
         maintenance_fix_count: 0,
         active_script_id: "",
         handler_config: "",
+        intent_spec: "",
       });
 
       // Should be abandoned based on workflow timestamp
@@ -1640,6 +1654,7 @@ describe("ScriptStore", () => {
         maintenance_fix_count: 0,
         active_script_id: "",
         handler_config: "",
+        intent_spec: "",
       });
 
       // Abandoned draft (10 days old - should only be in abandonedDrafts)
@@ -1658,6 +1673,7 @@ describe("ScriptStore", () => {
         maintenance_fix_count: 0,
         active_script_id: "",
         handler_config: "",
+        intent_spec: "",
       });
 
       // Recent draft (5 days old - should only be in staleDrafts)
@@ -1676,6 +1692,7 @@ describe("ScriptStore", () => {
         maintenance_fix_count: 0,
         active_script_id: "",
         handler_config: "",
+        intent_spec: "",
       });
 
       const summary = await scriptStore.getDraftActivitySummary();
@@ -1714,6 +1731,7 @@ describe("ScriptStore", () => {
         maintenance_fix_count: 0,
         active_script_id: "",
         handler_config: "",
+        intent_spec: "",
       });
 
       // Workflow exactly 30 days - 1 second ago (should NOT be archivable)
@@ -1732,6 +1750,7 @@ describe("ScriptStore", () => {
         maintenance_fix_count: 0,
         active_script_id: "",
         handler_config: "",
+        intent_spec: "",
       });
 
       const summary = await scriptStore.getDraftActivitySummary();

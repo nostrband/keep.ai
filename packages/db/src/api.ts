@@ -20,6 +20,7 @@ import { HandlerRunStore } from "./handler-run-store";
 import { MutationStore } from "./mutation-store";
 import { HandlerStateStore } from "./handler-state-store";
 import { ProducerScheduleStore } from "./producer-schedule-store";
+import { InputStore } from "./input-store";
 
 export class KeepDbApi {
   public readonly db: KeepDb;
@@ -41,6 +42,7 @@ export class KeepDbApi {
   public readonly mutationStore: MutationStore;
   public readonly handlerStateStore: HandlerStateStore;
   public readonly producerScheduleStore: ProducerScheduleStore;
+  public readonly inputStore: InputStore;
 
   constructor(db: KeepDb) {
     this.db = db;
@@ -62,6 +64,7 @@ export class KeepDbApi {
     this.mutationStore = new MutationStore(db);
     this.handlerStateStore = new HandlerStateStore(db);
     this.producerScheduleStore = new ProducerScheduleStore(db);
+    this.inputStore = new InputStore(db);
   }
 
   async addMessage(input: {
@@ -346,6 +349,7 @@ export class KeepDbApi {
         maintenance_fix_count: 0,
         active_script_id: "",  // No active script yet, will be set when first script is saved
         handler_config: "",  // Will be set when script is saved (exec-05)
+        intent_spec: "",  // Will be extracted after first planner save (exec-17)
       };
 
       // Create the matching workflow

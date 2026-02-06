@@ -16,12 +16,16 @@ import { initSandbox, Sandbox } from "./sandbox/sandbox";
 /**
  * Extracted workflow configuration from a validated script.
  * Stored in workflow.handler_config as JSON.
+ *
+ * Per exec-15, producers and consumers must declare which topics they publish to.
  */
 export interface WorkflowConfig {
   topics: string[];
   producers: Record<
     string,
     {
+      /** Topics this producer publishes to (required, non-empty) */
+      publishes: string[];
       schedule: { interval?: string; cron?: string };
     }
   >;
@@ -29,6 +33,8 @@ export interface WorkflowConfig {
     string,
     {
       subscribe: string[];
+      /** Topics this consumer publishes to in next phase (optional) */
+      publishes: string[];
       hasMutate: boolean;
       hasNext: boolean;
     }
@@ -129,6 +135,11 @@ async function createValidationSandbox(): Promise<Sandbox> {
 /**
  * Validation code to inject after user script.
  * Validates structure and extracts configuration.
+ *
+ * Per exec-15:
+ * - Producers must declare publishes array (required, non-empty)
+ * - Consumers may declare publishes array (optional, for next phase)
+ * - All referenced topics must be declared
  */
 const VALIDATION_CODE = `
 // Structure validation
@@ -140,6 +151,9 @@ if (!workflow.producers && !workflow.consumers) {
   throw new Error('Workflow must have at least one producer or consumer');
 }
 
+// Collect declared topics
+const declaredTopics = new Set(Object.keys(workflow.topics || {}));
+
 // Validate producers
 const producerConfig = {};
 for (const [name, p] of Object.entries(workflow.producers || {})) {
@@ -149,7 +163,14 @@ for (const [name, p] of Object.entries(workflow.producers || {})) {
   if (!p.schedule || (!p.schedule.interval && !p.schedule.cron)) {
     throw new Error(\`Producer '\${name}': schedule with interval or cron required\`);
   }
-  producerConfig[name] = { schedule: p.schedule };
+  // publishes is required for producers (exec-15)
+  if (!Array.isArray(p.publishes) || p.publishes.length === 0) {
+    throw new Error(\`Producer '\${name}': publishes must be a non-empty array of topic names\`);
+  }
+  producerConfig[name] = {
+    publishes: p.publishes,
+    schedule: p.schedule,
+  };
 }
 
 // Validate consumers
@@ -167,11 +188,39 @@ for (const [name, c] of Object.entries(workflow.consumers || {})) {
   if (c.next !== undefined && typeof c.next !== 'function') {
     throw new Error(\`Consumer '\${name}': next must be a function if provided\`);
   }
+  // publishes is optional for consumers (exec-15)
+  const publishes = Array.isArray(c.publishes) ? c.publishes : [];
+  // Warn if consumer has publishes but no next function
+  if (publishes.length > 0 && c.next === undefined) {
+    throw new Error(\`Consumer '\${name}': declares publishes but has no next function\`);
+  }
   consumerConfig[name] = {
     subscribe: c.subscribe,
+    publishes,
     hasMutate: typeof c.mutate === 'function',
     hasNext: typeof c.next === 'function',
   };
+}
+
+// Validate topic graph - all referenced topics must be declared (exec-15)
+for (const [name, p] of Object.entries(producerConfig)) {
+  for (const topic of p.publishes) {
+    if (!declaredTopics.has(topic)) {
+      throw new Error(\`Producer '\${name}': publishes to undeclared topic '\${topic}'\`);
+    }
+  }
+}
+for (const [name, c] of Object.entries(consumerConfig)) {
+  for (const topic of c.subscribe) {
+    if (!declaredTopics.has(topic)) {
+      throw new Error(\`Consumer '\${name}': subscribes to undeclared topic '\${topic}'\`);
+    }
+  }
+  for (const topic of c.publishes) {
+    if (!declaredTopics.has(topic)) {
+      throw new Error(\`Consumer '\${name}': publishes to undeclared topic '\${topic}'\`);
+    }
+  }
 }
 
 // Return extracted config
@@ -230,14 +279,15 @@ export async function validateWorkflowScript(
  */
 function extractErrorMessage(error: string): string {
   // QuickJS errors often have format: "Error: 'message' stack:\n..."
-  // Extract just the message part
-  const match = error.match(/Error:\s*'([^']+)'/);
-  if (match) {
-    return match[1];
+  // The message may contain single quotes (e.g., "Producer 'name': ...")
+  // so we match from opening quote to the closing quote before " stack:"
+  const quotedMatch = error.match(/Error:\s*'(.+?)'\s+stack:/s);
+  if (quotedMatch) {
+    return quotedMatch[1];
   }
 
-  // Try to extract from simpler format: "Error: message"
-  const simpleMatch = error.match(/Error:\s*(.+?)(?:\s+stack:|$)/);
+  // Try to extract from simpler format: "Error: message" without stack
+  const simpleMatch = error.match(/Error:\s*(.+?)(?:\s+stack:|$)/s);
   if (simpleMatch) {
     return simpleMatch[1].trim();
   }

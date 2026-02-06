@@ -39,7 +39,7 @@ export type { File } from "./file-store";
 
 // Script store
 export { ScriptStore, DRAFT_THRESHOLDS, formatVersion } from "./script-store";
-export type { Script, ScriptRun, Workflow, AbandonedDraft, DraftActivitySummary } from "./script-store";
+export type { Script, ScriptRun, Workflow, AbandonedDraft, DraftActivitySummary, IntentSpec } from "./script-store";
 
 // Notification store (Spec 12)
 export { NotificationStore } from "./notification-store";
@@ -67,7 +67,7 @@ export type { HandlerRun, HandlerType, HandlerRunPhase, HandlerErrorType, RunSta
 
 // Mutation store (execution model - mutations)
 export { MutationStore } from "./mutation-store";
-export type { Mutation, MutationStatus, MutationResolution, CreateMutationInput, UpdateMutationInput } from "./mutation-store";
+export type { Mutation, MutationStatus, MutationResolution, ReconcileResult, CreateMutationInput, UpdateMutationInput } from "./mutation-store";
 
 // Handler state store (execution model - handler state)
 export { HandlerStateStore } from "./handler-state-store";
@@ -76,6 +76,10 @@ export type { HandlerState } from "./handler-state-store";
 // Producer schedule store (execution model - producer scheduling, exec-13)
 export { ProducerScheduleStore } from "./producer-schedule-store";
 export type { ProducerSchedule, ScheduleType } from "./producer-schedule-store";
+
+// Input store (execution model - Input Ledger, exec-15, exec-16)
+export { InputStore } from "./input-store";
+export type { Input, InputWithStatus, InputStatus, InputStats, RegisterInputParams } from "./input-store";
 
 // Api
 export * from "./api";

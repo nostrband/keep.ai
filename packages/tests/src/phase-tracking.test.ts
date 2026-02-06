@@ -33,7 +33,8 @@ async function createTables(db: DBInterface): Promise<void> {
       name TEXT NOT NULL DEFAULT '',
       status TEXT NOT NULL DEFAULT 'active',
       active_script_id TEXT NOT NULL DEFAULT '',
-      handler_config TEXT NOT NULL DEFAULT ''
+      handler_config TEXT NOT NULL DEFAULT '',
+      intent_spec TEXT NOT NULL DEFAULT ''
     )
   `);
 }
@@ -195,6 +196,7 @@ describe("ToolWrapper Phase Tracking", () => {
         next_reconcile_at: 0,
         resolved_by: "",
         resolved_at: 0,
+        ui_title: "",
         created_at: Date.now(),
         updated_at: Date.now(),
       };
@@ -231,6 +233,7 @@ describe("ToolWrapper Phase Tracking", () => {
         next_reconcile_at: 0,
         resolved_by: "",
         resolved_at: 0,
+        ui_title: "",
         created_at: Date.now(),
         updated_at: Date.now(),
       };
@@ -262,6 +265,7 @@ describe("ToolWrapper Phase Tracking", () => {
         next_reconcile_at: 0,
         resolved_by: "",
         resolved_at: 0,
+        ui_title: "",
         created_at: Date.now(),
         updated_at: Date.now(),
       };
@@ -639,14 +643,14 @@ describe("ToolWrapper Phase Tracking", () => {
 
   describe("Phase matrix complete coverage", () => {
     const phases: Exclude<ExecutionPhase, null>[] = ['producer', 'prepare', 'mutate', 'next'];
-    const operations: OperationType[] = ['read', 'mutate', 'topic_peek', 'topic_publish'];
+    const operations: OperationType[] = ['read', 'mutate', 'topic_peek', 'topic_publish', 'register_input'];
 
     // Expected allowances based on PHASE_RESTRICTIONS
     const expectations: Record<Exclude<ExecutionPhase, null>, Record<OperationType, boolean>> = {
-      producer: { read: true, mutate: false, topic_peek: false, topic_publish: true },
-      prepare:  { read: true, mutate: false, topic_peek: true, topic_publish: false },
-      mutate:   { read: false, mutate: true, topic_peek: false, topic_publish: false },
-      next:     { read: false, mutate: false, topic_peek: false, topic_publish: true },
+      producer: { read: true, mutate: false, topic_peek: false, topic_publish: true, register_input: true },
+      prepare:  { read: true, mutate: false, topic_peek: true, topic_publish: false, register_input: false },
+      mutate:   { read: false, mutate: true, topic_peek: false, topic_publish: false, register_input: false },
+      next:     { read: false, mutate: false, topic_peek: false, topic_publish: true, register_input: false },
     };
 
     for (const phase of phases) {

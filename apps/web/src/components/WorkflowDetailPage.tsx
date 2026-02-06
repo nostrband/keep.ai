@@ -24,6 +24,8 @@ import { API_ENDPOINT } from "../const";
 import { WorkflowErrorAlert } from "./WorkflowErrorAlert";
 import { useUnresolvedWorkflowError } from "../hooks/useNotifications";
 import { getWorkflowTitle } from "../lib/workflowUtils";
+import { WorkflowInputsSummary } from "./WorkflowInputsSummary";
+import { WorkflowIntentSection } from "./WorkflowIntentSection";
 
 export default function WorkflowDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -300,6 +302,9 @@ export default function WorkflowDetailPage() {
               </div>
             )}
 
+            {/* Intent Section (exec-17) - shows goal, inputs, outputs, constraints */}
+            <WorkflowIntentSection intentSpecJson={workflow.intent_spec} />
+
             {/* Workflow Metadata */}
             <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
               <div className="flex items-start justify-between mb-6">
@@ -464,6 +469,9 @@ export default function WorkflowDetailPage() {
                 )}
               </div>
             )}
+
+            {/* Inputs & Outputs Summary (exec-16) */}
+            <WorkflowInputsSummary workflowId={workflow.id} />
 
             {/* Chat Section */}
             {chat && (

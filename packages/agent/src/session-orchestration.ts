@@ -142,12 +142,14 @@ async function suspendSession(
 
 /**
  * Find a consumer with pending work to process.
- * Returns the first consumer that has pending events in any of its subscribed topics.
+ * Returns the first consumer that has:
+ * - Pending events in any subscribed topic, OR
+ * - A due wakeAt time (for time-based scheduling per docs/dev/16-scheduling.md)
  */
 async function findConsumerWithPendingWork(
   api: KeepDbApi,
   workflow: Workflow
-): Promise<{ name: string } | null> {
+): Promise<{ name: string; reason: "events" | "wakeAt" } | null> {
   if (!workflow.handler_config) {
     return null;
   }
@@ -163,6 +165,7 @@ async function findConsumerWithPendingWork(
     return null;
   }
 
+  // First check for pending events (higher priority than wakeAt)
   for (const [consumerName, consumerConfig] of Object.entries(config.consumers)) {
     // Check if any subscribed topic has pending events
     for (const topicName of consumerConfig.subscribe || []) {
@@ -172,7 +175,19 @@ async function findConsumerWithPendingWork(
       );
       if (pendingCount > 0) {
         log(`Found consumer ${consumerName} with work in topic ${topicName} (${pendingCount} pending)`);
-        return { name: consumerName };
+        return { name: consumerName, reason: "events" };
+      }
+    }
+  }
+
+  // Then check for due wakeAt times (time-based scheduling)
+  const dueConsumers = await api.handlerStateStore.getConsumersWithDueWakeAt(workflow.id);
+  if (dueConsumers.length > 0) {
+    // Verify the consumer is actually defined in config
+    for (const consumerName of dueConsumers) {
+      if (config.consumers[consumerName]) {
+        log(`Found consumer ${consumerName} with due wakeAt`);
+        return { name: consumerName, reason: "wakeAt" };
       }
     }
   }

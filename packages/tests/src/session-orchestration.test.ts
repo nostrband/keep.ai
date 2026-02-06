@@ -35,6 +35,7 @@ async function createTables(db: DBInterface): Promise<void> {
       maintenance_fix_count INTEGER NOT NULL DEFAULT 0,
       active_script_id TEXT NOT NULL DEFAULT '',
       handler_config TEXT NOT NULL DEFAULT '',
+      intent_spec TEXT NOT NULL DEFAULT '',
       consumer_sleep_until INTEGER NOT NULL DEFAULT 0
     )
   `);
@@ -119,13 +120,14 @@ async function createTables(db: DBInterface): Promise<void> {
       next_reconcile_at INTEGER NOT NULL DEFAULT 0,
       resolved_by TEXT NOT NULL DEFAULT '',
       resolved_at INTEGER NOT NULL DEFAULT 0,
+      ui_title TEXT NOT NULL DEFAULT '',
       created_at INTEGER NOT NULL DEFAULT 0,
       updated_at INTEGER NOT NULL DEFAULT 0
     )
   `);
   await db.exec(`CREATE INDEX IF NOT EXISTS idx_mutations_handler_run ON mutations(handler_run_id)`);
 
-  // Handler state table
+  // Handler state table (includes wake_at from v42)
   await db.exec(`
     CREATE TABLE IF NOT EXISTS handler_state (
       id TEXT PRIMARY KEY NOT NULL DEFAULT '',
@@ -134,9 +136,11 @@ async function createTables(db: DBInterface): Promise<void> {
       state TEXT NOT NULL DEFAULT '{}',
       updated_at INTEGER NOT NULL DEFAULT 0,
       updated_by_run_id TEXT NOT NULL DEFAULT '',
+      wake_at INTEGER NOT NULL DEFAULT 0,
       UNIQUE(workflow_id, handler_name)
     )
   `);
+  await db.exec(`CREATE INDEX IF NOT EXISTS idx_handler_state_wake_at ON handler_state(wake_at)`);
 
   // Topics table
   await db.exec(`
@@ -162,6 +166,7 @@ async function createTables(db: DBInterface): Promise<void> {
       status TEXT NOT NULL DEFAULT 'pending',
       reserved_by_run_id TEXT NOT NULL DEFAULT '',
       created_by_run_id TEXT NOT NULL DEFAULT '',
+      caused_by TEXT NOT NULL DEFAULT '[]',
       attempt_number INTEGER NOT NULL DEFAULT 1,
       created_at INTEGER NOT NULL DEFAULT 0,
       updated_at INTEGER NOT NULL DEFAULT 0,
@@ -851,6 +856,160 @@ describe("Session Orchestration", () => {
       // Should handle failure gracefully
       expect(result.status).toBe("failed");
       expect(result.error).toBeDefined();
+    });
+  });
+
+  describe("Consumer wakeAt Scheduling (exec-19)", () => {
+    it("should not trigger consumer when wakeAt is in the future", async () => {
+      await createWorkflowWithScript(
+        db,
+        "workflow-1",
+        "script-1",
+        "const workflow = { consumers: { dailyDigest: { prepare: async () => ({ reservations: [] }) } } };",
+        '{"producers":{},"consumers":{"dailyDigest":{"subscribe":["notifications"]}}}'
+      );
+
+      // Create topic with no pending events
+      await api.topicStore.create("workflow-1", "notifications");
+
+      // Set wakeAt in the future
+      const futureTime = Date.now() + 60_000; // 1 minute from now
+      await api.handlerStateStore.updateWakeAt("workflow-1", "dailyDigest", futureTime);
+
+      const workflow = await api.scriptStore.getWorkflow("workflow-1");
+      const context: HandlerExecutionContext = { api };
+
+      const result = await executeWorkflowSession(
+        workflow!,
+        "event",
+        context
+      );
+
+      expect(result.status).toBe("completed");
+
+      // No consumer runs should be created (no events, wakeAt not due)
+      const runs = await api.handlerRunStore.getBySession(result.sessionId!);
+      expect(runs.filter(r => r.handler_type === "consumer")).toHaveLength(0);
+    });
+
+    it("should trigger consumer when wakeAt is due", async () => {
+      await createWorkflowWithScript(
+        db,
+        "workflow-1",
+        "script-1",
+        "const workflow = { consumers: { dailyDigest: { prepare: async () => ({ reservations: [] }) } } };",
+        '{"producers":{},"consumers":{"dailyDigest":{"subscribe":["notifications"]}}}'
+      );
+
+      // Create topic with no pending events
+      await api.topicStore.create("workflow-1", "notifications");
+
+      // Set wakeAt in the past (due now)
+      const pastTime = Date.now() - 1000; // 1 second ago
+      await api.handlerStateStore.updateWakeAt("workflow-1", "dailyDigest", pastTime);
+
+      const workflow = await api.scriptStore.getWorkflow("workflow-1");
+      const context: HandlerExecutionContext = { api };
+
+      const result = await executeWorkflowSession(
+        workflow!,
+        "event",
+        context
+      );
+
+      // A consumer run should have been created due to wakeAt
+      const runs = await api.handlerRunStore.getBySession(result.sessionId!);
+      expect(runs.some(r => r.handler_type === "consumer")).toBe(true);
+    });
+
+    it("should prioritize events over wakeAt", async () => {
+      await createWorkflowWithScript(
+        db,
+        "workflow-1",
+        "script-1",
+        "const workflow = { consumers: { processEmail: { prepare: async () => ({ reservations: [] }) } } };",
+        '{"producers":{},"consumers":{"processEmail":{"subscribe":["emails"]}}}'
+      );
+
+      // Create topic with pending events
+      await createTopicWithEvents(api, "workflow-1", "emails", ["msg-1"]);
+
+      // Also set wakeAt in the past
+      const pastTime = Date.now() - 1000;
+      await api.handlerStateStore.updateWakeAt("workflow-1", "processEmail", pastTime);
+
+      const workflow = await api.scriptStore.getWorkflow("workflow-1");
+      const context: HandlerExecutionContext = { api };
+
+      const result = await executeWorkflowSession(
+        workflow!,
+        "event",
+        context
+      );
+
+      // Consumer should have run (triggered by events, not wakeAt)
+      const runs = await api.handlerRunStore.getBySession(result.sessionId!);
+      expect(runs.some(r => r.handler_type === "consumer")).toBe(true);
+    });
+
+    it("should ignore wakeAt for consumers not defined in config", async () => {
+      await createWorkflowWithScript(
+        db,
+        "workflow-1",
+        "script-1",
+        "const workflow = {};",
+        '{"producers":{},"consumers":{}}'
+      );
+
+      // Set wakeAt for a consumer that doesn't exist in config
+      const pastTime = Date.now() - 1000;
+      await api.handlerStateStore.updateWakeAt("workflow-1", "nonExistentConsumer", pastTime);
+
+      const workflow = await api.scriptStore.getWorkflow("workflow-1");
+      const context: HandlerExecutionContext = { api };
+
+      const result = await executeWorkflowSession(
+        workflow!,
+        "event",
+        context
+      );
+
+      expect(result.status).toBe("completed");
+
+      // No consumer runs should be created
+      const runs = await api.handlerRunStore.getBySession(result.sessionId!);
+      expect(runs.filter(r => r.handler_type === "consumer")).toHaveLength(0);
+    });
+
+    it("should handle wakeAt=0 as no scheduled wake", async () => {
+      await createWorkflowWithScript(
+        db,
+        "workflow-1",
+        "script-1",
+        "const workflow = { consumers: { processEmail: { prepare: async () => ({ reservations: [] }) } } };",
+        '{"producers":{},"consumers":{"processEmail":{"subscribe":["emails"]}}}'
+      );
+
+      // Create topic with no events
+      await api.topicStore.create("workflow-1", "emails");
+
+      // Set wakeAt to 0 (no scheduled wake)
+      await api.handlerStateStore.updateWakeAt("workflow-1", "processEmail", 0);
+
+      const workflow = await api.scriptStore.getWorkflow("workflow-1");
+      const context: HandlerExecutionContext = { api };
+
+      const result = await executeWorkflowSession(
+        workflow!,
+        "event",
+        context
+      );
+
+      expect(result.status).toBe("completed");
+
+      // No consumer runs should be created (no events, no wakeAt)
+      const runs = await api.handlerRunStore.getBySession(result.sessionId!);
+      expect(runs.filter(r => r.handler_type === "consumer")).toHaveLength(0);
     });
   });
 });

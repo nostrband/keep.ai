@@ -45,4 +45,4 @@ export { makeConsoleLogTool } from "./console-log";
 // Note: makeItemsListTool removed (exec-02 - deprecated Items infrastructure)
 
 // Topics API (exec-03 - event-driven execution model)
-export { makeTopicsPeekTool, makeTopicsGetByIdsTool, makeTopicsPublishTool } from "./topics";
+export { makeTopicsPeekTool, makeTopicsGetByIdsTool, makeTopicsPublishTool, makeTopicsRegisterInputTool } from "./topics";

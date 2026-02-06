@@ -51,7 +51,8 @@ async function createIntegrationTables(db: DBInterface): Promise<void> {
       maintenance INTEGER NOT NULL DEFAULT 0,
       maintenance_fix_count INTEGER NOT NULL DEFAULT 0,
       active_script_id TEXT NOT NULL DEFAULT '',
-      handler_config TEXT NOT NULL DEFAULT ''
+      handler_config TEXT NOT NULL DEFAULT '',
+      intent_spec TEXT NOT NULL DEFAULT ''
     )
   `);
   await db.exec(`CREATE INDEX IF NOT EXISTS idx_workflows_task_id ON workflows(task_id)`);
@@ -205,6 +206,7 @@ describe("Maintainer Integration Tests", () => {
     maintenance_fix_count: 0,
     active_script_id: "script-1",
     handler_config: "",
+    intent_spec: "",
     ...overrides,
   });
 
