@@ -193,6 +193,13 @@ export {
   removeProducerSchedules,
 } from "./producer-schedule-init";
 
+// Intent extraction (exec-17)
+export {
+  extractIntent,
+  parseIntentSpec,
+  formatIntentForPrompt,
+} from "./intent-extract";
+
 export type {
   Sandbox,
   SandboxOptions,

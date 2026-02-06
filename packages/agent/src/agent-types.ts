@@ -67,6 +67,8 @@ export interface MaintainerContext {
   scriptVersion: string;
   /** Changelog of prior minor versions for this major version */
   changelog: Array<{ version: string; comment: string }>;
+  /** Intent spec JSON string (exec-17) - user's original intent for the workflow */
+  intentSpec?: string;
 }
 
 export type AgentTask = {

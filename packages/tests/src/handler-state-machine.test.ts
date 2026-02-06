@@ -34,6 +34,7 @@ async function createTables(db: DBInterface): Promise<void> {
       maintenance_fix_count INTEGER NOT NULL DEFAULT 0,
       active_script_id TEXT NOT NULL DEFAULT '',
       handler_config TEXT NOT NULL DEFAULT '',
+      intent_spec TEXT NOT NULL DEFAULT '',
       consumer_sleep_until INTEGER NOT NULL DEFAULT 0
     )
   `);

@@ -33,7 +33,8 @@ async function createTables(db: DBInterface): Promise<void> {
       name TEXT NOT NULL DEFAULT '',
       status TEXT NOT NULL DEFAULT 'active',
       active_script_id TEXT NOT NULL DEFAULT '',
-      handler_config TEXT NOT NULL DEFAULT ''
+      handler_config TEXT NOT NULL DEFAULT '',
+      intent_spec TEXT NOT NULL DEFAULT ''
     )
   `);
 }

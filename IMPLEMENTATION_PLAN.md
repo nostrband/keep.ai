@@ -1,14 +1,34 @@
 # Keep.AI v1 Implementation Plan
 
-## Status: Looking for Next Spec
+## Status: Ready for Next Spec
 
-**exec-16 (Inputs & Outputs UX) is complete!**
-
-All phases have been implemented with 16 new tests passing. Total test suite: 989 tests passing.
+**exec-17 (Intent Contract) implementation complete.**
 
 ---
 
 ## Recently Completed
+
+### exec-17 - Intent Contract ✅
+
+**Spec File:** [`specs/done/exec-17-intent-contract.md`](specs/done/exec-17-intent-contract.md)
+
+**Implementation Summary:**
+- Phase 1: Database migration (v45) - Added intent_spec column to workflows table
+- Phase 2: Intent extraction prompt - Created focused LLM prompt with JSON schema response format
+- Phase 3: Hook extraction to planner save - Triggers on first major version save, fire-and-forget async
+- Phase 4: UI - Intent section on workflow detail page (WorkflowIntentSection component)
+- Phase 5: Maintainer prompt update - Include intent spec in maintainer context
+- Phase 6: Tests (17 new tests for intent functionality)
+
+**Key Features:**
+- Structured IntentSpec with goal, inputs, outputs, assumptions, nonGoals, semanticConstraints, title
+- LLM-based intent extraction from user messages via OpenRouter API
+- Intent spec stored at workflow level (not per-script)
+- Maintainer agent receives intent context for repair decisions
+- React component for displaying structured intent in workflow detail page
+- parseIntentSpec and formatIntentForPrompt utility functions
+
+**Note:** Phases 7 (Backfill UI), 8 (API endpoint) were deferred as core functionality is complete.
 
 ### exec-16 - Inputs & Outputs UX ✅
 
@@ -49,10 +69,10 @@ All phases have been implemented with 16 new tests passing. Total test suite: 98
 
 ## What's Available for Next Implementation
 
-Review available specs in `specs/` directory and `docs/dev/` for potential next implementations.
+Review available specs in `specs/` directory, `docs/dev/` for design docs, and `docs/ISSUES.md` for prioritized feature requests.
 
 ---
 
-## Current Database Version: 44
+## Current Database Version: 45
 
 **Latest Tag:** v1.0.0-alpha.124

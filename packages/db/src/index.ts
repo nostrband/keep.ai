@@ -39,7 +39,7 @@ export type { File } from "./file-store";
 
 // Script store
 export { ScriptStore, DRAFT_THRESHOLDS, formatVersion } from "./script-store";
-export type { Script, ScriptRun, Workflow, AbandonedDraft, DraftActivitySummary } from "./script-store";
+export type { Script, ScriptRun, Workflow, AbandonedDraft, DraftActivitySummary, IntentSpec } from "./script-store";
 
 // Notification store (Spec 12)
 export { NotificationStore } from "./notification-store";

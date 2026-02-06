@@ -49,7 +49,7 @@ async function createScriptTables(db: DBInterface): Promise<void> {
   await db.exec(`CREATE INDEX IF NOT EXISTS idx_script_runs_script_id ON script_runs(script_id)`);
   await db.exec(`CREATE INDEX IF NOT EXISTS idx_script_runs_workflow_id ON script_runs(workflow_id)`);
 
-  // Create workflows table (matches production v16 + later migrations)
+  // Create workflows table (matches production v16 + v45 migrations)
   await db.exec(`
     CREATE TABLE IF NOT EXISTS workflows (
       id TEXT PRIMARY KEY NOT NULL,
@@ -64,7 +64,8 @@ async function createScriptTables(db: DBInterface): Promise<void> {
       maintenance INTEGER NOT NULL DEFAULT 0,
       maintenance_fix_count INTEGER NOT NULL DEFAULT 0,
       active_script_id TEXT NOT NULL DEFAULT '',
-      handler_config TEXT NOT NULL DEFAULT ''
+      handler_config TEXT NOT NULL DEFAULT '',
+      intent_spec TEXT NOT NULL DEFAULT ''
     )
   `);
   await db.exec(`CREATE INDEX IF NOT EXISTS idx_workflows_task_id ON workflows(task_id)`);
@@ -536,6 +537,7 @@ describe("ScriptStore", () => {
       maintenance_fix_count: 0,
       active_script_id: "",
       handler_config: "",
+      intent_spec: "",
       ...overrides,
     });
 

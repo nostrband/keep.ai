@@ -219,6 +219,7 @@ export class Agent {
         taskRunId: this.taskRunId,
         chatId: this.task.chat_id,
         scriptStore: this.env.api.scriptStore,
+        chatStore: this.env.api.chatStore,  // For intent extraction (exec-17)
       });
       tools.schedule = makeScheduleTool({
         taskId: this.task.id,
