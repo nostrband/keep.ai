@@ -28,7 +28,9 @@ Succinct learnings about how to RUN the project:
 
 **DB**
 - cr-sqlite requires all NOT NULL columns in CRR tables to have DEFAULT values
+- cr-sqlite requires NO UNIQUE indexes on CRR tables aside from primary key, enforce unique-ness at code level, make sure select-before-insert always runs inside a tx to avoid races 
 - if you do ALTER table on CRR tables then you can't write to these tables in the same migration (same tx) - split this migration into two and do writes in the second one
+- there's no crsql_as_crr_undo to stop CRR-tracking on tables, tracked tables can't be deleted, they must be marked deprecated, code using them removed, tables left as is
 - use `crsql_as_crr` when creating tables that should be synched, use `crsql_begin_alter`/`crsql_commit_alter` when altering synched tables, see other migrations as examples.
 
 # Codebase Patterns

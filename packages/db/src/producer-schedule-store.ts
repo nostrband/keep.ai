@@ -128,7 +128,10 @@ export class ProducerScheduleStore {
    * Create or update a producer schedule (upsert).
    */
   async upsert(input: ProducerScheduleInput, tx?: DBInterface): Promise<void> {
-    const db = tx || this.db.db;
+    if (!tx) {
+      return this.db.db.tx((tx) => this.upsert(input, tx));
+    }
+    const db = tx;
     const now = Date.now();
 
     // Check if exists

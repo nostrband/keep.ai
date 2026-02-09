@@ -110,7 +110,10 @@ export class ItemStore {
     runId: string,
     tx?: DBInterface
   ): Promise<Item> {
-    const db = tx || this.db.db;
+    if (!tx) {
+      return this.db.db.tx((tx) => this.startItem(workflowId, logicalItemId, title, createdBy, runId, tx));
+    }
+    const db = tx;
     const now = Date.now();
 
     // Check if item exists

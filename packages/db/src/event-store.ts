@@ -192,7 +192,10 @@ export class EventStore {
     createdByRunId: string,
     tx?: DBInterface
   ): Promise<Event> {
-    const db = tx || this.db.db;
+    if (!tx) {
+      return this.db.db.tx((tx) => this.publishEvent(workflowId, topicName, event, createdByRunId, tx));
+    }
+    const db = tx;
     const now = Date.now();
 
     // Get or create topic

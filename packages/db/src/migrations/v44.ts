@@ -40,8 +40,7 @@ export async function migrateV44(
       external_id TEXT NOT NULL DEFAULT '',
       title TEXT NOT NULL DEFAULT '',
       created_by_run_id TEXT NOT NULL DEFAULT '',
-      created_at INTEGER NOT NULL DEFAULT 0,
-      UNIQUE(workflow_id, source, type, external_id)
+      created_at INTEGER NOT NULL DEFAULT 0
     )
   `);
 

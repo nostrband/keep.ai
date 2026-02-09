@@ -90,7 +90,10 @@ export class HandlerStateStore {
     updatedByRunId: string,
     tx?: DBInterface
   ): Promise<void> {
-    const db = tx || this.db.db;
+    if (!tx) {
+      return this.db.db.tx((tx) => this.set(workflowId, handlerName, state, updatedByRunId, tx));
+    }
+    const db = tx;
     const now = Date.now();
     const stateJson = JSON.stringify(state);
 
@@ -174,7 +177,10 @@ export class HandlerStateStore {
     wakeAt: number,
     tx?: DBInterface
   ): Promise<void> {
-    const db = tx || this.db.db;
+    if (!tx) {
+      return this.db.db.tx((tx) => this.updateWakeAt(workflowId, handlerName, wakeAt, tx));
+    }
+    const db = tx;
     const now = Date.now();
 
     // Check if exists

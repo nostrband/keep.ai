@@ -36,8 +36,7 @@ export async function migrateV36(
       id TEXT PRIMARY KEY NOT NULL DEFAULT '',
       workflow_id TEXT NOT NULL DEFAULT '',
       name TEXT NOT NULL DEFAULT '',
-      created_at INTEGER NOT NULL DEFAULT 0,
-      UNIQUE(workflow_id, name)
+      created_at INTEGER NOT NULL DEFAULT 0
     )
   `);
   await tx.exec(`CREATE INDEX IF NOT EXISTS idx_topics_workflow ON topics(workflow_id)`);
@@ -57,8 +56,7 @@ export async function migrateV36(
       created_by_run_id TEXT NOT NULL DEFAULT '',
       attempt_number INTEGER NOT NULL DEFAULT 1,
       created_at INTEGER NOT NULL DEFAULT 0,
-      updated_at INTEGER NOT NULL DEFAULT 0,
-      UNIQUE(topic_id, message_id)
+      updated_at INTEGER NOT NULL DEFAULT 0
     )
   `);
   await tx.exec(`CREATE INDEX IF NOT EXISTS idx_events_topic_status ON events(topic_id, status)`);
@@ -95,7 +93,7 @@ export async function migrateV36(
   await tx.exec(`
     CREATE TABLE IF NOT EXISTS mutations (
       id TEXT PRIMARY KEY NOT NULL DEFAULT '',
-      handler_run_id TEXT NOT NULL DEFAULT '' UNIQUE,
+      handler_run_id TEXT NOT NULL DEFAULT '',
       workflow_id TEXT NOT NULL DEFAULT '',
       tool_namespace TEXT NOT NULL DEFAULT '',
       tool_method TEXT NOT NULL DEFAULT '',
@@ -126,8 +124,7 @@ export async function migrateV36(
       handler_name TEXT NOT NULL DEFAULT '',
       state TEXT NOT NULL DEFAULT '{}',
       updated_at INTEGER NOT NULL DEFAULT 0,
-      updated_by_run_id TEXT NOT NULL DEFAULT '',
-      UNIQUE(workflow_id, handler_name)
+      updated_by_run_id TEXT NOT NULL DEFAULT ''
     )
   `);
   await tx.exec(`CREATE INDEX IF NOT EXISTS idx_handler_state_workflow ON handler_state(workflow_id)`);

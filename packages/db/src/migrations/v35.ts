@@ -34,8 +34,7 @@ export async function migrateV35(
       created_by_run_id TEXT NOT NULL DEFAULT '',
       last_run_id TEXT NOT NULL DEFAULT '',
       created_at INTEGER NOT NULL DEFAULT 0,
-      updated_at INTEGER NOT NULL DEFAULT 0,
-      UNIQUE(workflow_id, logical_item_id)
+      updated_at INTEGER NOT NULL DEFAULT 0
     )
   `);
 

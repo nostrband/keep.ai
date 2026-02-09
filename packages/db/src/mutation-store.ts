@@ -154,9 +154,20 @@ export class MutationStore {
   /**
    * Create a new mutation record.
    * Must be called BEFORE executing external call for crash detection.
+   * Each handler run can have at most one mutation (1:1 relationship).
    */
   async create(input: CreateMutationInput, tx?: DBInterface): Promise<Mutation> {
-    const db = tx || this.db.db;
+    if (!tx) {
+      return this.db.db.tx((tx) => this.create(input, tx));
+    }
+    const db = tx;
+
+    // Check uniqueness: one mutation per handler_run_id
+    const existing = await this.getByHandlerRunId(input.handler_run_id, db);
+    if (existing) {
+      throw new Error(`Mutation already exists for handler run ${input.handler_run_id}`);
+    }
+
     const id = bytesToHex(randomBytes(16));
     const now = Date.now();
     const uiTitle = input.ui_title || "";

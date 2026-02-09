@@ -49,7 +49,8 @@
       "Bash(while read f)",
       "Bash(do echo \"=== $f ===\" sed -n '/ISSUE REVIEW/,$p' \"$f\")",
       "Bash(basename:*)",
-      "Bash(git log:*)"
+      "Bash(git log:*)",
+      "Bash(npx vitest:*)"
     ]
   }
 }

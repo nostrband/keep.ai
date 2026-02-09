@@ -90,7 +90,10 @@ export class InputStore {
     createdByRunId: string,
     tx?: DBInterface
   ): Promise<string> {
-    const db = tx || this.db.db;
+    if (!tx) {
+      return this.db.db.tx((tx) => this.register(workflowId, params, createdByRunId, tx));
+    }
+    const db = tx;
 
     // Check if already exists
     const existing = await db.execO<{ id: string }>(

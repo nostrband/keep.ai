@@ -39,8 +39,7 @@ export async function migrateV43(
       next_run_at INTEGER NOT NULL DEFAULT 0,
       last_run_at INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL DEFAULT 0,
-      updated_at INTEGER NOT NULL DEFAULT 0,
-      UNIQUE(workflow_id, producer_name)
+      updated_at INTEGER NOT NULL DEFAULT 0
     )
   `);
 

@@ -81,7 +81,10 @@ export class TopicStore {
     name: string,
     tx?: DBInterface
   ): Promise<Topic> {
-    const db = tx || this.db.db;
+    if (!tx) {
+      return this.db.db.tx((tx) => this.getOrCreate(workflowId, name, tx));
+    }
+    const db = tx;
 
     // Check if topic exists
     const existing = await this.getByName(workflowId, name, db);
@@ -115,7 +118,17 @@ export class TopicStore {
     name: string,
     tx?: DBInterface
   ): Promise<Topic> {
-    const db = tx || this.db.db;
+    if (!tx) {
+      return this.db.db.tx((tx) => this.create(workflowId, name, tx));
+    }
+    const db = tx;
+
+    // Check uniqueness: (workflow_id, name)
+    const existing = await this.getByName(workflowId, name, db);
+    if (existing) {
+      throw new Error(`Topic '${name}' already exists in workflow ${workflowId}`);
+    }
+
     const id = bytesToHex(randomBytes(16));
     const now = Date.now();
 
