@@ -1,8 +1,8 @@
 import React, { useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import SharedHeader from "./SharedHeader";
-import { useDbQuery } from "../hooks/dbQuery";
 import { useFileUpload } from "../hooks/useFileUpload";
+import { useCreateTask } from "../hooks/dbWrites";
 import {
   PromptInput,
   PromptInputAttachment,
@@ -27,14 +27,14 @@ export default function NewPage() {
   const [input, setInput] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const navigate = useNavigate();
-  const { api } = useDbQuery();
   const { uploadFiles, uploadState } = useFileUpload();
+  const createTask = useCreateTask();
 
   const handleSubmit = useCallback(async (message: PromptInputMessage) => {
     const hasText = Boolean(message.text);
     const hasAttachments = Boolean(message.files?.length);
 
-    if (!(hasText || hasAttachments) || !api) {
+    if (!(hasText || hasAttachments)) {
       return;
     }
 
@@ -71,8 +71,8 @@ export default function NewPage() {
         }
       }
 
-      // Call api.createTask
-      const result = await api.createTask({
+      // Create task via mutation hook (triggers sync to server)
+      const result = await createTask.mutateAsync({
         content: messageContent,
         files: attachedFiles,
       });
@@ -83,7 +83,7 @@ export default function NewPage() {
       console.error('Failed to create task:', error);
       setIsSubmitting(false);
     }
-  }, [api, navigate, uploadFiles]);
+  }, [createTask, navigate, uploadFiles]);
 
   return (
     <div className="min-h-screen bg-gray-50">

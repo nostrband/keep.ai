@@ -5,6 +5,33 @@ import { qk } from "./queryKeys";
 import { useDbQuery } from "./dbQuery";
 import { File } from "@app/db";
 
+export function useCreateTask() {
+  const { api } = useDbQuery();
+
+  return useMutation({
+    mutationFn: async (input: {
+      content: string;
+      files?: File[];
+      title?: string;
+    }) => {
+      if (!api) throw new Error("Database not available");
+
+      return await api.createTask({
+        content: input.content,
+        files: input.files,
+        title: input.title,
+      });
+    },
+    onSuccess: () => {
+      notifyTablesChanged(
+        ["chats", "chat_messages", "tasks", "workflows", "inbox"],
+        true,
+        api!
+      );
+    },
+  });
+}
+
 export function useAddMessage() {
   const { api } = useDbQuery();
 

@@ -4,6 +4,7 @@ import { useWorkflows } from "../hooks/dbScriptReads";
 import { useTasks } from "../hooks/dbTaskReads";
 import { useFileUpload } from "../hooks/useFileUpload";
 import { useDbQuery } from "../hooks/dbQuery";
+import { useCreateTask } from "../hooks/dbWrites";
 import { useAutonomyPreference } from "../hooks/useAutonomyPreference";
 import SharedHeader from "./SharedHeader";
 import { WorkflowStatusBadge } from "./StatusBadge";
@@ -167,6 +168,7 @@ export default function MainPage() {
   const isSubmittingRef = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { uploadFiles, uploadState } = useFileUpload();
+  const createTask = useCreateTask();
 
   // Fetch latest run for each workflow using batch query
   useEffect(() => {
@@ -254,7 +256,7 @@ export default function MainPage() {
     const hasText = Boolean(message.text);
     const hasAttachments = Boolean(message.files?.length);
 
-    if (!(hasText || hasAttachments) || !api) {
+    if (!(hasText || hasAttachments)) {
       return;
     }
 
@@ -294,8 +296,8 @@ export default function MainPage() {
         }
       }
 
-      // Create task and navigate to chat (same pattern as NewPage)
-      const result = await api.createTask({
+      // Create task via mutation hook (triggers sync to server)
+      const result = await createTask.mutateAsync({
         content: messageContent,
         files: attachedFiles,
       });
@@ -309,7 +311,7 @@ export default function MainPage() {
       isSubmittingRef.current = false;
       setIsSubmitting(false);
     }
-  }, [api, navigate, uploadFiles]);
+  }, [createTask, navigate, uploadFiles]);
 
   // Handle focus=input URL param (from Electron tray menu "New automation...")
   useEffect(() => {
