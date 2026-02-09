@@ -19,6 +19,18 @@ export {
   makeTopicsPublishTool,
   // Topics registerInput (exec-15)
   makeTopicsRegisterInputTool,
+  // Script tools (read-only, planner/maintainer)
+  makeGetScriptTool,
+  makeListScriptsTool,
+  makeScriptHistoryTool,
+  makeListScriptRunsTool,
+  makeGetScriptRunTool,
+  // File tools (read-only)
+  makeListFilesTool,
+  makeSearchFilesTool,
+  // User communication
+  makeUserSendTool,
+  type UserSendContext,
   // Tool definition helpers
   defineTool,
   defineReadOnlyTool,
