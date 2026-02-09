@@ -83,9 +83,10 @@ export function useChatEvents(chatId: string) {
 
     // Get chat messages with pagination from chat_messages table (Spec 12)
     // pageParam is the timestamp to get messages before (older messages)
+    const limit = 50;
     const messages = await api.chatStore.getNewChatMessages({
       chatId,
-      limit: 50,
+      limit,
       before: pageParam,
     });
 
@@ -97,10 +98,11 @@ export function useChatEvents(chatId: string) {
       timestamp: msg.timestamp,
     }));
 
-    // The nextCursor is the timestamp of the oldest event in this page
-    // Since events come in DESC order, the oldest is the last one
+    // Only set nextCursor if we got a full page, indicating more data exists
     const nextCursor =
-      events.length > 0 ? events[events.length - 1].timestamp : undefined;
+      messages.length >= limit
+        ? events[events.length - 1].timestamp
+        : undefined;
 
     return { events, nextCursor };
   };
