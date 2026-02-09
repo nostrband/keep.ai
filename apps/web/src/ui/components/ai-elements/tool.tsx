@@ -5,7 +5,7 @@ import {
   CollapsibleTrigger,
 } from "../ui/collapsible";
 import { cn } from "../../lib/utils";
-import type { ToolUIPart } from "ai";
+import type { ToolUIPart } from "@app/proto";
 import {
   CheckCircleIcon,
   ChevronDownIcon,

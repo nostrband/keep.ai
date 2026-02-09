@@ -40,11 +40,11 @@ import {
   makeTopicsGetByIdsTool,
   makeTopicsPublishTool,
 } from "../tools";
-import { z, ZodFirstPartyTypeKind as K } from "zod";
 import { EvalContext, EvalGlobal } from "./sandbox";
 import debug from "debug";
 import { ClassifiedError, isClassifiedError, LogicError, WorkflowPausedError } from "../errors";
 import type { ConnectionManager } from "@app/connectors";
+import { validateJsonSchema, printJsonSchema } from "../json-schema";
 
 /**
  * @deprecated SandboxAPI is deprecated. Use ToolWrapper from './tool-wrapper' instead.
@@ -147,9 +147,9 @@ Example: await ${ns}.${name}(<input>)
 `,
       ];
       if (tool.inputSchema)
-        desc.push(...["===INPUT===", printSchema(tool.inputSchema)]);
+        desc.push(...["===INPUT===", printJsonSchema(tool.inputSchema)]);
       if (tool.outputSchema)
-        desc.push(...["===OUTPUT===", printSchema(tool.outputSchema)]);
+        desc.push(...["===OUTPUT===", printJsonSchema(tool.outputSchema)]);
       const doc = desc.join("\n");
 
       // Init ns
@@ -164,17 +164,14 @@ Example: await ${ns}.${name}(<input>)
         // Validate input using inputSchema if present
         let validatedInput = input;
         if (tool.inputSchema) {
-          try {
-            validatedInput = tool.inputSchema.parse(input);
-          } catch (error) {
+          const result = validateJsonSchema(tool.inputSchema, input);
+          if (!result.valid) {
             this.debug(
               `Bad input for '${ns}.${name}' input ${JSON.stringify(
                 input
-              )} schema ${tool.inputSchema} error ${error}`
+              )} errors ${result.errors.join("; ")}`
             );
 
-            // NOTE: do not print zod error codes as those are too verbose, we're
-            // already printing Usage which is more useful.
             const message = `Invalid input for ${ns}.${name}.\nUsage: ${desc}`;
             const logicError = new LogicError(message, { source: `${ns}.${name}` });
 
@@ -187,6 +184,7 @@ Example: await ${ns}.${name}(<input>)
 
             throw logicError;
           }
+          validatedInput = result.value;
         }
 
         // Note: Mutation restrictions via Items.withItem() have been removed (exec-02)
@@ -224,11 +222,10 @@ Example: await ${ns}.${name}(<input>)
 
         // Validate output using outputSchema if present
         if (tool.outputSchema) {
-          try {
-            tool.outputSchema.parse(result);
-          } catch (error) {
+          const outResult = validateJsonSchema(tool.outputSchema, result);
+          if (!outResult.valid) {
             throw new LogicError(
-              `Invalid output from ${ns}.${name}: ${error instanceof Error ? error.message : 'Unknown validation error'}`,
+              `Invalid output from ${ns}.${name}: ${outResult.errors.join("; ")}`,
               { source: `${ns}.${name}` }
             );
           }
@@ -508,166 +505,3 @@ Example: await ${ns}.${name}(<input>)
   }
 }
 
-type Any = z.ZodTypeAny;
-
-export const printSchema = (schema: Any): string => {
-  const t = schema._def.typeName as K;
-
-  // For primitive types, return description if available
-  const isPrimitive = [
-    K.ZodString,
-    K.ZodNumber,
-    K.ZodBoolean,
-    K.ZodBigInt,
-    K.ZodDate,
-    K.ZodUndefined,
-    K.ZodNull,
-    K.ZodLiteral,
-    K.ZodEnum,
-    K.ZodNativeEnum,
-  ].includes(t);
-
-  if (schema.description && isPrimitive) {
-    return "<" + schema.description + ">";
-  }
-
-  let result: string;
-
-  switch (t) {
-    case K.ZodString:
-      result = "string";
-      break;
-    case K.ZodNumber:
-      result = "number";
-      break;
-    case K.ZodBoolean:
-      result = "boolean";
-      break;
-    case K.ZodBigInt:
-      result = "bigint";
-      break;
-    case K.ZodDate:
-      result = "date";
-      break;
-    case K.ZodUndefined:
-      result = "undefined";
-      break;
-    case K.ZodNull:
-      result = "null";
-      break;
-
-    case K.ZodLiteral:
-      result = JSON.stringify((schema as z.ZodLiteral<any>)._def.value);
-      break;
-
-    case K.ZodEnum:
-      result = `enum(${(
-        schema as z.ZodEnum<[string, ...string[]]>
-      )._def.values.join(", ")})`;
-      break;
-
-    case K.ZodNativeEnum:
-      result = `enum(${Object.values(
-        (schema as z.ZodNativeEnum<any>)._def.values
-      ).join(", ")})`;
-      break;
-
-    case K.ZodArray: {
-      const inner = (schema as z.ZodArray<Any>)._def.type;
-      result = `[${printSchema(inner)}]`;
-      break;
-    }
-
-    case K.ZodOptional:
-      result = `${printSchema((schema as z.ZodOptional<Any>)._def.innerType)}?`;
-      break;
-
-    case K.ZodNullable:
-      result = `${printSchema(
-        (schema as z.ZodNullable<Any>)._def.innerType
-      )} | null`;
-      break;
-
-    case K.ZodDefault:
-      result = `${printSchema(
-        (schema as z.ZodDefault<Any>)._def.innerType
-      )} (default)`;
-      break;
-
-    case K.ZodPromise:
-      result = `Promise<${printSchema(
-        (schema as z.ZodPromise<Any>)._def.type
-      )}>`;
-      break;
-
-    case K.ZodUnion:
-      result = (schema as z.ZodUnion<[Any, ...Any[]]>)._def.options
-        .map(printSchema)
-        .join(" | ");
-      break;
-
-    case K.ZodIntersection: {
-      const s = schema as z.ZodIntersection<Any, Any>;
-      result = `${printSchema(s._def.left)} & ${printSchema(s._def.right)}`;
-      break;
-    }
-
-    case K.ZodRecord: {
-      const s = schema as z.ZodRecord<Any, Any>;
-      result = `{ [key: ${printSchema(s._def.keyType)}]: ${printSchema(
-        s._def.valueType
-      )} }`;
-      break;
-    }
-
-    case K.ZodTuple:
-      result = `[${(schema as z.ZodTuple)._def.items
-        .map(printSchema)
-        .join(", ")}]`;
-      break;
-
-    case K.ZodObject: {
-      const obj = schema as z.ZodObject<any>;
-      // In Zod v3, the shape is a function on _def:
-      const shape = obj._def.shape();
-      const body = Object.entries(shape)
-        .map(([k, v]) => `${k}: ${printSchema(v as Any)}`)
-        .join("; ");
-      result = `{ ${body} }`;
-      break;
-    }
-
-    case K.ZodDiscriminatedUnion: {
-      const du = schema as z.ZodDiscriminatedUnion<string, any>;
-      // options is a Map in Zod; get its values:
-      const options: any[] = Array.from(du._def.options.values());
-      result = options.map(printSchema).join(" | ");
-      break;
-    }
-
-    case K.ZodEffects: {
-      // If you want to "ignore" refinements/transforms for printing:
-      const inner = (schema as z.ZodEffects<Any>)._def.schema;
-      result = printSchema(inner);
-      break;
-    }
-
-    case K.ZodBranded: {
-      const inner = (schema as z.ZodBranded<Any, any>)._def.type;
-      result = `${printSchema(inner)} /* branded */`;
-      break;
-    }
-
-    default:
-      // Fallback: show the Zod kind
-      result = t.replace("Zod", "").toLowerCase();
-      break;
-  }
-
-  // Add description as a comment for complex types
-  if (schema.description && !isPrimitive) {
-    result = `${result} /* ${schema.description} */`;
-  }
-
-  return result;
-};

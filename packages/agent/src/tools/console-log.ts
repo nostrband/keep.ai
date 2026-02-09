@@ -1,22 +1,39 @@
-import { z } from "zod";
+import { JSONSchema } from "../json-schema";
 import { EvalContext } from "../sandbox/sandbox";
 import { defineReadOnlyTool, Tool } from "./types";
 
-const inputSchema = z.object({
-  type: z
-    .enum(["log", "warn", "error"])
-    .describe(
-      "Log level: log for general info, warn for warnings, error for errors"
-    ),
-  line: z.string().describe("The message to log"),
-});
+const inputSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    type: {
+      enum: ["log", "warn", "error"],
+      description:
+        "Log level: log for general info, warn for warnings, error for errors",
+    },
+    line: { type: "string", description: "The message to log" },
+  },
+  required: ["type", "line"],
+};
 
-const outputSchema = z.object({
-  success: z.boolean().describe("Whether the log was recorded successfully"),
-});
+const outputSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    success: {
+      type: "boolean",
+      description: "Whether the log was recorded successfully",
+    },
+  },
+  required: ["success"],
+};
 
-type Input = z.infer<typeof inputSchema>;
-type Output = z.infer<typeof outputSchema>;
+interface Input {
+  type: "log" | "warn" | "error";
+  line: string;
+}
+
+interface Output {
+  success: boolean;
+}
 
 /**
  * Create the Console.log tool.
@@ -31,7 +48,7 @@ export function makeConsoleLogTool(getContext: () => EvalContext): Tool<Input, O
 Accepts log messages with different severity levels (log, warn, error).
 Messages are timestamped and stored in run logs.
 
-ℹ️ Not a mutation - can be used outside Items.withItem().`,
+\u2139\ufe0f Not a mutation - can be used outside Items.withItem().`,
     inputSchema,
     outputSchema,
     execute: async (input) => {

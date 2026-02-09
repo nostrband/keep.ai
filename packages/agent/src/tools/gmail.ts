@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { JSONSchema } from "../json-schema";
 import { EvalContext } from "../sandbox/sandbox";
 import debug from "debug";
 import { google } from "googleapis";
@@ -19,20 +19,30 @@ const SUPPORTED_METHODS = [
   "users.getProfile",
 ] as const;
 
-const inputSchema = z.object({
-  method: z.enum(SUPPORTED_METHODS).describe("Gmail API method to call"),
-  params: z
-    .any()
-    .optional()
-    .describe("Parameters to pass to the Gmail API method"),
-  account: z
-    .string()
-    .describe(
-      "Email address of the Gmail account to use (e.g., user@gmail.com)"
-    ),
-});
+const inputSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    method: {
+      enum: SUPPORTED_METHODS as unknown as string[],
+      description: "Gmail API method to call",
+    },
+    params: {
+      description: "Parameters to pass to the Gmail API method",
+    },
+    account: {
+      type: "string",
+      description:
+        "Email address of the Gmail account to use (e.g., user@gmail.com)",
+    },
+  },
+  required: ["method", "account"],
+};
 
-type Input = z.infer<typeof inputSchema>;
+interface Input {
+  method: (typeof SUPPORTED_METHODS)[number];
+  params?: any;
+  account: string;
+}
 
 /**
  * Create Gmail tool that uses ConnectionManager for credentials.

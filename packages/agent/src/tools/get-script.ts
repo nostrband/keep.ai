@@ -1,33 +1,45 @@
-import { z } from "zod";
+import { JSONSchema } from "../json-schema";
 import { ScriptStore } from "@app/db";
 import { EvalContext } from "../sandbox/sandbox";
 import { defineReadOnlyTool, Tool } from "./types";
 
-const inputSchema = z
-  .object({
-    id: z
-      .string()
-      .optional()
-      .describe(
-        "Script ID (optional, defaults to latest script version for current task)"
-      ),
-  })
-  .optional()
-  .nullable();
+const inputSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    id: {
+      type: "string",
+      description:
+        "Script ID (optional, defaults to latest script version for current task)",
+    },
+  },
+};
 
-const outputSchema = z
-  .object({
-    id: z.string(),
-    task_id: z.string(),
-    version: z.string(), // Format: "major.minor" e.g., "2.1"
-    timestamp: z.string(),
-    code: z.string(),
-    change_comment: z.string(),
-  })
-  .nullable();
+const outputSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    id: { type: "string" },
+    task_id: { type: "string" },
+    version: { type: "string" },
+    timestamp: { type: "string" },
+    code: { type: "string" },
+    change_comment: { type: "string" },
+  },
+  required: ["id", "task_id", "version", "timestamp", "code", "change_comment"],
+  nullable: true,
+};
 
-type Input = z.infer<typeof inputSchema>;
-type Output = z.infer<typeof outputSchema>;
+type Input = {
+  id?: string;
+} | null | undefined;
+
+type Output = {
+  id: string;
+  task_id: string;
+  version: string;
+  timestamp: string;
+  code: string;
+  change_comment: string;
+} | null;
 
 /**
  * Create the Scripts.get tool.
@@ -43,8 +55,8 @@ export function makeGetScriptTool(
     name: "get",
     description: `Get a script by ID, or get the latest script for current task if no ID provided.
 
-⚠️ This tool is only available during planning/maintenance. Do not use in production scripts.
-ℹ️ Not a mutation - can be used outside Items.withItem().`,
+\u26a0\ufe0f This tool is only available during planning/maintenance. Do not use in production scripts.
+\u2139\ufe0f Not a mutation - can be used outside Items.withItem().`,
     inputSchema,
     outputSchema,
     execute: async (input) => {

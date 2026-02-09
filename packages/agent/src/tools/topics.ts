@@ -9,7 +9,7 @@
  * - Topics.getByIds: Only in prepare phase
  * - Topics.publish: Only in producer or next phase
  */
-import { z } from "zod";
+import { JSONSchema } from "../json-schema";
 import { defineReadOnlyTool, defineTool, Tool } from "./types";
 import { EventStore, Event, PublishEvent, PeekEventsOptions, InputStore } from "@app/db";
 import { WorkflowConfig } from "../workflow-validator";
@@ -18,44 +18,91 @@ import { WorkflowConfig } from "../workflow-validator";
 // Schemas
 // ============================================================================
 
-const EventSchema = z.object({
-  messageId: z.string(),
-  title: z.string(),
-  payload: z.any(),
-  status: z.enum(["pending", "reserved", "consumed", "skipped"]),
-  createdAt: z.number(),
-});
+const EventSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    messageId: { type: "string" },
+    title: { type: "string" },
+    payload: {},
+    status: { enum: ["pending", "reserved", "consumed", "skipped"] },
+    createdAt: { type: "number" },
+  },
+  required: ["messageId", "title", "payload", "status", "createdAt"],
+};
 
-const PublishEventSchema = z.object({
-  messageId: z.string().describe("Unique ID within topic for idempotent publishing (e.g., external entity ID)"),
-  /**
-   * @deprecated Per exec-15, event titles are deprecated. User-facing metadata
-   * should be stored in the Input Ledger via Topics.registerInput().
-   */
-  title: z.string().optional().describe("Deprecated: use Input Ledger for user-facing metadata"),
-  payload: z.any().describe("Arbitrary JSON data for downstream consumers"),
-  /**
-   * Input ID from Topics.registerInput(). Required in producer phase,
-   * forbidden in next phase (causedBy is inherited from reserved events).
-   */
-  inputId: z.string().optional().describe("Input ID for causal tracking (required in producer phase)"),
-  /** Array of input IDs that caused this event (exec-15 causal tracking) - internal use */
-  causedBy: z.array(z.string()).optional().describe("Input IDs for causal tracking (set automatically)"),
-});
+interface EventOutput {
+  messageId: string;
+  title: string;
+  payload: any;
+  status: "pending" | "reserved" | "consumed" | "skipped";
+  createdAt: number;
+}
+
+const PublishEventSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    messageId: {
+      type: "string",
+      description: "Unique ID within topic for idempotent publishing (e.g., external entity ID)",
+    },
+    /**
+     * @deprecated Per exec-15, event titles are deprecated. User-facing metadata
+     * should be stored in the Input Ledger via Topics.registerInput().
+     */
+    title: {
+      type: "string",
+      description: "Deprecated: use Input Ledger for user-facing metadata",
+    },
+    payload: {
+      description: "Arbitrary JSON data for downstream consumers",
+    },
+    /**
+     * Input ID from Topics.registerInput(). Required in producer phase,
+     * forbidden in next phase (causedBy is inherited from reserved events).
+     */
+    inputId: {
+      type: "string",
+      description: "Input ID for causal tracking (required in producer phase)",
+    },
+    /** Array of input IDs that caused this event (exec-15 causal tracking) - internal use */
+    causedBy: {
+      type: "array",
+      items: { type: "string" },
+      description: "Input IDs for causal tracking (set automatically)",
+    },
+  },
+  required: ["messageId"],
+};
 
 // ============================================================================
 // Topics.peek
 // ============================================================================
 
-const peekInputSchema = z.object({
-  topic: z.string().describe("Topic name to peek events from"),
-  limit: z.number().min(1).max(1000).optional().describe("Maximum events to return (default: 100)"),
-});
+const peekInputSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    topic: { type: "string", description: "Topic name to peek events from" },
+    limit: {
+      type: "number",
+      minimum: 1,
+      maximum: 1000,
+      description: "Maximum events to return (default: 100)",
+    },
+  },
+  required: ["topic"],
+};
 
-const peekOutputSchema = z.array(EventSchema);
+const peekOutputSchema: JSONSchema = {
+  type: "array",
+  items: EventSchema,
+};
 
-type PeekInput = z.infer<typeof peekInputSchema>;
-type PeekOutput = z.infer<typeof peekOutputSchema>;
+interface PeekInput {
+  topic: string;
+  limit?: number;
+}
+
+type PeekOutput = EventOutput[];
 
 /**
  * Create the Topics.peek tool.
@@ -110,15 +157,30 @@ Note: Phase-restricted to 'prepare' phase only.`,
 // Topics.getByIds
 // ============================================================================
 
-const getByIdsInputSchema = z.object({
-  topic: z.string().describe("Topic name"),
-  ids: z.array(z.string()).describe("Array of messageIds to retrieve"),
-});
+const getByIdsInputSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    topic: { type: "string", description: "Topic name" },
+    ids: {
+      type: "array",
+      items: { type: "string" },
+      description: "Array of messageIds to retrieve",
+    },
+  },
+  required: ["topic", "ids"],
+};
 
-const getByIdsOutputSchema = z.array(EventSchema);
+const getByIdsOutputSchema: JSONSchema = {
+  type: "array",
+  items: EventSchema,
+};
 
-type GetByIdsInput = z.infer<typeof getByIdsInputSchema>;
-type GetByIdsOutput = z.infer<typeof getByIdsOutputSchema>;
+interface GetByIdsInput {
+  topic: string;
+  ids: string[];
+}
+
+type GetByIdsOutput = EventOutput[];
 
 /**
  * Create the Topics.getByIds tool.
@@ -164,17 +226,32 @@ Note: Phase-restricted to 'prepare' phase only.`,
 // Topics.publish
 // ============================================================================
 
-const publishInputSchema = z.object({
-  topic: z.union([
-    z.string(),
-    z.array(z.string()),
-  ]).describe("Topic name(s) to publish to - can be single topic or array for fan-out"),
-  event: PublishEventSchema,
-});
+const publishInputSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    topic: {
+      anyOf: [
+        { type: "string" },
+        { type: "array", items: { type: "string" } },
+      ],
+      description: "Topic name(s) to publish to - can be single topic or array for fan-out",
+    },
+    event: PublishEventSchema,
+  },
+  required: ["topic", "event"],
+};
 
-const publishOutputSchema = z.void();
+interface PublishInput {
+  topic: string | string[];
+  event: {
+    messageId: string;
+    title?: string;
+    payload?: any;
+    inputId?: string;
+    causedBy?: string[];
+  };
+}
 
-type PublishInput = z.infer<typeof publishInputSchema>;
 type PublishOutput = void;
 
 /**
@@ -246,7 +323,6 @@ Example (in next phase):
 
 Note: Phase-restricted to 'producer' or 'next' phase only.`,
     inputSchema: publishInputSchema,
-    outputSchema: publishOutputSchema,
     isReadOnly: () => false, // This is a write operation (creates events)
     execute: async (input: PublishInput): Promise<PublishOutput> => {
       const workflowId = getWorkflowId();
@@ -335,16 +411,29 @@ Note: Phase-restricted to 'producer' or 'next' phase only.`,
 // Topics.registerInput
 // ============================================================================
 
-const registerInputInputSchema = z.object({
-  source: z.string().describe("Connector name (e.g., 'gmail', 'slack', 'sheets')"),
-  type: z.string().describe("Type within source (e.g., 'email', 'message', 'row')"),
-  id: z.string().describe("External identifier from source system"),
-  title: z.string().describe("Human-readable description for user display"),
-});
+const registerInputInputSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    source: { type: "string", description: "Connector name (e.g., 'gmail', 'slack', 'sheets')" },
+    type: { type: "string", description: "Type within source (e.g., 'email', 'message', 'row')" },
+    id: { type: "string", description: "External identifier from source system" },
+    title: { type: "string", description: "Human-readable description for user display" },
+  },
+  required: ["source", "type", "id", "title"],
+};
 
-const registerInputOutputSchema = z.string().describe("The generated inputId");
+const registerInputOutputSchema: JSONSchema = {
+  type: "string",
+  description: "The generated inputId",
+};
 
-type RegisterInputInput = z.infer<typeof registerInputInputSchema>;
+interface RegisterInputInput {
+  source: string;
+  type: string;
+  id: string;
+  title: string;
+}
+
 type RegisterInputOutput = string;
 
 /**
@@ -423,7 +512,7 @@ Note: Phase-restricted to 'producer' phase only.`,
 /**
  * Map internal Event to output format.
  */
-function mapEventToOutput(event: Event): z.infer<typeof EventSchema> {
+function mapEventToOutput(event: Event): EventOutput {
   return {
     messageId: event.message_id,
     title: event.title,

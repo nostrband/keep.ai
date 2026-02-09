@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { JSONSchema } from "../json-schema";
 import { Exa } from "exa-js";
 import { getEnv } from "../env";
 import debug from "debug";
@@ -8,58 +8,106 @@ import { defineReadOnlyTool, Tool } from "./types";
 
 const debugWebFetch = debug("agent:web-fetch");
 
-const inputSchema = z.union([
-  z.object({
-    url: z.string().url().describe("The URL to fetch content from"),
-    live: z
-      .boolean()
-      .optional()
-      .default(true)
-      .describe("If false, allows cached not up-to-date content"),
-    maxCharacters: z
-      .number()
-      .int()
-      .min(1000)
-      .max(100000)
-      .optional()
-      .default(100000)
-      .describe(
-        "Maximum number of characters to fetch (1000-100000, default: 100000)"
-      ),
-    includeHtmlTags: z
-      .boolean()
-      .optional()
-      .default(false)
-      .describe("Whether to include HTML tags in the content"),
-  }),
-  z
-    .string()
-    .url()
-    .describe("URL to fetch content from (shorthand for { url: string })"),
-]);
+const inputSchema: JSONSchema = {
+  anyOf: [
+    {
+      type: "object",
+      properties: {
+        url: {
+          type: "string",
+          format: "uri",
+          description: "The URL to fetch content from",
+        },
+        live: {
+          type: "boolean",
+          default: true,
+          description: "If false, allows cached not up-to-date content",
+        },
+        maxCharacters: {
+          type: "integer",
+          minimum: 1000,
+          maximum: 100000,
+          default: 100000,
+          description:
+            "Maximum number of characters to fetch (1000-100000, default: 100000)",
+        },
+        includeHtmlTags: {
+          type: "boolean",
+          default: false,
+          description: "Whether to include HTML tags in the content",
+        },
+      },
+      required: ["url"],
+    },
+    {
+      type: "string",
+      format: "uri",
+      description: "URL to fetch content from (shorthand for { url: string })",
+    },
+  ],
+};
 
-const outputSchema = z.object({
-  url: z.string().describe("The actual URL that was fetched"),
-  title: z.string().describe("Page title"),
-  author: z.string().nullable().describe("Page author if available"),
-  publishedDate: z
-    .string()
-    .nullable()
-    .describe("Published date if available"),
-  text: z.string().describe("Full text content of the page"),
-  textLength: z.number().describe("Length of the text content"),
-  summary: z.string().nullable().describe("Brief summary of the content"),
-  fetchOptions: z
-    .object({
-      live: z.boolean(),
-      maxCharacters: z.number(),
-      includeHtmlTags: z.boolean(),
-    })
-    .describe("Options used for fetching"),
-});
+const outputSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    url: { type: "string", description: "The actual URL that was fetched" },
+    title: { type: "string", description: "Page title" },
+    author: { type: "string", nullable: true, description: "Page author if available" },
+    publishedDate: {
+      type: "string",
+      nullable: true,
+      description: "Published date if available",
+    },
+    text: { type: "string", description: "Full text content of the page" },
+    textLength: { type: "number", description: "Length of the text content" },
+    summary: {
+      type: "string",
+      nullable: true,
+      description: "Brief summary of the content",
+    },
+    fetchOptions: {
+      type: "object",
+      properties: {
+        live: { type: "boolean" },
+        maxCharacters: { type: "number" },
+        includeHtmlTags: { type: "boolean" },
+      },
+      required: ["live", "maxCharacters", "includeHtmlTags"],
+      description: "Options used for fetching",
+    },
+  },
+  required: [
+    "url",
+    "title",
+    "text",
+    "textLength",
+    "fetchOptions",
+  ],
+};
 
-type Input = z.infer<typeof inputSchema>;
-type Output = z.infer<typeof outputSchema>;
+interface InputObject {
+  url: string;
+  live?: boolean;
+  maxCharacters?: number;
+  includeHtmlTags?: boolean;
+}
+
+type Input = InputObject | string;
+
+interface Output {
+  url: string;
+  title: string;
+  author: string | null;
+  publishedDate: string | null;
+  text: string;
+  textLength: number;
+  summary: string | null;
+  fetchOptions: {
+    live: boolean;
+    maxCharacters: number;
+    includeHtmlTags: boolean;
+  };
+}
 
 /**
  * Create the Web.fetchParse tool.

@@ -1,37 +1,62 @@
-import { z } from "zod";
+import { JSONSchema } from "../json-schema";
 import { NoteStore } from "@app/db";
 import { defineReadOnlyTool, Tool } from "./types";
 
-const inputSchema = z.object({
-  keywords: z
-    .array(z.string())
-    .nullable()
-    .optional()
-    .describe("Array of keywords to search for in title and content (optional, case-insensitive)"),
-  tags: z
-    .array(z.string())
-    .nullable()
-    .optional()
-    .describe("Array of tags to filter by (optional, partial matches allowed, case-insensitive)"),
-  regexp: z
-    .string()
-    .nullable()
-    .optional()
-    .describe("Regular expression pattern to search in title and content (optional, case-insensitive)"),
-});
+const inputSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    keywords: {
+      type: "array",
+      items: { type: "string" },
+      description: "Array of keywords to search for in title and content (optional, case-insensitive)",
+    },
+    tags: {
+      type: "array",
+      items: { type: "string" },
+      description: "Array of tags to filter by (optional, partial matches allowed, case-insensitive)",
+    },
+    regexp: {
+      type: "string",
+      description: "Regular expression pattern to search in title and content (optional, case-insensitive)",
+    },
+  },
+  required: [],
+};
 
-const outputSchema = z.array(z.object({
-  id: z.string().describe("Unique note identifier"),
-  title: z.string().describe("Note title"),
-  tags: z.array(z.string()).describe("Array of tag strings"),
-  priority: z.enum(["low", "medium", "high"]).describe("Note priority level"),
-  created: z.string().describe("ISO timestamp when note was created"),
-  updated: z.string().describe("ISO timestamp when note was last updated"),
-  snippet: z.string().optional().describe("Content snippet if content matched the search"),
-}));
+const outputSchema: JSONSchema = {
+  type: "array",
+  items: {
+    type: "object",
+    properties: {
+      id: { type: "string", description: "Unique note identifier" },
+      title: { type: "string", description: "Note title" },
+      tags: { type: "array", items: { type: "string" }, description: "Array of tag strings" },
+      priority: { enum: ["low", "medium", "high"], description: "Note priority level" },
+      created: { type: "string", description: "ISO timestamp when note was created" },
+      updated: { type: "string", description: "ISO timestamp when note was last updated" },
+      snippet: { type: "string", description: "Content snippet if content matched the search" },
+    },
+    required: ["id", "title", "tags", "priority", "created", "updated"],
+  },
+};
 
-type Input = z.infer<typeof inputSchema>;
-type Output = z.infer<typeof outputSchema>;
+interface SearchNoteResult {
+  id: string;
+  title: string;
+  tags: string[];
+  priority: "low" | "medium" | "high";
+  created: string;
+  updated: string;
+  snippet?: string;
+}
+
+interface Input {
+  keywords?: string[] | null;
+  tags?: string[] | null;
+  regexp?: string | null;
+}
+
+type Output = SearchNoteResult[];
 
 /**
  * Create the Memory.searchNotes tool.

@@ -1,42 +1,52 @@
-import { z } from "zod";
+import { JSONSchema } from "../json-schema";
 import { NoteStore, NoteListItem } from "@app/db";
 import { defineReadOnlyTool, Tool } from "./types";
 
-const inputSchema = z.object({
-  priority: z
-    .enum(["low", "medium", "high"])
-    .nullable()
-    .optional()
-    .describe("Filter notes by priority level (optional)"),
-  limit: z
-    .number()
-    .int()
-    .min(1)
-    .max(100)
-    .nullable()
-    .optional()
-    .describe("Maximum number of notes to return (1-100, optional, default: 20)"),
-  offset: z
-    .number()
-    .int()
-    .min(0)
-    .nullable()
-    .optional()
-    .describe("Number of notes to skip for pagination (optional, default: 0)"),
-});
+const inputSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    priority: {
+      enum: ["low", "medium", "high"],
+      description: "Filter notes by priority level (optional)",
+    },
+    limit: {
+      type: "integer",
+      minimum: 1,
+      maximum: 100,
+      description: "Maximum number of notes to return (1-100, optional, default: 20)",
+    },
+    offset: {
+      type: "integer",
+      minimum: 0,
+      description: "Number of notes to skip for pagination (optional, default: 0)",
+    },
+  },
+  required: [],
+};
 
-const outputSchema = z.array(
-  z.object({
-    id: z.string().describe("Unique note identifier"),
-    title: z.string().describe("Note title"),
-    tags: z.array(z.string()).describe("Array of tag strings"),
-    priority: z.enum(["low", "medium", "high"]).describe("Note priority level"),
-    created: z.string().describe("ISO timestamp when note was created"),
-    updated: z.string().describe("ISO timestamp when note was last updated"),
-  })
-).describe("Array of note objects (metadata only, no content)");
+const outputSchema: JSONSchema = {
+  type: "array",
+  items: {
+    type: "object",
+    properties: {
+      id: { type: "string", description: "Unique note identifier" },
+      title: { type: "string", description: "Note title" },
+      tags: { type: "array", items: { type: "string" }, description: "Array of tag strings" },
+      priority: { enum: ["low", "medium", "high"], description: "Note priority level" },
+      created: { type: "string", description: "ISO timestamp when note was created" },
+      updated: { type: "string", description: "ISO timestamp when note was last updated" },
+    },
+    required: ["id", "title", "tags", "priority", "created", "updated"],
+  },
+  description: "Array of note objects (metadata only, no content)",
+};
 
-type Input = z.infer<typeof inputSchema>;
+interface Input {
+  priority?: "low" | "medium" | "high" | null;
+  limit?: number | null;
+  offset?: number | null;
+}
+
 type Output = NoteListItem[];
 
 /**

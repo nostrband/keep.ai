@@ -18,7 +18,7 @@ import {
   PromptInputTools,
 } from "../ui";
 import { PlusIcon } from "lucide-react";
-import type { FileUIPart } from "ai";
+import type { FileUIPart } from "@app/proto";
 import { type File as DbFile } from "@app/db";
 
 type PromptInputMessage = {

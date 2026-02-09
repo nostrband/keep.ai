@@ -14,7 +14,7 @@ import {
 } from "../ui/select";
 import { Textarea } from "../ui/textarea";
 import { cn } from "../../lib/utils";
-import type { ChatStatus, FileUIPart } from "ai";
+import type { ChatStatus, FileUIPart } from "@app/proto";
 import {
   ImageIcon,
   Loader2Icon,

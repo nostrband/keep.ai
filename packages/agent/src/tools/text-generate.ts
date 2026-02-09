@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { JSONSchema } from "../json-schema";
 import { EvalContext } from "../sandbox/sandbox";
 import { getEnv } from "../env";
 import { getModelName } from "../model";
@@ -8,33 +8,49 @@ import { defineReadOnlyTool, Tool } from "./types";
 
 const debugTextGenerate = debug("TextGenerate");
 
-const inputSchema = z.object({
-  prompt: z
-    .string()
-    .min(1)
-    .describe("Prompt to generate text from"),
-  temperature: z
-    .number()
-    .min(0)
-    .max(1)
-    .default(0.3)
-    .optional()
-    .describe("Sampling temperature: 0 is deterministic, 1 is very random (default: 0.3)"),
-  max_chars: z
-    .number()
-    .min(100)
-    .max(10000)
-    .default(1500)
-    .optional()
-    .describe("Maximum number of characters to generate (default: 1500)"),
-});
+const inputSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    prompt: {
+      type: "string",
+      minLength: 1,
+      description: "Prompt to generate text from",
+    },
+    temperature: {
+      type: "number",
+      minimum: 0,
+      maximum: 1,
+      default: 0.3,
+      description: "Sampling temperature: 0 is deterministic, 1 is very random (default: 0.3)",
+    },
+    max_chars: {
+      type: "number",
+      minimum: 100,
+      maximum: 10000,
+      default: 1500,
+      description: "Maximum number of characters to generate (default: 1500)",
+    },
+  },
+  required: ["prompt"],
+};
 
-const outputSchema = z.object({
-  text: z.string().describe("Generated text"),
-});
+const outputSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    text: { type: "string", description: "Generated text" },
+  },
+  required: ["text"],
+};
 
-type Input = z.infer<typeof inputSchema>;
-type Output = z.infer<typeof outputSchema>;
+interface Input {
+  prompt: string;
+  temperature?: number;
+  max_chars?: number;
+}
+
+interface Output {
+  text: string;
+}
 
 /**
  * Create the Text.generate tool.

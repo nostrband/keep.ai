@@ -46,7 +46,7 @@ export {
 export { setEnv, getEnv, setEnvFromProcess, type Env } from "./env";
 
 // Model configuration
-export { getOpenRouter, getModelName, DEFAULT_AGENT_MODEL } from "./model";
+export { getOpenRouterConfig, getModelName, DEFAULT_AGENT_MODEL } from "./model";
 
 export { Agent as ReplAgent } from "./agent";
 

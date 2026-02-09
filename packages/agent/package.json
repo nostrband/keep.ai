@@ -23,12 +23,11 @@
     "@app/node": "file:../node",
     "@app/proto": "file:../proto",
     "@notionhq/client": "^2.2.0",
-    "@openrouter/ai-sdk-provider": "^1.2.0",
-    "@openrouter/sdk": "^0.3.7",
-    "ai": "^5.0.76",
     "croner": "^9.1.0",
     "debug": "^4.4.3",
     "exa-js": "^2.0.0",
+    "ajv": "^8.17.0",
+    "ajv-formats": "^3.0.0",
     "quickjs-emscripten": "^0.31.0"
   },
   "devDependencies": {

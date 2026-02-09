@@ -1,38 +1,63 @@
-import { z } from "zod";
+import { JSONSchema } from "../json-schema";
 import { FileStore, File } from "@app/db";
 import { storeFileData } from "@app/node";
 import { EvalContext } from "../sandbox/sandbox";
 import { LogicError, PermissionError } from "../errors";
 import { defineTool, Tool } from "./types";
 
-const inputSchema = z.object({
-  filename: z.string().describe("Name of the file to save"),
-  content: z.string().optional().describe("Plain text content (mutually exclusive with bytes/base64)"),
-  bytes: z.instanceof(Uint8Array).optional().describe("Raw file bytes (mutually exclusive with content/base64)"),
-  base64: z.string().optional().describe("Base64-encoded file content (mutually exclusive with content/bytes)"),
-  mimeType: z.string().optional().describe("MIME type of the file (optional, will be auto-detected if not provided)"),
-  summary: z.string().optional().describe("Optional summary/description of the file"),
-}).refine(
-  (data) => {
-    const contentFields = [data.content, data.bytes, data.base64].filter(Boolean);
-    return contentFields.length === 1;
+const inputSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    filename: {
+      type: "string",
+      description: "Name of the file to save",
+    },
+    content: {
+      type: "string",
+      description: "Plain text content (mutually exclusive with bytes/base64)",
+    },
+    bytes: {
+      description: "Raw file bytes (mutually exclusive with content/base64)",
+    },
+    base64: {
+      type: "string",
+      description: "Base64-encoded file content (mutually exclusive with content/bytes)",
+    },
+    mimeType: {
+      type: "string",
+      description: "MIME type of the file (optional, will be auto-detected if not provided)",
+    },
+    summary: {
+      type: "string",
+      description: "Optional summary/description of the file",
+    },
   },
-  {
-    message: "Exactly one of 'content', 'bytes', or 'base64' must be provided",
-  }
-);
+  required: ["filename"],
+};
 
-const outputSchema = z.object({
-  id: z.string().describe("Generated file ID (SHA256 hash)"),
-  name: z.string().describe("Original filename"),
-  path: z.string().describe("Local file path relative to files directory"),
-  summary: z.string().describe("File summary"),
-  upload_time: z.string().describe("Upload timestamp"),
-  media_type: z.string().describe("Detected or provided MIME type"),
-  size: z.number().describe("File size in bytes"),
-});
+const outputSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    id: { type: "string", description: "Generated file ID (SHA256 hash)" },
+    name: { type: "string", description: "Original filename" },
+    path: { type: "string", description: "Local file path relative to files directory" },
+    summary: { type: "string", description: "File summary" },
+    upload_time: { type: "string", description: "Upload timestamp" },
+    media_type: { type: "string", description: "Detected or provided MIME type" },
+    size: { type: "number", description: "File size in bytes" },
+  },
+  required: ["id", "name", "path", "summary", "upload_time", "media_type", "size"],
+};
 
-type Input = z.infer<typeof inputSchema>;
+interface Input {
+  filename: string;
+  content?: string;
+  bytes?: Uint8Array;
+  base64?: string;
+  mimeType?: string;
+  summary?: string;
+}
+
 type Output = File;
 
 /**

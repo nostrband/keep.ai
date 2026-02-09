@@ -8,7 +8,7 @@
  * Account ID is workspace_id (not email like Google services).
  */
 
-import { z } from "zod";
+import { JSONSchema } from "../json-schema";
 import { Client } from "@notionhq/client";
 import debug from "debug";
 import { EvalContext } from "../sandbox/sandbox";
@@ -76,20 +76,30 @@ async function getNotionCredentials(
   return connectionManager.getCredentials(connectionId);
 }
 
-const inputSchema = z.object({
-  method: z.enum(SUPPORTED_METHODS).describe("Notion API method to call"),
-  params: z
-    .any()
-    .optional()
-    .describe("Parameters to pass to the Notion API method"),
-  account: z
-    .string()
-    .describe(
-      "Workspace ID of the Notion workspace to use (from connected workspaces)"
-    ),
-});
+const inputSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    method: {
+      enum: SUPPORTED_METHODS as unknown as string[],
+      description: "Notion API method to call",
+    },
+    params: {
+      description: "Parameters to pass to the Notion API method",
+    },
+    account: {
+      type: "string",
+      description:
+        "Workspace ID of the Notion workspace to use (from connected workspaces)",
+    },
+  },
+  required: ["method", "account"],
+};
 
-type Input = z.infer<typeof inputSchema>;
+interface Input {
+  method: (typeof SUPPORTED_METHODS)[number];
+  params?: any;
+  account: string;
+}
 
 /**
  * Create Notion tool that uses ConnectionManager for credentials.

@@ -1,38 +1,53 @@
-import { z } from "zod";
+import { JSONSchema } from "../json-schema";
 import { NoteStore } from "@app/db";
 import { EvalContext } from "../sandbox/sandbox";
 import { defineTool, Tool } from "./types";
 
-const inputSchema = z.object({
-  id: z.string().min(1).describe("ID of the note to update"),
-  title: z
-    .string()
-    .min(1)
-    .max(500)
-    .nullable()
-    .optional()
-    .describe("New title for the note (1-500 characters, optional)"),
-  content: z
-    .string()
-    .min(1)
-    .nullable()
-    .optional()
-    .describe("New content/body for the note (optional)"),
-  tags: z
-    .array(z.string())
-    .nullable()
-    .optional()
-    .describe("New array of tags to categorize the note (optional)"),
-  priority: z
-    .enum(["low", "medium", "high"])
-    .nullable()
-    .optional()
-    .describe("New priority level of the note (optional)"),
-});
+const inputSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    id: {
+      type: "string",
+      minLength: 1,
+      description: "ID of the note to update",
+    },
+    title: {
+      type: "string",
+      minLength: 1,
+      maxLength: 500,
+      description: "New title for the note (1-500 characters, optional)",
+    },
+    content: {
+      type: "string",
+      minLength: 1,
+      description: "New content/body for the note (optional)",
+    },
+    tags: {
+      type: "array",
+      items: { type: "string" },
+      description: "New array of tags to categorize the note (optional)",
+    },
+    priority: {
+      enum: ["low", "medium", "high"],
+      description: "New priority level of the note (optional)",
+    },
+  },
+  required: ["id"],
+};
 
-const outputSchema = z.string().describe("ID of the updated note");
+const outputSchema: JSONSchema = {
+  type: "string",
+  description: "ID of the updated note",
+};
 
-type Input = z.infer<typeof inputSchema>;
+interface Input {
+  id: string;
+  title?: string | null;
+  content?: string | null;
+  tags?: string[] | null;
+  priority?: "low" | "medium" | "high" | null;
+}
+
 type Output = string;
 
 /**

@@ -3,45 +3,92 @@
  * Use the new Topics-based event-driven execution model instead.
  * See specs/exec-02-deprecate-items.md for details.
  */
-import { z } from "zod";
+import { JSONSchema } from "../json-schema";
 import { defineReadOnlyTool, Tool } from "./types";
 import { ItemStore, ItemStatus } from "@app/db";
 
-const ItemStatusEnum = z.enum(['processing', 'done', 'failed', 'skipped']);
+const ItemStatusEnum = ["processing", "done", "failed", "skipped"] as const;
 
-const ItemSchema = z.object({
-  id: z.string(),
-  logical_item_id: z.string(),
-  title: z.string(),
-  status: ItemStatusEnum,
-  current_attempt_id: z.number(),
-  created_at: z.number(),
-  updated_at: z.number(),
-});
+const ItemSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    id: { type: "string" },
+    logical_item_id: { type: "string" },
+    title: { type: "string" },
+    status: { enum: ItemStatusEnum as unknown as string[] },
+    current_attempt_id: { type: "number" },
+    created_at: { type: "number" },
+    updated_at: { type: "number" },
+  },
+  required: ["id", "logical_item_id", "title", "status", "current_attempt_id", "created_at", "updated_at"],
+};
 
-const inputSchema = z.object({
-  status: ItemStatusEnum.optional().describe(
-    "Filter by item status: 'processing', 'done', 'failed', 'skipped'"
-  ),
-  logical_item_id: z.string().optional().describe(
-    "Filter by exact logical item ID (useful to check if specific item exists)"
-  ),
-  limit: z.number().min(1).max(1000).optional().describe(
-    "Maximum number of items to return (default: 100, max: 1000)"
-  ),
-  offset: z.number().min(0).optional().describe(
-    "Number of items to skip for pagination (default: 0)"
-  ),
-});
+const inputSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    status: {
+      enum: ItemStatusEnum as unknown as string[],
+      description: "Filter by item status: 'processing', 'done', 'failed', 'skipped'",
+    },
+    logical_item_id: {
+      type: "string",
+      description: "Filter by exact logical item ID (useful to check if specific item exists)",
+    },
+    limit: {
+      type: "number",
+      minimum: 1,
+      maximum: 1000,
+      description: "Maximum number of items to return (default: 100, max: 1000)",
+    },
+    offset: {
+      type: "number",
+      minimum: 0,
+      description: "Number of items to skip for pagination (default: 0)",
+    },
+  },
+};
 
-const outputSchema = z.object({
-  items: z.array(ItemSchema),
-  total: z.number().describe("Total count matching the filter (for pagination)"),
-  has_more: z.boolean().describe("Whether there are more items beyond this page"),
-});
+const outputSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    items: {
+      type: "array",
+      items: ItemSchema,
+    },
+    total: {
+      type: "number",
+      description: "Total count matching the filter (for pagination)",
+    },
+    has_more: {
+      type: "boolean",
+      description: "Whether there are more items beyond this page",
+    },
+  },
+  required: ["items", "total", "has_more"],
+};
 
-type Input = z.infer<typeof inputSchema>;
-type Output = z.infer<typeof outputSchema>;
+interface ItemOutput {
+  id: string;
+  logical_item_id: string;
+  title: string;
+  status: "processing" | "done" | "failed" | "skipped";
+  current_attempt_id: number;
+  created_at: number;
+  updated_at: number;
+}
+
+interface Input {
+  status?: "processing" | "done" | "failed" | "skipped";
+  logical_item_id?: string;
+  limit?: number;
+  offset?: number;
+}
+
+interface Output {
+  items: ItemOutput[];
+  total: number;
+  has_more: boolean;
+}
 
 /**
  * Create the Items.list tool for introspecting processed items.

@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { JSONSchema } from "../json-schema";
 import { FileStore, type File } from "@app/db";
 import { EvalContext } from "../sandbox/sandbox";
 import { getEnv } from "../env";
@@ -12,66 +12,107 @@ import { defineTool, Tool } from "./types";
 
 const debugImgTransform = debug("ImagesTransform");
 
-const inputSchema = z.object({
-  file_paths: z
-    .array(z.string().min(1))
-    .min(1)
-    .max(5)
-    .describe(
-      "Array of file paths of the input images to transform (1-5 images) - filename (without extension) will be used as ID to look up in database"
-    ),
-  prompt: z
-    .string()
-    .min(1)
-    .max(1000)
-    .describe(
-      "Textual description of the desired transformation or modification to apply to the image"
-    ),
-  file_prefix: z
-    .string()
-    .min(1)
-    .max(50)
-    .describe(
-      "Prefix to use for the filename of generated images, no spaces, filename-suitable symbols only"
-    ),
-  aspect_ratio: z
-    .string()
-    .optional()
-    .nullable()
-    .describe(
-      "Aspect ratio for the generated image (e.g., '16:9', '1:1', '4:3'). Defaults to '1:1' if not specified"
-    ),
-});
+const inputSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    file_paths: {
+      type: "array",
+      items: { type: "string", minLength: 1 },
+      minItems: 1,
+      maxItems: 5,
+      description:
+        "Array of file paths of the input images to transform (1-5 images) - filename (without extension) will be used as ID to look up in database",
+    },
+    prompt: {
+      type: "string",
+      minLength: 1,
+      maxLength: 1000,
+      description:
+        "Textual description of the desired transformation or modification to apply to the image",
+    },
+    file_prefix: {
+      type: "string",
+      minLength: 1,
+      maxLength: 50,
+      description:
+        "Prefix to use for the filename of generated images, no spaces, filename-suitable symbols only",
+    },
+    aspect_ratio: {
+      type: "string",
+      description:
+        "Aspect ratio for the generated image (e.g., '16:9', '1:1', '4:3'). Defaults to '1:1' if not specified",
+    },
+  },
+  required: ["file_paths", "prompt", "file_prefix"],
+};
 
-const outputSchema = z.object({
-  images: z
-    .array(
-      z.object({
-        id: z.string().describe("File ID of the generated image"),
-        name: z.string().describe("Filename of the generated image"),
-        path: z.string().describe("Local file path"),
-        size: z.number().describe("File size in bytes"),
-        media_type: z.string().describe("MIME type of the image"),
-        summary: z.string().describe("Summary/description of the image"),
-        upload_time: z.string().describe("Generation timestamp"),
-      })
-    )
-    .describe("Array of generated image file records"),
-  source_files: z
-    .array(
-      z.object({
-        id: z.string().describe("Source file ID"),
-        name: z.string().describe("Source filename"),
-        media_type: z.string().describe("Source MIME type"),
-        size: z.number().describe("Source file size in bytes"),
-      })
-    )
-    .describe("Information about the source image files"),
-  reasoning: z.string().describe("Image model's reasoning"),
-});
+const outputSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    images: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          id: { type: "string", description: "File ID of the generated image" },
+          name: { type: "string", description: "Filename of the generated image" },
+          path: { type: "string", description: "Local file path" },
+          size: { type: "number", description: "File size in bytes" },
+          media_type: { type: "string", description: "MIME type of the image" },
+          summary: { type: "string", description: "Summary/description of the image" },
+          upload_time: { type: "string", description: "Generation timestamp" },
+        },
+        required: ["id", "name", "path", "size", "media_type", "summary", "upload_time"],
+      },
+      description: "Array of generated image file records",
+    },
+    source_files: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          id: { type: "string", description: "Source file ID" },
+          name: { type: "string", description: "Source filename" },
+          media_type: { type: "string", description: "Source MIME type" },
+          size: { type: "number", description: "Source file size in bytes" },
+        },
+        required: ["id", "name", "media_type", "size"],
+      },
+      description: "Information about the source image files",
+    },
+    reasoning: {
+      type: "string",
+      description: "Image model's reasoning",
+    },
+  },
+  required: ["images", "source_files", "reasoning"],
+};
 
-type Input = z.infer<typeof inputSchema>;
-type Output = z.infer<typeof outputSchema>;
+interface Input {
+  file_paths: string[];
+  prompt: string;
+  file_prefix: string;
+  aspect_ratio?: string | null;
+}
+
+interface Output {
+  images: {
+    id: string;
+    name: string;
+    path: string;
+    size: number;
+    media_type: string;
+    summary: string;
+    upload_time: string;
+  }[];
+  source_files: {
+    id: string;
+    name: string;
+    media_type: string;
+    size: number;
+  }[];
+  reasoning: string;
+}
 
 /**
  * Create the Images.transform tool.

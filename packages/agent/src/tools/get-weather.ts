@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { JSONSchema } from "../json-schema";
 import debug from "debug";
 import { EvalContext } from "../sandbox/sandbox";
 import { LogicError, InternalError, classifyHttpError, isClassifiedError } from "../errors";
@@ -6,71 +6,138 @@ import { defineReadOnlyTool, Tool } from "./types";
 
 const debugGetWeather = debug("agent:get-weather");
 
-const inputSchema = z.union([
-  z
-    .string()
-    .min(1)
-    .describe("Location name string (shorthand for { place: string })"),
-  z.object({
-    place: z
-      .string()
-      .min(1)
-      .describe(
-        "Location name (e.g., 'Madrid', 'New York', 'Tokyo, Japan')"
-      ),
-    days: z
-      .number()
-      .int()
-      .min(1)
-      .max(16)
-      .optional()
-      .default(1)
-      .describe("Number of forecast days (1-16, default: 1)"),
-  }),
-  z.object({
-    location: z
-      .string()
-      .min(1)
-      .describe("Location name (alternative to 'place')"),
-    days: z
-      .number()
-      .int()
-      .min(1)
-      .max(16)
-      .optional()
-      .default(1)
-      .describe("Number of forecast days (1-16, default: 1)"),
-  }),
-]);
+const inputSchema: JSONSchema = {
+  anyOf: [
+    {
+      type: "string",
+      minLength: 1,
+      description: "Location name string (shorthand for { place: string })",
+    },
+    {
+      type: "object",
+      properties: {
+        place: {
+          type: "string",
+          minLength: 1,
+          description:
+            "Location name (e.g., 'Madrid', 'New York', 'Tokyo, Japan')",
+        },
+        days: {
+          type: "integer",
+          minimum: 1,
+          maximum: 16,
+          default: 1,
+          description: "Number of forecast days (1-16, default: 1)",
+        },
+      },
+      required: ["place"],
+    },
+    {
+      type: "object",
+      properties: {
+        location: {
+          type: "string",
+          minLength: 1,
+          description: "Location name (alternative to 'place')",
+        },
+        days: {
+          type: "integer",
+          minimum: 1,
+          maximum: 16,
+          default: 1,
+          description: "Number of forecast days (1-16, default: 1)",
+        },
+      },
+      required: ["location"],
+    },
+  ],
+};
 
-const outputSchema = z.object({
-  place: z.string().describe("Formatted location name"),
-  coordinates: z
-    .object({
-      latitude: z.number(),
-      longitude: z.number(),
-    })
-    .describe("Geographic coordinates"),
-  timezone: z.string().describe("Local timezone"),
-  days: z.number().describe("Number of forecast days returned"),
-  daily: z
-    .array(
-      z.object({
-        date: z.string().describe("Local date at the location"),
-        summary: z.string().describe("Weather condition summary"),
-        tempMaxC: z.number().describe("Maximum temperature in Celsius"),
-        tempMinC: z.number().describe("Minimum temperature in Celsius"),
-        precipMm: z
-          .number()
-          .describe("Precipitation amount in millimeters"),
-        windMaxKph: z.number().describe("Maximum wind speed in km/h"),
-      })
-    )
-    .describe("Daily weather forecast array"),
-});
+const outputSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    place: { type: "string", description: "Formatted location name" },
+    coordinates: {
+      type: "object",
+      properties: {
+        latitude: { type: "number" },
+        longitude: { type: "number" },
+      },
+      required: ["latitude", "longitude"],
+      description: "Geographic coordinates",
+    },
+    timezone: { type: "string", description: "Local timezone" },
+    days: { type: "number", description: "Number of forecast days returned" },
+    daily: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          date: { type: "string", description: "Local date at the location" },
+          summary: { type: "string", description: "Weather condition summary" },
+          tempMaxC: {
+            type: "number",
+            description: "Maximum temperature in Celsius",
+          },
+          tempMinC: {
+            type: "number",
+            description: "Minimum temperature in Celsius",
+          },
+          precipMm: {
+            type: "number",
+            description: "Precipitation amount in millimeters",
+          },
+          windMaxKph: {
+            type: "number",
+            description: "Maximum wind speed in km/h",
+          },
+        },
+        required: [
+          "date",
+          "summary",
+          "tempMaxC",
+          "tempMinC",
+          "precipMm",
+          "windMaxKph",
+        ],
+      },
+      description: "Daily weather forecast array",
+    },
+  },
+  required: ["place", "coordinates", "timezone", "days", "daily"],
+};
 
-type Input = z.infer<typeof inputSchema>;
-type Output = z.infer<typeof outputSchema>;
+interface InputPlaceObject {
+  place: string;
+  days?: number;
+}
+
+interface InputLocationObject {
+  location: string;
+  days?: number;
+}
+
+type Input = string | InputPlaceObject | InputLocationObject;
+
+interface DailyForecast {
+  date: string;
+  summary: string;
+  tempMaxC: number;
+  tempMinC: number;
+  precipMm: number;
+  windMaxKph: number;
+}
+
+interface Output {
+  place: string;
+  coordinates: {
+    latitude: number;
+    longitude: number;
+  };
+  timezone: string;
+  days: number;
+  daily: DailyForecast[];
+}
 
 /**
  * Create the Weather.get tool.

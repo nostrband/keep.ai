@@ -1,14 +1,78 @@
-import { z } from "zod";
-import { UIMessage } from "ai";
+// Own message types (replaces ai SDK types)
+export interface TextUIPart {
+  type: "text";
+  text: string;
+}
+
+export interface ReasoningUIPart {
+  type: "reasoning";
+  text: string;
+}
+
+export interface FileUIPart {
+  type: "file";
+  mediaType: string;
+  filename?: string;
+  url: string;
+}
+
+export interface ToolUIPart {
+  type: string;
+  toolCallId: string;
+  state: "partial-call" | "call" | "result";
+  input: any;
+  output?: any;
+  errorText?: string;
+}
+
+export interface StepStartUIPart {
+  type: "step-start";
+}
+
+export interface SourceUrlUIPart {
+  type: "source-url";
+  sourceId: string;
+  url: string;
+  title?: string;
+}
+
+export type UIMessagePart =
+  | TextUIPart
+  | ReasoningUIPart
+  | FileUIPart
+  | ToolUIPart
+  | StepStartUIPart
+  | SourceUrlUIPart;
+
+export interface UIMessage<METADATA = any> {
+  id: string;
+  role: "user" | "assistant" | "system";
+  parts: UIMessagePart[];
+  metadata?: METADATA;
+}
+
+export interface LanguageModelUsage {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  reasoningTokens?: number;
+  cachedInputTokens?: number;
+}
+
+export type ChatStatus = "submitted" | "streaming" | "ready" | "error";
+
+export interface GeneratedImage {
+  base64: string;
+  mediaType: string;
+}
 
 export type AutonomyMode = 'ai_decides' | 'coordinate';
 
-const metadataSchema = z.object({
-  createdAt: z.string().datetime(),
-  threadId: z.string().optional(),
-  volatile: z.boolean().optional(),
-});
-export type MessageMetadata = z.infer<typeof metadataSchema>;
+export interface MessageMetadata {
+  createdAt: string;
+  threadId?: string;
+  volatile?: boolean;
+}
 
 export type AssistantUIMessage = UIMessage<MessageMetadata>;
 

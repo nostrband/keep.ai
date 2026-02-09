@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { JSONSchema } from "../json-schema";
 import { Exa } from "exa-js";
 import { getEnv } from "../env";
 import debug from "debug";
@@ -8,64 +8,79 @@ import { defineReadOnlyTool, Tool } from "./types";
 
 const debugWebSearch = debug("agent:web-search");
 
-const inputSchema = z.union([
-  z.object({
-    query: z
-      .string()
-      .min(1)
-      .describe("The search query to find relevant web content"),
-    type: z
-      .enum(["neural", "keyword", "auto"])
-      .optional()
-      .default("auto")
-      .describe(
-        "Search type: 'neural' for semantic search, 'keyword' for exact matches, 'auto' for best results"
-      ),
-    numResults: z
-      .number()
-      .int()
-      .min(1)
-      .max(20)
-      .optional()
-      .default(5)
-      .describe("Number of search results to return (1-20, default: 5)"),
-    includeDomains: z
-      .array(z.string())
-      .optional()
-      .describe(
-        "Array of domains to include in search (e.g., ['reddit.com', 'stackoverflow.com'])"
-      ),
-    excludeDomains: z
-      .array(z.string())
-      .optional()
-      .describe("Array of domains to exclude from search"),
-    startPublishedDate: z
-      .string()
-      .optional()
-      .describe(
-        "Start date for content published date filter (ISO format: YYYY-MM-DD)"
-      ),
-    endPublishedDate: z
-      .string()
-      .optional()
-      .describe(
-        "End date for content published date filter (ISO format: YYYY-MM-DD)"
-      ),
-    live: z
-      .boolean()
-      .optional()
-      .default(false)
-      .describe(
-        "If true, ensures results are 100% up to date and not cached"
-      ),
-  }),
-  z
-    .string()
-    .min(1)
-    .describe("Search query string (shorthand for { query: string })"),
-]);
+const inputSchema: JSONSchema = {
+  anyOf: [
+    {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          minLength: 1,
+          description: "The search query to find relevant web content",
+        },
+        type: {
+          enum: ["neural", "keyword", "auto"],
+          default: "auto",
+          description:
+            "Search type: 'neural' for semantic search, 'keyword' for exact matches, 'auto' for best results",
+        },
+        numResults: {
+          type: "integer",
+          minimum: 1,
+          maximum: 20,
+          default: 5,
+          description: "Number of search results to return (1-20, default: 5)",
+        },
+        includeDomains: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "Array of domains to include in search (e.g., ['reddit.com', 'stackoverflow.com'])",
+        },
+        excludeDomains: {
+          type: "array",
+          items: { type: "string" },
+          description: "Array of domains to exclude from search",
+        },
+        startPublishedDate: {
+          type: "string",
+          description:
+            "Start date for content published date filter (ISO format: YYYY-MM-DD)",
+        },
+        endPublishedDate: {
+          type: "string",
+          description:
+            "End date for content published date filter (ISO format: YYYY-MM-DD)",
+        },
+        live: {
+          type: "boolean",
+          default: false,
+          description:
+            "If true, ensures results are 100% up to date and not cached",
+        },
+      },
+      required: ["query"],
+    },
+    {
+      type: "string",
+      minLength: 1,
+      description: "Search query string (shorthand for { query: string })",
+    },
+  ],
+};
 
-type Input = z.infer<typeof inputSchema>;
+interface InputObject {
+  query: string;
+  type?: "neural" | "keyword" | "auto";
+  numResults?: number;
+  includeDomains?: string[];
+  excludeDomains?: string[];
+  startPublishedDate?: string;
+  endPublishedDate?: string;
+  live?: boolean;
+}
+
+type Input = InputObject | string;
 
 /**
  * Create the Web.search tool.

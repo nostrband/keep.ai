@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { JSONSchema } from "../json-schema";
 import { EvalContext } from "../sandbox/sandbox";
 import { getEnv } from "../env";
 import { getTextModelName } from "../model";
@@ -8,30 +8,55 @@ import { defineReadOnlyTool, Tool } from "./types";
 
 const debugTextClassify = debug("TextClassify");
 
-const inputSchema = z.object({
-  text: z
-    .string()
-    .min(1)
-    .describe("Input text to analyze for classification"),
-  classes: z
-    .array(
-      z.object({
-        id: z.string().describe("Class identifier"),
-        description: z
-          .string()
-          .describe("Description of when this class should be selected"),
-      })
-    )
-    .min(1)
-    .describe("List of possible classes to choose from"),
-});
+const inputSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    text: {
+      type: "string",
+      minLength: 1,
+      description: "Input text to analyze for classification",
+    },
+    classes: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          id: { type: "string", description: "Class identifier" },
+          description: {
+            type: "string",
+            description: "Description of when this class should be selected",
+          },
+        },
+        required: ["id", "description"],
+      },
+      minItems: 1,
+      description: "List of possible classes to choose from",
+    },
+  },
+  required: ["text", "classes"],
+};
 
-const outputSchema = z.object({
-  class_id: z.string().describe("ID of the selected class"),
-});
+const outputSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    class_id: { type: "string", description: "ID of the selected class" },
+  },
+  required: ["class_id"],
+};
 
-type Input = z.infer<typeof inputSchema>;
-type Output = z.infer<typeof outputSchema>;
+interface ClassOption {
+  id: string;
+  description: string;
+}
+
+interface Input {
+  text: string;
+  classes: ClassOption[];
+}
+
+interface Output {
+  class_id: string;
+}
 
 /**
  * Create the Text.classify tool.

@@ -1,14 +1,12 @@
-import { z } from "zod";
-import { generateId, tool } from "ai";
+import { JSONSchema } from "../json-schema";
+import { AITool } from "./types";
 import { Script, ScriptStore } from "@app/db";
 import { validateWorkflowScript, isWorkflowFormatScript } from "../workflow-validator";
 
-const FixInfoSchema = z.object({
-  code: z.string().describe("The complete fixed script code"),
-  comment: z.string().describe("Brief description of what was fixed"),
-});
-
-export type FixInfo = z.infer<typeof FixInfoSchema>;
+export interface FixInfo {
+  code: string;
+  comment: string;
+}
 
 /**
  * Result of the fix tool.
@@ -42,7 +40,7 @@ export function makeFixTool(opts: {
   /** Optional callback invoked when the fix tool is called */
   onCalled?: (result: FixResult) => void;
 }) {
-  return tool({
+  return {
     execute: async (info: FixInfo): Promise<FixResult> => {
       // Validate workflow script structure if it uses the new workflow format (exec-05)
       // Old-format scripts (inline code) are not validated
@@ -74,7 +72,7 @@ export function makeFixTool(opts: {
       // Create new script with same major_version, incremented minor_version
       // Fix is ALWAYS saved - maintainer's work is never discarded
       const newScript: Script = {
-        id: generateId(),
+        id: crypto.randomUUID(),
         code: info.code,
         change_comment: info.comment,
         task_id: opts.maintainerTaskId,
@@ -138,6 +136,13 @@ Returns:
 - activated: true if the fix became active and workflow will re-run
 - activated: false if the planner updated the script while you were working (your fix was saved but not activated)
 `,
-    inputSchema: FixInfoSchema,
-  });
+    inputSchema: {
+      type: "object",
+      properties: {
+        code: { type: "string", description: "The complete fixed script code" },
+        comment: { type: "string", description: "Brief description of what was fixed" },
+      },
+      required: ["code", "comment"],
+    } as JSONSchema,
+  } satisfies AITool;
 }

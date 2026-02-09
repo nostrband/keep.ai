@@ -1373,8 +1373,7 @@ export async function createServer(config: ServerConfig = {}) {
 
       // Generate script run ID upfront so we can return it immediately
       // This avoids race conditions when querying for "latest" run after execution
-      const { generateId } = await import("ai");
-      const scriptRunId = generateId();
+      const scriptRunId = crypto.randomUUID();
 
       // Mark this workflow as having an in-progress test run
       inProgressTestRuns.set(workflow.id, scriptRunId);

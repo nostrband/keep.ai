@@ -1,4 +1,3 @@
-import { generateId } from "ai";
 import { CRSqliteDB } from "./database";
 
 export interface Note {
@@ -89,7 +88,7 @@ export class NoteStore {
     priority: "low" | "medium" | "high" = "low",
     id?: string
   ): Promise<Note> {
-    const noteId = id || generateId();
+    const noteId = id || crypto.randomUUID();
     const now = new Date().toISOString();
     const tagsJson = JSON.stringify(tags);
 

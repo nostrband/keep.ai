@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { JSONSchema } from "../json-schema";
 import { FileStore } from "@app/db";
 import { storeFileData } from "@app/node";
 import { EvalContext } from "../sandbox/sandbox";
@@ -8,25 +8,57 @@ import { defineTool, Tool } from "./types";
 
 const debugWebDownload = debug("agent:web-download");
 
-const inputSchema = z.object({
-  url: z.string().url().describe("URL of the file to download"),
-  filename: z.string().optional().describe("Name to save the file as (if not provided, will try to extract from URL and payload)"),
-  summary: z.string().optional().describe("Optional summary/description of the downloaded file"),
-});
+const inputSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    url: {
+      type: "string",
+      format: "uri",
+      description: "URL of the file to download",
+    },
+    filename: {
+      type: "string",
+      description: "Name to save the file as (if not provided, will try to extract from URL and payload)",
+    },
+    summary: {
+      type: "string",
+      description: "Optional summary/description of the downloaded file",
+    },
+  },
+  required: ["url"],
+};
 
-const outputSchema = z.object({
-  id: z.string().describe("Generated file ID (SHA256 hash)"),
-  name: z.string().describe("Filename"),
-  path: z.string().describe("Local file path relative to files directory"),
-  summary: z.string().describe("File summary"),
-  upload_time: z.string().describe("Download/upload timestamp"),
-  media_type: z.string().describe("Detected MIME type from response headers"),
-  size: z.number().describe("File size in bytes"),
-  url: z.string().describe("Original download URL"),
-});
+const outputSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    id: { type: "string", description: "Generated file ID (SHA256 hash)" },
+    name: { type: "string", description: "Filename" },
+    path: { type: "string", description: "Local file path relative to files directory" },
+    summary: { type: "string", description: "File summary" },
+    upload_time: { type: "string", description: "Download/upload timestamp" },
+    media_type: { type: "string", description: "Detected MIME type from response headers" },
+    size: { type: "number", description: "File size in bytes" },
+    url: { type: "string", description: "Original download URL" },
+  },
+  required: ["id", "name", "path", "summary", "upload_time", "media_type", "size", "url"],
+};
 
-type Input = z.infer<typeof inputSchema>;
-type Output = z.infer<typeof outputSchema>;
+interface Input {
+  url: string;
+  filename?: string;
+  summary?: string;
+}
+
+interface Output {
+  id: string;
+  name: string;
+  path: string;
+  summary: string;
+  upload_time: string;
+  media_type: string;
+  size: number;
+  url: string;
+}
 
 /**
  * Create the Web.download tool.
@@ -104,14 +136,14 @@ Returns the created file record with metadata.
       try {
         while (true) {
           const { done, value } = await reader.read();
-          
+
           if (done) break;
-          
+
           totalSize += value.length;
           if (totalSize > MAX_SIZE) {
             throw new LogicError(`File too large: ${totalSize} bytes (max: ${MAX_SIZE} bytes)`, { source: "Web.download" });
           }
-          
+
           chunks.push(value);
         }
       } finally {
@@ -120,7 +152,7 @@ Returns the created file record with metadata.
 
       // Combine chunks into single buffer
       const fileBuffer = Buffer.concat(chunks);
-      
+
       debugWebDownload("Downloaded file size:", fileBuffer.length, "bytes");
 
       // Extract filename from Content-Disposition header or URL if not provided
@@ -140,7 +172,7 @@ Returns the created file record with metadata.
             debugWebDownload("Filename from Content-Disposition:", filename);
           }
         }
-        
+
         // Fallback to extracting from URL
         if (!filename) {
           try {
@@ -148,7 +180,7 @@ Returns the created file record with metadata.
             const pathSegments = urlPath.split('/');
             filename = pathSegments[pathSegments.length - 1] || 'downloaded-file';
             debugWebDownload("Filename from URL:", filename);
-            
+
             // If no extension and we have a mime type, try to add appropriate extension
             if (!filename.includes('.') && mimeType) {
               // Simple mime to extension mapping
@@ -190,10 +222,10 @@ Returns the created file record with metadata.
       );
 
       // Create event for context tracking
-      await getContext().createEvent("web_download", { 
-        url: input.url, 
+      await getContext().createEvent("web_download", {
+        url: input.url,
         filename: filename,
-        size: fileBuffer.length 
+        size: fileBuffer.length
       });
 
       debugWebDownload("File download completed successfully:", {

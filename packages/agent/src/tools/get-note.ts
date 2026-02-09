@@ -1,22 +1,36 @@
-import { z } from "zod";
+import { JSONSchema } from "../json-schema";
 import { NoteStore, Note } from "@app/db";
 import { defineReadOnlyTool, Tool } from "./types";
 
-const inputSchema = z.object({
-  id: z.string().describe("The ID of the note to retrieve"),
-});
+const inputSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    id: {
+      type: "string",
+      description: "The ID of the note to retrieve",
+    },
+  },
+  required: ["id"],
+};
 
-const outputSchema = z.object({
-  id: z.string().describe("Unique note identifier"),
-  title: z.string().describe("Note title"),
-  content: z.string().describe("Full note content"),
-  tags: z.array(z.string()).describe("Array of tag strings"),
-  priority: z.enum(["low", "medium", "high"]).describe("Note priority level"),
-  created: z.string().describe("ISO timestamp when note was created"),
-  updated: z.string().describe("ISO timestamp when note was last updated"),
-});
+const outputSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    id: { type: "string", description: "Unique note identifier" },
+    title: { type: "string", description: "Note title" },
+    content: { type: "string", description: "Full note content" },
+    tags: { type: "array", items: { type: "string" }, description: "Array of tag strings" },
+    priority: { enum: ["low", "medium", "high"], description: "Note priority level" },
+    created: { type: "string", description: "ISO timestamp when note was created" },
+    updated: { type: "string", description: "ISO timestamp when note was last updated" },
+  },
+  required: ["id", "title", "content", "tags", "priority", "created", "updated"],
+};
 
-type Input = z.infer<typeof inputSchema>;
+interface Input {
+  id: string;
+}
+
 type Output = Note;
 
 /**

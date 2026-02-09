@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { JSONSchema } from "../json-schema";
 import { EvalContext } from "../sandbox/sandbox";
 import { getEnv } from "../env";
 import { getTextModelName } from "../model";
@@ -8,26 +8,47 @@ import { defineReadOnlyTool, Tool } from "./types";
 
 const debugTextSummarize = debug("TextSummarize");
 
-const inputSchema = z.object({
-  text: z.string().min(1).describe("Input text to summarize"),
-  prompt: z.string().optional().describe("Additional prompt on how to perform the summarization, preferred output format, etc"),
-  max_chars: z
-    .number()
-    .min(100)
-    .max(10000)
-    .default(1500)
-    .optional()
-    .describe(
-      "Maximum number of characters in the summary (default: 1500)"
-    ),
-});
+const inputSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    text: {
+      type: "string",
+      minLength: 1,
+      description: "Input text to summarize",
+    },
+    prompt: {
+      type: "string",
+      description: "Additional prompt on how to perform the summarization, preferred output format, etc",
+    },
+    max_chars: {
+      type: "number",
+      minimum: 100,
+      maximum: 10000,
+      default: 1500,
+      description:
+        "Maximum number of characters in the summary (default: 1500)",
+    },
+  },
+  required: ["text"],
+};
 
-const outputSchema = z.object({
-  summary: z.string().describe("Summarized text"),
-});
+const outputSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    summary: { type: "string", description: "Summarized text" },
+  },
+  required: ["summary"],
+};
 
-type Input = z.infer<typeof inputSchema>;
-type Output = z.infer<typeof outputSchema>;
+interface Input {
+  text: string;
+  prompt?: string;
+  max_chars?: number;
+}
+
+interface Output {
+  summary: string;
+}
 
 /**
  * Create the Text.summarize tool.

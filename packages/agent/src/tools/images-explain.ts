@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { JSONSchema } from "../json-schema";
 import { FileStore } from "@app/db";
 import { EvalContext } from "../sandbox/sandbox";
 import { getEnv } from "../env";
@@ -9,36 +9,61 @@ import { defineReadOnlyTool, Tool } from "./types";
 
 const debugImgExplain = debug("ImagesExplain");
 
-const inputSchema = z.object({
-  file_path: z
-    .string()
-    .min(1)
-    .describe("File path of the image to analyze"),
-  question: z
-    .string()
-    .min(1)
-    .max(2000)
-    .describe(
-      "Question or prompt about the image - what you want to know or understand about the image"
-    ),
-});
+const inputSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    file_path: {
+      type: "string",
+      minLength: 1,
+      description: "File path of the image to analyze",
+    },
+    question: {
+      type: "string",
+      minLength: 1,
+      maxLength: 2000,
+      description:
+        "Question or prompt about the image - what you want to know or understand about the image",
+    },
+  },
+  required: ["file_path", "question"],
+};
 
-const outputSchema = z.object({
-  explanation: z
-    .string()
-    .describe("AI-generated textual explanation or analysis of the image"),
-  file_info: z
-    .object({
-      id: z.string().describe("File ID"),
-      name: z.string().describe("Original filename"),
-      media_type: z.string().describe("MIME type of the image"),
-      size: z.number().describe("File size in bytes"),
-    })
-    .describe("Information about the analyzed image file"),
-});
+const outputSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    explanation: {
+      type: "string",
+      description: "AI-generated textual explanation or analysis of the image",
+    },
+    file_info: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "File ID" },
+        name: { type: "string", description: "Original filename" },
+        media_type: { type: "string", description: "MIME type of the image" },
+        size: { type: "number", description: "File size in bytes" },
+      },
+      required: ["id", "name", "media_type", "size"],
+      description: "Information about the analyzed image file",
+    },
+  },
+  required: ["explanation", "file_info"],
+};
 
-type Input = z.infer<typeof inputSchema>;
-type Output = z.infer<typeof outputSchema>;
+interface Input {
+  file_path: string;
+  question: string;
+}
+
+interface Output {
+  explanation: string;
+  file_info: {
+    id: string;
+    name: string;
+    media_type: string;
+    size: number;
+  };
+}
 
 /**
  * Create the Images.explain tool.

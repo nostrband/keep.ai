@@ -24,7 +24,7 @@ import {
 } from "../ui";
 import { PlusIcon /*, Info */ } from "lucide-react";
 // import { useAutonomyPreference } from "../hooks/useAutonomyPreference";
-import type { FileUIPart } from "ai";
+import type { FileUIPart } from "@app/proto";
 import { type File as DbFile } from "@app/db";
 
 type PromptInputMessage = {

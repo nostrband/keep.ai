@@ -5,7 +5,7 @@
  * Requires explicit account parameter (email address) for multi-account support.
  */
 
-import { z } from "zod";
+import { JSONSchema } from "../json-schema";
 import { EvalContext } from "../sandbox/sandbox";
 import debug from "debug";
 import { google } from "googleapis";
@@ -34,20 +34,30 @@ const TRACKED_METHODS = new Set<string>([
   "documents.batchUpdate",
 ]);
 
-const inputSchema = z.object({
-  method: z.enum(SUPPORTED_METHODS).describe("Google Docs API method to call"),
-  params: z
-    .any()
-    .optional()
-    .describe("Parameters to pass to the Google Docs API method"),
-  account: z
-    .string()
-    .describe(
-      "Email address of the Google Docs account to use (e.g., user@gmail.com)"
-    ),
-});
+const inputSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    method: {
+      enum: SUPPORTED_METHODS as unknown as string[],
+      description: "Google Docs API method to call",
+    },
+    params: {
+      description: "Parameters to pass to the Google Docs API method",
+    },
+    account: {
+      type: "string",
+      description:
+        "Email address of the Google Docs account to use (e.g., user@gmail.com)",
+    },
+  },
+  required: ["method", "account"],
+};
 
-type Input = z.infer<typeof inputSchema>;
+interface Input {
+  method: (typeof SUPPORTED_METHODS)[number];
+  params?: any;
+  account: string;
+}
 
 /**
  * Create Google Docs tool that uses ConnectionManager for credentials.

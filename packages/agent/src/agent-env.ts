@@ -3,7 +3,6 @@ import { StepInput } from "./agent-types";
 import debug from "debug";
 import { getEnv } from "./env";
 import { AssistantUIMessage, AutonomyMode } from "@app/proto";
-import { generateId, isFileUIPart } from "ai";
 import type { Connection } from "@app/connectors";
 
 export class AgentEnv {
@@ -81,10 +80,11 @@ ${systemPrompt}
       id: msg.id,
       role: msg.role,
       parts: msg.parts.map((p) => {
-        if (isFileUIPart(p)) {
+        if (p.type === "file") {
           // Extract relevant metadata for agent context
-          const filename = p.filename || 'file';
-          const mediaType = p.mediaType || 'unknown';
+          const fp = p as import("@app/proto").FileUIPart;
+          const filename = fp.filename || 'file';
+          const mediaType = fp.mediaType || 'unknown';
           return {
             type: "text" as const,
             text: `[Attached file: ${filename} (${mediaType})]`,

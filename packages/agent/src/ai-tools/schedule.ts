@@ -1,19 +1,17 @@
-import { z } from "zod";
-import { tool } from "ai";
+import { JSONSchema } from "../json-schema";
+import { AITool } from "./types";
 import { ScriptStore } from "@app/db";
 import { Cron } from "croner";
 
-const ScheduleInfoSchema = z.object({
-  cron: z.string().describe("Cron expression for script execution schedule"),
-});
-
-export type ScheduleInfo = z.infer<typeof ScheduleInfoSchema>;
+export interface ScheduleInfo {
+  cron: string;
+}
 
 export function makeScheduleTool(opts: {
   taskId: string;
   scriptStore: ScriptStore;
 }) {
-  return tool({
+  return {
     execute: async (info: ScheduleInfo): Promise<{ cron: string }> => {
       // Validate cron expression and calculate next run time
       let nextRunTimestamp = '';
@@ -41,10 +39,16 @@ export function makeScheduleTool(opts: {
 
       return { cron: info.cron };
     },
-    description: `Set the cron schedule for automated script execution. 
+    description: `Set the cron schedule for automated script execution.
 Required when script should run automatically (e.g., daily, hourly, every N minutes).
 Examples: '0 9 * * *' (daily 9am), '*/30 * * * *' (every 30min).
 `,
-    inputSchema: ScheduleInfoSchema,
-  });
+    inputSchema: {
+      type: "object",
+      properties: {
+        cron: { type: "string", description: "Cron expression for script execution schedule" },
+      },
+      required: ["cron"],
+    } as JSONSchema,
+  } satisfies AITool;
 }

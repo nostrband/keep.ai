@@ -1,7 +1,6 @@
-import { generateId } from "ai";
 import {
   getModelName,
-  getOpenRouter,
+  getOpenRouterConfig,
   initSandbox,
   ReplAgent,
   Sandbox,
@@ -165,7 +164,7 @@ export class TaskWorker {
       }
 
       // Reuse existing thread
-      task.thread_id = task.thread_id || generateId();
+      task.thread_id = task.thread_id || crypto.randomUUID();
       // Generate title from first inbox message if task doesn't have one
       await this.ensureThread(task, taskType, inbox);
 
@@ -220,20 +219,31 @@ export class TaskWorker {
       const env = await this.createEnv(taskType, task, sandbox);
 
       // Init agent
-      const model = getOpenRouter()(modelName, { usage: { include: true } });
-      const agent = new ReplAgent(model, env, sandbox, agentTask, taskRunId);
+      const openRouterConfig = getOpenRouterConfig();
+      const agent = new ReplAgent(
+        { modelName, ...openRouterConfig },
+        env,
+        sandbox,
+        agentTask,
+        taskRunId
+      );
 
       // Copy restored history
       agent.history.push(...history);
 
       try {
-        // Helper
+        // Helper — saves new or updated messages to the thread.
+        // The current assistant message accumulates parts across loop
+        // steps, so we always re-save it (INSERT OR REPLACE).
+        // All other messages are immutable, so savedIds skips them.
         const savedIds = new Set<string>();
         const saveNewMessages = async () => {
+          const last = agent.history[agent.history.length - 1];
+          const currentId = last?.role === "assistant" ? last.id : null;
           const newMessages = agent.history.filter(
-            (m) => !!m.parts && !savedIds.has(m.id)
+            (m) => !!m.parts && (!savedIds.has(m.id) || m.id === currentId)
           );
-          this.debug("Save new messages", newMessages);
+          this.debug("Save new messages", newMessages.length);
           await this.saveHistory(newMessages, task.thread_id);
           newMessages.forEach((m) => savedIds.add(m.id));
         };
@@ -697,7 +707,7 @@ If you cannot fix this issue autonomously, explain why without calling the \`fix
 
     // Create a new inbox message with the rich context
     const enrichedMessage = JSON.stringify({
-      id: generateId(),
+      id: crypto.randomUUID(),
       role: "user",
       parts: [{ type: "text", text: contextMessage }],
       metadata: {
@@ -765,8 +775,8 @@ If you cannot fix this issue autonomously, explain why without calling the \`fix
       const message = agent.history[i];
       if (message.role !== "assistant" || !message.parts) continue;
       for (const part of message.parts) {
-        if (part.type === "text" && part.text) {
-          return part.text;
+        if (part.type === "text" && (part as any).text) {
+          return (part as any).text;
         }
       }
     }
@@ -799,7 +809,7 @@ If you cannot fix this issue autonomously, explain why without calling the \`fix
     // Create notification with explanation and Re-plan action
     try {
       await this.api.notificationStore.saveNotification({
-        id: generateId(),
+        id: crypto.randomUUID(),
         workflow_id: workflowId,
         type: "maintenance_failed",
         payload: JSON.stringify({
@@ -860,7 +870,7 @@ If you'd like me to try a different approach, just let me know!`;
     modelName: string;
     inbox: string[];
   }) {
-    const taskRunId = generateId();
+    const taskRunId = crypto.randomUUID();
     const runStartTime = new Date();
     // Spec 10: input_goal, input_notes, input_plan are deprecated (always empty)
     await this.api.taskStore.createTaskRun({
@@ -880,7 +890,7 @@ If you'd like me to try a different approach, just let me know!`;
 
     // Log run start to execution_logs (Spec 01)
     await this.api.executionLogStore.saveExecutionLog({
-      id: generateId(),
+      id: crypto.randomUUID(),
       run_id: taskRunId,
       run_type: 'task',
       event_type: 'run_start',
@@ -944,7 +954,7 @@ If you'd like me to try a different approach, just let me know!`;
 
     // Log run end to execution_logs (Spec 01)
     await this.api.executionLogStore.saveExecutionLog({
-      id: generateId(),
+      id: crypto.randomUUID(),
       run_id: opts.taskRunId,
       run_type: 'task',
       event_type: 'run_end',
@@ -1042,7 +1052,7 @@ If you'd like me to try a different approach, just let me know!`;
 
         // Save to execution_logs table (Spec 01)
         await this.api.executionLogStore.saveExecutionLog({
-          id: generateId(),
+          id: crypto.randomUUID(),
           run_id: taskRunId || '',
           run_type: 'task',
           event_type: 'tool_call',
@@ -1166,7 +1176,7 @@ ${result.reply || ""}
   private async sendToUser(chat_id: string, reply: string, taskRunId?: string) {
     this.debug("Save user reply", reply);
 
-    const messageId = generateId();
+    const messageId = crypto.randomUUID();
     const timestamp = new Date().toISOString();
 
     // Build message content in AssistantUIMessage format

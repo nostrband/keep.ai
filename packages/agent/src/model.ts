@@ -1,21 +1,15 @@
-import {
-  createOpenRouter,
-  OpenRouterProvider,
-} from "@openrouter/ai-sdk-provider";
 import { getEnv } from "./env";
-
-let openRouter: OpenRouterProvider | undefined;
 
 export const DEFAULT_AGENT_MODEL = "anthropic/claude-sonnet-4";
 export const DEFAULT_TEXT_MODEL = "google/gemini-2.5-flash-lite";
 
-export function getOpenRouter() {
-  if (!openRouter)
-    openRouter = createOpenRouter({
-      apiKey: getEnv().OPENROUTER_API_KEY,
-      baseURL: getEnv().OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1",
-    });
-  return openRouter;
+export function getOpenRouterConfig() {
+  const apiKey = getEnv().OPENROUTER_API_KEY;
+  if (!apiKey) throw new Error("OPENROUTER_API_KEY is required");
+  return {
+    apiKey,
+    baseURL: getEnv().OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1",
+  };
 }
 
 export function getModelName() {

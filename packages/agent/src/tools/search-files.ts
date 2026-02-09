@@ -1,37 +1,54 @@
-import { z } from "zod";
+import { JSONSchema } from "../json-schema";
 import { FileStore, type File } from "@app/db";
 import { defineReadOnlyTool, Tool } from "./types";
 
-const inputSchema = z.object({
-  query: z.string().min(1).describe("Search query string to match against file name, path, and summary"),
-  limit: z
-    .number()
-    .int()
-    .min(1)
-    .max(100)
-    .optional()
-    .describe("Maximum number of files to return (1-100, default: 50)"),
-  offset: z
-    .number()
-    .int()
-    .min(0)
-    .optional()
-    .describe("Number of files to skip for pagination (default: 0)"),
-});
+const inputSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    query: {
+      type: "string",
+      minLength: 1,
+      description: "Search query string to match against file name, path, and summary",
+    },
+    limit: {
+      type: "integer",
+      minimum: 1,
+      maximum: 100,
+      description: "Maximum number of files to return (1-100, default: 50)",
+    },
+    offset: {
+      type: "integer",
+      minimum: 0,
+      description: "Number of files to skip for pagination (default: 0)",
+    },
+  },
+  required: ["query"],
+};
 
-const outputSchema = z.array(
-  z.object({
-    id: z.string().describe("File ID"),
-    name: z.string().describe("Original filename"),
-    path: z.string().describe("Local file path"),
-    summary: z.string().describe("File summary"),
-    upload_time: z.string().describe("Upload timestamp"),
-    media_type: z.string().describe("MIME type"),
-    size: z.number().describe("File size in bytes"),
-  })
-).describe("Array of file objects matching the search query");
+const outputSchema: JSONSchema = {
+  type: "array",
+  items: {
+    type: "object",
+    properties: {
+      id: { type: "string", description: "File ID" },
+      name: { type: "string", description: "Original filename" },
+      path: { type: "string", description: "Local file path" },
+      summary: { type: "string", description: "File summary" },
+      upload_time: { type: "string", description: "Upload timestamp" },
+      media_type: { type: "string", description: "MIME type" },
+      size: { type: "number", description: "File size in bytes" },
+    },
+    required: ["id", "name", "path", "summary", "upload_time", "media_type", "size"],
+  },
+  description: "Array of file objects matching the search query",
+};
 
-type Input = z.infer<typeof inputSchema>;
+interface Input {
+  query: string;
+  limit?: number;
+  offset?: number;
+}
+
 type Output = File[];
 
 /**

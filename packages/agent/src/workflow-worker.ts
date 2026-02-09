@@ -1,4 +1,3 @@
-import { generateId } from "ai";
 import { initSandbox, Sandbox } from "./sandbox/sandbox";
 import debug from "debug";
 import { KeepDbApi, Workflow, Script, DBInterface } from "@app/db";
@@ -81,7 +80,7 @@ export async function escalateToUser(
   // 2. Create an "escalated" notification
   try {
     await api.notificationStore.saveNotification({
-      id: generateId(),
+      id: crypto.randomUUID(),
       workflow_id: workflow.id,
       type: "escalated",
       payload: JSON.stringify({
@@ -231,7 +230,7 @@ export class WorkflowWorker {
     providedScriptRunId?: string
   ) {
     // Use provided ID or generate a new one (allows caller to know the run ID upfront)
-    const scriptRunId = providedScriptRunId || generateId();
+    const scriptRunId = providedScriptRunId || crypto.randomUUID();
     this.debug(
       "Running script run",
       scriptRunId,
@@ -770,7 +769,7 @@ export class WorkflowWorker {
 
         // Save to execution_logs table (Spec 01)
         await this.api.executionLogStore.saveExecutionLog({
-          id: generateId(),
+          id: crypto.randomUUID(),
           run_id: scriptRunId,
           run_type: 'script',
           event_type: 'tool_call',

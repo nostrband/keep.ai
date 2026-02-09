@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { JSONSchema } from "../json-schema";
 import { EvalContext } from "../sandbox/sandbox";
 import { getEnv } from "../env";
 import { getTextModelName } from "../model";
@@ -8,21 +8,39 @@ import { defineReadOnlyTool, Tool } from "./types";
 
 const debugTextExtract = debug("TextExtract");
 
-const inputSchema = z.object({
-  text: z.string().min(1).describe("Input text to extract data from"),
-  json_schema: z
-    .any()
-    .describe(
-      "JSON schema object describing the expected output structure"
-    ),
-});
+const inputSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    text: {
+      type: "string",
+      minLength: 1,
+      description: "Input text to extract data from",
+    },
+    json_schema: {
+      description: "JSON schema object describing the expected output structure",
+    },
+  },
+  required: ["text", "json_schema"],
+};
 
-const outputSchema = z.object({
-  result: z.any().describe("Extracted object matching the json_schema"),
-});
+const outputSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    result: {
+      description: "Extracted object matching the json_schema",
+    },
+  },
+  required: ["result"],
+};
 
-type Input = z.infer<typeof inputSchema>;
-type Output = z.infer<typeof outputSchema>;
+interface Input {
+  text: string;
+  json_schema: any;
+}
+
+interface Output {
+  result: any;
+}
 
 /**
  * Create the Text.extract tool.

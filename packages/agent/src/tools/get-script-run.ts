@@ -1,25 +1,43 @@
-import { z } from "zod";
+import { JSONSchema } from "../json-schema";
 import { ScriptStore } from "@app/db";
 import { defineReadOnlyTool, Tool } from "./types";
 
-const inputSchema = z.object({
-  id: z.string().describe("Script run ID"),
-});
+const inputSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    id: { type: "string", description: "Script run ID" },
+  },
+  required: ["id"],
+};
 
-const outputSchema = z
-  .object({
-    id: z.string(),
-    script_id: z.string(),
-    start_timestamp: z.string(),
-    end_timestamp: z.string(),
-    error: z.string(),
-    result: z.string(),
-    logs: z.string(),
-  })
-  .nullable();
+const outputSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    id: { type: "string" },
+    script_id: { type: "string" },
+    start_timestamp: { type: "string" },
+    end_timestamp: { type: "string" },
+    error: { type: "string" },
+    result: { type: "string" },
+    logs: { type: "string" },
+  },
+  required: ["id", "script_id", "start_timestamp", "end_timestamp", "error", "result", "logs"],
+  nullable: true,
+};
 
-type Input = z.infer<typeof inputSchema>;
-type Output = z.infer<typeof outputSchema>;
+interface Input {
+  id: string;
+}
+
+type Output = {
+  id: string;
+  script_id: string;
+  start_timestamp: string;
+  end_timestamp: string;
+  error: string;
+  result: string;
+  logs: string;
+} | null;
 
 /**
  * Create the Scripts.getRun tool.
@@ -32,8 +50,8 @@ export function makeGetScriptRunTool(scriptStore: ScriptStore): Tool<Input, Outp
     name: "getRun",
     description: `Get full script run info including result and logs by script_run_id.
 
-⚠️ This tool is only available during planning/maintenance. Do not use in production scripts.
-ℹ️ Not a mutation - can be used outside Items.withItem().`,
+\u26a0\ufe0f This tool is only available during planning/maintenance. Do not use in production scripts.
+\u2139\ufe0f Not a mutation - can be used outside Items.withItem().`,
     inputSchema,
     outputSchema,
     execute: async (input) => {

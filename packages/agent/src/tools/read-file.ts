@@ -1,32 +1,66 @@
-import { z } from "zod";
+import { JSONSchema } from "../json-schema";
 import { FileStore, type File } from "@app/db";
 import { fileUtils } from "@app/node";
 import { LogicError, PermissionError, classifyFileError } from "../errors";
 import { defineReadOnlyTool, Tool } from "./types";
 
-const inputSchema = z.object({
-  path: z.string().describe("File path to read - filename (without extension) will be used as ID"),
-  length: z.number().int().min(1).optional().describe("Number of bytes to read (optional, reads entire file if not specified)"),
-  offset: z.number().int().min(0).optional().describe("Byte offset to start reading from (default: 0)"),
-});
+const inputSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    path: {
+      type: "string",
+      description: "File path to read - filename (without extension) will be used as ID",
+    },
+    length: {
+      type: "integer",
+      minimum: 1,
+      description: "Number of bytes to read (optional, reads entire file if not specified)",
+    },
+    offset: {
+      type: "integer",
+      minimum: 0,
+      description: "Byte offset to start reading from (default: 0)",
+    },
+  },
+  required: ["path"],
+};
 
-const outputSchema = z.object({
-  info: z.object({
-    id: z.string().describe("File ID"),
-    name: z.string().describe("Original filename"),
-    path: z.string().describe("Local file path"),
-    summary: z.string().describe("File summary"),
-    upload_time: z.string().describe("Upload timestamp"),
-    media_type: z.string().describe("MIME type"),
-    size: z.number().describe("File size in bytes"),
-  }).describe("File metadata from database"),
-  offset: z.number().describe("Byte offset that was used for reading"),
-  length: z.number().describe("Number of bytes actually read"),
-  bytes: z.string().describe("File content as base64-encoded string"),
-});
+const outputSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    info: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "File ID" },
+        name: { type: "string", description: "Original filename" },
+        path: { type: "string", description: "Local file path" },
+        summary: { type: "string", description: "File summary" },
+        upload_time: { type: "string", description: "Upload timestamp" },
+        media_type: { type: "string", description: "MIME type" },
+        size: { type: "number", description: "File size in bytes" },
+      },
+      required: ["id", "name", "path", "summary", "upload_time", "media_type", "size"],
+      description: "File metadata from database",
+    },
+    offset: { type: "number", description: "Byte offset that was used for reading" },
+    length: { type: "number", description: "Number of bytes actually read" },
+    bytes: { type: "string", description: "File content as base64-encoded string" },
+  },
+  required: ["info", "offset", "length", "bytes"],
+};
 
-type Input = z.infer<typeof inputSchema>;
-type Output = z.infer<typeof outputSchema>;
+interface Input {
+  path: string;
+  length?: number;
+  offset?: number;
+}
+
+interface Output {
+  info: File;
+  offset: number;
+  length: number;
+  bytes: string;
+}
 
 /**
  * Create the Files.read tool.

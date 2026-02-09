@@ -1,5 +1,5 @@
-import { z } from "zod";
-import { generateId, tool } from "ai";
+import { JSONSchema } from "../json-schema";
+import { AITool } from "./types";
 import { Script, ScriptStore, ChatStore } from "@app/db";
 import { validateWorkflowScript, isWorkflowFormatScript } from "../workflow-validator";
 import { extractIntent } from "../intent-extract";
@@ -7,24 +7,25 @@ import debug from "debug";
 
 const log = debug("save-tool");
 
-const SaveInfoSchema = z.object({
-  code: z.string().describe("Script code to save"),
-  title: z.string().describe("Title for the workflow/automation"),
-  comments: z
-    .string()
-    .optional()
-    .describe("Comment for the code or code changes"),
-  summary: z
-    .string()
-    .optional()
-    .describe("One-sentence description of what the automation does"),
-  diagram: z
-    .string()
-    .optional()
-    .describe("Mermaid diagram source showing the automation flow (flowchart)"),
-});
+export interface SaveInfo {
+  code: string;
+  title: string;
+  comments?: string;
+  summary?: string;
+  diagram?: string;
+}
 
-export type SaveInfo = z.infer<typeof SaveInfoSchema>;
+const SaveInfoSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    code: { type: "string", description: "Script code to save" },
+    title: { type: "string", description: "Title for the workflow/automation" },
+    comments: { type: "string", description: "Comment for the code or code changes" },
+    summary: { type: "string", description: "One-sentence description of what the automation does" },
+    diagram: { type: "string", description: "Mermaid diagram source showing the automation flow (flowchart)" },
+  },
+  required: ["code", "title"],
+};
 
 // Result type for save tool - includes script info and whether it was a maintenance fix
 export interface SaveResult {
@@ -39,7 +40,7 @@ export function makeSaveTool(opts: {
   scriptStore: ScriptStore;
   chatStore?: ChatStore;  // Optional: for intent extraction (exec-17)
 }) {
-  return tool({
+  return {
     execute: async (info: SaveInfo): Promise<SaveResult> => {
       // Validate workflow script structure if it uses the new workflow format (exec-05)
       // Old-format scripts (inline code) are not validated
@@ -48,7 +49,6 @@ export function makeSaveTool(opts: {
         if (!validation.valid) {
           throw new Error(`Script validation failed: ${validation.error}`);
         }
-        // Config will be stored after script is saved
         var workflowConfig = validation.config;
       }
 
@@ -81,7 +81,7 @@ export function makeSaveTool(opts: {
       const wasInMaintenance = workflow.maintenance;
 
       const newScript: Script = {
-        id: generateId(),
+        id: crypto.randomUUID(),
         code: info.code,
         change_comment: info.comments || "",
         task_id: opts.taskId,
@@ -191,5 +191,5 @@ export function makeSaveTool(opts: {
 The title will only be applied if the workflow doesn't already have one.
 `,
     inputSchema: SaveInfoSchema,
-  });
+  } satisfies AITool;
 }

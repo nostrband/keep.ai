@@ -1,23 +1,42 @@
-import { z } from "zod";
+import { JSONSchema } from "../json-schema";
 import { ScriptStore } from "@app/db";
 import { defineReadOnlyTool, Tool } from "./types";
 
-const inputSchema = z.object({
-  task_id: z.string().describe("Task ID"),
-});
+const inputSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    task_id: { type: "string", description: "Task ID" },
+  },
+  required: ["task_id"],
+};
 
-const outputSchema = z.array(
-  z.object({
-    id: z.string(),
-    task_id: z.string(),
-    version: z.string(), // Format: "major.minor" e.g., "2.1"
-    timestamp: z.string(),
-    change_comment: z.string(),
-  })
-);
+const outputSchema: JSONSchema = {
+  type: "array",
+  items: {
+    type: "object",
+    properties: {
+      id: { type: "string" },
+      task_id: { type: "string" },
+      version: { type: "string" },
+      timestamp: { type: "string" },
+      change_comment: { type: "string" },
+    },
+    required: ["id", "task_id", "version", "timestamp", "change_comment"],
+  },
+};
 
-type Input = z.infer<typeof inputSchema>;
-type Output = z.infer<typeof outputSchema>;
+interface Input {
+  task_id: string;
+}
+
+interface OutputItem {
+  id: string;
+  task_id: string;
+  version: string;
+  timestamp: string;
+  change_comment: string;
+}
+type Output = OutputItem[];
 
 /**
  * Create the Scripts.history tool.
@@ -30,8 +49,8 @@ export function makeScriptHistoryTool(scriptStore: ScriptStore): Tool<Input, Out
     name: "history",
     description: `Get all script versions for a given task_id (all fields except 'code').
 
-⚠️ This tool is only available during planning/maintenance. Do not use in production scripts.
-ℹ️ Not a mutation - can be used outside Items.withItem().`,
+\u26a0\ufe0f This tool is only available during planning/maintenance. Do not use in production scripts.
+\u2139\ufe0f Not a mutation - can be used outside Items.withItem().`,
     inputSchema,
     outputSchema,
     execute: async (input) => {

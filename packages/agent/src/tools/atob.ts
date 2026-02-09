@@ -1,11 +1,18 @@
-import { z } from "zod";
+import { JSONSchema } from "../json-schema";
 import { defineReadOnlyTool, Tool } from "./types";
 
-const inputSchema = z.string().describe("Base64 or base64url encoded string");
-const outputSchema = z.string().describe("Decoded binary string");
+const inputSchema: JSONSchema = {
+  type: "string",
+  description: "Base64 or base64url encoded string",
+};
 
-type Input = z.infer<typeof inputSchema>;
-type Output = z.infer<typeof outputSchema>;
+const outputSchema: JSONSchema = {
+  type: "string",
+  description: "Decoded binary string",
+};
+
+type Input = string;
+type Output = string;
 
 /**
  * Create the Util.atob tool.
@@ -17,7 +24,7 @@ export function makeAtobTool(): Tool<Input, Output> {
     name: "atob",
     description: `Decode base64 or base64url encoded string to binary string, similar to Window.atob() (but with base64url support).
 
-ℹ️ Not a mutation - can be used outside Items.withItem().`,
+\u2139\ufe0f Not a mutation - can be used outside Items.withItem().`,
     inputSchema,
     outputSchema,
     execute: async (input: string) => {

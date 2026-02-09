@@ -24,7 +24,7 @@ import {
   ToolOutput,
 } from "../ai-elements/tool";
 import { Loader } from "../ai-elements/loader";
-import type { ToolUIPart } from "ai";
+import type { ToolUIPart } from "@app/proto";
 import { AssistantUIMessage } from "@app/proto"
 
 interface MessageItemProps {

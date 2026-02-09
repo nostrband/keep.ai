@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { JSONSchema } from "../json-schema";
 import { FileStore } from "@app/db";
 import { EvalContext } from "../sandbox/sandbox";
 import { getEnv } from "../env";
@@ -9,32 +9,59 @@ import { defineReadOnlyTool, Tool } from "./types";
 
 const debugPdfExplain = debug("PdfExplain");
 
-const inputSchema = z.object({
-  file_path: z.string().min(1).describe("File path of the PDF to analyze"),
-  prompt: z
-    .string()
-    .min(1)
-    .max(2000)
-    .describe(
-      "Question or prompt about the PDF - what you want to know or understand about the document"
-    ),
-});
+const inputSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    file_path: {
+      type: "string",
+      minLength: 1,
+      description: "File path of the PDF to analyze",
+    },
+    prompt: {
+      type: "string",
+      minLength: 1,
+      maxLength: 2000,
+      description:
+        "Question or prompt about the PDF - what you want to know or understand about the document",
+    },
+  },
+  required: ["file_path", "prompt"],
+};
 
-const outputSchema = z.object({
-  explanation: z
-    .string()
-    .describe("AI-generated textual explanation or analysis of the PDF"),
-  file_info: z
-    .object({
-      id: z.string().describe("File ID"),
-      name: z.string().describe("Original filename"),
-      size: z.number().describe("File size in bytes"),
-    })
-    .describe("Information about the analyzed PDF file"),
-});
+const outputSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    explanation: {
+      type: "string",
+      description: "AI-generated textual explanation or analysis of the PDF",
+    },
+    file_info: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "File ID" },
+        name: { type: "string", description: "Original filename" },
+        size: { type: "number", description: "File size in bytes" },
+      },
+      required: ["id", "name", "size"],
+      description: "Information about the analyzed PDF file",
+    },
+  },
+  required: ["explanation", "file_info"],
+};
 
-type Input = z.infer<typeof inputSchema>;
-type Output = z.infer<typeof outputSchema>;
+interface Input {
+  file_path: string;
+  prompt: string;
+}
+
+interface Output {
+  explanation: string;
+  file_info: {
+    id: string;
+    name: string;
+    size: number;
+  };
+}
 
 /**
  * Create the Pdf.explain tool.

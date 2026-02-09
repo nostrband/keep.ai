@@ -93,7 +93,7 @@ export class ChatStore {
     // Note: first_message_content and first_message_time are deprecated (Spec 09)
     // but we still populate them for backwards compatibility
     const firstMessageContent = firstMessage.parts
-      .filter((part) => part.type === "text")
+      .filter((part): part is { type: "text"; text: string } => part.type === "text")
       .map((part) => part.text)
       .join("");
 

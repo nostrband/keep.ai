@@ -31,7 +31,7 @@ import {
   // TooltipTrigger,
 } from "../ui";
 import { PlusIcon, AlertCircle, /* Info, */ Sparkles } from "lucide-react";
-import type { FileUIPart } from "ai";
+import type { FileUIPart } from "@app/proto";
 import type { File as DbFile, ScriptRun, Workflow, Task } from "@app/db";
 
 type PromptInputMessage = {

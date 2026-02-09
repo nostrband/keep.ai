@@ -51,7 +51,12 @@
       "Bash(basename:*)",
       "Bash(git log:*)",
       "Bash(npx vitest:*)",
-      "Bash(node -e:*)"
+      "Bash(node -e:*)",
+      "Bash(python3:*)",
+      "Bash(npx turbo run build:*)",
+      "Bash(sqlite3:*)",
+      "Bash(git fetch:*)",
+      "Bash(git add:*)"
     ]
   }
 }

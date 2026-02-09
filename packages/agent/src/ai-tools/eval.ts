@@ -1,5 +1,5 @@
-import { z } from "zod";
-import { tool } from "ai";
+import { JSONSchema } from "../json-schema";
+import { AITool } from "./types";
 import { EvalResult, Sandbox } from "../sandbox/sandbox";
 import { TaskType } from "@app/db";
 
@@ -10,7 +10,7 @@ export function makeEvalTool(opts: {
   setResult: (result: EvalResult, code: string) => void;
   getLogs: () => string;
 }) {
-  return tool({
+  return {
     execute: async ({
       jsCode,
     }: {
@@ -67,12 +67,20 @@ Guidelines:
 - returned value and 'state' must be convertible to JSON
 - don't 'return' big encrypted/encoded/intermediary data/fields - put them to 'state' to save tokens and process on next steps
 `,
-    inputSchema: z.object({
-      jsCode: z.string().describe("JS code"),
-    }),
-    outputSchema: z.object({
-      result: z.string().describe("JSON value of returned 'result' field"),
-      logs: z.string().describe("Execution logs"),
-    }),
-  });
+    inputSchema: {
+      type: "object",
+      properties: {
+        jsCode: { type: "string", description: "JS code" },
+      },
+      required: ["jsCode"],
+    } as JSONSchema,
+    outputSchema: {
+      type: "object",
+      properties: {
+        result: { type: "string", description: "JSON value of returned 'result' field" },
+        logs: { type: "string", description: "Execution logs" },
+      },
+      required: ["result", "logs"],
+    } as JSONSchema,
+  } satisfies AITool;
 }

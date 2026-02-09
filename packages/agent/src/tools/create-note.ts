@@ -1,36 +1,54 @@
-import { z } from "zod";
-import { generateId } from "ai";
+import { JSONSchema } from "../json-schema";
 import { NoteStore } from "@app/db";
 import { EvalContext } from "../sandbox/sandbox";
 import { defineTool, Tool } from "./types";
 
-const inputSchema = z.object({
-  id: z
-    .string()
-    .min(1)
-    .max(100)
-    .describe("Human-readable note ID, i.e. 'topics.diy' or 'user.profile'"),
-  title: z
-    .string()
-    .min(1)
-    .max(500)
-    .describe("Title of the note (1-500 characters)"),
-  content: z.string().min(1).describe("Content/body of the note"),
-  tags: z
-    .array(z.string())
-    .nullable()
-    .optional()
-    .describe("Array of tags to categorize the note (optional)"),
-  priority: z
-    .enum(["low", "medium", "high"])
-    .nullable()
-    .optional()
-    .describe("Priority level of the note (optional, default: low)"),
-});
+const inputSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    id: {
+      type: "string",
+      minLength: 1,
+      maxLength: 100,
+      description: "Human-readable note ID, i.e. 'topics.diy' or 'user.profile'",
+    },
+    title: {
+      type: "string",
+      minLength: 1,
+      maxLength: 500,
+      description: "Title of the note (1-500 characters)",
+    },
+    content: {
+      type: "string",
+      minLength: 1,
+      description: "Content/body of the note",
+    },
+    tags: {
+      type: "array",
+      items: { type: "string" },
+      description: "Array of tags to categorize the note (optional)",
+    },
+    priority: {
+      enum: ["low", "medium", "high"],
+      description: "Priority level of the note (optional, default: low)",
+    },
+  },
+  required: ["id", "title", "content"],
+};
 
-const outputSchema = z.string().describe("ID of the created note");
+const outputSchema: JSONSchema = {
+  type: "string",
+  description: "ID of the created note",
+};
 
-type Input = z.infer<typeof inputSchema>;
+interface Input {
+  id: string;
+  title: string;
+  content: string;
+  tags?: string[] | null;
+  priority?: "low" | "medium" | "high" | null;
+}
+
 type Output = string;
 
 /**
@@ -63,7 +81,7 @@ Maximum 500 notes, and title+content+tags size must not exceed 50KB.
       await noteStore.validateCreateNote(title, content, finalTags);
 
       // Generate ID for the note
-      const noteId = id || generateId();
+      const noteId = id || crypto.randomUUID();
 
       // Create the note directly in the database
       await noteStore.createNote(

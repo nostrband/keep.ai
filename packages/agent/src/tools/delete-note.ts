@@ -1,15 +1,23 @@
-import { z } from "zod";
+import { JSONSchema } from "../json-schema";
 import { NoteStore } from "@app/db";
 import { EvalContext } from "../sandbox/sandbox";
 import { defineTool, Tool } from "./types";
 
-const inputSchema = z.object({
-  id: z.string().describe("The ID of the note to delete"),
-});
+const inputSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    id: {
+      type: "string",
+      description: "The ID of the note to delete",
+    },
+  },
+  required: ["id"],
+};
 
-const outputSchema = z.void().describe("No return value - deletion successful");
+interface Input {
+  id: string;
+}
 
-type Input = z.infer<typeof inputSchema>;
 type Output = void;
 
 /**
@@ -27,7 +35,6 @@ export function makeDeleteNoteTool(
 
 ⚠️ MUTATION - must be called inside Items.withItem().`,
     inputSchema,
-    outputSchema,
     isReadOnly: () => false,
     execute: async (input: Input): Promise<Output> => {
       const { id } = input;

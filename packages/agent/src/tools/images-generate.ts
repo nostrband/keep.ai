@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { JSONSchema } from "../json-schema";
 import { FileStore, type File } from "@app/db";
 import { EvalContext } from "../sandbox/sandbox";
 import { getEnv } from "../env";
@@ -12,47 +12,77 @@ import { defineTool, Tool } from "./types";
 
 const debugImg = debug("ImagesGenerate");
 
-const inputSchema = z.object({
-  prompt: z
-    .string()
-    .min(1)
-    .max(1000)
-    .describe("Textual description of the image to generate"),
-  file_prefix: z
-    .string()
-    .min(1)
-    .max(50)
-    .describe(
-      "Prefix to use for the filename of generated images, no spaces, filename-suitable symbols only"
-    ),
-  aspect_ratio: z
-    .string()
-    .optional()
-    .nullable()
-    .describe(
-      "Aspect ratio for the image (e.g., '16:9', '1:1', '4:3'). Defaults to '1:1' if not specified"
-    ),
-});
+const inputSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    prompt: {
+      type: "string",
+      minLength: 1,
+      maxLength: 1000,
+      description: "Textual description of the image to generate",
+    },
+    file_prefix: {
+      type: "string",
+      minLength: 1,
+      maxLength: 50,
+      description:
+        "Prefix to use for the filename of generated images, no spaces, filename-suitable symbols only",
+    },
+    aspect_ratio: {
+      type: "string",
+      description:
+        "Aspect ratio for the image (e.g., '16:9', '1:1', '4:3'). Defaults to '1:1' if not specified",
+    },
+  },
+  required: ["prompt", "file_prefix"],
+};
 
-const outputSchema = z.object({
-  images: z
-    .array(
-      z.object({
-        id: z.string().describe("File ID of the generated image"),
-        name: z.string().describe("Filename of the generated image"),
-        path: z.string().describe("Local file path"),
-        size: z.number().describe("File size in bytes"),
-        media_type: z.string().describe("MIME type of the image"),
-        summary: z.string().describe("Summary/description of the image"),
-        upload_time: z.string().describe("Generation timestamp"),
-      })
-    )
-    .describe("Array of generated image file records"),
-  reasoning: z.string().describe("Image model's reasoning"),
-});
+const outputSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    images: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          id: { type: "string", description: "File ID of the generated image" },
+          name: { type: "string", description: "Filename of the generated image" },
+          path: { type: "string", description: "Local file path" },
+          size: { type: "number", description: "File size in bytes" },
+          media_type: { type: "string", description: "MIME type of the image" },
+          summary: { type: "string", description: "Summary/description of the image" },
+          upload_time: { type: "string", description: "Generation timestamp" },
+        },
+        required: ["id", "name", "path", "size", "media_type", "summary", "upload_time"],
+      },
+      description: "Array of generated image file records",
+    },
+    reasoning: {
+      type: "string",
+      description: "Image model's reasoning",
+    },
+  },
+  required: ["images", "reasoning"],
+};
 
-type Input = z.infer<typeof inputSchema>;
-type Output = z.infer<typeof outputSchema>;
+interface Input {
+  prompt: string;
+  file_prefix: string;
+  aspect_ratio?: string | null;
+}
+
+interface Output {
+  images: {
+    id: string;
+    name: string;
+    path: string;
+    size: number;
+    media_type: string;
+    summary: string;
+    upload_time: string;
+  }[];
+  reasoning: string;
+}
 
 /**
  * Create the Images.generate tool.

@@ -1,6 +1,5 @@
-import { z } from "zod";
+import { JSONSchema } from "../json-schema";
 import { KeepDbApi } from "@app/db";
-import { generateId } from "ai";
 import { defineTool, Tool } from "./types";
 
 export interface UserSendContext {
@@ -9,17 +8,31 @@ export interface UserSendContext {
   scriptRunId?: string;
 }
 
-const inputSchema = z.object({
-  message: z.string().describe("The message text to send to the user"),
-});
+const inputSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    message: { type: "string", description: "The message text to send to the user" },
+  },
+  required: ["message"],
+};
 
-const outputSchema = z.object({
-  id: z.string().describe("Generated notification/message ID"),
-  success: z.boolean().describe("Whether the message was sent successfully"),
-});
+const outputSchema: JSONSchema = {
+  type: "object",
+  properties: {
+    id: { type: "string", description: "Generated notification/message ID" },
+    success: { type: "boolean", description: "Whether the message was sent successfully" },
+  },
+  required: ["id", "success"],
+};
 
-type Input = z.infer<typeof inputSchema>;
-type Output = z.infer<typeof outputSchema>;
+interface Input {
+  message: string;
+}
+
+interface Output {
+  id: string;
+  success: boolean;
+}
 
 /**
  * Create the User.send tool.
@@ -33,12 +46,12 @@ export function makeUserSendTool(api: KeepDbApi, context?: UserSendContext): Too
 This is useful for scripts to send execution results to user.
 The message will create a notification that appears in the user's notification list.
 
-⚠️ MUTATION - must be called inside Items.withItem().`,
+\u26a0\ufe0f MUTATION - must be called inside Items.withItem().`,
     inputSchema,
     outputSchema,
     isReadOnly: () => false,
     execute: async (input) => {
-      const notificationId = generateId();
+      const notificationId = crypto.randomUUID();
       const timestamp = new Date().toISOString();
 
       // If we have workflow context, create a notification (Spec 01)

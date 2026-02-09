@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { JSONSchema } from "../json-schema";
 
 /**
  * Tool definition for sandbox-executable tools.
@@ -15,11 +15,11 @@ export interface Tool<TInput = unknown, TOutput = unknown> {
   /** Human-readable description for documentation */
   description: string;
 
-  /** Zod schema for input validation */
-  inputSchema: z.ZodType<TInput>;
+  /** JSON Schema for input validation */
+  inputSchema: JSONSchema;
 
-  /** Optional Zod schema for output validation */
-  outputSchema?: z.ZodType<TOutput>;
+  /** Optional JSON Schema for output validation */
+  outputSchema?: JSONSchema;
 
   /** Execute the tool with validated input */
   execute: (input: TInput) => Promise<TOutput>;
