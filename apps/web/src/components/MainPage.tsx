@@ -5,7 +5,7 @@ import { useTasks } from "../hooks/dbTaskReads";
 import { useFileUpload } from "../hooks/useFileUpload";
 import { useDbQuery } from "../hooks/dbQuery";
 import { useCreateTask } from "../hooks/dbWrites";
-import { useAutonomyPreference } from "../hooks/useAutonomyPreference";
+// import { useAutonomyPreference } from "../hooks/useAutonomyPreference";
 import SharedHeader from "./SharedHeader";
 import { WorkflowStatusBadge } from "./StatusBadge";
 import { formatCronSchedule } from "../lib/formatCronSchedule";
@@ -24,12 +24,13 @@ import {
   PromptInputTools,
   Suggestions,
   Suggestion,
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
+  // TODO: re-enable autonomy mode toggle for v2
+  // Tooltip,
+  // TooltipContent,
+  // TooltipProvider,
+  // TooltipTrigger,
 } from "../ui";
-import { PlusIcon, AlertCircle, Info, Sparkles } from "lucide-react";
+import { PlusIcon, AlertCircle, /* Info, */ Sparkles } from "lucide-react";
 import type { FileUIPart } from "ai";
 import type { File as DbFile, ScriptRun, Workflow, Task } from "@app/db";
 
@@ -158,7 +159,8 @@ export default function MainPage() {
   const { api } = useDbQuery();
   const { data: workflows = [], isLoading: isLoadingWorkflows } = useWorkflows();
   const { data: tasks = [] } = useTasks(false); // Get non-finished tasks
-  const { mode: autonomyMode, toggleMode: toggleAutonomyMode, isLoaded: isAutonomyLoaded } = useAutonomyPreference();
+  // TODO: re-enable autonomy mode toggle for v2
+  // const { mode: autonomyMode, toggleMode: toggleAutonomyMode, isLoaded: isAutonomyLoaded } = useAutonomyPreference();
   const [input, setInput] = useState("");
   const [latestRuns, setLatestRuns] = useState<Record<string, ScriptRun>>({});
   const [showAttentionOnly, setShowAttentionOnly] = useState(false);
@@ -390,7 +392,7 @@ export default function MainPage() {
             >
               <PlusIcon className="size-4" />
             </PromptInputButton>
-            {/* Autonomy Toggle - inside toolbar */}
+            {/* TODO: re-enable autonomy mode toggle for v2
             {isAutonomyLoaded && (
               <TooltipProvider>
                 <Tooltip>
@@ -418,6 +420,7 @@ export default function MainPage() {
                 </Tooltip>
               </TooltipProvider>
             )}
+            */}
           </PromptInputTools>
           <PromptInputSubmit
             disabled={!input || uploadState.isUploading || isSubmitting}

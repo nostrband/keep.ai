@@ -16,13 +16,14 @@ import {
   PromptInputTextarea,
   PromptInputToolbar,
   PromptInputTools,
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
+  // TODO: re-enable autonomy mode toggle for v2
+  // Tooltip,
+  // TooltipContent,
+  // TooltipProvider,
+  // TooltipTrigger,
 } from "../ui";
-import { PlusIcon, Info } from "lucide-react";
-import { useAutonomyPreference } from "../hooks/useAutonomyPreference";
+import { PlusIcon /*, Info */ } from "lucide-react";
+// import { useAutonomyPreference } from "../hooks/useAutonomyPreference";
 import type { FileUIPart } from "ai";
 import { type File as DbFile } from "@app/db";
 
@@ -39,7 +40,8 @@ export default function ChatPage() {
   const promptContainerRef = useRef<HTMLDivElement>(null);
   const addMessage = useAddMessage();
   const { uploadFiles, uploadState } = useFileUpload();
-  const { mode: autonomyMode, toggleMode: toggleAutonomyMode, isLoaded: isAutonomyLoaded } = useAutonomyPreference();
+  // TODO: re-enable autonomy mode toggle for v2
+  // const { mode: autonomyMode, toggleMode: toggleAutonomyMode, isLoaded: isAutonomyLoaded } = useAutonomyPreference();
 
   // Get task associated with this chat for quick-reply buttons
   const { data: task } = useTaskByChatId(id);
@@ -217,6 +219,7 @@ export default function ChatPage() {
                 >
                   <PlusIcon className="size-4" />
                 </PromptInputButton>
+                {/* TODO: re-enable autonomy mode toggle for v2
                 {isAutonomyLoaded && (
                   <TooltipProvider>
                     <Tooltip>
@@ -244,6 +247,7 @@ export default function ChatPage() {
                     </Tooltip>
                   </TooltipProvider>
                 )}
+                */}
               </PromptInputTools>
               <PromptInputSubmit
                 disabled={!input || uploadState.isUploading}

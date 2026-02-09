@@ -487,7 +487,7 @@ export type PromptInputTextareaProps = ComponentProps<typeof Textarea>;
 export const PromptInputTextarea = ({
   onChange,
   className,
-  placeholder = "How can I help you today?",
+  placeholder = "How can I help with this workflow?",
   ...props
 }: PromptInputTextareaProps) => {
   const attachments = usePromptInputAttachments();

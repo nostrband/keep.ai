@@ -952,12 +952,12 @@ If you'd like me to try a different approach, just let me know!`;
     sandbox.setGlobal(await toolWrapper.createGlobal());
 
     // Get user's autonomy preference for agent behavior
-    // Fallback to 'ai_decides' if DB query fails - autonomy mode is a preference, not critical
-    let autonomyMode: AutonomyMode = 'ai_decides';
+    // Fallback to 'coordinate' if DB query fails - autonomy mode is a preference, not critical
+    let autonomyMode: AutonomyMode = 'coordinate';
     try {
       autonomyMode = await this.api.getAutonomyMode();
     } catch (error) {
-      this.debug('Failed to get autonomy mode, using default ai_decides:', error);
+      this.debug('Failed to get autonomy mode, using default coordinate:', error);
     }
 
     // Fetch connected accounts for agent context

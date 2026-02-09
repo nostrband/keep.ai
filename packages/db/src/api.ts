@@ -197,7 +197,7 @@ export class KeepDbApi {
 
   /**
    * Get the user's autonomy preference.
-   * Defaults to 'ai_decides' if not set.
+   * Defaults to 'coordinate' if not set.
    */
   async getAutonomyMode(): Promise<AutonomyMode> {
     const sql = `
@@ -206,14 +206,14 @@ export class KeepDbApi {
     const result = await this.db.db.execO<{ value: string }>(sql);
 
     if (!result || result.length === 0) {
-      return 'ai_decides'; // Default mode
+      return 'coordinate'; // Default mode
     }
 
     const value = result[0].value;
-    if (value === 'coordinate') {
-      return 'coordinate';
+    if (value === 'ai_decides') {
+      return 'ai_decides';
     }
-    return 'ai_decides';
+    return 'coordinate';
   }
 
   /**

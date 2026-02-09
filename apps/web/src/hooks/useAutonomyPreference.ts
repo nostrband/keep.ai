@@ -12,7 +12,7 @@ import { AutonomyMode } from '@app/proto';
  */
 export function useAutonomyPreference() {
   const { api, dbStatus } = useDbQuery();
-  const [mode, setModeState] = useState<AutonomyMode>('ai_decides');
+  const [mode, setModeState] = useState<AutonomyMode>('coordinate');
   const [isLoaded, setIsLoaded] = useState(false);
 
   // Load preference from database on mount
