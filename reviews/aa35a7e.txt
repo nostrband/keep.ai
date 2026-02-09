@@ -134,3 +134,12 @@ preventing a real (albeit low-probability) data integrity issue. The error
 notifications significantly improve UX for edge cases.
 
 No critical bugs found. Minor improvements possible in error message specificity.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (submitError/uploadWarning not cleared on navigation) - skipped (React remounts on navigation)
+- Issue #2 (Transaction not passed correctly) - not an issue after investigation (verified correct)
+- Issue #3 (Error message not specific enough) - skipped (enhancement)
+- Issue #4 (File upload warning could show on success) - skipped (no user-facing impact)
+- Issue #5 (useNeedAuth polling every 5 seconds) - skipped (enhancement, not in scope)

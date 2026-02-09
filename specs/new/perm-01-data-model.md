@@ -1,5 +1,7 @@
 # Permission System Data Model
 
+DRAFT: do not implement.
+
 Database schema for the permission system described in `docs/dev/11-permissions.md`.
 
 ## Design Principles

@@ -1,4 +1,4 @@
-0a. Check `reviews/` and `ux-tests/` folders using efficient bash tools to find newest per-commit review files with unhandled issues. Files may or may not have 'ISSUE REVIEW' section, if they do and all issues are resolved (listed and not 'pending') then skip review file and go to the next one.
+0a. Check `reviews/` and `ux-tests/` folders using efficient bash tools or find_unhandled_reviews.py to find newest per-commit review files with unhandled issues. Files may or may not have 'ISSUE REVIEW' section, if they do and all issues are resolved (listed and not 'pending') then skip review file and go to the next one.
 0b. Choose up to 3 issues to work on them, skip issues that are low severity, informational, test-coverage related, enhancement ideas and such, only consider high/medium-severity issues that are necessary to work on to get to v1 release. Mark skipped issues in the review file in ISSUE REVIEW section:
    ```
    ================================================================================

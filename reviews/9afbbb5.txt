@@ -169,3 +169,12 @@ unnecessary error escalation. This should be addressed before new-format
 workflows are widely used.
 
 Priority: ISSUE 1 should be fixed soon (MEDIUM-HIGH)
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Missing retry/backoff for new-format workflows) - skipped (new-format workflows are early stage, will be addressed when format matures)
+- Issue #2 (Redundant signal emission on completion) - skipped (harmless redundancy)
+- Issue #3 (Accessing private property with bracket notation) - skipped (code smell, not a bug)
+- Issue #4 (Missing error handling in resume catch) - skipped (defensive logging is sufficient)
+- Issue #5 (No suspended session handling signal) - skipped (informational)

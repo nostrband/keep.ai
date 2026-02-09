@@ -270,3 +270,14 @@ But the frontend calls `refreshNeedAuth()` which just re-polls the database. If 
 3. **Medium Priority**: Verify the auth flow end-to-end, especially the timing between backend clearing the flag and frontend updating
 
 4. **Low Priority**: Refactor AuthPopup into smaller components for better testability
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Race condition in needAuth polling) - skipped (5s polling is acceptable for local product)
+- Issue #2 (Missing setNeedAuth in workflow-worker for payment) - skipped (payment errors are rare, task-worker handles it)
+- Issue #3 (Redundant timestamp storage) - skipped (cosmetic)
+- Issue #4 (useNeedAuth polling interval dependencies) - skipped (minor performance, not a bug)
+- Issue #5 (AuthPopup component size) - skipped (code quality, not a bug)
+- Issue #6 (No verification before clearing needAuth) - skipped (low severity)
+- Issue #7 (ClerkAuthProvider duplication) - skipped (code duplication, not a bug)

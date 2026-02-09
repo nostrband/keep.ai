@@ -1,0 +1,52 @@
+COMMIT: d1ba19e - Merge branch 'main' of https://github.com/nostrband/keep.ai into main
+DATE: Fri Feb 6 12:28:21 2026 +0100
+AUTHOR: Claude Agent <claude@anthropic.com>
+
+================================================================================
+SUMMARY
+================================================================================
+
+This is a merge commit that integrates remote changes from the main branch into
+the local main branch. It combines local commit fdd698d with remote commit
+078c2f2.
+
+The merge brings in significant execution model implementation work:
+- exec-09: Run status separation from phase
+- exec-10: Retry chain and phase reset rules
+- exec-11: Scheduler state and wakeAt
+- exec-12: Failure classification
+- exec-13: Per-producer scheduling
+- exec-14: Indeterminate mutation handling
+- Related test suites and documentation updates
+
+All individual commits in this merge have been reviewed separately:
+- 6ba14b5.txt (exec-09)
+- 61d14b6.txt (exec-10)
+- cdc017c.txt (exec-11)
+- 8505801.txt (exec-12)
+- e239121.txt (exec-12 continued)
+- e03b880.txt (exec-13)
+- 99741a2.txt (exec-14)
+- 9aa665b.txt (exec-13 tests)
+- c275ab0.txt (docs)
+- f3948d8.txt (docs)
+- 8849f24.txt (docs)
+
+================================================================================
+ISSUES
+================================================================================
+
+None - this is a standard merge commit with no additional code changes beyond
+combining the two branches. All actual code changes were reviewed in the
+individual commit reviews.
+
+================================================================================
+PROPOSALS
+================================================================================
+
+None required.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+No issues - merge commit with no code changes. Individual commits reviewed separately.

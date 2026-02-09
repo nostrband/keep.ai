@@ -737,3 +737,14 @@ The merge itself is clean, but the **behavioral changes** (auth flow, save tool 
 **Reviewer**: Claude Code (Sonnet 4.5)
 **Merge Status**: ✅ Clean automatic merge
 **Recommendation**: Approve with Priority 1 follow-ups
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #3.1 (parseMessageContent duplication) - skipped (code duplication, not a bug)
+- Issue #3.2 (Save tool title required) - not an issue after investigation (AI agent always provides title)
+- Issue #3.3 (IMPLEMENTATION_PLAN.md structural change) - skipped (documentation only)
+- Issue #3.4 (AuthDialog.tsx left in incomplete state) - skipped (UI refactoring, non-critical)
+- Issue #3.5 (Workflow title fallback inconsistency) - skipped (cosmetic)
+- Issue #3.6 (Missing import cleanup verification) - not an issue after investigation (TypeScript compiler validates)
+- Issue #3.7 (Test schema drift risk) - skipped (low severity)

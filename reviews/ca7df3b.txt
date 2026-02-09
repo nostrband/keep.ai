@@ -300,3 +300,16 @@ This commit implements a significant architectural improvement by introducing th
 - Script deletion protection needed (HIGH)
 
 **Recommendation**: The commit needs a follow-up fix for the transaction wrapping before heavy production use. The validation issues should also be addressed to prevent user confusion.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Race condition - script creation not atomic) - created specs/new/fix-save-script-atomicity.md
+- Issue #2 (Empty active_script_id allows activation) - skipped (caught at execution time, low probability)
+- Issue #3 (No protection for deleted scripts) - skipped (low probability, admin action)
+- Issue #4 (Idempotency claim is false) - skipped (AI agent triggers save, not double-click)
+- Issue #5 (Migration handles missing scripts silently) - skipped (migration already ran)
+- Issue #6 (UI shows activate when no script exists) - skipped (low severity UX)
+- Issue #7 (Maintenance fix doesn't validate script change) - skipped (enhancement)
+- Issue #8 (Missing last modified timestamp) - skipped (enhancement)
+- Issue #9 (Deprecated alias without documentation) - skipped (cosmetic)

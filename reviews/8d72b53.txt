@@ -1,0 +1,189 @@
+COMMIT: 8d72b53
+TITLE: Implement exec-15 Phase 7: Prompt Updates
+DATE: 2026-02-06
+
+== SUMMARY ==
+
+This commit updates the AI planner and maintainer prompts to reflect exec-15
+changes: Input Ledger, topic declarations, causal tracking, and UI metadata.
+The prompts teach the AI how to properly use the new workflow patterns.
+
+Key prompt changes:
+1. Producer section now includes `publishes` declaration and Topics.registerInput()
+2. Consumer section now includes optional `publishes` and ui.title in prepare
+3. Event design section focuses on Input Ledger, removes event title
+4. Phase rules updated to reflect exec-15 constraints
+5. Complete workflow example updated with all exec-15 patterns
+6. Maintainer constraints now protect publishes and input registration
+
+== FILES CHANGED ==
+
+1. packages/agent/src/agent-env.ts (+69 lines, -25 lines)
+   - Updated producer template to show `publishes` and registerInput pattern
+   - Updated consumer template to show optional `publishes` and `ui.title`
+   - Rewrote event design section to focus on Input Ledger
+   - Updated phase rules with exec-15 constraints
+   - Expanded complete workflow example with all patterns
+   - Added maintainer constraints for publishes and input registration
+
+2. IMPLEMENTATION_PLAN.md
+   - Updated implementation status
+
+== DETAILED ANALYSIS ==
+
+### Producer Section Updates
+
+Before:
+```javascript
+producers: {
+  producerName: {
+    schedule: { interval: "5m" },
+    handler: async (state) => {
+      // 1. Read from external system
+      // 2. Publish events with Topics.publish()
+      // 3. Return new state
+    }
+  }
+}
+```
+
+After:
+```javascript
+producers: {
+  producerName: {
+    publishes: ["topic.name"],     // Required: declare target topics
+    schedule: { interval: "5m" },
+    handler: async (state) => {
+      // 1. Read from external system
+      // 2. Register input with Topics.registerInput()
+      // 3. Publish events with Topics.publish() referencing the inputId
+      // 4. Return new state
+    }
+  }
+}
+```
+
+### Consumer Section Updates
+
+Added:
+- `publishes: ["downstream.topic"]` - Optional topics emitted in next phase
+- `ui: { title: "What this mutation does" }` - User-facing description
+
+### Phase Rules Updates
+
+Producer Phase:
+- Added: "register inputs"
+- Added: "publish to undeclared topics" (CANNOT)
+- Added: "MUST: Call Topics.registerInput() before Topics.publish()"
+
+Prepare Phase:
+- Added: "register inputs" (CANNOT)
+- Added: "SHOULD: Return { ui: { title: ... } } when mutation will occur"
+
+Next Phase:
+- Changed: "Publish to declared topics (no inputId needed - causedBy inherited)"
+- Added: "register inputs" (CANNOT)
+
+### Event Design Section
+
+Before: Events needed stable identifiers and descriptive titles
+After: Events are internal workflow coordination. User-facing metadata is
+handled by the Input Ledger.
+
+Removed "title" documentation from events.
+Added "Input Registration (Producer Phase Only)" section with full example.
+
+### Maintainer Constraints
+
+Added to "Cannot Modify":
+- Producer/consumer `publishes` declarations (would break event routing)
+
+Added to "Must Preserve":
+- Input registration logic (Topics.registerInput calls)
+- inputId linkage in producer publish calls
+
+== POTENTIAL ISSUES ==
+
+1. INCOMPLETE EXAMPLE COVERAGE (Low)
+   Location: agent-env.ts:520
+
+   The quick consumer example shows publishing without inputId:
+   ```javascript
+   await Topics.publish({ topic: "downstream.topic", event: { messageId: "...", payload: {} } });
+   ```
+
+   While the comment says "No inputId needed", it might be clearer to show the
+   full pattern with messageId derived from something meaningful.
+
+   PROPOSAL: Consider making the example more concrete:
+   ```javascript
+   await Topics.publish({
+     topic: "downstream.topic",
+     event: { messageId: `result:${prepared.data.id}`, payload: prepared.data }
+   });
+   ```
+
+2. LONG PROMPT SECTION (Info)
+   Location: agent-env.ts:475-686
+
+   The workflow prompt section is now ~210 lines. This is comprehensive but may
+   increase token usage for planning requests.
+
+   PROPOSAL: Consider whether the full workflow example (lines 529-621) could be
+   moved to a separate reference or made optional. Not critical for v1.
+
+3. TITLE GUIDANCE INCONSISTENCY (Low)
+   Location: agent-env.ts:679-685
+
+   The "Input titles must" section gives guidance that also applies to ui.title
+   in prepare phase, but this isn't explicitly stated.
+
+   The guidance says titles should "Describe what the input IS" but ui.title
+   should describe "What this mutation does" (line 507).
+
+   PROPOSAL: Add clarification that input titles describe the input source while
+   ui.title describes the action being taken. These are complementary:
+   - Input title: "Email from alice@example.com: Invoice December"
+   - ui.title: "Log email to spreadsheet"
+
+4. MAINTAINER CANNOT MODIFY PUBLISHES (Correct)
+   Location: agent-env.ts:794
+
+   The constraint that maintainer cannot modify `publishes` declarations is
+   correct - changing these would break event routing and require re-planning.
+
+   No issue, just noting this is a good addition.
+
+== CODE QUALITY ==
+
+- Prompt changes are clear and well-structured
+- Comments added at key points (e.g., "// Required in producer phase")
+- Example follows consistent style
+- Phase rules are now comprehensive and match runtime enforcement
+
+== PROMPT CORRECTNESS ==
+
+Verified against runtime implementation:
+- Producer publishes requirement: Matches workflow-validator.ts requirement
+- Topics.registerInput before publish: Matches topics.ts phase validation
+- ui.title in prepare: Matches PrepareResultUI interface
+- No inputId in next: Matches topics.ts phase validation
+- publishes in maintainer Cannot Modify: Matches runtime validation
+
+== VERDICT ==
+
+This is a necessary and well-executed prompt update that teaches the AI about
+exec-15 patterns. The prompts are now consistent with the runtime behavior
+implemented in earlier phases.
+
+The complete workflow example is especially valuable as it shows the full
+pattern including input registration, inputId linkage, and ui.title.
+
+Minor suggestions: Clarify distinction between input titles and ui.title.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Incomplete example coverage) - skipped (low severity, prompt clarity)
+- Issue #2 (Long prompt section) - skipped (informational, not blocking)
+- Issue #3 (Title guidance inconsistency) - skipped (low severity, prompt wording)

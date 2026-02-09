@@ -123,3 +123,11 @@ SUMMARY
 This commit has a critical bug (missing transform-origin property) and medium-severity design system violation (hardcoded colors). The CSS variable syntax fixes in other components are correct. The maintainer task type spec is comprehensive and well-designed. Priority should be given to fixing the missing origin property and reverting to CSS variable design tokens.
 
 Reviewed by: Claude Opus 4.5
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Missing transform-origin property) - created specs/new/fix-dropdown-menu-design-tokens.md
+- Issue #2 (Hardcoded colors break design system) - covered by specs/new/fix-dropdown-menu-design-tokens.md
+- Issue #3 (Inconsistent component styling) - covered by specs/new/fix-dropdown-menu-design-tokens.md
+- Issue #4 (Commit message typo) - skipped (cosmetic)

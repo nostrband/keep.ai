@@ -135,3 +135,12 @@ Recommend follow-up commits to:
 2. Update tab-lock.ts with error handling
 3. Complete ChatInterface.tsx migration
 4. Address QueryProvider files (either migrate or add explicit incognito warning)
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Incomplete migration - QueryProvider files) - skipped (QueryProvider needs localStorage for crypto keys, safe wrappers would just fail silently which is worse)
+- Issue #2 (tab-lock.ts unsafe access at module load) - skipped (app requires sessionStorage for tab locking, graceful failure not useful)
+- Issue #3 (ChatInterface.tsx still has direct sessionStorage) - skipped (low severity, scroll position only)
+- Issue #4 (Missing safeSessionStorageRemove) - skipped (low severity)
+- Issue #5 (useFileUpload.ts and FilesPage.tsx unsafe) - skipped (files feature requires localStorage key)

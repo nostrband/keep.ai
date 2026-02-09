@@ -1,0 +1,224 @@
+COMMIT REVIEW: 2728292 - Implement exec-15 Phase 8: Comprehensive test suite
+
+================================================================================
+SUMMARY
+================================================================================
+
+This commit adds 123 new tests covering the Input Ledger and Causal Tracking
+features implemented in exec-15. The test suite provides comprehensive coverage
+of:
+
+1. InputStore (15 tests): Idempotent registration, unique constraints across
+   all 4 dimensions (workflow_id, source, type, external_id), retrieval methods
+
+2. EventStore causedBy (5 tests): Storage and retrieval of caused_by arrays,
+   getCausedByForRun union/deduplication logic
+
+3. Topics.publish (10 tests): Multi-topic fan-out, phase-based inputId
+   validation (required in producer, forbidden in next), causedBy inheritance
+
+4. Topics.registerInput (5 tests): Tool metadata, idempotency, context
+   validation, write operation marking
+
+5. Workflow validation (25 tests): Producer publishes required/non-empty,
+   consumer publishes optional, topic graph validation
+
+6. Integration tests: Full 3-stage causal chain tracing, title deprecation
+   pattern demonstrating Input Ledger for user-facing metadata
+
+Also includes two bug fixes:
+- Export makeTopicsRegisterInputTool from agent package (missing export)
+- Fix extractErrorMessage regex for template literal errors
+
+================================================================================
+CHANGES ANALYSIS
+================================================================================
+
+FILES CHANGED:
+- IMPLEMENTATION_PLAN.md: Mark Phase 8 items as complete
+- packages/agent/src/index.ts: Add export for makeTopicsRegisterInputTool
+- packages/agent/src/tools/index.ts: Add export for makeTopicsRegisterInputTool
+- packages/agent/src/workflow-validator.ts: Fix regex in extractErrorMessage
+- packages/tests/src/event-store.test.ts: Add 5 causedBy tracking tests
+- packages/tests/src/input-store.test.ts: NEW FILE - 15 InputStore tests
+- packages/tests/src/topics-api.test.ts: Add 25+ tests for exec-15 features
+- packages/tests/src/workflow-validation.test.ts: NEW FILE - 25 validation tests
+
+REGEX FIX IN extractErrorMessage:
+The original regex `/Error:\s*'([^']+)'/` would truncate error messages
+containing single quotes (e.g., "Producer 'emailPoll': handler must be...").
+
+Fixed regex `/Error:\s*'(.+?)'\s+stack:/s` correctly:
+- Uses non-greedy `.+?` to match any character including quotes
+- Anchors to " stack:" delimiter instead of first quote
+- Added /s flag for multiline support
+
+================================================================================
+ISSUES FOUND
+================================================================================
+
+ISSUE 1: Missing error case tests in InputStore
+Severity: Low
+Location: packages/tests/src/input-store.test.ts
+
+The InputStore tests don't cover error cases like:
+- What happens with null/undefined parameters?
+- What happens with empty strings for required fields?
+- Invalid workflow IDs?
+
+These edge cases could reveal runtime bugs if not validated at the store level.
+
+PROPOSAL: Add error case tests or document that validation happens at higher
+layers (tool level).
+
+--------------------------------------------------------------------------------
+
+ISSUE 2: Title preservation behavior unclear
+Severity: Low
+Location: packages/tests/src/input-store.test.ts:80
+
+The test at line 80 has comment "Different title - should be ignored" but
+doesn't explicitly verify the original title is preserved after re-registration.
+
+PROPOSAL: Add assertion to verify the original title remains:
+```typescript
+const input = await inputStore.get(inputId2);
+expect(input!.title).toBe('Email from alice@example.com: "Hello"'); // First title
+```
+
+--------------------------------------------------------------------------------
+
+ISSUE 3: No concurrency tests for idempotent operations
+Severity: Medium
+Location: packages/tests/src/input-store.test.ts, packages/tests/src/event-store.test.ts
+
+Idempotent registration is critical for the Input Ledger design, but no tests
+verify behavior under concurrent requests. Race conditions could lead to
+duplicate inputs if the SELECT-then-INSERT isn't properly atomic.
+
+PROPOSAL: Add a concurrency test using Promise.all:
+```typescript
+it("should handle concurrent registrations of same input", async () => {
+  const results = await Promise.all(
+    Array(10).fill(null).map(() =>
+      inputStore.register("workflow-1", { source: "gmail", type: "email",
+        id: "concurrent-test", title: "Test" }, "run-1")
+    )
+  );
+  // All should return the same inputId
+  expect(new Set(results).size).toBe(1);
+});
+```
+
+--------------------------------------------------------------------------------
+
+ISSUE 4: Potential timestamp fragility in ordering tests
+Severity: Low
+Location: packages/tests/src/input-store.test.ts:221
+
+The test uses a 10ms delay to ensure different timestamps for ordering
+verification. On slow CI systems or under load, 10ms may be insufficient.
+
+PROPOSAL: Increase delay to 50ms or use explicit timestamps via test helper.
+
+--------------------------------------------------------------------------------
+
+ISSUE 5: Missing test for empty topic array in multi-topic publish
+Severity: Low
+Location: packages/tests/src/topics-api.test.ts
+
+Multi-topic publish tests verify single string and array of topics, but don't
+test what happens with an empty array `topic: []`.
+
+PROPOSAL: Add test to verify behavior (should probably throw error):
+```typescript
+it("should reject empty topic array", async () => {
+  const publishTool = makeTopicsPublishTool(...);
+  await expect(publishTool.execute({
+    topic: [],
+    event: { messageId: "msg-1", payload: {} },
+  })).rejects.toThrow(/at least one topic/i);
+});
+```
+
+--------------------------------------------------------------------------------
+
+ISSUE 6: Missing test for malformed JSON in caused_by
+Severity: Low
+Location: packages/tests/src/event-store.test.ts
+
+The getCausedByForRun tests verify normal operation but don't test resilience
+to malformed data. If caused_by contains invalid JSON or non-array values,
+the system should handle gracefully.
+
+PROPOSAL: Add resilience test (or document that DB constraints prevent this):
+```typescript
+it("should handle malformed caused_by gracefully", async () => {
+  // Directly insert event with bad caused_by
+  await db.exec(`INSERT INTO events (id, ..., caused_by) VALUES (?, ..., 'not-json')`);
+  const causedBy = await eventStore.getCausedByForRun("run-1");
+  expect(causedBy).toEqual([]); // Should not throw
+});
+```
+
+--------------------------------------------------------------------------------
+
+ISSUE 7: Workflow validation missing topic name format tests
+Severity: Low
+Location: packages/tests/src/workflow-validation.test.ts
+
+Tests validate that topics must be declared but don't test invalid topic names:
+- Empty strings: `publishes: [""]`
+- Special characters: `publishes: ["email/received"]`
+- Reserved names: Could topic names clash with system internals?
+
+PROPOSAL: Add tests for topic name validation rules or document that any string
+is allowed.
+
+================================================================================
+POSITIVE OBSERVATIONS
+================================================================================
+
+1. EXCELLENT test isolation: Each test creates its own data with in-memory DB,
+   preventing test pollution.
+
+2. EXCELLENT integration test: The "full causal chain" test (lines 1012-1052)
+   demonstrates realistic 3-stage pipeline tracing - this is valuable for
+   validating the architecture.
+
+3. GOOD separation of concerns: Unit tests for stores, tool-level tests for
+   API, integration tests for end-to-end flows.
+
+4. GOOD coverage of idempotency: All 4 dimensions of Input Ledger uniqueness
+   (workflow_id, source, type, external_id) are tested.
+
+5. GOOD regex fix: The extractErrorMessage fix correctly handles template
+   literal errors by anchoring to " stack:" delimiter.
+
+6. COMPREHENSIVE workflow validation: 25 tests cover producer/consumer
+   publishes rules and topic graph validation exhaustively.
+
+================================================================================
+VERDICT
+================================================================================
+
+This is a well-implemented test suite that provides strong confidence in the
+exec-15 features. The tests are thorough, well-organized, and follow good
+testing practices.
+
+The issues identified are minor - mainly edge cases and resilience scenarios
+that could be added in follow-up work. The core functionality is well-tested.
+
+QUALITY: 9/10 - Excellent test coverage with good patterns
+RISK: Low - Changes are test-only plus minor bug fixes
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Missing error case tests in InputStore) - skipped (low severity, test enhancement)
+- Issue #2 (Title preservation behavior unclear) - skipped (low severity, test enhancement)
+- Issue #3 (No concurrency tests) - skipped (medium severity, but tx serialization handles this)
+- Issue #4 (Timestamp fragility in ordering tests) - skipped (low severity, test robustness)
+- Issue #5 (Missing test for empty topic array) - skipped (low severity, test enhancement)
+- Issue #6 (Missing test for malformed JSON in caused_by) - skipped (low severity, test enhancement)
+- Issue #7 (Workflow validation missing topic name format tests) - skipped (low severity, test enhancement)

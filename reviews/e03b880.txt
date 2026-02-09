@@ -214,3 +214,14 @@ Priority:
 - ISSUE 1 (not initialized) - CRITICAL, feature is non-functional
 - ISSUE 2 (scheduler not using) - HIGH, scheduler integration missing
 - ISSUE 3-7 - LOW to MEDIUM, can be addressed later
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Producer schedules not initialized on deploy) - created specs/new/fix-producer-schedule-integration.md
+- Issue #2 (Scheduler uses workflow.next_run_timestamp) - covered by specs/new/fix-producer-schedule-integration.md
+- Issue #3 (Upsert race condition) - skipped (mitigated by single-threaded scheduler)
+- Issue #4 (extractSchedule assumes mutually exclusive) - skipped (low severity)
+- Issue #5 (computeNextRunTime invalid cron fallback) - skipped (low severity)
+- Issue #6 (Cron null fallback) - skipped (low severity)
+- Issue #7 (No tests for schedule-utils) - skipped (test coverage, not v1 blocker)

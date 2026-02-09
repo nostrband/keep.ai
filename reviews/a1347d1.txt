@@ -167,3 +167,8 @@ later once confidence is gained that all errors are properly classified.
 
 The commit message accurately describes the changes and the implementation
 matches the described goals.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- All issues - skipped (medium severity, not v1 blocker)

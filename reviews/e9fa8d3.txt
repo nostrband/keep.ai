@@ -274,3 +274,18 @@ MEDIUM (fix for correctness):
 The implementation provides solid infrastructure for logical items, but the
 memory leak and race condition issues must be fixed before production use
 with concurrent workflows.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Race condition in ItemStore.startItem) - skipped (Items infrastructure deprecated per specs/done/exec-02-deprecate-items.md)
+- Issue #2 (Memory leak in wrapGuestCallback) - skipped (Items infrastructure deprecated per specs/done/exec-02-deprecate-items.md)
+- Issue #3 (Infinite loop in awaitGuestPromise) - skipped (Items infrastructure deprecated per specs/done/exec-02-deprecate-items.md)
+- Issue #4 (Nested withItem detection fragile) - skipped (Items deprecated)
+- Issue #5 (Duplicate code SandboxAPI and ToolWrapper) - skipped (Items deprecated, SandboxAPI being removed)
+- Issue #6 (ToolWrapper phase tracking not thread-safe) - skipped (Items deprecated)
+- Issue #7 (Double disposal risk) - skipped (Items deprecated)
+- Issue #8 (Missing index on last_run_id) - skipped (Items deprecated)
+- Issue #9 (Inefficient pagination) - skipped (Items deprecated)
+- Issue #10 (Missing logicalItemId format validation) - skipped (Items deprecated)
+- Issue #11 (Empty string defaults in migration) - skipped (Items deprecated)

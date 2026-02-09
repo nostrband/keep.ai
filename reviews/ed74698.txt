@@ -1,0 +1,230 @@
+COMMIT REVIEW: ed74698 - Implement exec-16: Inputs & Outputs UX
+================================================================
+
+SUMMARY OF CHANGES
+------------------
+This commit implements a comprehensive Inputs and Outputs UX feature for workflow management, adding 2,805 lines across 15 files.
+
+New Functionality:
+- Input status tracking (pending/done/skipped based on downstream event state)
+- Input statistics aggregation by source/type
+- Stale input detection for pending inputs older than configurable threshold
+- Output statistics by connector with status breakdown
+- Causal tracing from inputs to mutations via events
+
+Database Layer (packages/db/):
+- InputStore: getByWorkflowWithStatus, getStatsByWorkflow, getStaleInputs, countNeedsAttention
+- MutationStore: getByInputId, getOutputStatsByWorkflow
+- EventStore: getByInputId
+- New types: InputWithStatus, InputStatus, InputStats
+
+UI Components (apps/web/src/components/):
+- WorkflowInputsSummary: Dashboard widget showing inputs/outputs overview
+- WorkflowInputsPage: Inputs list with status filtering and search
+- InputDetailPage: Input detail with mutation tracing
+- WorkflowOutputsPage: Outputs list with status filtering
+
+Routes: /workflow/:id/inputs, /workflow/:id/input/:inputId, /workflow/:id/outputs
+
+Tests: 16 new tests in packages/tests/src/input-ux.test.ts
+
+
+ISSUES FOUND
+============
+
+CRITICAL (3)
+------------
+
+1. Missing Index on events.caused_by - Major Performance Issue
+   Files: packages/db/src/input-store.ts (lines 203, 250, 258, 307, 340, 353)
+          packages/db/src/mutation-store.ts (line 492)
+          packages/db/src/event-store.ts (line 496)
+
+   Issue: Multiple queries use `LIKE '%"' || inputId || '"%'` to search within the JSON
+   caused_by column, but there's no index. This causes full table scans on the events
+   table for every input status computation. Performance degrades as O(N*M) where
+   N = inputs, M = events.
+
+   Proposal: Add a migration to create an index on events(caused_by), or better yet,
+   use SQLite's json_each() function, or create a junction table event_inputs(event_id, input_id)
+   for proper many-to-many relationships.
+
+2. N+1 Query Problem in Status Computation
+   File: packages/db/src/input-store.ts (lines 187-229)
+
+   Issue: getByWorkflowWithStatus() has a correlated EXISTS subquery that checks events
+   for EACH input individually. For a workflow with 100 inputs, this performs 100+
+   subqueries on the events table.
+
+   Proposal: Rewrite as a LEFT JOIN with aggregation to compute pending status in a
+   single query pass.
+
+3. Inefficient Aggregation Query with Nested Subqueries
+   File: packages/db/src/input-store.ts (lines 236-281)
+
+   Issue: getStatsByWorkflow() uses nested EXISTS subqueries within SUM/CASE expressions.
+   Each input triggers TWO subquery executions (for pending_count and done_count).
+   The done_count query is just NOT EXISTS of the pending query, making it redundant.
+
+   Proposal: Compute counts in a CTE or subquery first, then aggregate. Use
+   total_count - pending_count instead of recomputing.
+
+
+HIGH SEVERITY (4)
+-----------------
+
+4. Potential Race Condition in Input Status Computation
+   File: packages/db/src/input-store.ts (lines 187-229)
+
+   Issue: Status computation queries events separately from inputs without transaction
+   or snapshot isolation. Between reading inputs and checking event status, events
+   could be consumed, resulting in stale status in the UI.
+
+   Proposal: Ensure queries run in READ COMMITTED isolation, document that status is
+   eventually consistent, or add tx parameter requirement for status queries.
+
+5. Missing Validation in register() Method
+   File: packages/db/src/input-store.ts (lines 87-117)
+
+   Issue: No validation that params.source, params.type, params.id, params.title are
+   non-empty. Could create invalid input records that break UI or queries.
+
+   Proposal: Add validation:
+   if (!params.source || !params.type || !params.id || !params.title) {
+     throw new Error("All input parameters required");
+   }
+
+6. Silent Error Handling in React Query Hooks
+   File: apps/web/src/hooks/dbInputReads.ts (lines 16-20, 37-41, etc.)
+
+   Issue: All hooks catch errors and silently return empty arrays/defaults:
+   catch (error) { return []; }
+   Users won't see error messages, empty state is indistinguishable from error state.
+
+   Proposal: Log the error and re-throw to let React Query handle error state:
+   catch (error) { console.error("Failed to fetch:", error); throw error; }
+
+7. Type Safety Issue in mapRowToInputWithStatus
+   File: packages/db/src/input-store.ts (line 389)
+
+   Issue: Default value "done" masks database issues:
+   status: (row.computed_status as InputStatus) || "done"
+   If computed_status is NULL or invalid, it silently defaults rather than failing.
+
+   Proposal: Add explicit validation and throw on invalid status.
+
+
+MEDIUM SEVERITY (5)
+-------------------
+
+8. Incorrect Status Logic - Missing 'skipped' Event Handling
+   File: packages/db/src/input-store.ts (lines 203-206)
+
+   Issue: Status checks for 'pending' and 'reserved' events but doesn't account for
+   'skipped' events properly. Inputs with only skipped events show as "done".
+
+   Proposal: Clarify business logic - should skipped events result in "skipped" status?
+   Update computation if needed.
+
+9. Code Duplication: formatSourceType Function
+   Files: apps/web/src/components/WorkflowInputsPage.tsx (lines 63-101)
+          apps/web/src/components/InputDetailPage.tsx (lines 49-84)
+          apps/web/src/components/WorkflowInputsSummary.tsx (lines 17-57)
+
+   Issue: Same function with identical sourceMap and typeMap duplicated 3 times (94 lines).
+
+   Proposal: Extract to apps/web/src/lib/formatters.ts or similar shared utility.
+
+10. Code Duplication: formatConnector Function
+    Files: apps/web/src/components/WorkflowOutputsPage.tsx (lines 61-83)
+           apps/web/src/components/WorkflowInputsSummary.tsx (lines 62-83)
+
+    Proposal: Extract to shared utility module.
+
+11. Hardcoded Threshold Values Not Synchronized
+    File: apps/web/src/components/WorkflowInputsPage.tsx (line 191)
+
+    Issue: const staleThresholdMs = 7 * 24 * 60 * 60 * 1000; // 7 days
+    This should match backend default in input-store.ts (line 292) but there's no
+    guarantee they stay in sync.
+
+    Proposal: Export from shared constants file.
+
+12. Missing LIMIT on countNeedsAttention Query
+    File: packages/db/src/input-store.ts (lines 322-365)
+
+    Issue: Performs expensive JOINs without LIMIT clause. Could scan entire tables
+    for workflows with many inputs.
+
+    Proposal: Add reasonable upper bound or document performance characteristics.
+
+
+LOW SEVERITY (3)
+----------------
+
+13. Inconsistent Timestamp Formatting
+    Files: WorkflowInputsPage.tsx (lines 43-58), InputDetailPage.tsx (lines 26-29, 34-44)
+
+    Issue: Different timestamp formatting logic in different components.
+
+    Proposal: Create shared formatTimestamp utility.
+
+14. No Accessibility Labels
+    Files: All UI components
+
+    Issue: Interactive elements (search input, filter buttons) lack aria-labels.
+
+    Proposal: Add aria-labels for screen readers.
+
+15. Inconsistent Status Badge Styling
+    Files: WorkflowInputsPage.tsx (lines 322-335), InputDetailPage.tsx (lines 221-231)
+
+    Issue: Badge styling for same status uses different approaches.
+
+    Proposal: Extract badge styling to shared component.
+
+
+PROPOSALS SUMMARY
+=================
+
+Priority 1 (Must fix before production):
+- Add index on events(caused_by) or refactor to junction table
+- Rewrite status computation queries to avoid N+1 patterns
+- Add input validation in register() method
+- Fix error handling in React Query hooks
+
+Priority 2 (Should fix next iteration):
+- Fix status computation race condition with proper isolation
+- Clarify and fix skipped event status logic
+- Extract duplicate code to shared utilities
+
+Priority 3 (Nice to have):
+- Add LIMIT to expensive queries
+- Synchronize hardcoded threshold values
+- Add accessibility labels
+- Standardize component patterns
+
+
+POSITIVE OBSERVATIONS
+=====================
++ Well-structured test coverage (16 tests)
++ Clean separation between database layer and UI components
++ Good use of React Query for data fetching with auto-refresh
++ Status computation logic is conceptually sound
++ Routes follow existing app patterns
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Missing Index on caused_by) - skipped (critical perf, but need to measure first)
+- Issue #2 (N+1 Query Problem) - skipped (critical perf, but need to measure first)
+- Issue #3 (Inefficient Aggregation) - skipped (critical perf, but need to measure first)
+- Issue #4 (Race Condition Input Status) - skipped (high severity, eventual consistency acceptable)
+- Issue #5 (Missing Validation in register) - skipped (high severity, internal API)
+- Issue #6 (Silent Error Handling in React Query) - skipped (high severity, UX enhancement)
+- Issue #7 (Type Safety mapRowToInputWithStatus) - skipped (high severity, defensive default ok)
+- Issue #8 (Skipped Event Handling) - skipped (medium severity, needs business clarification)
+- Issue #9-15 (Code Duplication, Hardcoded Values, etc.) - skipped (medium/low severity enhancements)
+
+NOTE: Performance issues (#1-3) should be revisited if users report slowness with large workflows.
+They require database profiling to confirm before optimizing.

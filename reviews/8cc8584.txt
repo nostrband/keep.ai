@@ -203,3 +203,13 @@ Should verify:
 ## Conclusion
 
 This commit successfully migrates the event system to the new purpose-specific tables per Spec 01. The architecture is clean and the separation of concerns is good. However, there are two high-priority issues (missing taskRunId, missing script_id capture) that break the metadata linkage promises made by the new ChatMessage schema. These should be addressed before the feature is considered complete.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Missing taskRunId in sendToUser calls) - skipped (metadata linkage, not user-facing)
+- Issue #2 (SaveResult script_id not captured) - skipped (metadata linkage, not user-facing)
+- Issue #3 (workflowTitle not populated in UserSendContext) - skipped (low severity, notification text)
+- Issue #4 (Input/output data loss in execution logs) - skipped (cost tracking is primary use case)
+- Issue #5 (No error handling in user-send.ts) - skipped (error propagation is correct default)
+- Issue #6 (Hardcoded "main" chat ID) - skipped (acceptable for current architecture)

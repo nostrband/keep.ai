@@ -1,0 +1,227 @@
+COMMIT REVIEW: 355aa85
+======================
+Title: Implement exec-15 Phase 1 & 2: Database foundation and data access layer
+Date: Fri Feb 6 13:49:57 2026 +0100
+
+CHANGES OVERVIEW
+----------------
+This commit implements the foundational database layer for exec-15 (Input Ledger and Causal Tracking):
+
+1. Migration v44: Creates `inputs` table, adds `caused_by` column to events, adds `ui_title` to mutations
+2. InputStore class: Provides idempotent register(), get(), getByWorkflow(), getByIds() methods
+3. EventStore updates: Adds causedBy field support, getCausedByForRun() method, deprecates title field
+4. MutationStore: Adds ui_title support for PrepareResult.ui
+5. Topics.publish schema: Makes title optional, adds causedBy array
+6. Test updates: Updates all test schemas and assertions for new columns
+
+Files modified (15 files, +738/-496 lines):
+- packages/db/src/input-store.ts (NEW)
+- packages/db/src/migrations/v44.ts (NEW)
+- packages/db/src/event-store.ts
+- packages/db/src/mutation-store.ts
+- packages/db/src/api.ts
+- packages/db/src/database.ts
+- packages/db/src/index.ts
+- packages/agent/src/tools/topics.ts
+- packages/tests/src/event-store.test.ts
+- packages/tests/src/topics-api.test.ts
+- packages/tests/src/phase-tracking.test.ts
+- packages/tests/src/mutation-store.test.ts
+- packages/tests/src/handler-state-machine.test.ts
+- packages/tests/src/session-orchestration.test.ts
+- IMPLEMENTATION_PLAN.md
+
+POSITIVE ASPECTS
+----------------
+1. Clean, readable code with good documentation
+2. Proper TypeScript typing throughout
+3. Parameterized SQL queries (SQL injection safe)
+4. Good separation of concerns between InputStore, EventStore, tools
+5. Comprehensive test coverage for happy paths
+6. Follows existing codebase conventions
+7. Proper deprecation of Event.title field with backward compatibility
+
+ISSUES FOUND
+------------
+
+ISSUE 1: Non-Atomic Check-Then-Insert Race Condition
+Severity: MEDIUM
+Location: packages/db/src/input-store.ts:87-117
+
+Problem: InputStore.register() uses a SELECT followed by INSERT pattern:
+```typescript
+const existing = await db.execO<{ id: string }>(
+  `SELECT id FROM inputs WHERE workflow_id = ? ...`
+);
+if (existing && existing.length > 0) {
+  return existing[0].id;
+}
+// Race window here!
+const inputId = bytesToHex(randomBytes(16));
+await db.exec(`INSERT INTO inputs ...`);
+```
+
+Between the check and insert, another concurrent request could insert the same input,
+causing a UNIQUE constraint violation instead of graceful idempotent return.
+
+Proposal: Use SQLite's ON CONFLICT pattern:
+```typescript
+await db.exec(
+  `INSERT INTO inputs (...) VALUES (?, ?, ...)
+   ON CONFLICT(workflow_id, source, type, external_id) DO NOTHING`,
+  [...]
+);
+// Then query to get actual ID (existing or new)
+const result = await db.execO<{ id: string }>(
+  `SELECT id FROM inputs WHERE workflow_id = ? AND source = ? AND type = ? AND external_id = ?`,
+  [workflowId, params.source, params.type, params.id]
+);
+return result[0].id;
+```
+
+Note: EventStore.publishEvent() already correctly uses this pattern (see event-store.ts line 227-230).
+
+---
+
+ISSUE 2: Missing Input Length Validation in getByIds()
+Severity: MEDIUM
+Location: packages/db/src/input-store.ts:153-166
+
+Problem: Unlike FileStore, TaskStore, and ScriptStore, InputStore.getByIds() does NOT
+validate the input array size against MAX_IN_CLAUSE_LENGTH (typically 1000).
+
+```typescript
+async getByIds(inputIds: string[], tx?: DBInterface): Promise<Input[]> {
+  if (inputIds.length === 0) return [];
+  const placeholders = inputIds.map(() => "?").join(", ");
+  // No length validation!
+```
+
+Impact: Passing >1000 IDs could cause SQLite limit violations or resource exhaustion.
+
+Proposal: Add validation like other stores:
+```typescript
+import { validateInClauseLength } from './validation-utils';
+// ...
+validateInClauseLength(inputIds, 'getByIds');
+```
+
+---
+
+ISSUE 3: LIKE Pattern for JSON Array Matching is Fragile
+Severity: LOW
+Location: packages/db/src/input-store.ts:203,250,258,307,340,353
+
+Problem: Status computation queries use LIKE patterns to search JSON arrays:
+```sql
+AND (e.caused_by LIKE '%"' || i.id || '"%')
+```
+
+While this works for typical IDs, it could have edge cases with:
+- IDs containing special characters
+- IDs that are substrings of other IDs (mitigated by the quotes)
+- Very long caused_by arrays affecting query performance
+
+Impact: Status queries (getByWorkflowWithStatus, getStatsByWorkflow, etc.) could be slow
+or produce incorrect results in edge cases.
+
+Proposal: Add unit tests for edge cases with similar/substring IDs. Consider adding a
+performance test with large event tables. For future: consider a junction table if
+JSON LIKE pattern proves problematic at scale.
+
+---
+
+ISSUE 4: Silent JSON Parsing Failures
+Severity: LOW
+Location: packages/db/src/event-store.ts:540-551
+
+Problem: getCausedByForRun() silently ignores JSON parse failures:
+```typescript
+try {
+  const causedBy = JSON.parse(row.caused_by || "[]");
+  // ...
+} catch {
+  // Skip invalid JSON - SILENT!
+}
+```
+
+Impact: Corrupted caused_by values are lost without any logging, making debugging difficult.
+
+Proposal: Add debug logging for parse failures:
+```typescript
+} catch (e) {
+  debug('event-store')('Failed to parse caused_by for event: %s', row.id);
+}
+```
+
+---
+
+ISSUE 5: Pagination Order Stability
+Severity: LOW
+Location: packages/db/src/input-store.ts:210-222
+
+Problem: getByWorkflowWithStatus() orders by created_at DESC, but inputs created at the
+exact same millisecond could be reordered between pagination calls.
+
+Proposal: Add secondary sort by ID:
+```sql
+ORDER BY i.created_at DESC, i.id DESC
+```
+
+---
+
+ISSUE 6: Empty HandlerRunId Fallback
+Severity: LOW
+Location: packages/db/src/event-store.ts:257
+
+Problem: publishEvent() uses empty string fallback for handlerRunId:
+```typescript
+const handlerRunId = getHandlerRunId() || "";
+```
+
+An empty created_by_run_id breaks the link to the producing run.
+
+Proposal: Consider throwing an error if required context is missing rather than
+silently using defaults. Document when empty string is acceptable.
+
+TEST COVERAGE GAPS
+------------------
+- No concurrent registration race condition test
+- No LIKE pattern edge case tests with similar IDs
+- No JSON parsing error handling tests
+- No large batch operation tests (getByIds with 1000+ IDs)
+- No pagination stability tests with same-millisecond timestamps
+
+BACKWARD COMPATIBILITY
+----------------------
+GOOD - Changes are additive:
+- Event `title` field deprecated but preserved
+- Old events keep their titles; new events get empty string
+- Default `caused_by = '[]'` for existing events
+- Schema is additive (new columns with defaults)
+- Topics.publish accepts optional deprecated `title` parameter
+
+SUMMARY
+-------
+The implementation is functionally correct for normal operation with well-structured
+code and good test coverage. However, there are robustness issues that should be
+addressed before production deployment at scale:
+
+Priority fixes:
+1. Race condition in idempotent registration (MEDIUM)
+2. Missing validation in batch operations (MEDIUM)
+
+Recommended improvements:
+3. LIKE pattern edge case tests (LOW)
+4. JSON parse failure logging (LOW)
+5. Pagination ORDER BY fix (LOW)
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Non-atomic check-then-insert race condition) - not an issue after investigation (register() wraps in tx which serializes in SQLite; CRR tables cannot have UNIQUE constraints)
+- Issue #2 (Missing input length validation in getByIds) - skipped (medium severity, but inputs table is small per workflow)
+- Issue #3 (LIKE pattern for JSON array matching) - skipped (low severity, works for hex IDs)
+- Issue #4 (Silent JSON parsing failures) - skipped (low severity, systemic pattern)
+- Issue #5 (Pagination order stability) - skipped (low severity)
+- Issue #6 (Empty HandlerRunId fallback) - skipped (low severity)
