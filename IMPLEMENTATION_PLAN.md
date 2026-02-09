@@ -87,7 +87,7 @@ All Priority 3 items resolved.
 | `packages/sync` | P2P sync via HTTP/SSE and Nostr (CRSQLite replication) | Complete |
 | `packages/node` | Node.js standard lib (DB, transport, files, compression) | Complete |
 | `packages/browser` | Browser standard lib (DB, workers, transport, compression) | Complete |
-| `packages/tests` | Test suite (52 files, 1,139 tests, 1,084 passing) | Good coverage |
+| `packages/tests` | Test suite (56 files, 1,209 tests, 1,154 passing) | Good coverage |
 
 ### Apps
 | App | Purpose | Status |
@@ -112,7 +112,7 @@ All Priority 3 items resolved.
 | Database stores (16/16) | Excellent |
 | Execution engine | Comprehensive (handler state machine, orchestration, phases) |
 | Topics/events system | Good (46 tests) |
-| AI tools | Partial (7/40 tool files tested — script tools, file tools, user-send, note tools, utility, save, fix) |
+| AI tools | Good (11/40 tool files tested — script, file list/search/read/save, user-send, note, utility, save, fix, text generate/summarize/classify/extract, weather, web fetch/search) |
 | Frontend components | None |
 | Connectors package | None |
 | Server routes | None |
