@@ -71,6 +71,7 @@ import {
   notionService,
 } from "@app/connectors";
 import { registerConnectorRoutes } from "./routes/connectors";
+import { generateId } from "ai";
 
 const debugServer = debug("server:server");
 
@@ -1373,22 +1374,35 @@ export async function createServer(config: ServerConfig = {}) {
 
       // Generate script run ID upfront so we can return it immediately
       // This avoids race conditions when querying for "latest" run after execution
-      const { generateId } = await import("ai");
       const scriptRunId = generateId();
 
       // Mark this workflow as having an in-progress test run
       inProgressTestRuns.set(workflow.id, scriptRunId);
 
-      // Create a standalone WorkflowWorker for test execution
-      // Reuse the connectionManager from the scheduler for OAuth-based tools
-      const testWorker = new WorkflowWorker({
-        api: new KeepDbApi(keepDB),
-        userPath,
-        connectionManager,
-        // No onSignal - test runs don't emit signals to scheduler
-      });
+      // Create WorkflowWorker in try-catch — if construction throws,
+      // the .finally() cleanup never runs, permanently blocking test runs
+      let testWorker: WorkflowWorker;
+      try {
+        testWorker = new WorkflowWorker({
+          api: new KeepDbApi(keepDB),
+          userPath,
+          connectionManager,
+          // No onSignal - test runs don't emit signals to scheduler
+        });
+      } catch (error) {
+        inProgressTestRuns.delete(workflow.id);
+        throw error;
+      }
 
       debugServer("Starting test run for workflow:", workflow.id, "with scriptRunId:", scriptRunId);
+
+      // Safety timeout: clean up hung test runs after 10 minutes
+      const timeoutId = setTimeout(() => {
+        if (inProgressTestRuns.get(workflow.id) === scriptRunId) {
+          inProgressTestRuns.delete(workflow.id);
+          debugServer("Timeout cleanup for stuck test run", scriptRunId);
+        }
+      }, 10 * 60 * 1000);
 
       // Execute the workflow as a test run (type="test")
       // Run in background - don't await, return immediately with the run ID
@@ -1403,6 +1417,7 @@ export async function createServer(config: ServerConfig = {}) {
       }).catch((error) => {
         debugServer("Test run failed for workflow:", workflow.id, "scriptRunId:", scriptRunId, error);
       }).finally(() => {
+        clearTimeout(timeoutId);
         // Always clean up the in-progress tracking, whether success or failure
         inProgressTestRuns.delete(workflow.id);
         debugServer("Test run tracking cleared for workflow:", workflow.id);

@@ -175,6 +175,23 @@ async function createTables(db: DBInterface): Promise<void> {
   `);
   await db.exec(`CREATE INDEX IF NOT EXISTS idx_events_topic_status ON events(topic_id, status)`);
   await db.exec(`CREATE INDEX IF NOT EXISTS idx_events_reserved_by ON events(reserved_by_run_id)`);
+
+  // Producer schedules table (exec-13)
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS producer_schedules (
+      id TEXT PRIMARY KEY NOT NULL DEFAULT '',
+      workflow_id TEXT NOT NULL DEFAULT '',
+      producer_name TEXT NOT NULL DEFAULT '',
+      schedule_type TEXT NOT NULL DEFAULT '',
+      schedule_value TEXT NOT NULL DEFAULT '',
+      next_run_at INTEGER NOT NULL DEFAULT 0,
+      last_run_at INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL DEFAULT 0,
+      updated_at INTEGER NOT NULL DEFAULT 0
+    )
+  `);
+  await db.exec(`CREATE INDEX IF NOT EXISTS idx_producer_schedules_workflow ON producer_schedules(workflow_id)`);
+  await db.exec(`CREATE INDEX IF NOT EXISTS idx_producer_schedules_next_run ON producer_schedules(next_run_at)`);
 }
 
 /**

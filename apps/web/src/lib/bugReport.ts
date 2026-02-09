@@ -7,7 +7,7 @@
  */
 
 // Configuration - can be changed when the repo is set up
-const GITHUB_REPO = "anthropics/keep-ai";
+const GITHUB_REPO = "nostrband/keep.ai";
 const GITHUB_ISSUES_URL = `https://github.com/${GITHUB_REPO}/issues/new`;
 
 export interface BugReportContext {

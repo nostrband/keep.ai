@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { generateId, tool } from "ai";
-import { Script, ScriptStore } from "@app/db";
+import { Script, ScriptStore, ProducerScheduleStore } from "@app/db";
 import { validateWorkflowScript, isWorkflowFormatScript } from "../workflow-validator";
+import { updateProducerSchedules } from "../producer-schedule-init";
 
 const FixInfoSchema = z.object({
   code: z.string().describe("The complete fixed script code"),
@@ -39,6 +40,7 @@ export function makeFixTool(opts: {
   /** The script ID that the maintainer is fixing */
   expectedScriptId: string;
   scriptStore: ScriptStore;
+  producerScheduleStore?: ProducerScheduleStore;  // For per-producer scheduling (exec-13)
   /** Optional callback invoked when the fix tool is called */
   onCalled?: (result: FixResult) => void;
 }) {
@@ -106,6 +108,15 @@ export function makeFixTool(opts: {
           updates.handler_config = JSON.stringify(workflowConfig);
         }
         await opts.scriptStore.updateWorkflowFields(opts.workflowId, updates);
+
+        // Update per-producer schedules (exec-13)
+        if (workflowConfig && opts.producerScheduleStore) {
+          try {
+            await updateProducerSchedules(opts.workflowId, workflowConfig, opts.producerScheduleStore);
+          } catch (error) {
+            // Don't fail the fix save if schedule update fails
+          }
+        }
       } else {
         // Race detected - planner updated the script
         // Fix is saved but not activated; clear maintenance so planner's version runs

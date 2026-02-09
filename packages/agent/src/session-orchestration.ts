@@ -294,7 +294,21 @@ export async function executeWorkflowSession(
       }
 
       if (handlerConfig?.producers) {
-        for (const producerName of Object.keys(handlerConfig.producers)) {
+        // For schedule triggers, only run producers that are due (exec-13)
+        let producersToRun: string[];
+        if (trigger === "schedule") {
+          const dueProducers = await api.producerScheduleStore.getDueProducers(workflow.id);
+          producersToRun = dueProducers.map(p => p.producer_name);
+          log(`Schedule trigger: ${producersToRun.length} due producers for workflow ${workflow.id}`);
+          // Fall back to all producers if no per-producer schedules exist yet
+          if (producersToRun.length === 0) {
+            producersToRun = Object.keys(handlerConfig.producers);
+          }
+        } else {
+          producersToRun = Object.keys(handlerConfig.producers);
+        }
+
+        for (const producerName of producersToRun) {
           log(`Running producer ${producerName}`);
 
           // Create handler run

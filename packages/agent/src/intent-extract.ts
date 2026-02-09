@@ -9,6 +9,7 @@
  * a script is saved to extract the user's intent from their messages.
  */
 
+import { z } from "zod";
 import { getEnv } from "./env";
 import { getTextModelName } from "./model";
 import debug from "debug";
@@ -67,17 +68,19 @@ const INTENT_JSON_SCHEMA = {
 };
 
 /**
- * Raw extraction result from the LLM.
+ * Zod schema for validating the LLM extraction response.
  */
-interface IntentExtractionResult {
-  goal: string;
-  inputs: string[];
-  outputs: string[];
-  assumptions: string[];
-  nonGoals: string[];
-  semanticConstraints: string[];
-  title: string;
-}
+const IntentExtractionSchema = z.object({
+  goal: z.string().min(1),
+  inputs: z.array(z.string()),
+  outputs: z.array(z.string()),
+  assumptions: z.array(z.string()),
+  nonGoals: z.array(z.string()),
+  semanticConstraints: z.array(z.string()),
+  title: z.string().min(1),
+});
+
+type IntentExtractionResult = z.infer<typeof IntentExtractionSchema>;
 
 /**
  * Extract intent from user messages in a planner conversation.
@@ -162,7 +165,8 @@ export async function extractIntent(
     }
     content = content.trim();
 
-    const extracted: IntentExtractionResult = JSON.parse(content);
+    const parsed = JSON.parse(content);
+    const extracted = IntentExtractionSchema.parse(parsed);
 
     debugIntent("Intent extracted successfully:", extracted.title);
 

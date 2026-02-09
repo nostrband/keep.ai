@@ -42,11 +42,11 @@ export function WorkflowIntentSection({ intentSpecJson }: WorkflowIntentSectionP
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Inputs */}
-        {intentSpec.inputs.length > 0 && (
+        {intentSpec.inputs?.length > 0 && (
           <div>
             <h3 className="text-sm font-medium text-gray-700 mb-2">Watches</h3>
             <ul className="list-disc list-inside text-gray-700 space-y-1">
-              {intentSpec.inputs.map((input, i) => (
+              {intentSpec.inputs?.map((input, i) => (
                 <li key={i} className="text-sm">{input}</li>
               ))}
             </ul>
@@ -54,11 +54,11 @@ export function WorkflowIntentSection({ intentSpecJson }: WorkflowIntentSectionP
         )}
 
         {/* Outputs */}
-        {intentSpec.outputs.length > 0 && (
+        {intentSpec.outputs?.length > 0 && (
           <div>
             <h3 className="text-sm font-medium text-gray-700 mb-2">Produces</h3>
             <ul className="list-disc list-inside text-gray-700 space-y-1">
-              {intentSpec.outputs.map((output, i) => (
+              {intentSpec.outputs?.map((output, i) => (
                 <li key={i} className="text-sm">{output}</li>
               ))}
             </ul>
@@ -67,11 +67,11 @@ export function WorkflowIntentSection({ intentSpecJson }: WorkflowIntentSectionP
       </div>
 
       {/* Assumptions */}
-      {intentSpec.assumptions.length > 0 && (
+      {intentSpec.assumptions?.length > 0 && (
         <div className="mt-4">
           <h3 className="text-sm font-medium text-gray-700 mb-2">Assumptions</h3>
           <ul className="list-disc list-inside text-gray-600 space-y-1">
-            {intentSpec.assumptions.map((assumption, i) => (
+            {intentSpec.assumptions?.map((assumption, i) => (
               <li key={i} className="text-sm">{assumption}</li>
             ))}
           </ul>
@@ -79,11 +79,11 @@ export function WorkflowIntentSection({ intentSpecJson }: WorkflowIntentSectionP
       )}
 
       {/* Non-goals */}
-      {intentSpec.nonGoals.length > 0 && (
+      {intentSpec.nonGoals?.length > 0 && (
         <div className="mt-4">
           <h3 className="text-sm font-medium text-gray-700 mb-2">What it won't do</h3>
           <ul className="list-disc list-inside text-gray-600 space-y-1">
-            {intentSpec.nonGoals.map((nonGoal, i) => (
+            {intentSpec.nonGoals?.map((nonGoal, i) => (
               <li key={i} className="text-sm">{nonGoal}</li>
             ))}
           </ul>
@@ -91,14 +91,14 @@ export function WorkflowIntentSection({ intentSpecJson }: WorkflowIntentSectionP
       )}
 
       {/* Semantic constraints */}
-      {intentSpec.semanticConstraints.length > 0 && (
+      {intentSpec.semanticConstraints?.length > 0 && (
         <div className="mt-4">
           <h3 className="text-sm font-medium text-gray-700 mb-2">
             Constraints
             <span className="ml-2 text-xs font-normal text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">best-effort</span>
           </h3>
           <ul className="list-disc list-inside text-gray-600 space-y-1">
-            {intentSpec.semanticConstraints.map((constraint, i) => (
+            {intentSpec.semanticConstraints?.map((constraint, i) => (
               <li key={i} className="text-sm">{constraint}</li>
             ))}
           </ul>

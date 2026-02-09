@@ -1,8 +1,9 @@
 import { z } from "zod";
 import { generateId, tool } from "ai";
-import { Script, ScriptStore, ChatStore } from "@app/db";
+import { Script, ScriptStore, ChatStore, CRSqliteDB, DBInterface, ProducerScheduleStore } from "@app/db";
 import { validateWorkflowScript, isWorkflowFormatScript } from "../workflow-validator";
 import { extractIntent } from "../intent-extract";
+import { updateProducerSchedules } from "../producer-schedule-init";
 import debug from "debug";
 
 const log = debug("save-tool");
@@ -38,6 +39,8 @@ export function makeSaveTool(opts: {
   chatId: string;
   scriptStore: ScriptStore;
   chatStore?: ChatStore;  // Optional: for intent extraction (exec-17)
+  db?: CRSqliteDB;         // For transaction support
+  producerScheduleStore?: ProducerScheduleStore;  // For per-producer scheduling (exec-13)
 }) {
   return tool({
     execute: async (info: SaveInfo): Promise<SaveResult> => {
@@ -93,51 +96,60 @@ export function makeSaveTool(opts: {
         summary: info.summary || "",
         diagram: info.diagram || "",
       };
-      await opts.scriptStore.addScript(newScript);
-
-      // Update workflow's active_script_id to point to the new script
-      // New script versions automatically become active
-      // If workflow was draft (no script yet), transition to 'ready' (Spec 11)
-      // Also update title if currently empty
-      // Also save handler_config if validation extracted it (exec-05)
+      // Wrap script creation and all workflow field updates in a single transaction
+      // to prevent the scheduler from executing old scripts between writes
       const shouldUpdateTitle = info.title && (!workflow.title || workflow.title.trim() === '');
 
-      if (workflow.status === 'draft') {
-        const updates: { status: string; active_script_id: string; title?: string; handler_config?: string } = {
-          status: 'ready',
-          active_script_id: newScript.id,
-        };
-        if (shouldUpdateTitle) {
-          updates.title = info.title;
+      const saveOps = async (tx?: DBInterface) => {
+        await opts.scriptStore.addScript(newScript, tx);
+
+        if (workflow.status === 'draft') {
+          const updates: { status: string; active_script_id: string; title?: string; handler_config?: string } = {
+            status: 'ready',
+            active_script_id: newScript.id,
+          };
+          if (shouldUpdateTitle) {
+            updates.title = info.title;
+          }
+          if (workflowConfig) {
+            updates.handler_config = JSON.stringify(workflowConfig);
+          }
+          await opts.scriptStore.updateWorkflowFields(workflow.id, updates, tx);
+        } else {
+          const updates: { active_script_id: string; title?: string; handler_config?: string } = {
+            active_script_id: newScript.id,
+          };
+          if (shouldUpdateTitle) {
+            updates.title = info.title;
+          }
+          if (workflowConfig) {
+            updates.handler_config = JSON.stringify(workflowConfig);
+          }
+          await opts.scriptStore.updateWorkflowFields(workflow.id, updates, tx);
         }
-        if (workflowConfig) {
-          updates.handler_config = JSON.stringify(workflowConfig);
+
+        // If workflow was in maintenance mode, clear it and trigger immediate re-run
+        if (wasInMaintenance) {
+          await opts.scriptStore.updateWorkflowFields(workflow.id, {
+            maintenance: false,
+            next_run_timestamp: new Date().toISOString(),
+          }, tx);
         }
-        await opts.scriptStore.updateWorkflowFields(workflow.id, updates);
+      };
+
+      if (opts.db) {
+        await opts.db.db.tx(async (tx) => saveOps(tx));
       } else {
-        const updates: { active_script_id: string; title?: string; handler_config?: string } = {
-          active_script_id: newScript.id,
-        };
-        if (shouldUpdateTitle) {
-          updates.title = info.title;
-        }
-        if (workflowConfig) {
-          updates.handler_config = JSON.stringify(workflowConfig);
-        }
-        await opts.scriptStore.updateWorkflowFields(workflow.id, updates);
+        await saveOps();
       }
 
-      // Note: No separate add_script/maintenance_fixed events (Spec 01)
-      // The script_id is returned and included in chat message metadata by task-worker
-
-      // If workflow was in maintenance mode, clear it and trigger immediate re-run
-      if (wasInMaintenance) {
-        // Clear maintenance flag and set next_run_timestamp to now for immediate re-run
-        // Use updateWorkflowFields for atomic partial update to avoid overwriting concurrent changes
-        await opts.scriptStore.updateWorkflowFields(workflow.id, {
-          maintenance: false,
-          next_run_timestamp: new Date().toISOString(),
-        });
+      // Initialize/update per-producer schedules (exec-13)
+      if (workflowConfig && opts.producerScheduleStore) {
+        try {
+          await updateProducerSchedules(workflow.id, workflowConfig, opts.producerScheduleStore);
+        } catch (error) {
+          log(`Failed to update producer schedules for workflow ${workflow.id}:`, error);
+        }
       }
 
       // Intent extraction (exec-17)

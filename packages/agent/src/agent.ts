@@ -190,6 +190,7 @@ export class Agent {
         workflowId: this.task.maintainerContext.workflowId,
         expectedScriptId: this.task.maintainerContext.expectedScriptId,
         scriptStore: this.env.api.scriptStore,
+        producerScheduleStore: this.env.api.producerScheduleStore,
         onCalled: () => {
           this.fixCalled = true;
         },
@@ -220,6 +221,8 @@ export class Agent {
         chatId: this.task.chat_id,
         scriptStore: this.env.api.scriptStore,
         chatStore: this.env.api.chatStore,  // For intent extraction (exec-17)
+        db: this.env.api.db,                // For transaction support
+        producerScheduleStore: this.env.api.producerScheduleStore,  // For per-producer scheduling (exec-13)
       });
       tools.schedule = makeScheduleTool({
         taskId: this.task.id,
