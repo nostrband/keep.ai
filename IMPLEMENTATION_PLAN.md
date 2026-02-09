@@ -1,171 +1,122 @@
 # Keep.AI v1 Implementation Plan
 
-## Status: Codebase clean, no pending specs
+## Goal: Simple, Lovable, and Complete v1 Release
 
-All specs completed and in `specs/done/`. Ideas from `ideas/` folder verified as already implemented.
+Keep.AI is a local personal automation product where AI creates and maintains automations. Users express intent, then fully delegate to the system. The execution model (exec-01 through exec-19) is fully implemented. This plan focuses on what remains to ship a polished, reliable v1.
 
----
-
-## Codebase Architecture Summary
-
-### Execution Model (discovered during analysis)
-
-**Dual Execution Paths:**
-1. **Legacy**: Direct script execution via `WorkflowWorker.executeWorkflow()`
-2. **New (exec-07)**: Session-based execution via `session-orchestration.ts`
-
-**Key Components:**
-- `WorkflowScheduler` - 10s interval loop, cron-based scheduling, retry management
-- `TaskScheduler` - Inbox-driven agent task execution
-- `handler-state-machine.ts` - Consumer three-phase model (prepare/mutate/next)
-- `MutationStore` - Mutation ledger with status tracking
-- `ReconciliationScheduler` - Background reconciliation for uncertain mutations
-
-**Scheduler Runtime Notes:**
-- Producer schedules stored in `producer_schedules` table (v43 migration)
-- Consumer wakeAt stored in `handler_state` table (v42 migration)
-- Reconciliation scheduler processes `needs_reconcile` mutations with exponential backoff
+**Current DB Version:** 45 | **Latest Tag:** v1.0.0-alpha.133
 
 ---
 
-## Recently Completed
+## Priority 1: Critical Bugs (Data Integrity & Core Functionality)
 
-### TypeScript Fix - script-store.test.ts ✅
+All Priority 1 bugs resolved.
 
-Fixed 17 workflow test objects missing `intent_spec` property (added in exec-17). Discovered during type-check, all tests now pass.
+- [x] **Fix script save atomicity** — `specs/fix-save-script-atomicity.md`
+  - Wrapped `addScript` + `updateWorkflowFields` + maintenance clear in `db.tx()`
+  - Added `db` and `producerScheduleStore` params to `makeSaveTool`
 
-### exec-19 - Consumer wakeAt Scheduling Integration ✅
+- [x] **Fix reconciliation transaction** — `specs/fix-reconciliation-transaction.md`
+  - Wrapped workflow resume and handler_run resume in `this.api.db.db.tx()`
 
-**Spec Reference:** `docs/dev/16-scheduling.md` §Consumer Scheduling
+- [x] **Fix intent extraction validation** — `specs/fix-intent-extract-validation.md`
+  - Added Zod `IntentExtractionSchema` to validate LLM response
+  - Added optional chaining to all array accesses in `WorkflowIntentSection.tsx`
 
-**Why Critical:** Per docs/dev/16-scheduling.md, time-based patterns (daily digests, delayed processing, batch timeouts) require the host to wake consumers at scheduled times, not just on new events. Without wakeAt integration, consumers could only be triggered by events, making time-based workflows impossible.
-
-**Implementation Summary:**
-- Phase 1: Fixed TypeScript build error in ReconciliationScheduler (NodeJS.Timer → ReturnType<typeof setInterval>)
-- Phase 2: Updated `findConsumerWithPendingWork()` in session-orchestration.ts to check for due wakeAt
-- Phase 3: Added 5 comprehensive tests for wakeAt scheduling behavior
-
-**Key Features:**
-- Events take priority over wakeAt (if both are present, events trigger first)
-- wakeAt only triggers consumers defined in handler_config
-- wakeAt=0 means no scheduled wake
-- Existing infrastructure (v42 migration, handlerStateStore.getConsumersWithDueWakeAt) now integrated into scheduler
-- wakeAt is cleared when PrepareResult doesn't include it (already implemented in handler-state-machine.ts)
-
-**Files Modified:**
-- `packages/agent/src/session-orchestration.ts` - Added wakeAt check to findConsumerWithPendingWork
-- `packages/agent/src/reconciliation/scheduler.ts` - Fixed TypeScript type error
-- `packages/tests/src/session-orchestration.test.ts` - Added 5 new tests, updated schema
-
-**Test Coverage:** 5 new tests covering:
-- Consumer not triggered when wakeAt is in the future
-- Consumer triggered when wakeAt is due
-- Events prioritized over wakeAt
-- wakeAt ignored for consumers not in config
-- wakeAt=0 means no scheduled wake
-
-### exec-18 - Mutation Reconciliation Runtime ✅
-
-**Spec File:** [`specs/done/exec-18-mutation-reconciliation-runtime.md`](specs/done/exec-18-mutation-reconciliation-runtime.md)
-
-**Why Critical:** Per `docs/dev/13-reconciliation.md`, mutation reconciliation is "the foundation for idempotent execution guarantees." Without it, the system cannot recover from transient failures (timeouts, network issues, crashes during external calls).
-
-**Implementation Summary:**
-- Phase 1: Connector reconcile interface - ReconcileResult, MutationParams, ReconcilableTool types
-- Phase 2: Gmail connector reconcile - Search sent folder by idempotency key
-- Phase 3: Mutation wrapper updates - handleUncertainOutcome in handler-state-machine
-- Phase 4: Background reconciliation job - ReconciliationScheduler with exponential backoff
-- Phase 5: MutationStore extensions - markNeedsReconcile, getDueForReconciliation, scheduleNextReconcile
-- Phase 6: Handler state machine integration - needs_reconcile status handling
-- Phase 7: Tests - 19 new tests for reconciliation functionality
-
-**Key Features:**
-- ReconciliationRegistry singleton for tool reconcile method registration
-- Immediate reconciliation on uncertain outcomes (timeout/network errors)
-- Background reconciliation with configurable policy (max attempts, backoff)
-- ReconciliationScheduler with 10s default check interval
-- Exhausted reconciliation → indeterminate status → workflow paused
-- Gmail send reconciliation via sent folder search
-
-**Files Created:**
-- `packages/agent/src/reconciliation/types.ts`
-- `packages/agent/src/reconciliation/registry.ts`
-- `packages/agent/src/reconciliation/gmail-reconcile.ts`
-- `packages/agent/src/reconciliation/scheduler.ts`
-- `packages/agent/src/reconciliation/index.ts`
-- `packages/tests/src/reconciliation.test.ts`
-
-**Files Modified:**
-- `packages/db/src/mutation-store.ts` - Added reconciliation methods
-- `packages/agent/src/handler-state-machine.ts` - Immediate reconciliation integration
-- `packages/agent/src/index.ts` - Export reconciliation module
-
-### exec-17 - Intent Contract ✅
-
-**Spec File:** [`specs/done/exec-17-intent-contract.md`](specs/done/exec-17-intent-contract.md)
-
-**Implementation Summary:**
-- Phase 1: Database migration (v45) - Added intent_spec column to workflows table
-- Phase 2: Intent extraction prompt - Created focused LLM prompt with JSON schema response format
-- Phase 3: Hook extraction to planner save - Triggers on first major version save, fire-and-forget async
-- Phase 4: UI - Intent section on workflow detail page (WorkflowIntentSection component)
-- Phase 5: Maintainer prompt update - Include intent spec in maintainer context
-- Phase 6: Tests (17 new tests for intent functionality)
-
-**Key Features:**
-- Structured IntentSpec with goal, inputs, outputs, assumptions, nonGoals, semanticConstraints, title
-- LLM-based intent extraction from user messages via OpenRouter API
-- Intent spec stored at workflow level (not per-script)
-- Maintainer agent receives intent context for repair decisions
-- React component for displaying structured intent in workflow detail page
-- parseIntentSpec and formatIntentForPrompt utility functions
-
-**Note:** Phases 7 (Backfill UI), 8 (API endpoint) were deferred as core functionality is complete.
-
-### exec-16 - Inputs & Outputs UX ✅
-
-**Spec File:** [`specs/done/exec-16-inputs-outputs-ux.md`](specs/done/exec-16-inputs-outputs-ux.md)
-
-**Implementation Summary:**
-- Phase 1: Database query methods and React hooks (InputStore, EventStore, MutationStore extensions)
-- Phase 2: Dashboard Inputs Summary component (WorkflowInputsSummary)
-- Phase 3: Inputs List view with status computation (WorkflowInputsPage)
-- Phase 4: Input Detail view with mutation tracing (InputDetailPage)
-- Phase 6: Outputs view (WorkflowOutputsPage)
-- Phase 8: Comprehensive test suite (16 new tests)
-
-**Key Features:**
-- Input status computation (pending/done/skipped based on event state)
-- Input statistics aggregation by source/type
-- Stale input detection (pending longer than threshold)
-- Output statistics by connector
-- Causal tracing from inputs to mutations
-- Full React Query hooks for all data access
-
-**Note:** Phase 5 (Skip Input functionality) and Phase 7 (UI polish) were deferred as the core functionality is complete.
-
-### exec-15 - Input Ledger, Causal Tracking, and Topic Declarations ✅
-
-**Spec File:** [`specs/done/exec-15-input-ledger-and-causal-tracking.md`](specs/done/exec-15-input-ledger-and-causal-tracking.md)
-
-**Implementation Summary:**
-- Phase 1 & 2: Database foundation (v44 migration, InputStore)
-- Phase 3: Topics API updates (registerInput, multi-topic, inputId/causedBy)
-- Phase 4: WorkflowConfig with publishes declarations
-- Phase 5: Handler context threading
-- Phase 6: PrepareResult.ui and mutation UI title
-- Phase 7: Prompt updates
-- Phase 8: Comprehensive test suite (123 new tests)
+- [x] **Wire up producer schedule integration** — `specs/fix-producer-schedule-integration.md`
+  - Save/fix tools now call `updateProducerSchedules()` after saving `handler_config`
+  - Scheduler now queries `producerScheduleStore.getDueProducers()` for new-format workflows
+  - Session orchestration only runs due producers for schedule triggers (falls back to all)
+  - Scheduler no longer overwrites `next_run_timestamp` for new-format workflows
 
 ---
 
-## What's Available for Next Implementation
+## Priority 2: High-Impact Bugs
 
-Review available specs in `specs/` directory, `docs/dev/` for design docs, and `docs/ISSUES.md` for prioritized feature requests.
+All Priority 2 bugs resolved.
+
+- [x] **Fix test run tracking leak** — `specs/fix-test-run-tracking-leak.md`
+  - Wrapped WorkflowWorker construction in try-catch with Map cleanup
+  - Added 10-minute safety timeout for hung test runs
+  - Moved `generateId` import to module level
+
+- [x] **Fix bug report GitHub repo** — `specs/fix-bug-report-github-repo.md`
+  - Changed `GITHUB_REPO` from `"anthropics/keep-ai"` to `"nostrband/keep.ai"`
+
+- [x] **Fix dropdown menu design tokens** — `specs/fix-dropdown-menu-design-tokens.md`
+  - Restored `bg-popover`, `text-popover-foreground`, `bg-accent`, `text-accent-foreground`, `text-muted-foreground`, `bg-border`
+  - Added `origin-[var(--radix-dropdown-menu-content-transform-origin)]`
+  - Fixed tooltip.tsx to use design tokens
 
 ---
 
-## Current Database Version: 45
+## Priority 3: UX Polish for v1 Release
 
-**Latest Tag:** v1.0.0-alpha.126
+All Priority 3 items resolved.
 
+- [x] **Add React error boundaries**
+  - Created `ErrorBoundary` class component in `apps/web/src/components/ErrorBoundary.tsx`
+  - Wraps all routes in `App.tsx` — catches unhandled rendering errors
+  - Shows user-friendly message with "Reload page" and "Go back" buttons
+  - Error message displayed in pre block for debugging
+
+- [x] **Clean up console.log statements**
+  - Verified: zero `console.log` statements exist in web app
+  - All remaining console calls are `console.error`, `console.warn`, or `console.debug` in appropriate error-handling contexts
+  - No cleanup needed — codebase was already clean
+
+- [x] **Improve reconciliation status visibility**
+  - Added `usePendingReconciliation` hook querying indeterminate/needs_reconcile mutations
+  - WorkflowDetailPage: amber alert banner showing "Verifying action completed" with mutation title and link to outputs
+  - MainPage: bulk-fetches reconciliation state for all workflows, shows "Verifying action completed..." with amber styling
+  - Workflow list items use amber left border and text for reconciliation (vs red for errors)
+
+---
+
+## Priority 4: Future Features (Post-v1)
+
+## Architecture Summary
+
+### Packages
+| Package | Purpose | Status |
+|---------|---------|--------|
+| `packages/agent` | AI agent execution engine (79 files, ~8,100 LOC) | Complete |
+| `packages/db` | Database layer, SQLite + CRSQLite (17 stores, 45 migrations) | Complete |
+| `packages/connectors` | OAuth connections (Gmail, Drive, Sheets, Docs, Notion) | Complete |
+| `packages/proto` | Shared types, Zod schemas, error classification | Complete |
+| `packages/sync` | P2P sync via HTTP/SSE and Nostr (CRSQLite replication) | Complete |
+| `packages/node` | Node.js standard lib (DB, transport, files, compression) | Complete |
+| `packages/browser` | Browser standard lib (DB, workers, transport, compression) | Complete |
+| `packages/tests` | Test suite (63 files, 1,420 tests, 1,365 passing) | Excellent coverage |
+
+### Apps
+| App | Purpose | Status |
+|-----|---------|--------|
+| `apps/web` | React frontend (3 modes: frontend, serverless, electron) | Complete |
+| `apps/server` | Fastify backend (schedulers, sync, API, connectors) | Complete |
+| `apps/electron` | Desktop app (tray, notifications, embedded server) | Complete |
+| `apps/user-server` | User auth backend | Complete |
+
+### Execution Model
+- **Topics**: Durable event streams connecting producers to consumers
+- **Producers**: Poll external systems, register inputs, publish events
+- **Consumers**: 3-phase execution (prepare → mutate → next)
+- **Handler State Machine**: Checkpoint-based crash recovery
+- **Session Orchestration**: Groups handler runs, cost tracking
+- **Reconciliation**: Verifies uncertain mutation outcomes
+- **Maintainer**: Bounded auto-fix for logic errors
+
+### Test Coverage
+| Area | Status |
+|------|--------|
+| Database stores (16/16) | Excellent |
+| Execution engine | Comprehensive (handler state machine, orchestration, phases, failure handling, indeterminate resolution, schedule utils) |
+| Topics/events system | Excellent (46 topics-api + 46 topics-tools tests) |
+| AI tools | Excellent (all tool files tested — script, file list/search/read/save, user-send, note, utility, save, fix, text generate/summarize/classify/extract, weather, web fetch/search/download, images explain/generate/transform, audio explain, pdf explain, gmail, gdrive, gsheets, gdocs, notion) |
+| Frontend components | None |
+| Server routes | None |
+| Electron app | None |
+
+### Known FIXMEs in Codebase
+1. `packages/sync/src/Peer.ts:788` — Transaction batching may split across boundaries
+2. `packages/sync/src/nostr/stream/StreamWriter.ts:515` — Hardcoded chunk threshold needs bandwidth tuning

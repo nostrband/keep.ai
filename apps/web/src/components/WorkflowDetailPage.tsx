@@ -26,6 +26,7 @@ import { useUnresolvedWorkflowError } from "../hooks/useNotifications";
 import { getWorkflowTitle } from "../lib/workflowUtils";
 import { WorkflowInputsSummary } from "./WorkflowInputsSummary";
 import { WorkflowIntentSection } from "./WorkflowIntentSection";
+import { usePendingReconciliation } from "../hooks/dbInputReads";
 
 export default function WorkflowDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -38,6 +39,7 @@ export default function WorkflowDetailPage() {
   const { data: scriptRuns = [], isLoading: isLoadingRuns } = useScriptRunsByWorkflowId(id!);
   const { data: scriptVersions = [], isLoading: isLoadingVersions } = useScriptVersionsByWorkflowId(id!);
   const { data: unresolvedError } = useUnresolvedWorkflowError(id!);
+  const { data: pendingReconciliation = [] } = usePendingReconciliation(id!);
   const { data: maintainerTasks = [] } = useMaintainerTasks(id!);
   const success = useAutoHidingMessage({ duration: 3000 });
   const warning = useAutoHidingMessage({ duration: 5000 });
@@ -281,6 +283,33 @@ export default function WorkflowDetailPage() {
             {/* Error Alert - show unresolved errors at the top */}
             {unresolvedError && (
               <WorkflowErrorAlert notification={unresolvedError} />
+            )}
+
+            {/* Reconciliation Alert - show when mutations have uncertain outcomes */}
+            {pendingReconciliation.length > 0 && (
+              <div className="mb-6 bg-amber-50 border border-amber-200 rounded-lg p-4">
+                <div className="flex items-start gap-3">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                  <div className="flex-1">
+                    <div className="font-medium text-amber-800">
+                      {pendingReconciliation.length === 1
+                        ? "Verifying action completed successfully"
+                        : `Verifying ${pendingReconciliation.length} actions completed successfully`}
+                    </div>
+                    <p className="text-sm text-amber-700 mt-1">
+                      {pendingReconciliation[0].ui_title
+                        ? `"${pendingReconciliation[0].ui_title}" — outcome is uncertain and needs verification.`
+                        : "An action's outcome is uncertain and needs verification."}
+                    </p>
+                    <Link
+                      to={`/workflow/${id}/outputs?filter=indeterminate`}
+                      className="text-sm text-amber-800 underline mt-2 inline-block hover:text-amber-900"
+                    >
+                      View details
+                    </Link>
+                  </div>
+                </div>
+              </div>
             )}
 
             {/* Archived workflow restore banner */}

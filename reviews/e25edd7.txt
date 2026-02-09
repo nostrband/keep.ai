@@ -206,3 +206,16 @@ The commit successfully addresses the stated P0/P1/P2 issues. The test-run endpo
 - File upload error handling should inform the user
 
 **Recommendation**: The commit is production-ready with the inProgressTestRuns timeout cleanup as a follow-up fix.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Memory leak in inProgressTestRuns Map) - created specs/new/fix-test-run-tracking-leak.md
+- Issue #2 (Dynamic import in request handler) - covered by specs/new/fix-test-run-tracking-leak.md
+- Issue #3 (Test runs in attention list) - skipped (low probability, UX-only)
+- Issue #4 (Inconsistent logging levels) - skipped (enhancement)
+- Issue #5 (Index strategy may not be optimal) - skipped (low severity)
+- Issue #6 (Empty string error type ambiguity) - skipped (cosmetic)
+- Issue #7 (CLI chat_id inconsistency) - skipped (cosmetic)
+- Issue #8 (File upload error not surfaced) - not an issue after investigation (fixed in commit aa35a7e)
+- Issue #9 (Orphaned files from failed task creation) - skipped (low severity)

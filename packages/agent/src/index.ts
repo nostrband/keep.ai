@@ -8,17 +8,47 @@ export {
   makeSearchNotesTool,
   makeUpdateNoteTool,
   makeWebSearchTool,
+  makeWebFetchTool,
+  makeWebDownloadTool,
   makePdfExplainTool,
   makeAudioExplainTool,
   makeAtobTool,
   makeConsoleLogTool,
-  // makeItemsListTool removed (exec-02 - deprecated Items infrastructure)
   // Topics API (exec-03)
   makeTopicsPeekTool,
   makeTopicsGetByIdsTool,
   makeTopicsPublishTool,
   // Topics registerInput (exec-15)
   makeTopicsRegisterInputTool,
+  // Script tools (read-only, planner/maintainer)
+  makeGetScriptTool,
+  makeListScriptsTool,
+  makeScriptHistoryTool,
+  makeListScriptRunsTool,
+  makeGetScriptRunTool,
+  // File tools
+  makeReadFileTool,
+  makeSaveFileTool,
+  makeListFilesTool,
+  makeSearchFilesTool,
+  // Text AI tools
+  makeTextGenerateTool,
+  makeTextSummarizeTool,
+  makeTextClassifyTool,
+  makeTextExtractTool,
+  // Image AI tools
+  makeImagesGenerateTool,
+  makeImagesExplainTool,
+  makeImagesTransformTool,
+  // Connector tools
+  makeGmailTool,
+  makeGDriveTool,
+  makeGSheetsTool,
+  makeGDocsTool,
+  makeNotionTool,
+  // User communication
+  makeUserSendTool,
+  type UserSendContext,
   // Tool definition helpers
   defineTool,
   defineReadOnlyTool,

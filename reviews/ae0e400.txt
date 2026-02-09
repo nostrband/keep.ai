@@ -193,3 +193,14 @@ In exec-06, add handling for 'needs_reconcile' status:
 ### Proposal 6: Use Existing classifyError Pattern
 In exec-07, reuse the existing `classifyError()` function from @app/proto or
 @app/agent that returns ClassifiedError with proper type field.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Missing NOT NULL defaults on CRR tables) - not an issue after investigation (migrations v36-v43 include proper defaults)
+- Issue #2 (Assumes non-existent tool signatures) - skipped (spec was already implemented correctly)
+- Issue #3 (ToolWrapper file path in spec) - skipped (spec already in done/)
+- Issue #4 (Zero-tool sandbox limitations) - skipped (informational, sandbox has timeout)
+- Issue #5 (Missing mutation status handling) - skipped (handled by exec-14 indeterminate resolution)
+- Issue #6 (Missing error classification in session) - skipped (fixed by exec-12)
+- Issue #7 (Incomplete prompt update) - skipped (implemented correctly in exec-08)

@@ -189,3 +189,12 @@ Significant and important improvements to both Electron error handling and datab
 **Critical Finding:** The `getLastChatActivities()` method in chat-store.ts was missed and needs IN clause validation added.
 
 Otherwise, excellent defensive programming practices implemented throughout.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Missing IN clause validation in chat-store.ts) - not an issue after investigation (getLastChatActivities method no longer exists)
+- Issue #2 (Error messages not propagated to users) - skipped (low severity, Electron internals)
+- Issue #3 (No retry logic for ensureWindowReady) - skipped (users can manually retry)
+- Issue #4 (Global shortcut registration not atomic) - skipped (logging is sufficient)
+- Issue #5 (Potential race in window state) - skipped (not a practical concern)

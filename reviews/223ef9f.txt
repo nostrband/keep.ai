@@ -202,3 +202,12 @@ Recommended actions before merge:
 1. Fix the memory leak risk (HIGH)
 2. Consider adding timeout-based cleanup (MEDIUM)
 3. Move dynamic import to module level (LOW)
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Memory leak if WorkflowWorker construction fails) - created specs/new/fix-test-run-tracking-leak.md
+- Issue #2 (No timeout-based cleanup) - covered by specs/new/fix-test-run-tracking-leak.md
+- Issue #3 (Dynamic import on every request) - covered by specs/new/fix-test-run-tracking-leak.md
+- Issue #4 (Map not persisted across restarts) - skipped (acceptable for local product)
+- Issue #5 (Race condition between check and set) - not an issue after investigation (Node.js single-threaded)

@@ -1,0 +1,115 @@
+COMMIT REVIEW: 814e70e - Update IMPLEMENTATION_PLAN.md: exec-15 complete, identify next spec
+
+================================================================================
+SUMMARY
+================================================================================
+
+This commit significantly condenses the IMPLEMENTATION_PLAN.md file after
+completing exec-15, reducing it from 329 lines to 48 lines. The detailed
+8-phase implementation checklist is removed and replaced with a concise
+completion summary, plus notes about potential next work (exec-16).
+
+================================================================================
+CHANGES ANALYSIS
+================================================================================
+
+FILES CHANGED:
+- IMPLEMENTATION_PLAN.md: Major restructure from detailed checklist to summary
+
+CONTENT CHANGES:
+
+1. Status changed from "Active Spec: exec-15" to "Looking for Next Spec"
+2. Removed detailed 8-phase implementation checklist (Phases 1-8 with ~60 items)
+3. Added "Recently Completed" section with exec-15 summary
+4. Added "What's Available for Next Implementation" section mentioning exec-16
+5. Removed Critical Path Summary, What This Spec Does NOT Cover, and Backward
+   Compatibility Notes sections
+6. Updated spec file path from specs/new/ to specs/done/
+7. Added latest tag reference: v1.0.0-alpha.124
+
+LINE CHANGES: -303 lines, +22 lines (net -281 lines)
+
+================================================================================
+ISSUES FOUND
+================================================================================
+
+ISSUE 1: Historical context lost
+Severity: Low
+Location: IMPLEMENTATION_PLAN.md
+
+The detailed checklist with specific file references and implementation notes
+provided valuable historical context for understanding how exec-15 was built.
+This information is now lost.
+
+PROPOSAL: Consider archiving detailed implementation plans to a separate file
+(e.g., docs/archive/exec-15-implementation.md) rather than deleting them.
+This preserves context for future debugging or similar feature development.
+
+--------------------------------------------------------------------------------
+
+ISSUE 2: Backward Compatibility Notes removed
+Severity: Low
+Location: IMPLEMENTATION_PLAN.md (removed section)
+
+The "Backward Compatibility Notes" section documented important constraints:
+- Existing events with title values preserved
+- WorkflowConfig without publishes fails validation
+- Topics.publish signature change (no more title)
+- Existing handler_runs and mutations unaffected
+
+This information is useful for developers who may encounter migration issues.
+
+PROPOSAL: Consider keeping backward compatibility notes in a central location
+(perhaps CHANGELOG.md or a dedicated migrations guide).
+
+--------------------------------------------------------------------------------
+
+ISSUE 3: Missing exec-16 spec location uncertainty
+Severity: Very Low
+Location: IMPLEMENTATION_PLAN.md:35
+
+The plan references `docs/dev/17-inputs-outputs.md` as the source for exec-16,
+but this should be verified to exist. If it doesn't exist, the reference is
+misleading.
+
+PROPOSAL: Verify the referenced doc exists before pointing to it.
+
+================================================================================
+POSITIVE OBSERVATIONS
+================================================================================
+
+1. GOOD cleanup: Removing completed checklist items keeps the document focused
+   on current/future work rather than accumulating historical cruft.
+
+2. CLEAR status: "Looking for Next Spec" immediately communicates project state.
+
+3. GOOD summary: The "Recently Completed" section provides appropriate high-level
+   overview of what exec-15 delivered.
+
+4. FORWARD-LOOKING: Identifying exec-16 as potential next work helps maintain
+   project momentum.
+
+5. CORRECT metadata: Database version (44) and tag (v1.0.0-alpha.124) are
+   documented for reference.
+
+================================================================================
+VERDICT
+================================================================================
+
+This is appropriate housekeeping after completing a major feature. The document
+transformation from "implementation tracker" to "status summary" is reasonable
+once the work is done.
+
+The main concern is loss of historical context, but this is a minor issue -
+the git history preserves the detailed checklist, and the spec file in
+specs/done/ likely contains similar information.
+
+QUALITY: 8/10 - Clean refactor, minor information loss acceptable
+RISK: None - Documentation only
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Historical context lost) - skipped (low severity, git history preserves it)
+- Issue #2 (Backward Compatibility Notes removed) - skipped (low severity, doc-only)
+- Issue #3 (exec-16 spec location) - skipped (very low severity, doc reference)

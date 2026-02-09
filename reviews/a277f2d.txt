@@ -91,3 +91,8 @@ The deletion itself is reasonable for cleanup, but:
 - Better rationale in commit messages would help future maintainers
 
 RECOMMENDATION: Accept the deletion but ensure architectural notes (maintainer task type design, notification types, etc.) are captured in AGENTS.md or similar persistent documentation.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- All issues - skipped (medium severity, not v1 blocker)

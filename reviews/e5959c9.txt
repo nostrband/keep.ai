@@ -1,0 +1,218 @@
+COMMIT REVIEW: e5959c9
+======================
+Title: Implement exec-15 Phase 3: Topics API Updates
+Date: Fri Feb 6 13:56:42 2026 +0100
+
+CHANGES OVERVIEW
+----------------
+This commit implements Phase 3 of exec-15, adding causal tracking to the Topics API:
+
+1. Adds register_input operation type to PHASE_RESTRICTIONS (producer only)
+2. Creates Topics.registerInput tool for Input Ledger integration
+3. Updates Topics.publish to support multi-topic fan-out (string or string[])
+4. Adds inputId parameter for causal tracking in producer phase
+5. Implements causedBy inheritance from reserved events in consumer next phase
+6. Updates tool-lists.ts to include registerInput and pass getPhase
+
+Files modified (4 files, +191/-29 lines):
+- packages/agent/src/tools/topics.ts
+- packages/agent/src/sandbox/tool-wrapper.ts
+- packages/agent/src/sandbox/tool-lists.ts
+- IMPLEMENTATION_PLAN.md
+
+POSITIVE ASPECTS
+----------------
+1. Clear, actionable error messages for phase violations
+2. Proper validation at all entry points
+3. Good separation between tool definition and phase control
+4. Comprehensive test coverage of happy paths
+5. Correct idempotency semantics for registerInput
+6. Proper causal tracking inheritance in next phase
+7. Backward compatibility maintained via null phase support (task mode)
+8. Multi-topic fan-out cleanly implemented with array normalization
+
+PHASE RESTRICTIONS IMPLEMENTATION
+---------------------------------
+The PHASE_RESTRICTIONS matrix correctly implements access control:
+```typescript
+producer: { register_input: true },   // Only phase that can register inputs
+prepare:  { register_input: false },
+mutate:   { register_input: false },
+next:     { register_input: false },  // Inherits causedBy from reserved events
+```
+
+Operation type detection properly identifies Topics tools:
+- Topics.registerInput -> 'register_input'
+- Topics.peek/getByIds -> 'topic_peek'
+- Topics.publish -> 'topic_publish'
+
+ISSUES FOUND
+------------
+
+ISSUE 1: Multi-Topic Publish is Sequential, Not Atomic
+Severity: LOW
+Location: packages/agent/src/tools/topics.ts:327-329
+
+Problem: When publishing to multiple topics, events are published sequentially:
+```typescript
+for (const topicName of topics) {
+  await eventStore.publishEvent(workflowId, topicName, publishEvent, handlerRunId);
+}
+```
+
+Scenario: If a crash occurs between topic 1 and topic 2:
+- Topic 1 gets the event
+- Topic 2 does not
+- Handler is in inconsistent state
+
+Mitigation: This is idempotent by messageId, so re-run will complete. However,
+consumers might race to reserve the first event while topic 2 still lacks it.
+
+Proposal: Consider wrapping multi-topic publish in a transaction, or document this
+eventual consistency model. Could add:
+```typescript
+await db.tx(async (tx) => {
+  for (const topicName of topics) {
+    await eventStore.publishEvent(workflowId, topicName, publishEvent, handlerRunId, tx);
+  }
+});
+```
+
+---
+
+ISSUE 2: No Validation That inputId Exists
+Severity: LOW
+Location: packages/agent/src/tools/topics.ts:41, 298, 312
+
+Problem: inputId is accepted as any string without validation:
+```typescript
+inputId: z.string().optional()
+// ...
+if (!input.event.inputId) {
+  throw new Error("...requires inputId...");
+}
+causedBy = [input.event.inputId]; // No check that inputId exists!
+```
+
+A producer could pass a fake inputId like "invalid-123", and Topics.publish would accept it.
+
+Impact:
+- Causal tracking becomes invalid
+- Queries searching by inputId won't find the event
+- Tests don't cover this case
+
+Proposal: Optional validation that inputId exists in InputStore. Trade-off: adds
+latency to publish calls. Current code relies on the fact that inputId MUST come
+from Topics.registerInput() in the same handler run, so it should exist (eventual
+consistency).
+
+If validation is added:
+```typescript
+if (phase === 'producer' && input.event.inputId) {
+  const inputExists = await inputStore.get(input.event.inputId);
+  if (!inputExists) {
+    throw new LogicError(`inputId '${input.event.inputId}' not found in Input Ledger`);
+  }
+}
+```
+
+---
+
+ISSUE 3: Silent JSON Parse Failures in getCausedByForRun
+Severity: LOW
+Location: packages/db/src/event-store.ts:525-555
+
+Problem: getCausedByForRun() (used by Topics.publish in next phase) silently skips
+invalid JSON:
+```typescript
+try {
+  const causedBy = JSON.parse(row.caused_by || "[]");
+  // ...
+} catch {
+  // Skip invalid JSON - no logging!
+}
+```
+
+Impact: If caused_by contains corrupted data, it's silently ignored. Operators
+won't know there's a problem, and causal tracking is silently broken.
+
+Proposal: Add debug logging for JSON parse failures to help troubleshooting.
+
+---
+
+ISSUE 4: Phase Fallback Allows Loose Validation
+Severity: LOW (by design)
+Location: packages/agent/src/tools/topics.ts:309-316
+
+Observation: When phase is null (task mode), the code allows both inputId and causedBy:
+```typescript
+} else {
+  // No phase info available (task mode or legacy) - use provided values
+  if (input.event.inputId) {
+    causedBy = [input.event.inputId];
+  } else if (input.event.causedBy) {
+    causedBy = input.event.causedBy;
+  }
+}
+```
+
+This is intentional for backward compatibility with task mode. Tests confirm it works.
+Not a bug - by design.
+
+EDGE CASES TESTED
+-----------------
+Well tested:
+- Single and multi-topic publish
+- Idempotency by messageId
+- Phase validation (producer requires inputId, next forbids it)
+- CausedBy inheritance in next phase
+- Title deprecation
+- Empty handler run ID
+- Missing workflow context
+- Null phase (task mode)
+- Empty reservations
+
+Edge cases NOT explicitly tested:
+- Corrupted caused_by JSON in database
+- Invalid inputId format (non-existent IDs)
+- Very large caused_by arrays
+- Cross-workflow causedBy leakage
+- Concurrent multi-topic publishes
+
+TEST RECOMMENDATIONS
+--------------------
+Add tests for:
+1. Multi-topic publish atomicity / crash recovery
+2. Invalid inputId (non-existent in Input Ledger)
+3. Corrupted caused_by JSON handling
+4. Large caused_by arrays (performance test)
+
+BACKWARD COMPATIBILITY
+----------------------
+GOOD - Changes maintain compatibility:
+- Topics.publish still accepts deprecated title field
+- Null phase (task mode) allows both inputId and causedBy
+- No breaking changes to existing tool signatures
+- New functionality is opt-in via inputId parameter
+
+SUMMARY
+-------
+The implementation is solid and production-ready. The code correctly implements
+the exec-15 Phase 3 specification with clear error messages, proper phase-based
+validation, and comprehensive test coverage.
+
+Minor observations (not blocking):
+1. Multi-topic publish is sequential, not atomic (acceptable due to idempotency)
+2. InputId format validation is lenient (acceptable - eventual consistency)
+3. JSON parse failures silently skip (could benefit from logging)
+4. Invalid inputId references not caught at publish time (acceptable)
+
+No critical issues found. Code is ready for merge.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Multi-topic publish sequential not atomic) - skipped (low severity, idempotent by messageId)
+- Issue #2 (No validation that inputId exists) - skipped (low severity, eventual consistency)
+- Issue #3 (Silent JSON parse failures in getCausedByForRun) - skipped (low severity, systemic pattern)
+- Issue #4 (Phase fallback allows loose validation) - skipped (by design for backward compat)

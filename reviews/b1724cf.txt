@@ -175,3 +175,8 @@ that could confuse the agent or developers. Consider a follow-up commit to:
 2. Clarify whether Notes API is still available for state persistence
 
 No critical bugs. Medium-priority clarity improvements recommended for prompts.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- All issues - skipped (medium severity, not v1 blocker)

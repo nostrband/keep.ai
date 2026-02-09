@@ -200,3 +200,28 @@ export function useWorkflowMutations(workflowId: string, options?: { status?: st
     enabled: !!api && !!workflowId,
   });
 }
+
+/**
+ * Get mutations needing reconciliation (indeterminate or needs_reconcile) for a workflow.
+ * Used to show reconciliation status alerts in workflow detail and main page.
+ */
+export function usePendingReconciliation(workflowId: string) {
+  const { api } = useDbQuery();
+  return useQuery({
+    queryKey: qk.pendingReconciliation(workflowId),
+    queryFn: async () => {
+      if (!api) return [];
+      try {
+        const [indeterminate, needsReconcile] = await Promise.all([
+          api.mutationStore.getByWorkflow(workflowId, { status: "indeterminate" }),
+          api.mutationStore.getNeedsReconcile(workflowId),
+        ]);
+        return [...indeterminate, ...needsReconcile];
+      } catch (error) {
+        return [];
+      }
+    },
+    meta: { tables: ["mutations"] },
+    enabled: !!api && !!workflowId,
+  });
+}

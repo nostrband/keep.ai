@@ -140,3 +140,8 @@ sections that need completion.
 
 The logical items UI spec is detailed and implementation-ready, but has a minor
 type inconsistency with the logical items documentation that should be resolved.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- All issues - skipped (medium severity, not v1 blocker)

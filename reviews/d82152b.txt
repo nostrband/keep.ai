@@ -336,3 +336,15 @@ error codes handled. Minor improvements suggested for code clarity.
 
 This commit successfully demonstrates that the connectors framework can support
 non-Google OAuth providers, achieving its stated goal.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Conflicting status/code in classifyNotionError) - skipped (typeof check provides safety, confusing but works)
+- Issue #2 (Custom helper instead of shared pattern) - skipped (only 2 OAuth services, premature abstraction)
+- Issue #3 (workspace_name display duplicated) - skipped (minor duplication)
+- Issue #4 (Notion tokens don't expire) - not an issue after investigation (revocation handled correctly)
+- Issue #5 (Missing owner parameter) - not an issue after investigation (correctly used)
+- Issue #6 (z.any() for params) - skipped (consistent with other API tools)
+- Issue #7 (Event logging criteria different) - skipped (intentional per-service criteria)
+- Issue #8 (ensureClassified won't use classifyNotionError) - skipped (unlikely, tool catches all errors)

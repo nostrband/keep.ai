@@ -227,3 +227,13 @@ onError: (error) => {
 2. **Should Fix**: Add `setInput("")` in the `onSuccess` callback of `handleQuickReply` to clear the input field after a successful quick-reply.
 
 3. **Optional**: Add error handling/toast notification for failed quick-reply mutations.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (PromptInputTextarea doesn't support forwardRef) - skipped (focus is a nice-to-have UX, not blocking v1)
+- Issue #2 (Quick-reply missing input reset) - skipped (low severity UX)
+- Issue #3 (useScriptRun with empty string) - not an issue after investigation (hook correctly handles falsy)
+- Issue #4 (Version number lookup correctness) - not an issue after investigation (correct fix)
+- Issue #5 (Missing error handling for quick-reply) - skipped (low severity)
+- Issue #6 (State update after unmount) - not an issue after investigation (React 18+ handles gracefully)

@@ -161,3 +161,8 @@ Recommended fix in apps/web/src/App.tsx, around line 344:
   <Route path="/chat/main" element={<Navigate to="/" replace />} />
   <Route path="/chat/new" element={<Navigate to="/" replace />} />  {/* ADD THIS */}
   <Route path="/new" element={<Navigate to="/" replace />} />
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- All issues - skipped (medium severity, not v1 blocker)

@@ -1,0 +1,178 @@
+COMMIT REVIEW: 5ffe72bc7ecfb52a75680307e67b4bf6a4ec9d5d
+============================================================
+Title: Implement exec-19: Consumer wakeAt Scheduling Integration
+Author: Artur Briugeman (Co-Authored-By: Claude Opus 4.5)
+Date: Fri Feb 6 16:03:41 2026 +0100
+
+FILES CHANGED:
+- IMPLEMENTATION_PLAN.md (+34 lines)
+- packages/agent/src/reconciliation/scheduler.ts (+1/-1 line)
+- packages/agent/src/session-orchestration.ts (+17/-4 lines)
+- packages/tests/src/session-orchestration.test.ts (+154/-2 lines)
+
+============================================================
+SUMMARY OF CHANGES
+============================================================
+
+This commit integrates wakeAt scheduling into the session orchestration system,
+enabling time-based workflow patterns like daily digests, delayed processing,
+and batch timeouts. Previously, consumers could only be triggered by new events;
+now they can also be woken at scheduled times.
+
+Key changes:
+
+1. **TypeScript Type Fix (scheduler.ts)**
+   - Changed `NodeJS.Timer` to `ReturnType<typeof setInterval>` for the
+     interval property
+   - This is a portable, runtime-agnostic fix that doesn't assume Node.js types
+
+2. **Session Orchestration Updates (session-orchestration.ts)**
+   - Modified `findConsumerWithPendingWork()` to check wakeAt times in addition
+     to pending events
+   - Return type expanded to include `reason: "events" | "wakeAt"` for logging
+   - Events are checked first (higher priority), then wakeAt times
+   - wakeAt consumers are verified against handler_config to prevent orphaned
+     state from triggering runs
+
+3. **Test Coverage (session-orchestration.test.ts)**
+   - Added 5 comprehensive tests for wakeAt behavior:
+     * Consumer not triggered when wakeAt is in the future
+     * Consumer triggered when wakeAt is due
+     * Events prioritized over wakeAt
+     * wakeAt ignored for consumers not in config
+     * wakeAt=0 means no scheduled wake
+   - Updated test schema to include wake_at column from migration v42
+
+4. **Documentation (IMPLEMENTATION_PLAN.md)**
+   - Added detailed implementation summary for exec-19
+   - Updated version tag to v1.0.0-alpha.125
+
+============================================================
+POTENTIAL ISSUES
+============================================================
+
+### ISSUE 1: Unused Return Value (reason field) [LOW]
+
+Location: session-orchestration.ts:178, 190
+The `reason` field is returned from `findConsumerWithPendingWork()` but only
+used for debug logging. It's not passed to `executeHandler()` or stored
+anywhere, which means there's no way to distinguish event-triggered vs
+wakeAt-triggered runs in the database or UI.
+
+**Proposal:**
+- If distinguishing trigger reasons is needed later, store the trigger reason
+  in the handler_run record (would require schema change)
+- For now, this is acceptable as it provides debug visibility without adding
+  complexity. Keep as-is.
+
+### ISSUE 2: Non-Atomic Event vs wakeAt Check [MEDIUM]
+
+Location: session-orchestration.ts:168-193
+The event check and wakeAt check are sequential, not atomic. Between checking
+events and checking wakeAt, new events could arrive or time could progress.
+
+**Scenario:**
+1. findConsumerWithPendingWork() checks events → none found
+2. New event arrives in the millisecond between checks
+3. wakeAt check returns a due consumer
+4. Consumer runs due to wakeAt, but an event was actually pending
+
+**Impact:** Low in practice - the consumer runs either way. However, the
+`reason` logged may not accurately reflect what triggered the run.
+
+**Proposal:**
+- Accept this race condition as a pragmatic trade-off. The consumer processes
+  work either way, and perfect accuracy of the trigger reason is not critical.
+- Document this behavior if cause tracking becomes important.
+
+### ISSUE 3: Silent JSON Parse Failure [LOW]
+
+Location: session-orchestration.ts:157-162
+If `workflow.handler_config` is invalid JSON, the function returns null
+(no work found) instead of throwing. This silently masks configuration errors.
+
+**Impact:** Workflow stops processing without clear error indication. Only
+visible in debug logs.
+
+**Proposal:**
+- Consider logging a warning when JSON parsing fails
+- Keep current behavior for resilience (don't crash on malformed config)
+
+### ISSUE 4: Missing Type Guard for config.consumers [LOW]
+
+Location: session-orchestration.ts:164-166
+The check `if (!config.consumers)` doesn't verify that `config.consumers` is
+actually an object. If it's somehow a non-object truthy value,
+`Object.entries()` on line 169 could throw.
+
+**Proposal:**
+- Add type guard: `if (!config.consumers || typeof config.consumers !== 'object')`
+- Low priority since handler_config is validated elsewhere
+
+### ISSUE 5: Test Schema Drift [LOW]
+
+Location: session-orchestration.test.ts:130-137
+The test creates its own table schema with wake_at column, which could drift
+from the actual migration (v42). If the production schema changes, tests might
+not catch issues.
+
+**Proposal:**
+- Consider importing the migration SQL or using a shared schema definition
+- Acceptable for now as the schema is simple and stable
+
+============================================================
+OBSERVATIONS (Non-Issues)
+============================================================
+
+1. **Good: Events prioritized over wakeAt**
+   The implementation correctly checks events first, ensuring responsiveness
+   to incoming events is not degraded by scheduled wakes.
+
+2. **Good: Config validation for wakeAt consumers**
+   Line 188 verifies the consumer exists in handler_config before triggering,
+   preventing orphaned handler_state records from causing unexpected runs.
+
+3. **Good: TypeScript fix is correct**
+   `ReturnType<typeof setInterval>` is the proper portable pattern for timer
+   references, avoiding Node.js-specific type dependencies.
+
+4. **Good: Test coverage is comprehensive**
+   Five tests cover the key scenarios: future wakeAt, due wakeAt, event
+   priority, config validation, and wakeAt=0 semantics.
+
+5. **Good: Documentation is thorough**
+   IMPLEMENTATION_PLAN.md provides clear context on why this feature is needed
+   and what was implemented.
+
+============================================================
+ARCHITECTURAL NOTES
+============================================================
+
+The wakeAt integration leverages existing infrastructure:
+- Migration v42 added wake_at column to handler_state table
+- handlerStateStore.getConsumersWithDueWakeAt() queries consumers with due times
+- handler-state-machine.ts handles wakeAt persistence from PrepareResult
+- The session orchestrator now consumes this existing infrastructure
+
+The design follows the scheduling spec (docs/dev/16-scheduling.md) which defines
+wakeAt as an optional hint from consumers for time-based patterns. Events always
+wake consumers (for responsiveness), and wakeAt provides scheduled wake-ups.
+
+============================================================
+VERDICT
+============================================================
+
+This is a well-implemented feature that enables time-based workflow patterns.
+The code is clean, well-tested, and follows the existing architecture. The
+identified issues are minor and acceptable given the pragmatic trade-offs.
+
+APPROVED with minor suggestions noted above.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Unused Return Value reason) - skipped (low severity, debug info only)
+- Issue #2 (Non-Atomic Event vs wakeAt Check) - skipped (medium severity, pragmatic tradeoff)
+- Issue #3 (Silent JSON Parse Failure) - skipped (low severity, resilience tradeoff)
+- Issue #4 (Missing Type Guard config.consumers) - skipped (low severity, validated elsewhere)
+- Issue #5 (Test Schema Drift) - skipped (low severity, schema is stable)

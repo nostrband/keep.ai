@@ -1,0 +1,160 @@
+COMMIT: 14fbcd8 - Add 17-input-outputs, add Input Ledger
+DATE: Fri Feb 6 11:14:16 2026 +0100
+AUTHOR: Claude Agent
+
+================================================================================
+SUMMARY
+================================================================================
+
+This commit is a significant documentation update that introduces the "Input Ledger" concept and replaces the old "Event Management UX" chapter with a new "Inputs & Outputs" chapter. The changes better align documentation with the user's mental model (inputs/outputs) rather than internal workflow concepts (events/runs).
+
+FILES CHANGED:
+- docs/dev/17-inputs-outputs.md (NEW, 407 lines) - Complete new chapter for UX
+- docs/dev/17-event-management-ux.md (DELETED, 240 lines) - Old event-centric UX doc
+- docs/dev/06a-topics-and-handlers.md (+295/-14 lines) - Added Input Ledger, causal tracking, producer declarations
+- docs/dev/06b-consumer-lifecycle.md (+57/-1 lines) - Added prepareResult.ui field documentation
+- docs/dev/16-scheduling.md (+1/-1 lines) - Cross-reference fix
+
+================================================================================
+CHANGES IN DETAIL
+================================================================================
+
+1. NEW CHAPTER 17 - INPUTS & OUTPUTS (17-inputs-outputs.md)
+   - Defines the user-facing Inputs→Outputs view model
+   - Inputs come from Input Ledger (source, type, id, title)
+   - Outputs are mutations (from mutation ledger)
+   - Internal concepts (topics, events, runs) are hidden from primary UX
+   - Defines status computation: input is "pending" if any downstream event is pending
+   - Documents user actions: Skip input (v1 only)
+   - Includes stale input warnings (7-day threshold)
+   - Run history available as secondary/debug view
+   - Trust boundary: ui.title is script-declared, actual params from host
+
+2. INPUT LEDGER (added to 06a-topics-and-handlers.md)
+   - New section defining Input schema: inputId, source, type, id, title
+   - Uniqueness by (source, type, id) per workflow (idempotent registration)
+   - Known sources list: gmail, slack, sheets, calendar, system
+   - Separation from events: Inputs = user-facing, Events = internal coordination
+
+3. CAUSAL TRACKING (added to 06a-topics-and-handlers.md)
+   - Events now have `caused_by` field pointing to Input IDs
+   - Producer events: caused_by = [inputId] from registerInput
+   - Consumer-emitted events: inherit caused_by from reserved events
+   - Enables tracing "what happened to my input" without exposing internals
+
+4. PRODUCER DECLARATIONS (added to 06a-topics-and-handlers.md)
+   - Producers must declare `publishes: [...]` topic list
+   - Publishing to undeclared topic is runtime error
+   - ctx.registerInput() required before publishing
+   - Multi-topic fan-out support: ctx.publish(["topicA", "topicB"], ...)
+
+5. CONSUMER UPDATES (added to 06a and 06b)
+   - Consumers declare both `subscribe` and `publishes`
+   - prepareResult.ui.title field for user-facing mutation descriptions
+   - No inputId needed in next phase - causedBy auto-inherited
+
+6. REMOVED EVENT TITLES
+   - Events no longer have titles (removed from 06a)
+   - User-facing metadata now lives in Input Ledger only
+
+================================================================================
+POTENTIAL ISSUES
+================================================================================
+
+1. CONSISTENCY: Documentation vs Code
+   SEVERITY: Low
+   The documentation describes concepts (Input Ledger, causal tracking, prepareResult.ui)
+   that have already been implemented in exec-15 and exec-16. Verified via code search:
+   - InputStore in packages/db/src/input-store.ts
+   - caused_by field in packages/db/src/event-store.ts
+   - prepareResult.ui in packages/agent/src/handler-state-machine.ts
+   - Topics.registerInput() in packages/agent/src/tools/topics.ts
+   STATUS: No action needed - documentation aligns with implementation.
+
+2. SKIP SEMANTICS - BATCH HANDLING COMPLEXITY
+   SEVERITY: Medium
+   The documentation states: "If a reservation includes events from multiple inputs
+   (e.g., batch processing), and one input is skipped: Pre-mutation: entire run is
+   aborted, all reserved events released"
+
+   CONCERN: This could cause unexpected behavior. If a consumer batches 10 events
+   from 10 different inputs, and one input gets skipped, all 10 events are released.
+   The consumer then re-prepares with 9 events. This is correct but could surprise
+   users who skip one input expecting only that input to be affected.
+
+   PROPOSAL: The documentation correctly describes the behavior, but the UX should
+   warn users when skipping an input that is part of an active batch reservation.
+   E.g., "This input is currently being processed with 9 others. Skipping will
+   restart the batch."
+
+3. CORRELATION ORPHANS
+   SEVERITY: Medium
+   The documentation mentions: "Remaining events may become orphaned (correlation
+   never completes). These show as stale and can be individually skipped or
+   investigated."
+
+   CONCERN: No proactive detection mechanism is described for correlation orphans.
+   The 7-day stale warning threshold may be too long for some use cases.
+
+   PROPOSAL: Consider adding documentation about how the system could detect
+   correlation patterns that will never complete (e.g., if the consumer correlates
+   email + approval and the email is skipped, the approval event is orphaned).
+   This is a future enhancement, not a v1 blocker.
+
+4. INPUT LEDGER vs EVENT SOURCE TERMINOLOGY
+   SEVERITY: Low
+   The `source` field in Input Ledger overlaps conceptually with the connector name.
+   The documentation says "Scripts cannot invent arbitrary sources because all
+   external access goes through host-managed connectors."
+
+   CONCERN: The known sources table (gmail, slack, sheets, calendar, system) is
+   hardcoded in docs. If new connectors are added, this doc will become stale.
+
+   PROPOSAL: Reference a central connectors registry or note that this list is
+   illustrative, not exhaustive.
+
+5. ZERO OUTPUTS DISPLAY
+   SEVERITY: Low
+   Documentation states: 'If an input was processed but no mutations occurred
+   (e.g., routing-only consumers), it shows "Done ✓" with "What happened: No
+   external changes".'
+
+   This is correct behavior but the message "No external changes" might confuse
+   users who see the input was processed but don't know why nothing happened.
+
+   PROPOSAL: Consider allowing consumers to provide a reason in such cases, or
+   logging the route taken for debugging.
+
+================================================================================
+STYLE/QUALITY NOTES
+================================================================================
+
+1. GOOD: Clear separation of concerns between Input Ledger and Events
+2. GOOD: Trust boundary clearly documented (script-declared vs host-observed)
+3. GOOD: Prompting guidance section for LLMs is practical and specific
+4. GOOD: ASCII art diagrams help visualize the UX
+5. GOOD: Cross-references to related chapters are maintained
+
+================================================================================
+VERDICT
+================================================================================
+
+This is a well-structured documentation update that aligns the dev docs with
+both the implementation (exec-15, exec-16) and the user mental model. The
+Inputs→Outputs paradigm is more intuitive than the previous Events-centric view.
+
+No code changes are required. Minor documentation improvements could be made
+for edge cases (batch skip warnings, correlation orphan detection, dynamic
+connector list), but these are enhancements, not bugs.
+
+RECOMMENDATION: Approve as-is. The identified issues are design considerations
+for future iterations, not problems with the current documentation.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Documentation vs Code) - skipped (low severity, already aligned)
+- Issue #2 (Skip Semantics - Batch Handling) - skipped (medium severity, correctly documented)
+- Issue #3 (Correlation Orphans) - skipped (medium severity, future enhancement)
+- Issue #4 (Input Ledger vs Event Source) - skipped (low severity, doc clarification)
+- Issue #5 (Zero Outputs Display) - skipped (low severity, UX enhancement)

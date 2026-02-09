@@ -239,23 +239,29 @@ export class ReconciliationScheduler {
       return;
     }
 
-    // Only resume if workflow was paused for reconciliation
-    // (status might be 'paused' or 'error' depending on failure path)
-    if (workflow.status === "paused") {
-      await this.api.scriptStore.updateWorkflowFields(mutation.workflow_id, {
-        status: "active",
-      });
-      log(`Workflow ${mutation.workflow_id} resumed after reconciliation`);
-    }
-
     // Get the handler run associated with this mutation
     const handlerRun = await this.api.handlerRunStore.get(mutation.handler_run_id);
-    if (handlerRun && handlerRun.status === "paused:reconciliation") {
-      // Reset status to active so state machine can continue
-      await this.api.handlerRunStore.update(handlerRun.id, {
-        status: "active",
-      });
-      log(`Handler run ${handlerRun.id} resumed after reconciliation`);
-    }
+
+    // Wrap both updates in a transaction for atomicity — crash between them
+    // would leave workflow active but handler_run paused, preventing recovery
+    await this.api.db.db.tx(async (tx) => {
+      if (workflow.status === "paused") {
+        await this.api.scriptStore.updateWorkflowFields(
+          mutation.workflow_id,
+          { status: "active" },
+          tx
+        );
+        log(`Workflow ${mutation.workflow_id} resumed after reconciliation`);
+      }
+
+      if (handlerRun && handlerRun.status === "paused:reconciliation") {
+        await this.api.handlerRunStore.update(
+          handlerRun.id,
+          { status: "active" },
+          tx
+        );
+        log(`Handler run ${handlerRun.id} resumed after reconciliation`);
+      }
+    });
   }
 }

@@ -217,3 +217,12 @@ This commit adds type registrations and UI configurations for maintenance events
 2. If notifications are sufficient → remove the dead type registrations
 
 The commit cannot be considered production-ready until the discrepancy between registration and creation is resolved.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Maintenance events registered but never created) - skipped (dead code but harmless type registrations, can be cleaned up later)
+- Issue #2 (Payload interfaces don't match reality) - skipped (dead code)
+- Issue #3 (Navigation links will never work) - skipped (dead code)
+- Issue #4 (Inconsistent significance levels) - skipped (dead code)
+- Issue #5 (Spec moved to done but incomplete) - skipped (spec scope was registration only)

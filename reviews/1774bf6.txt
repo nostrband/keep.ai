@@ -1,0 +1,110 @@
+COMMIT REVIEW: 1774bf6625953db357c5d83969729f4cfd55b762
+============================================================
+Title: Fix script-store.test.ts: Add missing intent_spec to workflow objects
+Author: Artur Briugeman (Co-Authored-By: Claude Opus 4.5)
+Date: Fri Feb 6 16:14:16 2026 +0100
+
+FILES CHANGED:
+- packages/tests/src/script-store.test.ts (+17 lines)
+
+============================================================
+SUMMARY OF CHANGES
+============================================================
+
+This commit fixes TypeScript compilation errors in the draft activity tests
+by adding the missing `intent_spec` property to workflow objects. The
+`intent_spec` field was added to the Workflow interface in exec-17 (Intent
+Contract) but these test files were creating workflow objects directly
+without the new required field.
+
+Changes:
+- Added `intent_spec: ""` to 17 workflow object literals in the test file
+- Affected test suites:
+  * getAbandonedDrafts tests (7 instances)
+  * getDraftActivitySummary tests (10 instances)
+
+============================================================
+POTENTIAL ISSUES
+============================================================
+
+### ISSUE 1: Empty String vs More Realistic Test Data [LOW]
+
+Location: All 17 additions
+All workflow objects use `intent_spec: ""` (empty string). While this matches
+the default value and is technically correct, it doesn't test scenarios with
+populated intent_spec values.
+
+**Impact:** Tests don't verify that draft activity queries work correctly
+when intent_spec has actual data.
+
+**Proposal:**
+- Accept for now since these tests focus on draft activity timestamps, not
+  intent_spec functionality
+- If intent_spec should affect draft/abandoned classification in the future,
+  add specific tests for that
+
+### ISSUE 2: Manual Object Creation Pattern [LOW]
+
+Location: Throughout script-store.test.ts
+The tests create Workflow objects by specifying every field manually. This
+is fragile - when new required fields are added (like intent_spec), all
+tests break.
+
+**Proposal:**
+- Consider creating a test helper function that provides default values:
+  ```typescript
+  function createTestWorkflow(overrides: Partial<Workflow>): Workflow {
+    return {
+      id: '',
+      title: '',
+      task_id: '',
+      chat_id: '',
+      timestamp: '',
+      cron: '',
+      events: '',
+      status: 'draft',
+      next_run_timestamp: '',
+      maintenance: false,
+      maintenance_fix_count: 0,
+      active_script_id: '',
+      handler_config: '',
+      intent_spec: '',
+      ...overrides,
+    };
+  }
+  ```
+- This is a code quality improvement for future maintenance, not a bug
+
+============================================================
+OBSERVATIONS (Non-Issues)
+============================================================
+
+1. **Correct default value used**
+   Empty string is the correct default for intent_spec per the Workflow
+   interface comment: "JSON IntentSpec from exec-17 (empty string if not
+   yet extracted)"
+
+2. **All test locations fixed**
+   The commit appears to have found and fixed all 17 instances in the
+   draft activity test section. No partial fix.
+
+3. **Tests focus on timestamp-based logic**
+   These tests verify getAbandonedDrafts and getDraftActivitySummary which
+   work based on timestamps, not intent_spec. Using empty string is
+   appropriate here.
+
+============================================================
+VERDICT
+============================================================
+
+This is a straightforward TypeScript fix that adds a required field to test
+fixtures. The change is correct and complete. The only suggestions are minor
+code quality improvements for future maintainability.
+
+APPROVED - clean fix.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Empty String Test Data) - skipped (low severity, tests focus on timestamps)
+- Issue #2 (Manual Object Creation Pattern) - skipped (low severity, test helper enhancement)

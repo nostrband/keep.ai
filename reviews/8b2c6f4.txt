@@ -224,3 +224,8 @@ The main issue is that gmail.ts duplicates logic that was later extracted to
 google-common.ts. This is understandable given the commit sequence (Gmail was
 refactored first, then other Google services were added with the common helper).
 A follow-up refactor to use the shared helpers would improve maintainability.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- All issues - skipped (medium severity, not v1 blocker)

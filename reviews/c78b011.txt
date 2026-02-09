@@ -1,0 +1,143 @@
+COMMIT: c78b011
+TITLE: Implement exec-15 Phase 6: PrepareResult.ui and Mutation UI Title
+DATE: 2026-02-06
+
+== SUMMARY ==
+
+This commit adds structured UI metadata to the prepare phase result, allowing
+consumers to specify a user-facing title that describes what the mutation will do.
+The title flows from prepare result → mutation record → UI display.
+
+Changes:
+1. Added PrepareResultUI interface with optional `title` field
+2. Changed PrepareResult.ui from `unknown` to `PrepareResultUI` (structured type)
+3. Extract ui.title from prepareResult when creating mutation records
+
+== FILES CHANGED ==
+
+1. packages/agent/src/handler-state-machine.ts (+11 lines)
+   - Added PrepareResultUI interface (lines 61-64)
+   - Changed PrepareResult.ui type from `unknown` to `PrepareResultUI` (line 75)
+   - Extract ui.title when creating mutation (lines 1239, 1245)
+
+2. IMPLEMENTATION_PLAN.md (+1 line)
+   - Updated implementation status
+
+== DETAILED ANALYSIS ==
+
+The PrepareResultUI interface:
+```typescript
+export interface PrepareResultUI {
+  /** User-facing title describing what the mutation will do */
+  title?: string;
+}
+```
+
+This allows consumers to return structured UI metadata:
+```typescript
+prepare: async (state) => {
+  return {
+    reservations: [...],
+    data: {...},
+    ui: { title: "Send email to alice@example.com" }  // New in exec-15
+  };
+}
+```
+
+The title is passed to mutation creation:
+```typescript
+mutation = await api.mutationStore.create({
+  handler_run_id: run.id,
+  workflow_id: run.workflow_id,
+  ui_title: prepareResult.ui?.title,  // Extracted here
+});
+```
+
+== POTENTIAL ISSUES ==
+
+1. UI_TITLE NOT UPDATED ON EXISTING MUTATION (Low)
+   Location: handler-state-machine.ts:1240-1247
+
+   The code only sets ui_title when creating a NEW mutation:
+   ```typescript
+   let mutation = await api.mutationStore.getByHandlerRunId(run.id);
+   if (!mutation) {
+     mutation = await api.mutationStore.create({
+       ...
+       ui_title: prepareResult.ui?.title,
+     });
+   }
+   ```
+
+   If a mutation already exists (e.g., from a retry), the ui_title from the new
+   prepare phase is NOT updated. This could be intentional (preserving original
+   title) or a bug (should update to new title).
+
+   PROPOSAL: Consider whether retried mutations should update ui_title. If so:
+   ```typescript
+   if (!mutation) {
+     mutation = await api.mutationStore.create({...});
+   } else if (prepareResult.ui?.title && mutation.ui_title !== prepareResult.ui.title) {
+     await api.mutationStore.update(mutation.id, { ui_title: prepareResult.ui.title });
+   }
+   ```
+   However, for retry scenarios where prepare is re-run, the original context may
+   be more meaningful. Current behavior seems correct.
+
+2. NO VALIDATION ON TITLE LENGTH (Low)
+   Location: handler-state-machine.ts:1245
+
+   There's no validation on the length of ui.title. Extremely long titles could
+   cause UI issues or database problems.
+
+   PROPOSAL: Consider adding a max length check (e.g., 500 characters) with
+   truncation if needed. Not critical for v1.
+
+3. TYPE NARROWING FROM UNKNOWN (Info)
+   Location: handler-state-machine.ts:75
+
+   The change from `ui?: unknown` to `ui?: PrepareResultUI` is a good improvement.
+   However, PrepareResult comes from user-provided script execution, so the
+   runtime value could still be any shape.
+
+   The optional chaining `prepareResult.ui?.title` handles this safely since
+   undefined access on non-objects returns undefined in JavaScript.
+
+   PROPOSAL: No change needed. The implementation is runtime-safe.
+
+== CODE QUALITY ==
+
+- Clean, minimal change focused on a single concern
+- Good use of optional chaining for safe property access
+- Clear JSDoc comment on PrepareResultUI.title
+- Consistent naming: "title" in UI, "ui_title" in database
+
+== BACKWARD COMPATIBILITY ==
+
+Fully backward compatible:
+- PrepareResult.ui is optional
+- Old scripts returning `ui: undefined` or no ui field work unchanged
+- Scripts returning arbitrary ui objects work (title is optional)
+
+== INTEGRATION POINTS ==
+
+The ui_title flows to:
+1. MutationStore.create() - stores in mutations.ui_title column
+2. mutation-store.ts getByInputId() - returns ui_title for display
+3. Inputs/Outputs UX (exec-16) - displays ui_title to users
+
+== VERDICT ==
+
+This is a clean, focused change that adds user-facing metadata to mutations.
+The implementation correctly handles the optional nature of the title and
+integrates well with the mutation store.
+
+Minor consideration: Retry scenarios don't update ui_title, which may or may
+not be desired behavior.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (ui_title not updated on existing mutation) - skipped (low severity, current behavior is correct)
+- Issue #2 (No validation on title length) - skipped (low severity, not critical for v1)
+- Issue #3 (Type narrowing from unknown) - skipped (informational, implementation is safe)

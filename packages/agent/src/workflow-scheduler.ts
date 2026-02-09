@@ -287,25 +287,39 @@ export class WorkflowScheduler {
 
       this.debug(`Found ${activeWorkflows.length} active workflows`);
 
-      // Check which workflows should run based on next_run_timestamp
+      // Check which workflows should run based on schedules
       const currentTime = Date.now();
       const dueWorkflows = [];
 
       for (const workflow of activeWorkflows) {
-        // Check if next_run_timestamp is set and is in the past
-        if (workflow.next_run_timestamp && workflow.next_run_timestamp.trim() !== '') {
+        // New-format workflows use per-producer schedules (exec-13)
+        if (this.isNewFormatWorkflow(workflow)) {
           try {
-            const nextRunTime = new Date(workflow.next_run_timestamp).getTime();
-            
-            // Check if workflow is due (next_run_timestamp <= current time)
-            if (nextRunTime <= currentTime) {
+            const dueProducers = await this.api.producerScheduleStore.getDueProducers(workflow.id);
+            if (dueProducers.length > 0) {
               dueWorkflows.push(workflow);
               this.debug(
-                `Workflow ${workflow.id} (${workflow.title}) is due: nextRun=${workflow.next_run_timestamp}`
+                `Workflow ${workflow.id} (${workflow.title}) has ${dueProducers.length} due producers`
               );
             }
           } catch (error) {
-            this.debug(`Invalid next_run_timestamp for workflow ${workflow.id}:`, error);
+            this.debug(`Error checking producer schedules for workflow ${workflow.id}:`, error);
+          }
+        } else {
+          // Legacy workflows use workflow.next_run_timestamp
+          if (workflow.next_run_timestamp && workflow.next_run_timestamp.trim() !== '') {
+            try {
+              const nextRunTime = new Date(workflow.next_run_timestamp).getTime();
+
+              if (nextRunTime <= currentTime) {
+                dueWorkflows.push(workflow);
+                this.debug(
+                  `Workflow ${workflow.id} (${workflow.title}) is due: nextRun=${workflow.next_run_timestamp}`
+                );
+              }
+            } catch (error) {
+              this.debug(`Invalid next_run_timestamp for workflow ${workflow.id}:`, error);
+            }
           }
         }
       }
@@ -351,42 +365,39 @@ export class WorkflowScheduler {
             );
           }
 
-          // After execution, calculate and update next_run_timestamp from cron if available
-          // Use updateWorkflowFields to only update specific fields atomically,
-          // preventing concurrent updates (e.g., user pause) from being overwritten
-          if (workflow.cron && workflow.cron.trim() !== '') {
-            try {
-              const cronJob = new Cron(workflow.cron);
-              const nextRun = cronJob.nextRun();
+          // New-format workflows use per-producer schedules (exec-13);
+          // next_run_at is updated by commitProducer() in handler-state-machine.
+          // Only legacy workflows need workflow-level next_run_timestamp from cron.
+          if (!this.isNewFormatWorkflow(workflow)) {
+            if (workflow.cron && workflow.cron.trim() !== '') {
+              try {
+                const cronJob = new Cron(workflow.cron);
+                const nextRun = cronJob.nextRun();
 
-              if (nextRun) {
-                // Note: Only update next_run_timestamp, not timestamp.
-                // workflow.timestamp is the creation time; script_runs track execution times.
+                if (nextRun) {
+                  await this.api.scriptStore.updateWorkflowFields(workflow.id, {
+                    next_run_timestamp: nextRun.toISOString(),
+                  });
+                  this.debug(
+                    `Updated workflow ${workflow.id} next_run_timestamp to ${nextRun.toISOString()}`
+                  );
+                } else {
+                  await this.api.scriptStore.updateWorkflowFields(workflow.id, {
+                    next_run_timestamp: '',
+                  });
+                }
+              } catch (error) {
+                this.debug(`Error calculating next run for workflow ${workflow.id}:`, error);
                 await this.api.scriptStore.updateWorkflowFields(workflow.id, {
-                  next_run_timestamp: nextRun.toISOString(),
-                });
-                this.debug(
-                  `Updated workflow ${workflow.id} next_run_timestamp to ${nextRun.toISOString()}`
-                );
-              } else {
-                // Clear next_run_timestamp if cron has no next run
-                await this.api.scriptStore.updateWorkflowFields(workflow.id, {
+                  status: 'error',
                   next_run_timestamp: '',
                 });
               }
-            } catch (error) {
-              this.debug(`Error calculating next run for workflow ${workflow.id}:`, error);
-              // Mark workflow as error - only update the error-related fields
+            } else {
               await this.api.scriptStore.updateWorkflowFields(workflow.id, {
-                status: 'error',
                 next_run_timestamp: '',
               });
             }
-          } else {
-            // No cron expression, clear next_run_timestamp
-            await this.api.scriptStore.updateWorkflowFields(workflow.id, {
-              next_run_timestamp: '',
-            });
           }
         } catch (error) {
           this.debug("failed to process workflow:", error);

@@ -35,7 +35,7 @@ export { makeTextExtractTool } from "./text-extract";
 export { makeTextClassifyTool } from "./text-classify";
 export { makeTextSummarizeTool } from "./text-summarize";
 export { makeTextGenerateTool } from "./text-generate";
-export { makeUserSendTool } from "./user-send";
+export { makeUserSendTool, type UserSendContext } from "./user-send";
 export { makeGetScriptTool } from "./get-script";
 export { makeListScriptsTool } from "./list-scripts";
 export { makeScriptHistoryTool } from "./script-history";

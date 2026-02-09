@@ -71,3 +71,8 @@ The commit follows good documentation practices:
 
 RISK LEVEL: None (documentation only)
 RECOMMENDATION: Merge as-is
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+No actionable issues - documentation update only.

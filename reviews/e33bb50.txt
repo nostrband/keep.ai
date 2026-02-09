@@ -1,0 +1,272 @@
+COMMIT REVIEW: e33bb50
+======================
+Title: Implement exec-15 Phase 4: WorkflowConfig and Validation
+Date: Fri Feb 6 14:00:53 2026 +0100
+
+CHANGES OVERVIEW
+----------------
+This commit implements Phase 4 of exec-15, adding topic declaration requirements:
+
+1. Adds publishes field to producer config (required, non-empty array)
+2. Adds publishes field to consumer config (optional, for next phase)
+3. Validates topic graph: all referenced topics must be declared
+4. Updates phase-tracking tests for register_input operation type
+
+Files modified (3 files, +59/-10 lines):
+- packages/agent/src/workflow-validator.ts
+- packages/tests/src/phase-tracking.test.ts
+- IMPLEMENTATION_PLAN.md
+
+POSITIVE ASPECTS
+----------------
+1. Comprehensive validation of three distinct concerns (producer publishes, consumer requirements, topic graph)
+2. Excellent test coverage (23+ tests for validation alone)
+3. Clear error messages with handler/topic names
+4. Proper phase restriction for register_input operation
+5. Runtime validation in Topics.publish() enforces declarations
+6. Consumer publishes correctly requires next function
+7. Follows fail-fast principle - catches invalid configs at save time
+
+WORKFLOWCONFIG INTERFACE CHANGES
+--------------------------------
+The WorkflowConfig interface now includes publishes:
+
+```typescript
+producers: Record<string, {
+  publishes: string[];  // REQUIRED, non-empty
+  schedule: { interval?: string; cron?: string };
+}>;
+consumers: Record<string, {
+  subscribe: string[];
+  publishes: string[];  // OPTIONAL, defaults to []
+  hasMutate: boolean;
+  hasNext: boolean;
+}>;
+```
+
+Key semantics:
+- Producer publishes: REQUIRED and MUST be non-empty
+- Consumer publishes: OPTIONAL (defaults to empty [])
+- Consumer with publishes MUST have a next function
+
+VALIDATION LAYERS
+-----------------
+Layer 1 - Producer publishes requirement:
+```javascript
+if (!Array.isArray(p.publishes) || p.publishes.length === 0) {
+  throw new Error(`Producer '${name}': publishes must be a non-empty array`);
+}
+```
+
+Layer 2 - Consumer publishes vs next:
+```javascript
+if (publishes.length > 0 && c.next === undefined) {
+  throw new Error(`Consumer '${name}': declares publishes but has no next function`);
+}
+```
+
+Layer 3 - Topic graph validation:
+```javascript
+if (!declaredTopics.has(topic)) {
+  throw new Error(`Producer '${name}': publishes to undeclared topic '${topic}'`);
+}
+```
+
+ISSUES FOUND
+------------
+
+ISSUE 1: Breaking Change for Existing Workflows
+Severity: HIGH (by design, but needs documentation)
+Location: packages/agent/src/workflow-validator.ts:166-169
+
+Problem: Any existing workflow script defining a producer WITHOUT publishes will
+now fail validation immediately:
+
+```javascript
+// BEFORE (would have worked)
+producers: {
+  emailPoll: {
+    handler: async () => {},
+    schedule: { interval: "5m" }  // No publishes field!
+  }
+}
+// AFTER
+// Error: Producer 'emailPoll': publishes must be a non-empty array
+```
+
+Impact:
+- All legacy scripts without `publishes` will fail when re-saved/validated
+- Existing workflows may still execute (handler_config is optional), but cannot be updated
+- Scripts saved pre-e33bb50 without `publishes` will break on maintenance/fix operations
+
+Proposal: Document migration path for users. Add migration guide explaining:
+1. All producers must now declare `publishes: ["topic.name"]`
+2. Existing workflows need to be updated before next save
+3. Consider adding a one-time migration tool to backfill publishes from actual usage
+
+---
+
+ISSUE 2: Unused Topics Not Detected
+Severity: LOW
+Location: packages/agent/src/workflow-validator.ts:205-224
+
+Problem: Topic graph validation only checks that referenced topics are declared,
+but doesn't warn about unused topic declarations:
+
+```javascript
+const workflow = {
+  topics: { "input": {}, "output": {}, "unused": {} },  // "unused" never referenced
+  producers: {
+    poll: {
+      publishes: ["input", "output"]  // "unused" is dead code
+    }
+  }
+};
+// Validates successfully - no warning about "unused"
+```
+
+Impact: Dead code accumulates in workflow definitions.
+
+Proposal: Add optional linting warning for unused topics:
+```javascript
+const usedTopics = new Set([...producerPublishes, ...consumerSubscribe, ...consumerPublishes]);
+for (const topic of declaredTopics) {
+  if (!usedTopics.has(topic)) {
+    console.warn(`Topic '${topic}' is declared but never used`);
+  }
+}
+```
+
+---
+
+ISSUE 3: Topic Declaration Changes Don't Re-validate Historical Events
+Severity: MEDIUM
+Location: N/A (architecture gap)
+
+Problem: If a handler's publishes declaration changes, existing events in the
+old topics are not re-validated:
+
+Scenario:
+1. Producer publishes to topic A with inputId X
+2. Handler config changes, producer now declares publishes: ["B"]
+3. Old event with inputId X points to topic A (no longer declared)
+4. No error thrown - events are orphaned
+
+Impact: Topic declaration changes could leave orphaned events that don't match
+the current config.
+
+Proposal: Document this limitation. For future: consider adding a migration tool
+that validates existing events against current declarations.
+
+---
+
+ISSUE 4: No Runtime Integration Test for Topics.publish() Validation
+Severity: LOW
+Location: Missing test
+
+Problem: While Topics.publish() has runtime validation against handler_config
+declarations, there's no integration test verifying this end-to-end.
+
+The runtime validation (topics.ts:265-284) checks:
+```typescript
+if (!handlerConfig.publishes.includes(topicName)) {
+  throw new LogicError(`Cannot publish to undeclared topic '${topic}'`);
+}
+```
+
+But tests only verify the validation code, not the full integration path through
+handler-state-machine.ts to Topics.publish().
+
+Proposal: Add integration test in handler-state-machine.test.ts:
+```typescript
+it("should reject Topics.publish to undeclared topic at runtime", async () => {
+  // Setup workflow with handler_config declaring publishes: ["allowed"]
+  // Call Topics.publish({ topic: "not-allowed", ... })
+  // Assert: LogicError thrown
+});
+```
+
+---
+
+ISSUE 5: Empty Topics Declaration Edge Case
+Severity: LOW (correctly handled)
+Location: packages/agent/src/workflow-validator.ts:153
+
+Observation: If workflow.topics = {} (empty), all producers/consumers fail validation.
+
+This is CORRECT behavior - a workflow without any topics is invalid. The error message
+is clear: "publishes to undeclared topic 'X'".
+
+PHASE-TRACKING TEST UPDATE
+--------------------------
+The test correctly adds register_input to the operation matrix:
+
+```typescript
+const operations: OperationType[] = ['read', 'mutate', 'topic_peek', 'topic_publish', 'register_input'];
+
+const expectations = {
+  producer: { register_input: true },   // Only producer can register
+  prepare:  { register_input: false },
+  mutate:   { register_input: false },
+  next:     { register_input: false },
+};
+```
+
+This aligns with exec-15 spec: Input Ledger registration is producer-only.
+
+TEST COVERAGE
+-------------
+Comprehensive coverage:
+- 14 producer validation tests (with/without publishes, handlers, schedules)
+- 8 consumer validation tests (publishes/next function requirement)
+- 5 topic graph validation tests (undeclared topics)
+- Phase matrix completeness test (includes register_input)
+
+Potential gaps:
+- No test for unused topic declarations (would pass but is dead code)
+- No integration test for runtime Topics.publish() validation
+- No test for consumer switching publishes on/off over time (migration scenario)
+
+BACKWARD COMPATIBILITY
+----------------------
+BREAKING CHANGE:
+- Producer `publishes` is now REQUIRED
+- Existing scripts without `publishes` will fail validation on next save
+
+SAFE:
+- Consumer `publishes` is optional (defaults to [])
+- Existing consumer-only workflows continue working
+- Runtime validation is additive
+
+SUMMARY
+-------
+The implementation is well-structured with comprehensive validation and excellent
+test coverage. However, this is a BREAKING CHANGE for existing workflows:
+
+Critical consideration:
+1. Breaking change for producers without `publishes` (requires user migration)
+
+Minor observations:
+2. Unused topics not detected (dead code accumulates)
+3. No runtime integration tests for declare-vs-actual validation
+4. Historical events not re-validated on declaration change
+
+The implementation is production-ready with the caveat that users with legacy
+workflow scripts will need to add `publishes` declarations to their producers.
+Consider adding a migration guide or tool.
+
+RECOMMENDED FOLLOW-UP
+---------------------
+1. Add migration documentation explaining the breaking change
+2. Consider a one-time migration tool to backfill publishes from existing usage
+3. Add linting warning for unused topic declarations
+4. Add runtime integration test for Topics.publish() validation
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Breaking change for existing workflows) - skipped (high severity by design, all workflows are AI-managed and will be regenerated)
+- Issue #2 (Unused topics not detected) - skipped (low severity, linting enhancement)
+- Issue #3 (Topic declaration changes don't re-validate) - skipped (medium severity, architecture gap, acceptable for v1)
+- Issue #4 (No runtime integration test) - skipped (low severity, test enhancement)
+- Issue #5 (Empty topics declaration edge case) - skipped (correctly handled)

@@ -1,0 +1,205 @@
+COMMIT: fdd698d - Add impl spec for added inputs to exec model
+DATE: Fri Feb 6 12:28:18 2026 +0100
+AUTHOR: Claude Agent
+
+================================================================================
+SUMMARY
+================================================================================
+
+This commit adds a comprehensive implementation specification for the Input Ledger
+and Causal Tracking features that were documented in commit 14fbcd8. The spec
+describes how to bridge the gap between the updated execution model documentation
+(06a, 06b, 17) and the actual codebase implementation.
+
+FILES CHANGED:
+- specs/new/exec-15-input-ledger-and-causal-tracking.md (NEW, 823 lines)
+
+NOTE: This spec has since been implemented and moved to specs/done/.
+
+================================================================================
+CHANGES IN DETAIL
+================================================================================
+
+The spec covers 9 major implementation areas:
+
+1. DATABASE CHANGES
+   - New `inputs` table (Input Ledger) with columns: id, workflow_id, source, type,
+     external_id, title, created_by_run_id, created_at
+   - Unique constraint on (workflow_id, source, type, external_id) for idempotency
+   - ALTER events table: add `caused_by` column (JSON array of input IDs)
+   - ALTER mutations table: add `ui_title` column
+   - Event `title` column retained for backward compat but no longer populated
+
+2. INPUTSTORE (packages/db/src/input-store.ts)
+   - `register()` - idempotent input registration
+   - `get()` and `getByWorkflow()` - retrieval methods
+   - Added to KeepDbApi
+
+3. EVENTSTORE UPDATES
+   - `publishEvent()` accepts `causedBy` parameter, stores as JSON array
+   - `getCausedByForRun()` - get union of caused_by from reserved events
+   - ON CONFLICT updates caused_by (last-write-wins)
+
+4. TOPICS API CHANGES
+   - New `Topics.registerInput()` tool
+   - Phase restriction: only allowed in producer phase
+   - Updated `Topics.publish()`:
+     - Multi-topic support: `publish(["topicA", "topicB"], {...})`
+     - Producer: inputId required, caused_by = [inputId]
+     - Consumer next: inputId forbidden, caused_by inherited from reserved events
+   - Topic validation against declared `publishes` array
+
+5. SCRIPT VALIDATION UPDATES
+   - WorkflowConfig: producers require `publishes: string[]`
+   - WorkflowConfig: consumers have optional `publishes: string[]`
+   - Static validation: all referenced topics must be declared in workflow.topics
+   - Error if consumer has publishes but no next function
+
+6. HANDLER EXECUTION CONTEXT
+   - Thread `workflowConfig` and `handlerName` to tool context
+   - Required for topic validation at runtime
+
+7. PLANNER PROMPT UPDATES
+   - New producer format with `publishes` declaration
+   - New consumer format with optional `publishes`
+   - Updated event design section (no titles, use registerInput)
+   - Updated phase rules
+
+8. MAINTAINER PROMPT UPDATES
+   - Cannot modify: publishes declarations
+   - Must preserve: registerInput logic, inputId linkage
+
+9. PREPARERESULT.UI STRUCTURE
+   - `ui: { title: string }` for user-facing mutation description
+   - Stored in mutations.ui_title column
+
+================================================================================
+POTENTIAL ISSUES
+================================================================================
+
+1. BACKWARD COMPATIBILITY - INTENTIONAL BREAKAGE
+   SEVERITY: Info (intentional)
+   The spec states: "Existing WorkflowConfig without publishes will fail validation.
+   This is intentional — scripts must be re-planned with the new format."
+
+   This is documented as intentional since exec-02 deprecated Items, requiring
+   all scripts to be re-planned anyway. However, this could cause confusion if
+   any old workflows exist in user data.
+
+   STATUS: Intentional design decision, properly documented.
+
+2. CAUSED_BY AS JSON TEXT
+   SEVERITY: Low
+   The `caused_by` column stores JSON as TEXT. This is standard for SQLite but
+   means queries like "find all events caused by input X" require LIKE-based
+   matching or JSON extraction.
+
+   Example from implementation:
+   `WHERE e.caused_by LIKE '%"' || i.id || '"%'`
+
+   CONCERN: This pattern is fragile - could match partial IDs if IDs contain
+   the search pattern. However, since IDs are UUIDs, this is unlikely in practice.
+
+   PROPOSAL: Document this limitation. Consider using SQLite JSON functions
+   if performance becomes an issue: `json_each(caused_by) WHERE value = ?`
+
+3. TOPICS.REGISTERINPUT NAMESPACE
+   SEVERITY: Low
+   The spec mentions: "Alternative: registerInput could be on a ctx object passed
+   to the handler. But since the current model uses global Topics.*, keeping it
+   as Topics.registerInput() is consistent."
+
+   The docs (06a) show `ctx.registerInput()` but implementation uses
+   `Topics.registerInput()`. This inconsistency could confuse developers.
+
+   PROPOSAL: Either update docs to show `Topics.registerInput()` or create
+   an alias on ctx for documentation alignment.
+
+4. EVENT TITLE BACKWARD COMPATIBILITY
+   SEVERITY: Low
+   The spec says: "Existing events with title values are preserved. New events
+   get title = ''."
+
+   CONCERN: Code that reads event titles will get empty strings for new events.
+   If any UI or debug logic displays event titles, it will show empty for new data.
+
+   STATUS: This is intentional - the Input Ledger replaces event titles. The UX
+   should read from Input Ledger, not events.
+
+5. MULTI-TOPIC PUBLISH ATOMICITY
+   SEVERITY: Medium
+   The spec shows multi-topic publish as a loop:
+   ```
+   for (const topicName of topics) {
+     await context.api.eventStore.publishEvent(...)
+   }
+   ```
+
+   CONCERN: If publish to topic A succeeds but topic B fails, partial state.
+   On retry (idempotent), topic A gets LWW update, which is fine. But there's
+   a window where events exist in A but not B.
+
+   PROPOSAL: Consider wrapping in a transaction, or document that multi-topic
+   publish is not atomic. Given LWW semantics, eventual consistency should
+   be acceptable.
+
+6. MISSING INDEX ON CAUSED_BY
+   SEVERITY: Low
+   The spec notes: "No additional indexes needed for now." for causal tracking.
+
+   CONCERN: UX queries like "find all events for input X" will table-scan events.
+   With large event volumes, this could be slow.
+
+   PROPOSAL: The spec correctly defers this to the UX spec (exec-16). When
+   implemented, consider a generated column + index or JSON index if supported.
+
+================================================================================
+STYLE/QUALITY NOTES
+================================================================================
+
+1. GOOD: Comprehensive coverage - all 9 areas needed for the feature
+2. GOOD: Clear implementation order (Steps 1-7) with dependencies
+3. GOOD: Explicit backward compatibility analysis
+4. GOOD: Testing section with both unit and integration test scenarios
+5. GOOD: References section linking to related docs and specs
+6. GOOD: SQL examples are concrete and copy-pasteable
+7. GOOD: Clear separation of "what this spec does" vs "what it doesn't cover"
+
+================================================================================
+VERIFICATION
+================================================================================
+
+Verified that this spec was implemented:
+- Spec now resides in specs/done/exec-15-input-ledger-and-causal-tracking.md
+- InputStore exists at packages/db/src/input-store.ts
+- EventStore has caused_by support at packages/db/src/event-store.ts
+- Topics.registerInput exists at packages/agent/src/tools/topics.ts
+- WorkflowConfig validation updated in packages/agent/src/workflow-validator.ts
+
+================================================================================
+VERDICT
+================================================================================
+
+This is a well-structured implementation specification that successfully bridges
+the gap between the execution model documentation and the codebase. The spec is
+detailed enough for implementation (as evidenced by its successful implementation
+in the codebase).
+
+Minor concerns:
+- JSON-in-TEXT for caused_by is standard SQLite practice but has query limitations
+- Multi-topic publish is not atomic but eventual consistency is acceptable
+- Namespace inconsistency between docs (ctx.registerInput) and impl (Topics.registerInput)
+
+RECOMMENDATION: Approve. All identified issues are minor and the spec has been
+successfully implemented. The namespace inconsistency could be addressed in a
+future doc cleanup.
+
+================================================================================
+ISSUE REVIEW
+================================================================================
+- Issue #1 (Backward Compatibility) - skipped (intentional, documented)
+- Issue #2 (CAUSED_BY as JSON TEXT) - skipped (low severity, standard SQLite practice)
+- Issue #3 (Topics.registerInput Namespace) - skipped (low severity, doc cleanup)
+- Issue #4 (Event Title Backward Compat) - skipped (low severity, intentional design)
+- Issue #5 (Multi-topic Publish Atomicity) - skipped (medium severity, eventual consistency acceptable)
+- Issue #6 (Missing Index on caused_by) - skipped (low severity, deferred to UX spec)
