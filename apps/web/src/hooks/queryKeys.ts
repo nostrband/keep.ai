@@ -86,4 +86,5 @@ export const qk = {
   inputMutations: (inputId: string) => [{ scope: "inputMutations", inputId }] as const,
   inputEvents: (inputId: string) => [{ scope: "inputEvents", inputId }] as const,
   workflowMutations: (workflowId: string) => [{ scope: "workflowMutations", workflowId }] as const,
+  pendingReconciliation: (workflowId: string) => [{ scope: "pendingReconciliation", workflowId }] as const,
 };

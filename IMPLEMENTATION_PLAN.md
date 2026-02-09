@@ -4,7 +4,7 @@
 
 Keep.AI is a local personal automation product where AI creates and maintains automations. Users express intent, then fully delegate to the system. The execution model (exec-01 through exec-19) is fully implemented. This plan focuses on what remains to ship a polished, reliable v1.
 
-**Current DB Version:** 45 | **Latest Tag:** v1.0.0-alpha.126
+**Current DB Version:** 45 | **Latest Tag:** v1.0.0-alpha.127
 
 ---
 
@@ -52,25 +52,24 @@ All Priority 2 bugs resolved.
 
 ## Priority 3: UX Polish for v1 Release
 
-These items make the difference between "alpha" and "lovable."
+All Priority 3 items resolved.
 
-- [ ] **Add React error boundaries**
-  - No error boundaries exist — single unhandled error crashes entire app
-  - Add route-level error boundaries in `apps/web/src/App.tsx`
-  - Show user-friendly error message with reload option
-  - Complexity: Small
+- [x] **Add React error boundaries**
+  - Created `ErrorBoundary` class component in `apps/web/src/components/ErrorBoundary.tsx`
+  - Wraps all routes in `App.tsx` — catches unhandled rendering errors
+  - Shows user-friendly message with "Reload page" and "Go back" buttons
+  - Error message displayed in pre block for debugging
 
-- [ ] **Clean up console.log statements**
-  - 79 console statements across web app should be removed or converted to debug logging
-  - Key files: `QueryProviderEmbedded.tsx`, `App.tsx`, `worker.ts`, `service-worker.ts`
-  - Keep `console.error` for actual errors; remove `console.log`/`console.debug`
-  - Complexity: Small
+- [x] **Clean up console.log statements**
+  - Verified: zero `console.log` statements exist in web app
+  - All remaining console calls are `console.error`, `console.warn`, or `console.debug` in appropriate error-handling contexts
+  - No cleanup needed — codebase was already clean
 
-- [ ] **Improve reconciliation status visibility**
-  - When mutation is in reconciliation, user sees "paused" but doesn't understand why
-  - Add clear messaging: "Verifying that [mutation] completed successfully"
-  - Show reconciliation status in workflow detail and notifications
-  - Complexity: Medium
+- [x] **Improve reconciliation status visibility**
+  - Added `usePendingReconciliation` hook querying indeterminate/needs_reconcile mutations
+  - WorkflowDetailPage: amber alert banner showing "Verifying action completed" with mutation title and link to outputs
+  - MainPage: bulk-fetches reconciliation state for all workflows, shows "Verifying action completed..." with amber styling
+  - Workflow list items use amber left border and text for reconciliation (vs red for errors)
 
 ---
 

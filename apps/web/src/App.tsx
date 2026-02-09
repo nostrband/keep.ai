@@ -33,6 +33,7 @@ import ConsolePage from "./components/ConsolePage";
 import SettingsPage from "./components/SettingsPage";
 import NotificationsPage from "./components/NotificationsPage";
 import { ConnectDeviceDialog } from "./components/ConnectDeviceDialog";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { useDbQuery } from "./hooks/dbQuery";
 
 // Access build-time constants
@@ -340,6 +341,7 @@ function App() {
       {isElectron && <ElectronIPCHandler />}
       {/* Show banner when app is updated via service worker (not in Electron) */}
       {!isElectron && <AppUpdateBanner />}
+      <ErrorBoundary>
       <Routes>
         <Route path="/" element={<MainPage />} />
         <Route path="/chat" element={<ChatPage />} />
@@ -371,6 +373,7 @@ function App() {
         {!isServerless && <Route path="/settings" element={<SettingsPage />} />}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      </ErrorBoundary>
     </Router>
   );
 }

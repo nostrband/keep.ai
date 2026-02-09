@@ -51,17 +51,19 @@ const EXAMPLE_SUGGESTIONS = [
   "Save interesting tweets to a note",
 ];
 
+type AttentionLevel = "none" | "warning" | "error";
+
 // Compute secondary line text for workflow
-function getSecondaryLine(workflow: Workflow, latestRun: ScriptRun | undefined, task: Task | undefined): { text: string; isAttention: boolean } {
+function getSecondaryLine(workflow: Workflow, latestRun: ScriptRun | undefined, task: Task | undefined, reconciliationCount: number): { text: string; isAttention: boolean; attentionLevel: AttentionLevel } {
   // Check if task is waiting for input
   if (task && (task.state === "wait" || task.state === "asks")) {
-    return { text: "Waiting for your input", isAttention: true };
+    return { text: "Waiting for your input", isAttention: true, attentionLevel: "error" };
   }
 
   // Check if workflow is in maintenance mode (agent is auto-fixing)
   // Per spec 09b: Logic errors are handled silently, don't show as needing attention
   if (workflow.maintenance) {
-    return { text: "Auto-fixing issue...", isAttention: false };
+    return { text: "Auto-fixing issue...", isAttention: false, attentionLevel: "none" };
   }
 
   // Check latest run status
@@ -79,45 +81,53 @@ function getSecondaryLine(workflow: Workflow, latestRun: ScriptRun | undefined, 
       if (needsAttention) {
         // Show user-friendly message based on error type
         if (errorType === 'auth') {
-          return { text: `⚠ Authentication expired ${ago}`, isAttention: true };
+          return { text: `⚠ Authentication expired ${ago}`, isAttention: true, attentionLevel: "error" };
         } else if (errorType === 'permission') {
-          return { text: `⚠ Permission denied ${ago}`, isAttention: true };
+          return { text: `⚠ Permission denied ${ago}`, isAttention: true, attentionLevel: "error" };
         } else if (errorType === 'network') {
-          return { text: `⚠ Network error ${ago}`, isAttention: true };
+          return { text: `⚠ Network error ${ago}`, isAttention: true, attentionLevel: "error" };
         } else if (errorType === 'internal') {
-          return { text: `⚠ Something went wrong ${ago} - contact support`, isAttention: true };
+          return { text: `⚠ Something went wrong ${ago} - contact support`, isAttention: true, attentionLevel: "error" };
         }
-        return { text: `⚠ Failed ${ago} - needs attention`, isAttention: true };
+        return { text: `⚠ Failed ${ago} - needs attention`, isAttention: true, attentionLevel: "error" };
       } else {
         // Logic error - agent is handling it
-        return { text: `Issue detected ${ago} - fixing...`, isAttention: false };
+        return { text: `Issue detected ${ago} - fixing...`, isAttention: false, attentionLevel: "none" };
       }
     }
 
     if (latestRun.end_timestamp) {
       const runTime = new Date(latestRun.end_timestamp);
       const ago = formatTimeAgo(runTime);
-      return { text: `Last run: ${ago} ✓`, isAttention: false };
+      return { text: `Last run: ${ago} ✓`, isAttention: false, attentionLevel: "none" };
     }
 
-    // Still running
-    return { text: "Running now...", isAttention: false };
+    // Still running — check if paused for reconciliation
+    if (reconciliationCount > 0) {
+      return { text: "Verifying action completed...", isAttention: true, attentionLevel: "warning" };
+    }
+    return { text: "Running now...", isAttention: false, attentionLevel: "none" };
+  }
+
+  // No latest run but has reconciliation mutations
+  if (reconciliationCount > 0) {
+    return { text: "Verifying action completed...", isAttention: true, attentionLevel: "warning" };
   }
 
   // Check next run time
   if (workflow.next_run_timestamp && workflow.status === "active") {
     const nextRun = new Date(workflow.next_run_timestamp);
     if (nextRun > new Date()) {
-      return { text: `Next run: ${formatNextRun(nextRun)}`, isAttention: false };
+      return { text: `Next run: ${formatNextRun(nextRun)}`, isAttention: false, attentionLevel: "none" };
     }
   }
 
   // Check if scheduled
   if (!workflow.cron && !workflow.events) {
-    return { text: "Not scheduled", isAttention: false };
+    return { text: "Not scheduled", isAttention: false, attentionLevel: "none" };
   }
 
-  return { text: workflow.cron || workflow.events || "No schedule", isAttention: false };
+  return { text: workflow.cron || workflow.events || "No schedule", isAttention: false, attentionLevel: "none" };
 }
 
 function formatTimeAgo(date: Date): string {
@@ -163,6 +173,7 @@ export default function MainPage() {
   // const { mode: autonomyMode, toggleMode: toggleAutonomyMode, isLoaded: isAutonomyLoaded } = useAutonomyPreference();
   const [input, setInput] = useState("");
   const [latestRuns, setLatestRuns] = useState<Record<string, ScriptRun>>({});
+  const [reconciliationCounts, setReconciliationCounts] = useState<Record<string, number>>({});
   const [showAttentionOnly, setShowAttentionOnly] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -181,7 +192,11 @@ export default function MainPage() {
     const fetchRuns = async () => {
       try {
         const workflowIds = workflows.map(w => w.id);
-        const runsMap = await api.scriptStore.getLatestRunsByWorkflowIds(workflowIds);
+        const [runsMap, indeterminate, needsReconcile] = await Promise.all([
+          api.scriptStore.getLatestRunsByWorkflowIds(workflowIds),
+          api.mutationStore.getIndeterminate(),
+          api.mutationStore.getNeedsReconcile(),
+        ]);
 
         // Check if component unmounted during fetch
         if (cancelled) return;
@@ -192,6 +207,13 @@ export default function MainPage() {
           runs[workflowId] = run;
         }
         setLatestRuns(runs);
+
+        // Group reconciliation mutations by workflow_id
+        const counts: Record<string, number> = {};
+        for (const m of [...indeterminate, ...needsReconcile]) {
+          counts[m.workflow_id] = (counts[m.workflow_id] || 0) + 1;
+        }
+        setReconciliationCounts(counts);
       } catch {
         // Ignore errors
       }
@@ -223,13 +245,14 @@ export default function MainPage() {
     const workflowsWithStatus = nonArchived.map(workflow => {
       const latestRun = latestRuns[workflow.id];
       const task = taskMap[workflow.task_id];
-      const { text, isAttention } = getSecondaryLine(workflow, latestRun, task);
+      const { text, isAttention, attentionLevel } = getSecondaryLine(workflow, latestRun, task, reconciliationCounts[workflow.id] || 0);
       // A workflow is "running" if it has a script run with no end_timestamp
       const isRunning = isScriptRunRunning(latestRun);
       return {
         ...workflow,
         secondaryText: text,
         needsAttention: isAttention,
+        attentionLevel,
         isRunning,
         lastActivity: latestRun?.end_timestamp || latestRun?.start_timestamp || workflow.timestamp,
       };
@@ -244,7 +267,7 @@ export default function MainPage() {
 
     const count = sorted.filter(w => w.needsAttention).length;
     return { sortedWorkflows: sorted, attentionCount: count, archivedCount: archived.length };
-  }, [workflows, latestRuns, taskMap]);
+  }, [workflows, latestRuns, taskMap, reconciliationCounts]);
 
   // Filter workflows if showing attention only
   const displayedWorkflows = showAttentionOnly
@@ -537,8 +560,10 @@ export default function MainPage() {
                     key={workflow.id}
                     to={`/workflows/${workflow.id}`}
                     className={`block p-4 bg-white rounded-lg border transition-all hover:shadow-sm ${
-                      workflow.needsAttention
+                      workflow.attentionLevel === "error"
                         ? "border-l-4 border-l-red-500 border-t-gray-200 border-r-gray-200 border-b-gray-200"
+                        : workflow.attentionLevel === "warning"
+                        ? "border-l-4 border-l-amber-500 border-t-gray-200 border-r-gray-200 border-b-gray-200"
                         : "border-gray-200 hover:border-gray-300"
                     }`}
                   >
@@ -554,7 +579,9 @@ export default function MainPage() {
                           )}
                         </div>
                         <div className={`text-sm ${
-                          workflow.needsAttention ? "text-red-600" : "text-gray-500"
+                          workflow.attentionLevel === "error" ? "text-red-600"
+                          : workflow.attentionLevel === "warning" ? "text-amber-600"
+                          : "text-gray-500"
                         }`}>
                           {workflow.cron && (
                             <span className="text-gray-400">{formatCronSchedule(workflow.cron)} · </span>
