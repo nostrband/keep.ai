@@ -4,7 +4,7 @@
 
 Keep.AI is a local personal automation product where AI creates and maintains automations. Users express intent, then fully delegate to the system. The execution model (exec-01 through exec-19) is fully implemented. This plan focuses on what remains to ship a polished, reliable v1.
 
-**Current DB Version:** 45 | **Latest Tag:** v1.0.0-alpha.130
+**Current DB Version:** 45 | **Latest Tag:** v1.0.0-alpha.132
 
 ---
 
