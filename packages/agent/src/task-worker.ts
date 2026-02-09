@@ -530,13 +530,17 @@ export class TaskWorker {
       return undefined;
     }
 
-    // 2. Extract scriptRunId from first inbox item metadata
+    // 2. Extract scriptRunId, handlerRunId, handlerName from first inbox item metadata
     let scriptRunId: string | undefined;
+    let handlerRunId: string | undefined;
+    let handlerName: string | undefined;
     for (const item of inbox) {
       try {
         const parsed = JSON.parse(item);
         if (parsed.metadata?.scriptRunId) {
           scriptRunId = parsed.metadata.scriptRunId;
+          handlerRunId = parsed.metadata.handlerRunId;
+          handlerName = parsed.metadata.handlerName;
           break;
         }
       } catch (e) {
@@ -551,7 +555,24 @@ export class TaskWorker {
       return undefined;
     }
 
-    // 3. Load the failed script run
+    // 3. Load handler run if present (new-format workflows)
+    let handlerRunError: string | undefined;
+    let handlerRunErrorType: string | undefined;
+    let handlerRunLogs: string | undefined;
+    let handlerType: string | undefined;
+    if (handlerRunId) {
+      const handlerRun = await this.api.handlerRunStore.get(handlerRunId);
+      if (handlerRun) {
+        handlerRunError = handlerRun.error || undefined;
+        handlerRunErrorType = handlerRun.error_type || undefined;
+        handlerRunLogs = handlerRun.logs || undefined;
+        handlerType = handlerRun.handler_type || undefined;
+      } else {
+        this.debug("loadMaintainerContext: Handler run not found", handlerRunId);
+      }
+    }
+
+    // 4. Load the failed script run
     const scriptRun = await this.api.scriptStore.getScriptRun(scriptRunId);
     if (!scriptRun) {
       this.debug("loadMaintainerContext: Script run not found", scriptRunId);
@@ -564,14 +585,17 @@ export class TaskWorker {
         scriptCode: activeScript.code,
         scriptVersion: formatVersion(activeScript.major_version, activeScript.minor_version),
         changelog: [],
+        handlerRunId,
+        handlerName,
+        handlerType,
       };
     }
 
-    // 4. Load the script that was run (might be different from current active script)
+    // 5. Load the script that was run (might be different from current active script)
     const failedScript = await this.api.scriptStore.getScript(scriptRun.script_id);
     const scriptToUse = failedScript || activeScript;
 
-    // 5. Build changelog from prior minor versions for the same major version
+    // 6. Build changelog from prior minor versions for the same major version
     const priorScripts = await this.api.scriptStore.getScriptsByWorkflowAndMajorVersion(
       workflowId,
       scriptToUse.major_version
@@ -584,26 +608,34 @@ export class TaskWorker {
         comment: s.change_comment || "",
       }));
 
-    // 6. Trim logs to last 5000 chars for predictable context size
-    const allLogs = scriptRun.logs || "";
+    // 7. Determine error and logs source:
+    //    - When handler info is present (new-format), use handler run's error/logs
+    //    - Otherwise (old-format), use script_run error/logs
+    const errorType = handlerRunErrorType || scriptRun.error_type || "unknown";
+    const errorMessage = handlerRunError || scriptRun.error || "Unknown error";
+
+    const rawLogs = handlerRunLogs || scriptRun.logs || "";
     const MAX_LOG_CHARS = 5000;
-    const trimmedLogs = allLogs.length > MAX_LOG_CHARS
-      ? "[truncated]\n" + allLogs.slice(-MAX_LOG_CHARS)
-      : allLogs;
+    const trimmedLogs = rawLogs.length > MAX_LOG_CHARS
+      ? "[truncated]\n" + rawLogs.slice(-MAX_LOG_CHARS)
+      : rawLogs;
 
     return {
       workflowId,
       expectedScriptId: scriptToUse.id,
       scriptRunId,
       error: {
-        type: scriptRun.error_type || "unknown",
-        message: scriptRun.error || "Unknown error",
+        type: errorType,
+        message: errorMessage,
       },
       logs: trimmedLogs,
       scriptCode: scriptToUse.code,
       scriptVersion: formatVersion(scriptToUse.major_version, scriptToUse.minor_version),
       changelog,
       intentSpec: workflow.intent_spec || undefined,  // exec-17: Include intent for repair context
+      handlerRunId,
+      handlerName,
+      handlerType,
     };
   }
 
@@ -643,7 +675,7 @@ ${intentSection}
 
 ## Script Information
 - **Version:** ${context.scriptVersion}
-- **Workflow ID:** ${context.workflowId}
+- **Workflow ID:** ${context.workflowId}${context.handlerName ? `\n- **Failed Handler:** ${context.handlerName} (${context.handlerType || 'unknown'})` : ''}
 
 ## Console Logs (last 50 lines)
 \`\`\`
@@ -665,6 +697,7 @@ If you cannot fix this issue autonomously, explain why without calling the \`fix
 
     // Create a new inbox message with the rich context
     const enrichedMessage = JSON.stringify({
+      id: generateId(),
       role: "user",
       parts: [{ type: "text", text: contextMessage }],
       metadata: {

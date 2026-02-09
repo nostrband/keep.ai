@@ -1,7 +1,8 @@
 import debug from "debug";
 import { KeepDbApi, Workflow } from "@app/db";
-import { WorkflowWorker } from "./workflow-worker";
+import { WorkflowWorker, MAX_FIX_ATTEMPTS, escalateToUser } from "./workflow-worker";
 import { WorkflowExecutionSignal, WorkflowRetryState } from "./workflow-worker-signal";
+import { LogicError } from "./errors";
 import { isValidEnv } from "./env";
 import { Cron } from "croner";
 import type { ConnectionManager } from "@app/connectors";
@@ -422,8 +423,61 @@ export class WorkflowScheduler {
       return;
     }
 
+    // Route maintenance results to enterMaintenanceMode before signaling
+    if (result.status === 'maintenance') {
+      await this.enterMaintenanceModeForSession(workflow, result);
+    }
+
     // Handle session result by emitting appropriate signals
     this.handleSessionResult(workflow.id, result);
+  }
+
+  /**
+   * Enter maintenance mode for a session that failed with a logic error.
+   * Re-fetches the workflow to get current fix count, then either
+   * creates a maintainer task or escalates to the user.
+   */
+  private async enterMaintenanceModeForSession(
+    workflow: Workflow,
+    result: SessionResult
+  ): Promise<void> {
+    // Re-fetch to get current maintenance_fix_count
+    const freshWorkflow = await this.api.scriptStore.getWorkflow(workflow.id);
+    if (!freshWorkflow) {
+      this.debug(`enterMaintenanceModeForSession: workflow ${workflow.id} not found`);
+      return;
+    }
+
+    const fixCount = freshWorkflow.maintenance_fix_count || 0;
+
+    if (fixCount >= MAX_FIX_ATTEMPTS) {
+      this.debug(
+        `Workflow ${workflow.id} exceeded max fix attempts (${fixCount}/${MAX_FIX_ATTEMPTS}), escalating to user`
+      );
+      await escalateToUser(this.api, {
+        workflow: freshWorkflow,
+        scriptRunId: result.sessionId || '',
+        error: new LogicError(result.error || 'Logic error'),
+        logs: [], // Session-level logs are empty for new-format workflows
+        fixAttempts: fixCount,
+      });
+      return;
+    }
+
+    // Enter maintenance mode: creates maintainer task + inbox item
+    await this.api.enterMaintenanceMode({
+      workflowId: workflow.id,
+      workflowTitle: workflow.title,
+      scriptRunId: result.sessionId || '',
+      handlerRunId: result.handlerRunId,
+      handlerName: result.handlerName,
+    });
+
+    this.debug(
+      `Entered maintenance mode for workflow ${workflow.id}, ` +
+      `handler: ${result.handlerName || '(none)'}, ` +
+      `fix attempt ${fixCount + 1}/${MAX_FIX_ATTEMPTS}`
+    );
   }
 
   /**
@@ -433,17 +487,13 @@ export class WorkflowScheduler {
     switch (result.status) {
       case 'completed':
         this.debug(`Session ${result.sessionId} completed for workflow ${workflowId}`);
-        // Clear any retry state and signal success
-        this.workflowRetryState.delete(workflowId);
         // Signal success to scheduler (same as old-format completion)
-        if (this.worker['onSignal']) {
-          this.worker['onSignal']({
-            type: 'done',
-            workflowId,
-            timestamp: Date.now(),
-            scriptRunId: result.sessionId,
-          });
-        }
+        this.handleWorkerSignal({
+          type: 'done',
+          workflowId,
+          timestamp: Date.now(),
+          scriptRunId: result.sessionId,
+        });
         break;
 
       case 'suspended':
@@ -457,16 +507,28 @@ export class WorkflowScheduler {
         this.debug(`Session ${result.sessionId} failed for workflow ${workflowId}: ${result.error}`);
         // Session-orchestration already set workflow status to 'error'
         // Signal that user needs attention
-        if (this.worker['onSignal']) {
-          this.worker['onSignal']({
-            type: 'needs_attention',
-            workflowId,
-            timestamp: Date.now(),
-            error: result.error || 'Session failed',
-            errorType: 'logic',
-            scriptRunId: result.sessionId,
-          });
-        }
+        this.handleWorkerSignal({
+          type: 'needs_attention',
+          workflowId,
+          timestamp: Date.now(),
+          error: result.error || 'Session failed',
+          errorType: 'logic',
+          scriptRunId: result.sessionId,
+        });
+        break;
+
+      case 'maintenance':
+        this.debug(`Session ${result.sessionId} entered maintenance for workflow ${workflowId}: ${result.error}`);
+        // enterMaintenanceModeForSession already handled DB work
+        // Signal maintenance mode to clear retry state
+        this.handleWorkerSignal({
+          type: 'maintenance',
+          workflowId,
+          timestamp: Date.now(),
+          error: result.error || 'Logic error - entering maintenance',
+          errorType: 'logic',
+          scriptRunId: result.sessionId,
+        });
         break;
     }
   }

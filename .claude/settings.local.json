@@ -50,7 +50,8 @@
       "Bash(do echo \"=== $f ===\" sed -n '/ISSUE REVIEW/,$p' \"$f\")",
       "Bash(basename:*)",
       "Bash(git log:*)",
-      "Bash(npx vitest:*)"
+      "Bash(npx vitest:*)",
+      "Bash(node -e:*)"
     ]
   }
 }

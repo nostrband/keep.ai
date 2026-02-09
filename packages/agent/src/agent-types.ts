@@ -69,6 +69,12 @@ export interface MaintainerContext {
   changelog: Array<{ version: string; comment: string }>;
   /** Intent spec JSON string (exec-17) - user's original intent for the workflow */
   intentSpec?: string;
+  /** Handler run that failed (new-format workflows) */
+  handlerRunId?: string;
+  /** Handler name that failed (new-format workflows) */
+  handlerName?: string;
+  /** Handler type: producer or consumer (new-format workflows) */
+  handlerType?: string;
 }
 
 export type AgentTask = {

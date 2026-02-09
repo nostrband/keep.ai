@@ -11,6 +11,10 @@ export interface EnterMaintenanceModeParams {
   workflowId: string;
   workflowTitle: string;
   scriptRunId: string;
+  /** Handler run that triggered maintenance (new-format workflows) */
+  handlerRunId?: string;
+  /** Handler name that failed (new-format workflows) */
+  handlerName?: string;
 }
 
 /**

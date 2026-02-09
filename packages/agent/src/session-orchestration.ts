@@ -36,10 +36,15 @@ export type SessionTrigger = "schedule" | "manual" | "event";
  * Result returned from executeWorkflowSession.
  */
 export interface SessionResult {
-  status: "completed" | "suspended" | "failed";
+  status: "completed" | "suspended" | "failed" | "maintenance";
   error?: string;
+  errorType?: string;
   reason?: string;
   sessionId?: string;
+  /** Handler run that triggered maintenance (new-format only) */
+  handlerRunId?: string;
+  /** Handler name that failed (new-format only) */
+  handlerName?: string;
 }
 
 /**
@@ -104,6 +109,36 @@ async function failSession(
     status: "error",
   });
   log(`Session ${session.id} failed: ${error}`);
+}
+
+/**
+ * Finish a session for maintenance mode (logic errors eligible for auto-fix).
+ * Unlike failSession, does NOT set workflow.status = "error".
+ * The workflow stays active — enterMaintenanceMode() will set maintenance=true.
+ */
+async function finishSessionForMaintenance(
+  api: KeepDbApi,
+  session: ScriptRun,
+  error: string,
+  errorType: string = "logic"
+): Promise<void> {
+  // Aggregate cost from handler runs
+  const runs = await api.handlerRunStore.getBySession(session.id);
+  const totalCost = runs.reduce((sum, run) => sum + (run.cost || 0), 0);
+
+  await api.scriptStore.finishScriptRun(
+    session.id,
+    new Date().toISOString(),
+    "failed",
+    error,
+    "", // no logs
+    errorType,
+    totalCost
+  );
+
+  // NOTE: Do NOT set workflow.status = "error" here.
+  // enterMaintenanceMode() will set workflow.maintenance = true.
+  log(`Session ${session.id} finished for maintenance: ${error}`);
 }
 
 /**
@@ -310,15 +345,26 @@ export async function executeWorkflowSession(
 
           // Per exec-09: check status instead of phase for failure/paused detection
           if (isFailedStatus(result.status)) {
-            await failSession(
-              api,
-              session,
-              result.error || "Producer failed",
-              result.errorType || "logic"
-            );
+            const errorMsg = result.error || "Producer failed";
+            const errType = result.errorType || "logic";
+
+            // Route logic errors to maintenance for auto-fix
+            if (result.status === "failed:logic") {
+              await finishSessionForMaintenance(api, session, errorMsg, errType);
+              return {
+                status: "maintenance",
+                error: errorMsg,
+                errorType: errType,
+                sessionId,
+                handlerRunId: handlerRun.id,
+                handlerName: producerName,
+              };
+            }
+
+            await failSession(api, session, errorMsg, errType);
             return {
               status: "failed",
-              error: result.error || "Producer failed",
+              error: errorMsg,
               sessionId,
             };
           }
@@ -365,15 +411,26 @@ export async function executeWorkflowSession(
 
       // Per exec-09: check status instead of phase for failure/paused detection
       if (isFailedStatus(result.status)) {
-        await failSession(
-          api,
-          session,
-          result.error || "Consumer failed",
-          result.errorType || "logic"
-        );
+        const errorMsg = result.error || "Consumer failed";
+        const errType = result.errorType || "logic";
+
+        // Route logic errors to maintenance for auto-fix
+        if (result.status === "failed:logic") {
+          await finishSessionForMaintenance(api, session, errorMsg, errType);
+          return {
+            status: "maintenance",
+            error: errorMsg,
+            errorType: errType,
+            sessionId,
+            handlerRunId: handlerRun.id,
+            handlerName: consumer.name,
+          };
+        }
+
+        await failSession(api, session, errorMsg, errType);
         return {
           status: "failed",
-          error: result.error || "Consumer failed",
+          error: errorMsg,
           sessionId,
         };
       }
@@ -402,7 +459,20 @@ export async function executeWorkflowSession(
     return { status: "completed", sessionId };
   } catch (error) {
     // Use getRunStatusForError instead of ensureClassified (per exec-12)
-    const { error: classifiedError } = getRunStatusForError(error, "session-orchestration");
+    const { status: runStatus, error: classifiedError } = getRunStatusForError(error, "session-orchestration");
+
+    // Route logic errors to maintenance for auto-fix
+    if (runStatus === "failed:logic") {
+      await finishSessionForMaintenance(api, session, classifiedError.message, classifiedError.type);
+      return {
+        status: "maintenance",
+        error: classifiedError.message,
+        errorType: classifiedError.type,
+        sessionId,
+        // No handlerRunId/handlerName — error occurred outside handler execution
+      };
+    }
+
     await failSession(api, session, classifiedError.message, classifiedError.type);
     return {
       status: "failed",
@@ -454,15 +524,26 @@ async function continueSession(
 
     // Per exec-09: check status instead of phase for failure/paused detection
     if (isFailedStatus(result.status)) {
-      await failSession(
-        api,
-        session,
-        result.error || "Consumer failed",
-        result.errorType || "logic"
-      );
+      const errorMsg = result.error || "Consumer failed";
+      const errType = result.errorType || "logic";
+
+      // Route logic errors to maintenance for auto-fix
+      if (result.status === "failed:logic") {
+        await finishSessionForMaintenance(api, session, errorMsg, errType);
+        return {
+          status: "maintenance",
+          error: errorMsg,
+          errorType: errType,
+          sessionId: session.id,
+          handlerRunId: handlerRun.id,
+          handlerName: consumer.name,
+        };
+      }
+
+      await failSession(api, session, errorMsg, errType);
       return {
         status: "failed",
-        error: result.error || "Consumer failed",
+        error: errorMsg,
         sessionId: session.id,
       };
     }

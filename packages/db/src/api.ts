@@ -441,6 +441,8 @@ export class KeepDbApi {
           }],
           metadata: {
             scriptRunId: scriptRunId,
+            ...(params.handlerRunId && { handlerRunId: params.handlerRunId }),
+            ...(params.handlerName && { handlerName: params.handlerName }),
           },
         }),
         handler_thread_id: "",

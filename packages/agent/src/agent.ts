@@ -306,6 +306,7 @@ export class Agent {
 
           // onStep handler
           if (opts?.onStep) {
+            this.debug("step", input.step, "onStep calling");
             const info = await opts.onStep(
               input.step,
               input,
@@ -318,10 +319,12 @@ export class Agent {
 
             // New stuff in the inbox
             if (info.inbox) input.inbox = [...info.inbox];
+            this.debug("step", input.step, "onStep done, proceed:", info.proceed, "stopped:", stopped);
           }
 
           // Enforce hard limit
           if (input.step >= MAX_STEPS) stopped = true;
+          this.debug("step", input.step, "onStepFinish done, stopped:", stopped);
         },
         onError: (event) => {
           error = event.error;
@@ -355,7 +358,19 @@ export class Agent {
         },
       });
 
-      this.updateUsage(await result.usage);
+      // result.usage may hang when toUIMessageStream() consumed the stream
+      // (AI SDK bug) - use a timeout to avoid blocking the agent loop
+      try {
+        const usage = await Promise.race([
+          result.usage,
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("usage timeout")), 5000)
+          ),
+        ]);
+        this.updateUsage(usage);
+      } catch (e) {
+        this.debug("result.usage timed out, skipping usage update");
+      }
 
       // @ts-ignore
       this.debug("openRouterUsage", this.openRouterUsage);
