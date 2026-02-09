@@ -66,8 +66,9 @@ function createMockConnections(service: string, accounts: string[]): Connection[
     id: `${service}-${accountId}`,
     service,
     accountId,
+    status: "connected" as const,
     createdAt: Date.now(),
-    updatedAt: Date.now(),
+    lastUsedAt: Date.now(),
   }));
 }
 
@@ -99,7 +100,7 @@ describe("Gmail Tool", () => {
       "users.threads.get",
       "users.threads.list",
       "users.getProfile",
-    ];
+    ] as const;
 
     for (const method of methods) {
       const isReadOnly = gmailTool.isReadOnly?.({
@@ -224,7 +225,7 @@ describe("Google Drive Tool", () => {
     const connectionManager = createMockConnectionManager();
     const gdriveTool = makeGDriveTool(() => mockContext, connectionManager);
 
-    const readMethods = ["files.list", "files.get", "files.export"];
+    const readMethods = ["files.list", "files.get", "files.export"] as const;
 
     for (const method of readMethods) {
       const isReadOnly = gdriveTool.isReadOnly?.({
@@ -244,7 +245,7 @@ describe("Google Drive Tool", () => {
       "files.update",
       "files.delete",
       "files.copy",
-    ];
+    ] as const;
 
     for (const method of writeMethods) {
       const isReadOnly = gdriveTool.isReadOnly?.({
@@ -374,7 +375,7 @@ describe("Google Sheets Tool", () => {
       "spreadsheets.get",
       "spreadsheets.values.get",
       "spreadsheets.values.batchGet",
-    ];
+    ] as const;
 
     for (const method of readMethods) {
       const isReadOnly = gsheetsTool.isReadOnly?.({
@@ -396,7 +397,7 @@ describe("Google Sheets Tool", () => {
       "spreadsheets.values.clear",
       "spreadsheets.values.batchUpdate",
       "spreadsheets.batchUpdate",
-    ];
+    ] as const;
 
     for (const method of writeMethods) {
       const isReadOnly = gsheetsTool.isReadOnly?.({
@@ -532,7 +533,7 @@ describe("Google Docs Tool", () => {
     const connectionManager = createMockConnectionManager();
     const gdocsTool = makeGDocsTool(() => mockContext, connectionManager);
 
-    const writeMethods = ["documents.create", "documents.batchUpdate"];
+    const writeMethods = ["documents.create", "documents.batchUpdate"] as const;
 
     for (const method of writeMethods) {
       const isReadOnly = gdocsTool.isReadOnly?.({
@@ -663,7 +664,7 @@ describe("Notion Tool", () => {
       "pages.retrieve",
       "blocks.children.list",
       "search",
-    ];
+    ] as const;
 
     for (const method of readMethods) {
       const isReadOnly = notionTool.isReadOnly?.({
@@ -682,7 +683,7 @@ describe("Notion Tool", () => {
       "pages.create",
       "pages.update",
       "blocks.children.append",
-    ];
+    ] as const;
 
     for (const method of writeMethods) {
       const isReadOnly = notionTool.isReadOnly?.({
@@ -720,16 +721,18 @@ describe("Notion Tool", () => {
         id: "notion-workspace-1",
         service: "notion",
         accountId: "workspace-1",
+        status: "connected",
         createdAt: Date.now(),
-        updatedAt: Date.now(),
+        lastUsedAt: Date.now(),
         metadata: { workspace_name: "My Workspace" },
       },
       {
         id: "notion-workspace-2",
         service: "notion",
         accountId: "workspace-2",
+        status: "connected",
         createdAt: Date.now(),
-        updatedAt: Date.now(),
+        lastUsedAt: Date.now(),
         metadata: { workspace_name: "Work Workspace" },
       },
     ];
@@ -843,8 +846,9 @@ describe("Notion Tool", () => {
         id: "notion-workspace-1",
         service: "notion",
         accountId: "workspace-1",
+        status: "connected",
         createdAt: Date.now(),
-        updatedAt: Date.now(),
+        lastUsedAt: Date.now(),
         metadata: { workspace_name: "My Workspace" },
       },
     ];

@@ -239,7 +239,7 @@ describe("Media Tools", () => {
         createMockContext()
       );
       // defineReadOnlyTool always returns true for isReadOnly
-      expect(tool.isReadOnly?.()).toBe(true);
+      expect(tool.isReadOnly?.({ file_path: "test.png", question: "test" })).toBe(true);
     });
 
     it("should create images_explain event", async () => {
@@ -365,7 +365,7 @@ describe("Media Tools", () => {
       const tool = makeImagesGenerateTool(fileStore, userPath, () =>
         createMockContext()
       );
-      expect(tool.isReadOnly?.()).toBe(false);
+      expect(tool.isReadOnly?.({ prompt: "test", file_prefix: "test" })).toBe(false);
     });
 
     it("should create images_generate event", async () => {
@@ -534,7 +534,7 @@ describe("Media Tools", () => {
       const tool = makeImagesTransformTool(fileStore, userPath, () =>
         createMockContext()
       );
-      expect(tool.isReadOnly?.()).toBe(false);
+      expect(tool.isReadOnly?.({ file_paths: ["test.png"], prompt: "test", file_prefix: "test" })).toBe(false);
     });
 
     it("should create images_transform event", async () => {
@@ -714,7 +714,7 @@ describe("Media Tools", () => {
       const tool = makeAudioExplainTool(fileStore, userPath, () =>
         createMockContext()
       );
-      expect(tool.isReadOnly?.()).toBe(true);
+      expect(tool.isReadOnly?.({ file_path: "test.mp3", prompt: "test" })).toBe(true);
     });
 
     it("should create audio_explain event", async () => {
@@ -880,7 +880,7 @@ describe("Media Tools", () => {
       const tool = makePdfExplainTool(fileStore, userPath, () =>
         createMockContext()
       );
-      expect(tool.isReadOnly?.()).toBe(true);
+      expect(tool.isReadOnly?.({ file_path: "test.pdf", prompt: "test" })).toBe(true);
     });
 
     it("should create pdf_explain event", async () => {
