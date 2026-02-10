@@ -1,10 +1,9 @@
 import debug from "debug";
 import { KeepDbApi, Workflow } from "@app/db";
-import { WorkflowWorker, MAX_FIX_ATTEMPTS, escalateToUser } from "./workflow-worker";
+import { MAX_FIX_ATTEMPTS, escalateToUser } from "./workflow-escalation";
 import { WorkflowExecutionSignal, WorkflowRetryState } from "./workflow-worker-signal";
 import { LogicError } from "./errors";
 import { isValidEnv } from "./env";
-import { Cron } from "croner";
 import type { ConnectionManager } from "@app/connectors";
 import {
   executeWorkflowSessionIfIdle,
@@ -24,7 +23,6 @@ export interface WorkflowSchedulerConfig {
 
 export class WorkflowScheduler {
   private api: KeepDbApi;
-  private worker: WorkflowWorker;
   private userPath?: string;
   public readonly connectionManager?: ConnectionManager;
 
@@ -49,17 +47,11 @@ export class WorkflowScheduler {
     this.userPath = config.userPath;
     this.connectionManager = config.connectionManager;
 
-    // Create worker with signal handler
-    this.worker = new WorkflowWorker({
-      ...config,
-      onSignal: (signal) => this.handleWorkerSignal(signal),
-    });
-
     this.debug("Constructed");
   }
 
   /**
-   * Handle signals from the worker about execution outcomes
+   * Handle signals about execution outcomes
    */
   private handleWorkerSignal(signal: WorkflowExecutionSignal): void {
     this.debug("Received signal:", signal);
@@ -185,7 +177,7 @@ export class WorkflowScheduler {
       this.debug("Error resuming incomplete sessions:", e);
     }
 
-    // Ensure producer schedules exist for all active new-format workflows
+    // Ensure producer schedules exist for all active workflows
     try {
       await this.ensureProducerSchedules();
     } catch (e) {
@@ -220,16 +212,16 @@ export class WorkflowScheduler {
   }
 
   /**
-   * Ensure all active new-format workflows have producer schedule rows.
+   * Ensure all active workflows have producer schedule rows.
    * Handles workflows created before producer-schedule initialization was wired up.
    */
   private async ensureProducerSchedules(): Promise<void> {
     const allWorkflows = await this.api.scriptStore.listWorkflows(1000, 0);
-    const activeNewFormat = allWorkflows.filter(
-      (w) => w.status === "active" && this.isNewFormatWorkflow(w)
+    const activeWithConfig = allWorkflows.filter(
+      (w) => w.status === "active" && w.handler_config && w.handler_config.trim() !== ''
     );
 
-    for (const workflow of activeNewFormat) {
+    for (const workflow of activeWithConfig) {
       const existing = await this.api.producerScheduleStore.getForWorkflow(workflow.id);
       if (existing.length > 0) continue;
 
@@ -253,14 +245,6 @@ export class WorkflowScheduler {
       connectionManager: this.connectionManager,
       userPath: this.userPath,
     };
-  }
-
-  /**
-   * Check if a workflow uses the new format (exec-07).
-   * New-format workflows have a handler_config set from validation (exec-05).
-   */
-  private isNewFormatWorkflow(workflow: Workflow): boolean {
-    return !!workflow.handler_config && workflow.handler_config.trim() !== '';
   }
 
   public async checkWork(): Promise<void> {
@@ -322,7 +306,7 @@ export class WorkflowScheduler {
 
       // Get all workflows
       const allWorkflows = await this.api.scriptStore.listWorkflows(1000, 0);
-      
+
       // Filter active workflows - per spec 06, only workflows with status="active" run
       // Draft ("draft"), Ready ("ready"), Paused ("paused"), and Error ("error") workflows do not run on schedule
       const activeWorkflows = allWorkflows.filter(
@@ -331,40 +315,21 @@ export class WorkflowScheduler {
 
       this.debug(`Found ${activeWorkflows.length} active workflows`);
 
-      // Check which workflows should run based on schedules
+      // Check which workflows should run based on per-producer schedules
       const currentTime = Date.now();
       const dueWorkflows = [];
 
       for (const workflow of activeWorkflows) {
-        // New-format workflows use per-producer schedules (exec-13)
-        if (this.isNewFormatWorkflow(workflow)) {
-          try {
-            const dueProducers = await this.api.producerScheduleStore.getDueProducers(workflow.id);
-            if (dueProducers.length > 0) {
-              dueWorkflows.push(workflow);
-              this.debug(
-                `Workflow ${workflow.id} (${workflow.title}) has ${dueProducers.length} due producers`
-              );
-            }
-          } catch (error) {
-            this.debug(`Error checking producer schedules for workflow ${workflow.id}:`, error);
+        try {
+          const dueProducers = await this.api.producerScheduleStore.getDueProducers(workflow.id);
+          if (dueProducers.length > 0) {
+            dueWorkflows.push(workflow);
+            this.debug(
+              `Workflow ${workflow.id} (${workflow.title}) has ${dueProducers.length} due producers`
+            );
           }
-        } else {
-          // Legacy workflows use workflow.next_run_timestamp
-          if (workflow.next_run_timestamp && workflow.next_run_timestamp.trim() !== '') {
-            try {
-              const nextRunTime = new Date(workflow.next_run_timestamp).getTime();
-
-              if (nextRunTime <= currentTime) {
-                dueWorkflows.push(workflow);
-                this.debug(
-                  `Workflow ${workflow.id} (${workflow.title}) is due: nextRun=${workflow.next_run_timestamp}`
-                );
-              }
-            } catch (error) {
-              this.debug(`Invalid next_run_timestamp for workflow ${workflow.id}:`, error);
-            }
-          }
+        } catch (error) {
+          this.debug(`Error checking producer schedules for workflow ${workflow.id}:`, error);
         }
       }
 
@@ -395,54 +360,7 @@ export class WorkflowScheduler {
         );
 
         try {
-          // Check if this is a new-format workflow (exec-07)
-          if (this.isNewFormatWorkflow(workflow)) {
-            // Use session-based execution for new-format workflows
-            await this.executeNewFormatWorkflow(workflow);
-          } else {
-            // Use legacy worker execution for old-format workflows
-            // Pass retry info to worker if this is a retry
-            await this.worker.executeWorkflow(
-              workflow,
-              retryState?.originalRunId || '',
-              retryState?.retryCount || 0
-            );
-          }
-
-          // New-format workflows use per-producer schedules (exec-13);
-          // next_run_at is updated by commitProducer() in handler-state-machine.
-          // Only legacy workflows need workflow-level next_run_timestamp from cron.
-          if (!this.isNewFormatWorkflow(workflow)) {
-            if (workflow.cron && workflow.cron.trim() !== '') {
-              try {
-                const cronJob = new Cron(workflow.cron);
-                const nextRun = cronJob.nextRun();
-
-                if (nextRun) {
-                  await this.api.scriptStore.updateWorkflowFields(workflow.id, {
-                    next_run_timestamp: nextRun.toISOString(),
-                  });
-                  this.debug(
-                    `Updated workflow ${workflow.id} next_run_timestamp to ${nextRun.toISOString()}`
-                  );
-                } else {
-                  await this.api.scriptStore.updateWorkflowFields(workflow.id, {
-                    next_run_timestamp: '',
-                  });
-                }
-              } catch (error) {
-                this.debug(`Error calculating next run for workflow ${workflow.id}:`, error);
-                await this.api.scriptStore.updateWorkflowFields(workflow.id, {
-                  status: 'error',
-                  next_run_timestamp: '',
-                });
-              }
-            } else {
-              await this.api.scriptStore.updateWorkflowFields(workflow.id, {
-                next_run_timestamp: '',
-              });
-            }
-          }
+          await this.executeNewFormatWorkflow(workflow);
         } catch (error) {
           this.debug("failed to process workflow:", error);
         }
@@ -458,12 +376,12 @@ export class WorkflowScheduler {
   }
 
   /**
-   * Execute a new-format workflow using session orchestration (exec-07).
+   * Execute a workflow using session orchestration (exec-07).
    * This uses the executeWorkflowSessionIfIdle function which enforces
    * single-threaded execution (only one session per workflow at a time).
    */
   private async executeNewFormatWorkflow(workflow: Workflow): Promise<void> {
-    this.debug(`Executing new-format workflow ${workflow.id} via session orchestration`);
+    this.debug(`Executing workflow ${workflow.id} via session orchestration`);
 
     const context = this.createExecutionContext();
     const result = await executeWorkflowSessionIfIdle(

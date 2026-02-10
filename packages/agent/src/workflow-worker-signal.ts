@@ -1,7 +1,7 @@
 import { ErrorType } from "./errors";
 
 /**
- * Signals sent from WorkflowWorker to WorkflowScheduler to communicate
+ * Signals used by WorkflowScheduler to communicate
  * execution outcomes that affect scheduling decisions.
  *
  * Signal types:
@@ -19,11 +19,6 @@ export interface WorkflowExecutionSignal {
   errorType?: ErrorType;       // Classified error type (auth, permission, network, logic)
   scriptRunId?: string;        // ID of the script run that triggered this signal
 }
-
-/**
- * Callback function type for handling workflow execution signals
- */
-export type WorkflowSignalHandler = (signal: WorkflowExecutionSignal) => void;
 
 /**
  * Retry state for a specific workflow

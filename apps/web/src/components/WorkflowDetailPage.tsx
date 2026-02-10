@@ -20,7 +20,6 @@ import { workflowNotifications } from "../lib/WorkflowNotifications";
 import { WorkflowStatusBadge, ScriptRunStatusBadge, TaskStatusBadge } from "./StatusBadge";
 import { formatCronSchedule } from "../lib/formatCronSchedule";
 import { useAutoHidingMessage } from "../hooks/useAutoHidingMessage";
-import { API_ENDPOINT } from "../const";
 import { WorkflowErrorAlert } from "./WorkflowErrorAlert";
 import { useUnresolvedWorkflowError } from "../hooks/useNotifications";
 import { getWorkflowTitle } from "../lib/workflowUtils";
@@ -43,7 +42,6 @@ export default function WorkflowDetailPage() {
   const { data: maintainerTasks = [] } = useMaintainerTasks(id!);
   const success = useAutoHidingMessage({ duration: 3000 });
   const warning = useAutoHidingMessage({ duration: 5000 });
-  const [isTestRunning, setIsTestRunning] = useState(false);
   const [showVersionHistory, setShowVersionHistory] = useState(false);
   const [diffVersions, setDiffVersions] = useState<{ oldId: string; newId: string } | null>(null);
   const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
@@ -148,39 +146,6 @@ export default function WorkflowDetailPage() {
         success.show("Workflow scheduled to run now");
       },
     });
-  };
-
-  const handleTestRun = async () => {
-    if (!workflow || !activeScript) return;
-
-    setIsTestRunning(true);
-    warning.clear();
-    success.clear();
-
-    try {
-      const response = await fetch(`${API_ENDPOINT}/workflow/test-run`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ workflow_id: workflow.id }),
-      });
-
-      const result = await response.json();
-
-      if (result.success) {
-        success.show("Test completed successfully");
-      } else {
-        showWarning(`Test failed: ${result.error || 'Unknown error'}`);
-      }
-
-      // Refresh the script runs list to show the new test run
-      queryClient.invalidateQueries({ queryKey: ['scriptRuns', workflow.id] });
-    } catch (error) {
-      showWarning(`Test failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    } finally {
-      setIsTestRunning(false);
-    }
   };
 
   const handleChat = () => {
@@ -388,17 +353,6 @@ export default function WorkflowDetailPage() {
                         className="cursor-pointer"
                       >
                         Run now
-                      </Button>
-                    )}
-                    {activeScript && (
-                      <Button
-                        onClick={handleTestRun}
-                        disabled={isTestRunning || updateWorkflowMutation.isPending}
-                        size="sm"
-                        variant="outline"
-                        className="cursor-pointer bg-amber-50 border-amber-300 text-amber-900 hover:bg-amber-100"
-                      >
-                        {isTestRunning ? "Testing..." : "Test run"}
                       </Button>
                     )}
                     {workflow?.chat_id && (
@@ -724,12 +678,6 @@ export default function WorkflowDetailPage() {
                               endTimestamp={run.end_timestamp}
                               labels={{ error: "error", success: "completed", running: "running" }}
                             />
-                            {/* Show test badge if this is a test run */}
-                            {run.type === 'test' && (
-                              <Badge variant="outline" className="text-amber-700 border-amber-300 bg-amber-50 text-xs">
-                                Test
-                              </Badge>
-                            )}
                             {/* Show retry badge if this is a retry run */}
                             {run.retry_of && run.retry_count > 0 && (
                               <Badge variant="outline" className="text-orange-700 border-orange-300 bg-orange-50 text-xs">

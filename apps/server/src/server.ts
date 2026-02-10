@@ -28,7 +28,6 @@ import {
   getEnv,
   TaskScheduler,
   WorkflowScheduler,
-  WorkflowWorker,
   Env,
   DEFAULT_AGENT_MODEL,
   setEnvFromProcess,
@@ -73,10 +72,6 @@ import {
 import { registerConnectorRoutes } from "./routes/connectors";
 
 const debugServer = debug("server:server");
-
-// Track in-progress test runs per workflow to prevent concurrent executions
-// Key: workflow_id, Value: scriptRunId
-const inProgressTestRuns = new Map<string, string>();
 
 // Setup configuration directory and environment
 const configDir = path.join(os.homedir(), ".keep.ai");
@@ -1331,108 +1326,6 @@ export async function createServer(config: ServerConfig = {}) {
       debugServer("Error in /api/agent/status:", error);
       return reply.status(500).send({
         error: "Failed to get agent status",
-        message: error instanceof Error ? error.message : "Unknown error",
-      });
-    }
-  });
-
-  // POST /api/workflow/test-run - Execute a test run for a workflow
-  // This runs the workflow script immediately without affecting the workflow state
-  // (no status changes, no maintenance mode, no scheduler signals)
-  app.post("/api/workflow/test-run", async (request, reply) => {
-    try {
-      const body = request.body as { workflow_id: string };
-
-      if (!body.workflow_id) {
-        return reply.status(400).send({ error: "workflow_id is required" });
-      }
-
-      // Check if a test run is already in progress for this workflow
-      // This prevents wasting resources and confusion from multiple concurrent test runs
-      const existingRunId = inProgressTestRuns.get(body.workflow_id);
-      if (existingRunId) {
-        debugServer("Test run already in progress for workflow:", body.workflow_id, "scriptRunId:", existingRunId);
-        return reply.status(409).send({
-          error: "Test run already in progress",
-          message: "A test run is already running for this workflow. Please wait for it to complete.",
-          scriptRunId: existingRunId,
-        });
-      }
-
-      // Get the workflow from the database
-      const workflow = await api.scriptStore.getWorkflow(body.workflow_id);
-      if (!workflow) {
-        return reply.status(404).send({ error: "Workflow not found" });
-      }
-
-      // Check if the workflow has scripts
-      const scripts = await api.scriptStore.getScriptsByWorkflowId(workflow.id);
-      if (scripts.length === 0) {
-        return reply.status(400).send({ error: "Workflow has no scripts to run" });
-      }
-
-      // Generate script run ID upfront so we can return it immediately
-      // This avoids race conditions when querying for "latest" run after execution
-      const scriptRunId = crypto.randomUUID();
-
-      // Mark this workflow as having an in-progress test run
-      inProgressTestRuns.set(workflow.id, scriptRunId);
-
-      // Create WorkflowWorker in try-catch — if construction throws,
-      // the .finally() cleanup never runs, permanently blocking test runs
-      let testWorker: WorkflowWorker;
-      try {
-        testWorker = new WorkflowWorker({
-          api: new KeepDbApi(keepDB),
-          userPath,
-          connectionManager,
-          // No onSignal - test runs don't emit signals to scheduler
-        });
-      } catch (error) {
-        inProgressTestRuns.delete(workflow.id);
-        throw error;
-      }
-
-      debugServer("Starting test run for workflow:", workflow.id, "with scriptRunId:", scriptRunId);
-
-      // Safety timeout: clean up hung test runs after 10 minutes
-      const timeoutId = setTimeout(() => {
-        if (inProgressTestRuns.get(workflow.id) === scriptRunId) {
-          inProgressTestRuns.delete(workflow.id);
-          debugServer("Timeout cleanup for stuck test run", scriptRunId);
-        }
-      }, 10 * 60 * 1000);
-
-      // Execute the workflow as a test run (type="test")
-      // Run in background - don't await, return immediately with the run ID
-      testWorker.executeWorkflow(
-        workflow,
-        '', // no retryOf
-        0,  // retryCount
-        'test', // runType
-        scriptRunId // pass the pre-generated ID
-      ).then(() => {
-        debugServer("Test run completed successfully for workflow:", workflow.id, "scriptRunId:", scriptRunId);
-      }).catch((error) => {
-        debugServer("Test run failed for workflow:", workflow.id, "scriptRunId:", scriptRunId, error);
-      }).finally(() => {
-        clearTimeout(timeoutId);
-        // Always clean up the in-progress tracking, whether success or failure
-        inProgressTestRuns.delete(workflow.id);
-        debugServer("Test run tracking cleared for workflow:", workflow.id);
-      });
-
-      // Return immediately with HTTP 202 (Accepted) and the run ID
-      // Client can poll /api/script-run/{id} to check status
-      return reply.status(202).send({
-        success: true,
-        message: "Test run started",
-        scriptRunId: scriptRunId,
-      });
-    } catch (error) {
-      debugServer("Error in /api/workflow/test-run:", error);
-      return reply.status(500).send({
-        error: "Failed to start test run",
         message: error instanceof Error ? error.message : "Unknown error",
       });
     }

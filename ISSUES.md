@@ -1,3 +1,5 @@
+
+
 ISSUES:
 +- doesn't start if submitted from homepage
 +- logic error happened but no auto-fix
@@ -6,7 +8,6 @@ ISSUES:
 - fix macos builds
 - registered input without any events is not 'done', it should be pending or 'orphaned' or some such
 - we have to make sure task-scheduler can't launch more that 1 task per workflow, meaning several maintainer tasks + planner - planner first, maintainers one by one second
-- there's this.isNewFormatWorkflow(workflow) - remove old format support
 +- "Scroll up to load older messages"
 +- 'How can I help you today?' placeholder 
 - stack traces have no line number of any other hint at where the issue is - just 'not a function' or some such, plus script run page doesn't show which handler was running, and I guess when auto-fix will run it also needs info on which handler failed
@@ -25,11 +26,10 @@ ISSUES:
 - "No outputs recorded yet" on the workflow page even though some outputs were produced like notifications
 - on workflow/input page the 'what happened' orders by time desc - should be by time asc
 - on workflow/input page internal events are just id and status, should allow viewing the content somehow? or remove them entirely? also show event topic, at least 
-
+- notifications must go through browser notifcs, through push api and through electron native notifs
 
 TODOs:
 1. Make web app dev-testable, make API host use env var and pass server's endpoint so that server could work separately while the dev version would be npm run dev-ed
 4. Global per-connector permissions
 7. LLM APIs pre/post validation and hardening
 8. Script/patch validation, including LLM auditor (separate from Intent Contract extractor).
-9. Testing/Dry-run...

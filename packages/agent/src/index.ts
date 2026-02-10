@@ -112,17 +112,14 @@ export {
 } from "./workflow-scheduler";
 
 export {
-  WorkflowWorker,
-  type WorkflowWorkerConfig,
   MAX_FIX_ATTEMPTS,
   escalateToUser,
   type EscalateToUserOptions,
   type EscalateToUserResult,
-} from "./workflow-worker";
+} from "./workflow-escalation";
 
 export {
   type WorkflowExecutionSignal,
-  type WorkflowSignalHandler,
   type WorkflowRetryState,
 } from "./workflow-worker-signal";
 
