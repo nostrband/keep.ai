@@ -1,6 +1,7 @@
 
 
 ISSUES:
+- reconciliation doesn't seem to work, not implemented right? and host-managed mutation retries? 
 - remove diagram from the workflow page?
 - fix macos builds
 - we have to make sure task-scheduler can't launch more that 1 task per workflow, meaning several maintainer tasks + planner - planner first, maintainers one by one second
@@ -16,7 +17,6 @@ ISSUES:
 - why is maintainer's inbox full of data if it only needs failed handler_run_id?
 - notifications should have buttons styled properly (grey box etc) and cursor pointer
 - should notifications have their own page? or be expandable? bcs long-form notifs can't be fully read now
-- "No outputs recorded yet" on the workflow page even though some outputs were produced like notifications
 - on workflow/input page the 'what happened' orders by time desc - should be by time asc
 - on workflow/input page internal events are just id and status, should allow viewing the content somehow? or remove them entirely? also show event topic, at least 
 - notifications must go through browser notifcs, through push api and through electron native notifs

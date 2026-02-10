@@ -62,7 +62,8 @@
       "Bash(git -C /home/artur/src/nostr.band/keep.ai config user.name)",
       "Bash(git -C /home/artur/src/nostr.band/keep.ai config user.email)",
       "Bash(git -C /home/artur/src/nostr.band/keep.ai config user.name \"Artur Briugeman\")",
-      "Bash(git -C /home/artur/src/nostr.band/keep.ai config user.email \"brugeman.artur@gmail.com\")"
+      "Bash(git -C /home/artur/src/nostr.band/keep.ai config user.email \"brugeman.artur@gmail.com\")",
+      "Bash(git stash:*)"
     ]
   }
 }

@@ -330,6 +330,17 @@ Example: await ${ns}.${name}(<input>)
       const operationType = this.getOperationType(tool, validatedInput);
       this.checkPhaseAllowed(operationType);
 
+      // Before executing a mutation tool, record tool info on the mutation record.
+      // This enables crash recovery (in_flight detection) and output tracking
+      // (tool_namespace/tool_method are used by the UI to display outputs).
+      if (operationType === 'mutate' && this.currentMutation && this.currentPhase === 'mutate') {
+        await this.api.mutationStore.markInFlight(this.currentMutation.id, {
+          tool_namespace: ns,
+          tool_method: name,
+          params: JSON.stringify(validatedInput),
+        });
+      }
+
       // Execute the tool
       let result: unknown;
       try {
