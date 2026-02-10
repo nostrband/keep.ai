@@ -440,13 +440,18 @@ async function pauseRunForIndeterminate(
   run: HandlerRun,
   reason: string
 ): Promise<void> {
-  // Pause the handler run
-  await pauseRun(api, run, "paused:reconciliation", reason);
-
-  // Also pause the workflow (exec-14: workflow paused during indeterminate)
-  await api.scriptStore.updateWorkflowFields(run.workflow_id, {
-    status: "paused",
+  // Atomic: pause handler run + workflow in a single transaction
+  await api.db.db.tx(async (tx: DBInterface) => {
+    await api.handlerRunStore.update(run.id, {
+      status: "paused:reconciliation" as RunStatus,
+      error: reason,
+      end_timestamp: new Date().toISOString(),
+    }, tx);
+    await api.scriptStore.updateWorkflowFields(run.workflow_id, {
+      status: "paused",
+    }, tx);
   });
+  log(`Handler run ${run.id} paused:reconciliation: ${reason}`);
   log(`Workflow ${run.workflow_id} paused due to indeterminate mutation`);
 }
 
@@ -1258,9 +1263,10 @@ async function executeMutate(
   );
 
   try {
-    // Set mutate phase and current mutation
-    toolWrapper.setCurrentMutation(mutation);
+    // Set mutate phase first, then current mutation
+    // (setPhase resets currentMutation, so it must come before setCurrentMutation)
     toolWrapper.setPhase("mutate");
+    toolWrapper.setCurrentMutation(mutation);
 
     // Inject prepared data
     sandbox.setGlobal({ __prepared__: prepareResult });
@@ -1301,17 +1307,18 @@ return await workflow.consumers.${run.handler_name}.mutate(__prepared__);
     }
 
     // If mutation was executed (status is in_flight), mark as applied
+    // Atomic checkpoint: markApplied + updatePhase in a single transaction
     if (updatedMutation && updatedMutation.status === "in_flight") {
-      await api.mutationStore.markApplied(
-        updatedMutation.id,
-        JSON.stringify(result.result)
-      );
+      await api.db.db.tx(async (tx: DBInterface) => {
+        await api.mutationStore.markApplied(updatedMutation.id, JSON.stringify(result.result), tx);
+        await api.handlerRunStore.updatePhase(run.id, "mutated", tx);
+      });
     } else if (updatedMutation && updatedMutation.status === "pending") {
       // Mutate handler didn't call any mutation tool - mark as applied with null result
-      await api.mutationStore.markApplied(
-        updatedMutation.id,
-        JSON.stringify(null)
-      );
+      await api.db.db.tx(async (tx: DBInterface) => {
+        await api.mutationStore.markApplied(updatedMutation.id, JSON.stringify(null), tx);
+        await api.handlerRunStore.updatePhase(run.id, "mutated", tx);
+      });
     }
 
     // Save logs if any

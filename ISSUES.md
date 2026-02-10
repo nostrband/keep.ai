@@ -14,6 +14,7 @@ ISSUES:
 - what does 'run now' button do? run all producers?
 - schedule on workflow page is still cron expr, should be human readable, but maybe it's also impl detail - the actual schedule is now inside each producer, right? workflow-scheduler should take that into account, not script/workflow 'cron' field, also 'schedule' tool seems no longer needed right?
 - on homepage workflow has 'active' badge while it has 'maintenance' flag, we should display maintenance somehow - either extra 'fixing' icon near/inside 'active' badge, or separate badge value like 'Fixing' - the workflow is definitely not 'active' in user's mind if it's stopped for maintenance
+- why mutation is created before in_flight status? like it feels like tool wrapper would immediately, unconditionally set the tool status to inflight after mutation row added? or do we still create it but then check input format and set 'failed' if input invalid? what's the logic there?
 - why is maintainer's inbox full of data if it only needs failed handler_run_id?
 - notifications should have buttons styled properly (grey box etc) and cursor pointer
 - should notifications have their own page? or be expandable? bcs long-form notifs can't be fully read now
