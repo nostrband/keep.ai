@@ -9,7 +9,6 @@ ISSUES:
 - provide hints into what constitutes mutations vs not, like Text.* tools aren't mutations and can be re-executed... maybe? why not 
 - script_runs table has same error/logs as handler_runs, think on getting rid of this table
 - 'idle' with 'server error' doesn't seem right, we can't really know
-- move input/output section on workflow page up under main section, move intent section above 'what it does', sections: main, input/output, chat, auto-fix, intent, what it does, script, script runs
 - shouldn't we display handler runs instead of script runs on workflow page?
 - what does 'run now' button do? run all producers?
 - schedule on workflow page is still cron expr, should be human readable, but maybe it's also impl detail - the actual schedule is now inside each producer, right? workflow-scheduler should take that into account, not script/workflow 'cron' field, also 'schedule' tool seems no longer needed right?

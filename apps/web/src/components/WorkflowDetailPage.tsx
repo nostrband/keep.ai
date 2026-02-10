@@ -12,7 +12,6 @@ import { useChat } from "../hooks/dbChatReads";
 import { useMaintainerTasks } from "../hooks/dbTaskReads";
 import { useUpdateWorkflow, useActivateScriptVersion } from "../hooks/dbWrites";
 import SharedHeader from "./SharedHeader";
-import { Response } from "../ui";
 import ScriptDiff from "./ScriptDiff";
 import { Badge, Button } from "../ui";
 import { Archive, RotateCcw } from "lucide-react";
@@ -57,12 +56,6 @@ export default function WorkflowDetailPage() {
     }
     return scriptVersions.find((s: any) => s.id === workflow.active_script_id) || latestScript;
   }, [workflow?.active_script_id, scriptVersions, latestScript]);
-
-  // Memoize mermaid markdown to maintain referential stability for Response memo
-  const diagramMarkdown = useMemo(
-    () => activeScript?.diagram ? `\`\`\`mermaid\n${activeScript.diagram}\n\`\`\`` : null,
-    [activeScript?.diagram]
-  );
 
   // Clear workflow notifications when viewing this workflow
   // This prevents re-notifying user for errors they've already seen
@@ -296,9 +289,6 @@ export default function WorkflowDetailPage() {
               </div>
             )}
 
-            {/* Intent Section (exec-17) - shows goal, inputs, outputs, constraints */}
-            <WorkflowIntentSection intentSpecJson={workflow.intent_spec} />
-
             {/* Workflow Metadata */}
             <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
               <div className="flex items-start justify-between mb-6">
@@ -434,26 +424,7 @@ export default function WorkflowDetailPage() {
               </div>
             </div>
 
-            {/* What This Automation Does - Summary and Diagram */}
-            {activeScript && (activeScript.summary || activeScript.diagram) && (
-              <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
-                <h2 className="text-lg font-semibold text-gray-900 mb-4">What This Automation Does</h2>
-
-                {/* Summary */}
-                {activeScript.summary && (
-                  <p className="text-gray-700 mb-4">{activeScript.summary}</p>
-                )}
-
-                {/* Mermaid Diagram - rendered via markdown code fence */}
-                {diagramMarkdown && (
-                  <div className="mt-4 p-4 bg-gray-50 rounded-lg">
-                    <Response>{diagramMarkdown}</Response>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Inputs & Outputs Summary (exec-16) */}
+            {/* Inputs & Outputs Summary */}
             <WorkflowInputsSummary workflowId={workflow.id} />
 
             {/* Chat Section */}
@@ -515,6 +486,9 @@ export default function WorkflowDetailPage() {
                 </div>
               </div>
             )}
+
+            {/* Intent Section - shows goal, inputs, outputs, constraints */}
+            <WorkflowIntentSection intentSpecJson={workflow.intent_spec} />
 
             {/* Script Section */}
             {activeScript && (
