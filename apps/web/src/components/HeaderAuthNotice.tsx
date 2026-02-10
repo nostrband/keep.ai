@@ -25,7 +25,7 @@ export function HeaderAuthNotice({ className = "" }: HeaderAuthNoticeProps) {
   // Determine the button text based on state
   const getButtonText = () => {
     if (showServerError) {
-      return 'Server error';
+      return 'Server offline';
     }
     return isFirstLaunch ? 'Sign up' : 'Sign in';
   };
@@ -58,7 +58,7 @@ export function HeaderAuthNotice({ className = "" }: HeaderAuthNoticeProps) {
       <button
         onClick={handleClick}
         className={buttonClass}
-        aria-label={showServerError ? "Server error" : "Authentication required"}
+        aria-label={showServerError ? "Server offline" : "Authentication required"}
       >
         {/* Warning icon */}
         <svg

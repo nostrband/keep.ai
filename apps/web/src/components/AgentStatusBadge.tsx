@@ -5,10 +5,10 @@ import { useAgentStatus, formatAgentStatus } from "../hooks/useAgentStatus";
  * Displays in the header showing if tasks or workflows are running.
  */
 export function AgentStatusBadge() {
-  const { data: status, isLoading } = useAgentStatus();
+  const { data: status, isLoading, isError } = useAgentStatus();
 
-  // Don't show anything while loading initial state
-  if (isLoading && !status) {
+  // Don't show anything while loading initial state or when server is down
+  if ((isLoading && !status) || isError) {
     return null;
   }
 
