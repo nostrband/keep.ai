@@ -367,6 +367,44 @@ export class EventStore {
   }
 
   /**
+   * Release orphaned reserved events back to pending on startup.
+   * Only releases events whose reserving handler run is terminal (committed,
+   * failed, suspended) or missing from the DB entirely. Active runs are left
+   * alone — the scheduler's resume/retry logic handles those.
+   */
+  async releaseOrphanedReservedEvents(tx?: DBInterface): Promise<number> {
+    const db = tx || this.db.db;
+    const now = Date.now();
+
+    // Release events reserved by runs that are terminal or no longer exist
+    const reserved = await db.execO<{ count: number }>(
+      `SELECT COUNT(*) as count FROM events e
+       WHERE e.status = 'reserved'
+       AND NOT EXISTS (
+         SELECT 1 FROM handler_runs h
+         WHERE h.id = e.reserved_by_run_id
+         AND h.status = 'active'
+       )`
+    );
+    const count = reserved?.[0]?.count ?? 0;
+    if (count === 0) return 0;
+
+    await db.exec(
+      `UPDATE events
+       SET status = 'pending', reserved_by_run_id = '', attempt_number = attempt_number + 1, updated_at = ?
+       WHERE status = 'reserved'
+       AND NOT EXISTS (
+         SELECT 1 FROM handler_runs h
+         WHERE h.id = events.reserved_by_run_id
+         AND h.status = 'active'
+       )`,
+      [now]
+    );
+
+    return count;
+  }
+
+  /**
    * Count pending events for a topic.
    */
   async countPending(

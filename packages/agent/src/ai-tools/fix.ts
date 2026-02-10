@@ -1,6 +1,6 @@
 import { JSONSchema } from "../json-schema";
 import { AITool } from "./types";
-import { Script, ScriptStore, ProducerScheduleStore } from "@app/db";
+import { Script, ScriptStore, ProducerScheduleStore, EventStore } from "@app/db";
 import { validateWorkflowScript, isWorkflowFormatScript } from "../workflow-validator";
 import { updateProducerSchedules } from "../producer-schedule-init";
 
@@ -39,6 +39,10 @@ export function makeFixTool(opts: {
   expectedScriptId: string;
   scriptStore: ScriptStore;
   producerScheduleStore?: ProducerScheduleStore;  // For per-producer scheduling (exec-13)
+  /** EventStore for releasing reserved events on fix activation */
+  eventStore?: EventStore;
+  /** Handler run ID whose reserved events should be released */
+  handlerRunId?: string;
   /** Optional callback invoked when the fix tool is called */
   onCalled?: (result: FixResult) => void;
 }) {
@@ -114,6 +118,11 @@ export function makeFixTool(opts: {
           } catch (error) {
             // Don't fail the fix save if schedule update fails
           }
+        }
+
+        // Release events reserved by the failed handler run so the retry session can find them
+        if (opts.eventStore && opts.handlerRunId) {
+          await opts.eventStore.releaseEvents(opts.handlerRunId);
         }
       } else {
         // Race detected - planner updated the script

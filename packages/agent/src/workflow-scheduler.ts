@@ -12,6 +12,8 @@ import {
   type SessionResult,
 } from "./session-orchestration";
 import type { HandlerExecutionContext } from "./handler-state-machine";
+import { initializeProducerSchedules } from "./producer-schedule-init";
+import type { WorkflowConfig } from "./workflow-validator";
 
 export interface WorkflowSchedulerConfig {
   api: KeepDbApi;
@@ -183,6 +185,23 @@ export class WorkflowScheduler {
       this.debug("Error resuming incomplete sessions:", e);
     }
 
+    // Ensure producer schedules exist for all active new-format workflows
+    try {
+      await this.ensureProducerSchedules();
+    } catch (e) {
+      this.debug("Error ensuring producer schedules:", e);
+    }
+
+    // Release orphaned event reservations from previous run
+    try {
+      const released = await this.api.eventStore.releaseOrphanedReservedEvents();
+      if (released > 0) {
+        this.debug(`Released ${released} orphaned reserved events`);
+      }
+    } catch (e) {
+      this.debug("Error releasing reserved events:", e);
+    }
+
     this.interval = setInterval(() => this.checkWork(), 10000);
 
     // check immediately
@@ -198,6 +217,31 @@ export class WorkflowScheduler {
     this.debug("Resuming incomplete sessions...");
     await resumeIncompleteSessions(context);
     this.debug("Incomplete sessions resumed");
+  }
+
+  /**
+   * Ensure all active new-format workflows have producer schedule rows.
+   * Handles workflows created before producer-schedule initialization was wired up.
+   */
+  private async ensureProducerSchedules(): Promise<void> {
+    const allWorkflows = await this.api.scriptStore.listWorkflows(1000, 0);
+    const activeNewFormat = allWorkflows.filter(
+      (w) => w.status === "active" && this.isNewFormatWorkflow(w)
+    );
+
+    for (const workflow of activeNewFormat) {
+      const existing = await this.api.producerScheduleStore.getForWorkflow(workflow.id);
+      if (existing.length > 0) continue;
+
+      // No schedule rows — parse handler_config and initialize
+      try {
+        const config: WorkflowConfig = JSON.parse(workflow.handler_config!);
+        await initializeProducerSchedules(workflow.id, config, this.api.producerScheduleStore);
+        this.debug(`Initialized missing producer schedules for workflow ${workflow.id} (${workflow.title})`);
+      } catch (e) {
+        this.debug(`Failed to initialize producer schedules for workflow ${workflow.id}:`, e);
+      }
+    }
   }
 
   /**

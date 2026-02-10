@@ -393,6 +393,8 @@ export class Agent {
         expectedScriptId: this.task.maintainerContext.expectedScriptId,
         scriptStore: this.env.api.scriptStore,
         producerScheduleStore: this.env.api.producerScheduleStore,
+        eventStore: this.env.api.eventStore,
+        handlerRunId: this.task.maintainerContext.handlerRunId,
         onCalled: () => {
           this.fixCalled = true;
         },

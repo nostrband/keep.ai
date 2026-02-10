@@ -6,7 +6,7 @@
 
 import debug from "debug";
 import { ProducerScheduleStore, ScheduleType } from "@app/db";
-import { computeNextRunTime, extractSchedule } from "./schedule-utils";
+import { extractSchedule } from "./schedule-utils";
 import { WorkflowConfig } from "./workflow-validator";
 
 const log = debug("producer-schedule-init");
@@ -44,7 +44,8 @@ export async function initializeProducerSchedules(
       continue;
     }
 
-    const nextRunAt = computeNextRunTime(schedule.type, schedule.value);
+    // Run immediately on first initialization — don't wait a full interval
+    const nextRunAt = Date.now();
 
     await store.upsert({
       workflow_id: workflowId,
@@ -54,7 +55,7 @@ export async function initializeProducerSchedules(
       next_run_at: nextRunAt,
     });
 
-    log(`Producer ${workflowId}/${producerName}: ${schedule.type}=${schedule.value}, next_run_at=${new Date(nextRunAt).toISOString()}`);
+    log(`Producer ${workflowId}/${producerName}: ${schedule.type}=${schedule.value}, next_run_at=${new Date(nextRunAt).toISOString()} (immediate)`);
   }
 }
 
@@ -105,29 +106,27 @@ export async function updateProducerSchedules(
         existing.schedule_type !== schedule.type ||
         existing.schedule_value !== schedule.value
       ) {
-        // Schedule changed - update with new next_run_at
-        const nextRunAt = computeNextRunTime(schedule.type, schedule.value);
+        // Schedule changed - run immediately with new config
         await store.upsert({
           workflow_id: workflowId,
           producer_name: producerName,
           schedule_type: schedule.type as ScheduleType,
           schedule_value: schedule.value,
-          next_run_at: nextRunAt,
+          next_run_at: Date.now(),
         });
-        log(`Updated schedule for producer ${producerName}: ${schedule.type}=${schedule.value}`);
+        log(`Updated schedule for producer ${producerName}: ${schedule.type}=${schedule.value} (immediate)`);
       }
       // If schedule unchanged, keep existing next_run_at
     } else {
-      // New producer - create schedule
-      const nextRunAt = computeNextRunTime(schedule.type, schedule.value);
+      // New producer - run immediately
       await store.upsert({
         workflow_id: workflowId,
         producer_name: producerName,
         schedule_type: schedule.type as ScheduleType,
         schedule_value: schedule.value,
-        next_run_at: nextRunAt,
+        next_run_at: Date.now(),
       });
-      log(`Added schedule for new producer ${producerName}: ${schedule.type}=${schedule.value}`);
+      log(`Added schedule for new producer ${producerName}: ${schedule.type}=${schedule.value} (immediate)`);
     }
   }
 

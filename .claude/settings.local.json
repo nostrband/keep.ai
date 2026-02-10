@@ -56,7 +56,9 @@
       "Bash(npx turbo run build:*)",
       "Bash(sqlite3:*)",
       "Bash(git fetch:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git merge:*)"
     ]
   }
 }

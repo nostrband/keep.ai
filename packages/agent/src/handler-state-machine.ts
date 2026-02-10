@@ -333,7 +333,12 @@ export async function createRetryRun(
       tx
     );
 
-    // 2. Create new retry run
+    // 2. Release reserved events (when resetting to preparing — no mutation applied)
+    if (startPhase === "preparing") {
+      await api.eventStore.releaseEvents(previousRun.id, tx);
+    }
+
+    // 3. Create new retry run
     result.newRun = await api.handlerRunStore.create(
       {
         script_run_id: previousRun.script_run_id,
