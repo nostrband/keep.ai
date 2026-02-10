@@ -195,8 +195,8 @@ export class InputStore {
     const db = tx || this.db.db;
 
     // Query inputs with status computed from events
-    // An input is 'pending' if ANY event references it and is pending/reserved
-    // Otherwise it's 'done'
+    // An input is 'done' only if it has caused_by events AND none are pending/reserved
+    // An input is 'pending' if it has no caused_by events OR any are pending/reserved
     let query = `
       SELECT i.*,
         CASE
@@ -206,7 +206,12 @@ export class InputStore {
             AND (e.caused_by LIKE '%"' || i.id || '"%')
             AND e.status IN ('pending', 'reserved')
           ) THEN 'pending'
-          ELSE 'done'
+          WHEN EXISTS (
+            SELECT 1 FROM events e
+            WHERE e.workflow_id = i.workflow_id
+            AND (e.caused_by LIKE '%"' || i.id || '"%')
+          ) THEN 'done'
+          ELSE 'pending'
         END as computed_status
       FROM inputs i
       WHERE i.workflow_id = ?
@@ -252,10 +257,20 @@ export class InputStore {
             WHERE e.workflow_id = i.workflow_id
             AND (e.caused_by LIKE '%"' || i.id || '"%')
             AND e.status IN ('pending', 'reserved')
-          ) THEN 1 ELSE 0
+          ) THEN 1
+          WHEN NOT EXISTS (
+            SELECT 1 FROM events e
+            WHERE e.workflow_id = i.workflow_id
+            AND (e.caused_by LIKE '%"' || i.id || '"%')
+          ) THEN 1
+          ELSE 0
         END) as pending_count,
         SUM(CASE
-          WHEN NOT EXISTS (
+          WHEN EXISTS (
+            SELECT 1 FROM events e
+            WHERE e.workflow_id = i.workflow_id
+            AND (e.caused_by LIKE '%"' || i.id || '"%')
+          ) AND NOT EXISTS (
             SELECT 1 FROM events e
             WHERE e.workflow_id = i.workflow_id
             AND (e.caused_by LIKE '%"' || i.id || '"%')
@@ -304,11 +319,18 @@ export class InputStore {
       FROM inputs i
       WHERE i.workflow_id = ?
       AND i.created_at < ?
-      AND EXISTS (
-        SELECT 1 FROM events e
-        WHERE e.workflow_id = i.workflow_id
-        AND (e.caused_by LIKE '%"' || i.id || '"%')
-        AND e.status IN ('pending', 'reserved')
+      AND (
+        EXISTS (
+          SELECT 1 FROM events e
+          WHERE e.workflow_id = i.workflow_id
+          AND (e.caused_by LIKE '%"' || i.id || '"%')
+          AND e.status IN ('pending', 'reserved')
+        )
+        OR NOT EXISTS (
+          SELECT 1 FROM events e
+          WHERE e.workflow_id = i.workflow_id
+          AND (e.caused_by LIKE '%"' || i.id || '"%')
+        )
       )
       ORDER BY i.created_at ASC
     `;
@@ -337,11 +359,18 @@ export class InputStore {
       FROM inputs i
       WHERE i.workflow_id = ?
       AND i.created_at < ?
-      AND EXISTS (
-        SELECT 1 FROM events e
-        WHERE e.workflow_id = i.workflow_id
-        AND (e.caused_by LIKE '%"' || i.id || '"%')
-        AND e.status IN ('pending', 'reserved')
+      AND (
+        EXISTS (
+          SELECT 1 FROM events e
+          WHERE e.workflow_id = i.workflow_id
+          AND (e.caused_by LIKE '%"' || i.id || '"%')
+          AND e.status IN ('pending', 'reserved')
+        )
+        OR NOT EXISTS (
+          SELECT 1 FROM events e
+          WHERE e.workflow_id = i.workflow_id
+          AND (e.caused_by LIKE '%"' || i.id || '"%')
+        )
       )
     `;
 

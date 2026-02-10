@@ -1,15 +1,9 @@
 
 
 ISSUES:
-+- doesn't start if submitted from homepage
-+- logic error happened but no auto-fix
-- event seems to be missing after logic error - why is input marked done? bcs event wasn't created for it, right?
 - remove diagram from the workflow page?
 - fix macos builds
-- registered input without any events is not 'done', it should be pending or 'orphaned' or some such
 - we have to make sure task-scheduler can't launch more that 1 task per workflow, meaning several maintainer tasks + planner - planner first, maintainers one by one second
-+- "Scroll up to load older messages"
-+- 'How can I help you today?' placeholder 
 - stack traces have no line number of any other hint at where the issue is - just 'not a function' or some such, plus script run page doesn't show which handler was running, and I guess when auto-fix will run it also needs info on which handler failed
 - provide hints into what constitutes mutations vs not, like Text.* tools aren't mutations and can be re-executed... maybe? why not 
 - script_runs table has same error/logs as handler_runs, think on getting rid of this table
@@ -17,9 +11,8 @@ ISSUES:
 - move input/output section on workflow page up under main section, move intent section above 'what it does', sections: main, input/output, chat, auto-fix, intent, what it does, script, script runs
 - shouldn't we display handler runs instead of script runs on workflow page?
 - what does 'run now' button do? run all producers?
-- what does 'test run' button do? what's 'tested'? remove it?
 - schedule on workflow page is still cron expr, should be human readable, but maybe it's also impl detail - the actual schedule is now inside each producer, right? workflow-scheduler should take that into account, not script/workflow 'cron' field, also 'schedule' tool seems no longer needed right?
-- on homepage workflow is 'active' while it has 'maintenance' flag, we should display maintenance somehow - either extra 'fixing' icon near/inside 'active' badge, or separate badge value like 'Fixing' - the workflow is definitely not 'active' in user's mind if it's stopped for maintenance
+- on homepage workflow has 'active' badge while it has 'maintenance' flag, we should display maintenance somehow - either extra 'fixing' icon near/inside 'active' badge, or separate badge value like 'Fixing' - the workflow is definitely not 'active' in user's mind if it's stopped for maintenance
 - why is maintainer's inbox full of data if it only needs failed handler_run_id?
 - notifications should have buttons styled properly (grey box etc) and cursor pointer
 - should notifications have their own page? or be expandable? bcs long-form notifs can't be fully read now

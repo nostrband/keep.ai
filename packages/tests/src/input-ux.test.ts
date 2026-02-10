@@ -156,8 +156,8 @@ describe("exec-16: Input/Output UX", () => {
   });
 
   describe("Input Status Computation", () => {
-    it("should return 'done' status for input with no events", async () => {
-      // Register input with no events
+    it("should return 'pending' status for input with no events", async () => {
+      // Register input with no events (producer registered but hasn't published yet)
       const inputId = await inputStore.register(workflowId, {
         source: "gmail",
         type: "email",
@@ -169,7 +169,7 @@ describe("exec-16: Input/Output UX", () => {
 
       expect(inputs).toHaveLength(1);
       expect(inputs[0].id).toBe(inputId);
-      expect(inputs[0].status).toBe("done"); // No events = done
+      expect(inputs[0].status).toBe("pending"); // No events = pending (producer may have failed)
     });
 
     it("should return 'pending' status for input with pending events", async () => {
@@ -318,7 +318,7 @@ describe("exec-16: Input/Output UX", () => {
       const gmailStats = stats.find(s => s.source === "gmail" && s.type === "email");
       expect(gmailStats).toBeDefined();
       expect(gmailStats!.total_count).toBe(2);
-      expect(gmailStats!.done_count).toBe(2); // No events = done
+      expect(gmailStats!.pending_count).toBe(2); // No events = pending
 
       const slackStats = stats.find(s => s.source === "slack" && s.type === "message");
       expect(slackStats).toBeDefined();
@@ -346,8 +346,8 @@ describe("exec-16: Input/Output UX", () => {
       const gmailStats = stats.find(s => s.source === "gmail");
 
       expect(gmailStats).toBeDefined();
-      expect(gmailStats!.pending_count).toBe(1);
-      expect(gmailStats!.done_count).toBe(1);
+      expect(gmailStats!.pending_count).toBe(2); // input1 has pending event, input2 has no events (both pending)
+      expect(gmailStats!.done_count).toBe(0);
       expect(gmailStats!.total_count).toBe(2);
     });
   });
@@ -400,7 +400,7 @@ describe("exec-16: Input/Output UX", () => {
     });
 
     it("should not include completed inputs in stale list even if old", async () => {
-      // Create old input
+      // Create old input with all events consumed (truly done)
       const inputId = bytesToHex(randomBytes(16));
       const staleTime = Date.now() - (8 * 24 * 60 * 60 * 1000);
 
@@ -410,7 +410,15 @@ describe("exec-16: Input/Output UX", () => {
         [inputId, workflowId, "gmail", "email", "old-done", "Old done email", "r1", staleTime]
       );
 
-      // No pending events = done status
+      // Create and consume an event so the input is truly done
+      await eventStore.publishEvent(
+        workflowId,
+        "topic1",
+        { messageId: "old-done-msg", payload: {}, causedBy: [inputId] },
+        "r1"
+      );
+      await eventStore.reserveEvents("hr-old-done", [{ topic: "topic1", ids: ["old-done-msg"] }]);
+      await eventStore.consumeEvents("hr-old-done");
 
       const staleInputs = await inputStore.getStaleInputs(workflowId);
 
