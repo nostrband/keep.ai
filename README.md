@@ -12,7 +12,7 @@ No visual graphs. No manual tweaking. No babysitting.
 
 Keep.AI is backed by a detailed architecture: a split [runtime](docs/dev/04-runtime-planner-executor-maintainer.md) separating planning from execution, a [three-phase execution model](docs/dev/06-execution-model.md) with durable checkpoints, [mutation reconciliation](docs/dev/13-reconciliation.md) for uncertain side-effects, [host-enforced permissions](docs/dev/11-permissions.md), and [deterministic failure handling](docs/dev/09-failure-repair.md). See the full [design specs](docs/dev/).
 
-Delegated automations must be boring.
+The specs make for dry reading. So do the automations. That's by design — delegated automation must be boring.
 
 ---
 
