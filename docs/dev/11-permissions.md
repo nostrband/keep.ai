@@ -1,4 +1,6 @@
-# Permissions, Grants, and Enforced Policy
+# Permissions, Grants, and Enforced Policy (DRAFT)
+
+**Status: Draft**
 
 This document defines how Keep.AI controls **what automations are allowed to do**.
 
