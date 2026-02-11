@@ -435,18 +435,14 @@ flowchart TD
     F --> E
 \`\`\`
 
-Use 'schedule' tool to set when the script runs automatically by providing a
-cron expression. If user requests automated/recurring execution, you MUST
-call 'schedule' after saving the first code version, otherwise the script
-will not run automatically.
-
 Use other tools to ask questions to user, use JS APIs to inspect the script code
 change history and other metadata.
 
-After you save and schedule the script, it will be executed by the host
-system in the same sandbox env according to the cron schedule (but without
-state passing across iterations). Errors in the scheduled execution will be
-passed back to you to fix the code and save an updated version.
+After you save the script, it will be executed by the host system in the
+same sandbox env according to the producer schedules defined in the workflow
+config (but without state passing across iterations). Errors in the
+scheduled execution will be passed back to you to fix the code and save an
+updated version.
 
 To save state across script launches (since global.state isn't saved there), use
 notes, i.e. by creating a note with id "<taskId>.<meaningful_note_name>" and 

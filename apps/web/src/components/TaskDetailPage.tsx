@@ -10,6 +10,7 @@ import { Response } from "../ui/components/ai-elements/response";
 import { TaskStatusBadge, WorkflowStatusBadge, TaskRunStatusBadge } from "./StatusBadge";
 import { useAutoHidingMessage } from "../hooks/useAutoHidingMessage";
 import { getWorkflowTitle } from "../lib/workflowUtils";
+import { formatCronSchedule } from "../lib/formatCronSchedule";
 
 export default function TaskDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -190,7 +191,7 @@ export default function TaskDetailPage() {
                         <WorkflowStatusBadge status={workflow.status} />
                       </div>
                       <div className="flex items-center gap-4 text-xs text-gray-500">
-                        {workflow.cron && <span>Cron: {workflow.cron}</span>}
+                        {workflow.cron && <span>Schedule: {formatCronSchedule(workflow.cron)}</span>}
                         {workflow.events && <span>Events: {workflow.events}</span>}
                         <span>Created: {new Date(workflow.timestamp).toLocaleString()}</span>
                       </div>

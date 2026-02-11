@@ -4,6 +4,7 @@ import { Script, ScriptStore, ChatStore, CRSqliteDB, DBInterface, ProducerSchedu
 import { validateWorkflowScript, isWorkflowFormatScript } from "../workflow-validator";
 import { extractIntent } from "../intent-extract";
 import { updateProducerSchedules } from "../producer-schedule-init";
+import { getMostFrequentProducerCron } from "../schedule-utils";
 import debug from "debug";
 
 const log = debug("save-tool");
@@ -147,6 +148,13 @@ export function makeSaveTool(opts: {
       if (workflowConfig && opts.producerScheduleStore) {
         try {
           await updateProducerSchedules(workflow.id, workflowConfig, opts.producerScheduleStore);
+          // Denormalize schedule info to workflow for display
+          const cron = getMostFrequentProducerCron(workflowConfig.producers);
+          const nextRunAt = await opts.producerScheduleStore.getNextScheduledTime(workflow.id);
+          await opts.scriptStore.updateWorkflowFields(workflow.id, {
+            cron,
+            next_run_timestamp: nextRunAt ? new Date(nextRunAt).toISOString() : '',
+          });
         } catch (error) {
           log(`Failed to update producer schedules for workflow ${workflow.id}:`, error);
         }

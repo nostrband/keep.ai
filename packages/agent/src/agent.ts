@@ -7,7 +7,6 @@ import { makeEvalTool } from "./ai-tools/eval";
 import { makeFinishTool } from "./ai-tools/finish";
 import { makeAskTool } from "./ai-tools/ask";
 import { makeSaveTool } from "./ai-tools/save";
-import { makeScheduleTool } from "./ai-tools/schedule";
 import { makeFixTool } from "./ai-tools/fix";
 import { AITool } from "./ai-tools/types";
 
@@ -421,10 +420,6 @@ export class Agent {
         chatStore: this.env.api.chatStore,
         db: this.env.api.db,
         producerScheduleStore: this.env.api.producerScheduleStore,
-      });
-      tools.schedule = makeScheduleTool({
-        taskId: this.task.id,
-        scriptStore: this.env.api.scriptStore,
       });
     }
 

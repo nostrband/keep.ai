@@ -191,7 +191,7 @@ export function WorkflowInputsSummary({ workflowId }: WorkflowInputsSummaryProps
                   className="flex items-center justify-between p-2 rounded-lg hover:bg-gray-50 transition-colors group"
                 >
                   <span className="text-sm text-gray-900 flex items-center gap-2">
-                    <span className="text-gray-400">├─</span>
+                    <span className="text-gray-400">└─</span>
                     {formatConnector(stat.tool_namespace)}
                   </span>
                   <span className="text-xs text-gray-500 flex items-center gap-3">

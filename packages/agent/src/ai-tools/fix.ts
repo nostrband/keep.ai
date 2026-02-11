@@ -3,6 +3,7 @@ import { AITool } from "./types";
 import { Script, ScriptStore, ProducerScheduleStore, EventStore } from "@app/db";
 import { validateWorkflowScript, isWorkflowFormatScript } from "../workflow-validator";
 import { updateProducerSchedules } from "../producer-schedule-init";
+import { getMostFrequentProducerCron } from "../schedule-utils";
 
 export interface FixInfo {
   code: string;
@@ -115,6 +116,13 @@ export function makeFixTool(opts: {
         if (workflowConfig && opts.producerScheduleStore) {
           try {
             await updateProducerSchedules(opts.workflowId, workflowConfig, opts.producerScheduleStore);
+            // Denormalize schedule info to workflow for display
+            const cron = getMostFrequentProducerCron(workflowConfig.producers);
+            const nextRunAt = await opts.producerScheduleStore.getNextScheduledTime(opts.workflowId);
+            await opts.scriptStore.updateWorkflowFields(opts.workflowId, {
+              cron,
+              next_run_timestamp: nextRunAt ? new Date(nextRunAt).toISOString() : '',
+            });
           } catch (error) {
             // Don't fail the fix save if schedule update fails
           }

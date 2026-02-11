@@ -1,6 +1,9 @@
 /**
  * Parse cron expression to human-readable schedule string.
  * This function never throws - it returns the raw cron string on any error.
+ *
+ * NOTE: Canonical implementation lives in packages/agent/src/schedule-utils.ts.
+ * This is a browser-compatible copy (the agent package can't be imported in web builds).
  */
 export function formatCronSchedule(cron?: string): string {
   if (!cron) return "Not scheduled";
@@ -13,10 +16,21 @@ export function formatCronSchedule(cron?: string): string {
     const [minute, hour, dayOfMonth, month, dayOfWeek] = parts;
 
     // Every minute - must verify ALL five fields are wildcards
-    // "* * 1 * *" should NOT return "Every minute"
     if (minute === "*" && hour === "*" && dayOfMonth === "*" &&
         month === "*" && dayOfWeek === "*") {
       return "Every minute";
+    }
+
+    // Step expressions: */N minutes (all other fields *)
+    const minuteStep = minute.match(/^\*\/(\d+)$/);
+    if (minuteStep && hour === "*" && dayOfMonth === "*" && month === "*" && dayOfWeek === "*") {
+      return `Every ${minuteStep[1]} minutes`;
+    }
+
+    // Step expressions: 0 */N hours (minute=0, all other fields *)
+    const hourStep = hour.match(/^\*\/(\d+)$/);
+    if (minute === "0" && hourStep && dayOfMonth === "*" && month === "*" && dayOfWeek === "*") {
+      return `Every ${hourStep[1]} hours`;
     }
 
     // Every hour at specific minute

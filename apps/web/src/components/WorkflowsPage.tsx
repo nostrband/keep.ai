@@ -5,6 +5,7 @@ import SharedHeader from "./SharedHeader";
 import { Button } from "../ui";
 import { WorkflowStatusBadge } from "./StatusBadge";
 import { getWorkflowTitle } from "../lib/workflowUtils";
+import { formatCronSchedule } from "../lib/formatCronSchedule";
 
 // Supported filter values (case-insensitive matching)
 const VALID_FILTERS = ["drafts"] as const;
@@ -87,7 +88,7 @@ export default function WorkflowsPage() {
                       <WorkflowStatusBadge status={workflow.status} />
                     </div>
                     <div className="flex items-center gap-4 text-xs text-gray-500">
-                      {workflow.cron && <span>Schedule: {workflow.cron}</span>}
+                      {workflow.cron && <span>Schedule: {formatCronSchedule(workflow.cron)}</span>}
                       {workflow.events && <span>Events: {workflow.events}</span>}
                       <span>
                         Created: {new Date(workflow.timestamp).toLocaleString()}

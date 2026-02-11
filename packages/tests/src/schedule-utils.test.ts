@@ -3,6 +3,8 @@ import {
   parseInterval,
   computeNextRunTime,
   extractSchedule,
+  intervalToCron,
+  getMostFrequentProducerCron,
 } from "@app/agent";
 
 /**
@@ -119,6 +121,83 @@ describe("Schedule Utils (exec-13)", () => {
     it("should return null for empty strings", () => {
       expect(extractSchedule({ interval: "" })).toBeNull();
       expect(extractSchedule({ cron: "" })).toBeNull();
+    });
+  });
+
+  describe("intervalToCron", () => {
+    it("should convert minute intervals", () => {
+      expect(intervalToCron("5m")).toBe("*/5 * * * *");
+      expect(intervalToCron("15m")).toBe("*/15 * * * *");
+      expect(intervalToCron("30m")).toBe("*/30 * * * *");
+    });
+
+    it("should convert 1 minute to every-minute cron", () => {
+      expect(intervalToCron("1m")).toBe("* * * * *");
+    });
+
+    it("should convert hour intervals", () => {
+      expect(intervalToCron("1h")).toBe("0 * * * *");
+      expect(intervalToCron("2h")).toBe("0 */2 * * *");
+      expect(intervalToCron("6h")).toBe("0 */6 * * *");
+    });
+
+    it("should convert day intervals", () => {
+      expect(intervalToCron("1d")).toBe("0 0 * * *");
+    });
+
+    it("should convert sub-minute intervals to every-minute", () => {
+      expect(intervalToCron("30s")).toBe("* * * * *");
+      expect(intervalToCron("1s")).toBe("* * * * *");
+    });
+  });
+
+  describe("getMostFrequentProducerCron", () => {
+    it("should return cron for single producer with interval", () => {
+      const producers = {
+        poll: {
+          publishes: ["topic.a"],
+          schedule: { interval: "5m" },
+        },
+      };
+      expect(getMostFrequentProducerCron(producers)).toBe("*/5 * * * *");
+    });
+
+    it("should return most frequent schedule from multiple producers", () => {
+      const producers = {
+        slow: {
+          publishes: ["topic.a"],
+          schedule: { interval: "1h" },
+        },
+        fast: {
+          publishes: ["topic.b"],
+          schedule: { interval: "5m" },
+        },
+      };
+      expect(getMostFrequentProducerCron(producers)).toBe("*/5 * * * *");
+    });
+
+    it("should return empty string when no producers have schedules", () => {
+      expect(getMostFrequentProducerCron({})).toBe("");
+    });
+
+    it("should handle producers with no schedule", () => {
+      const producers = {
+        noSchedule: {
+          publishes: ["topic.a"],
+          schedule: {},
+        },
+      };
+      expect(getMostFrequentProducerCron(producers)).toBe("");
+    });
+
+    it("should handle cron schedules", () => {
+      const producers = {
+        poll: {
+          publishes: ["topic.a"],
+          schedule: { cron: "0 * * * *" },
+        },
+      };
+      expect(getMostFrequentProducerCron(producers)).toBe("0 * * * *");
     });
   });
 });

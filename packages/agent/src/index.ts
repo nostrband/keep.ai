@@ -62,14 +62,12 @@ export {
   makeFinishTool,
   makeFixTool,
   makeSaveTool,
-  makeScheduleTool,
   type AskInfo,
   type FinishInfo,
   type FixInfo,
   type FixResult,
   type SaveInfo,
   type SaveResult,
-  type ScheduleInfo,
 } from "./ai-tools";
 
 // Environment configuration
@@ -211,6 +209,9 @@ export {
   parseInterval,
   computeNextRunTime,
   extractSchedule,
+  formatCronSchedule,
+  intervalToCron,
+  getMostFrequentProducerCron,
 } from "./schedule-utils";
 
 // Producer schedule initialization (exec-13)

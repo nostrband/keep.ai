@@ -1,15 +1,32 @@
 import { useAgentStatus, formatAgentStatus } from "../hooks/useAgentStatus";
+import { useNeedAuth } from "../hooks/useNeedAuth";
 
 /**
  * A compact badge showing the current agent activity status.
- * Displays in the header showing if tasks or workflows are running.
+ * Displays in the header showing if tasks or workflows are running,
+ * idle, or offline (server unreachable).
  */
 export function AgentStatusBadge() {
-  const { data: status, isLoading, isError } = useAgentStatus();
+  const { data: status, isLoading } = useAgentStatus();
+  const { isServerError, isLoaded: isAuthLoaded, refresh } = useNeedAuth();
 
-  // Don't show anything while loading initial state or when server is down
-  if ((isLoading && !status) || isError) {
+  // Don't show anything while loading initial state
+  if (isLoading && !status && !isAuthLoaded) {
     return null;
+  }
+
+  // Offline state takes priority - mutually exclusive with idle/running
+  if (isServerError) {
+    return (
+      <div
+        className="flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-600 cursor-pointer"
+        title="Server is unreachable. Click to retry."
+        onClick={refresh}
+      >
+        <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
+        <span className="hidden sm:inline">Offline</span>
+      </div>
+    );
   }
 
   const isRunning = status?.isRunning ?? false;

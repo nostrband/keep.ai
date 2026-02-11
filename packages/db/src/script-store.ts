@@ -95,10 +95,10 @@ export interface Workflow {
   task_id: string;
   chat_id: string;                // Direct link to workflow's chat (Spec 09)
   timestamp: string;
-  cron: string;
+  cron: string;                // Denormalized from producers: most-frequent schedule as cron expression (written by save/fix tools)
   events: string;
   status: string;
-  next_run_timestamp: string;
+  next_run_timestamp: string;  // Denormalized from producer_schedules: soonest next_run_at as ISO string (written by save/fix tools)
   maintenance: boolean;
   maintenance_fix_count: number;  // Tracks consecutive fix attempts in maintenance mode
   active_script_id: string;       // ID of the script version that should execute when workflow runs

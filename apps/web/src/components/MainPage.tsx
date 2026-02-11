@@ -127,7 +127,7 @@ function getSecondaryLine(workflow: Workflow, latestRun: ScriptRun | undefined, 
     return { text: "Not scheduled", isAttention: false, attentionLevel: "none" };
   }
 
-  return { text: workflow.cron || workflow.events || "No schedule", isAttention: false, attentionLevel: "none" };
+  return { text: formatCronSchedule(workflow.cron || workflow.events), isAttention: false, attentionLevel: "none" };
 }
 
 function formatTimeAgo(date: Date): string {
