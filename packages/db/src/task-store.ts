@@ -398,6 +398,13 @@ export class TaskStore {
     );
   }
 
+  async updateTaskTitle(taskId: string, title: string): Promise<void> {
+    await this.db.db.exec(
+      `UPDATE tasks SET title = ? WHERE id = ? AND (deleted IS NULL OR deleted = FALSE)`,
+      [title, taskId]
+    );
+  }
+
   // Create a new task run
   async createTaskRun(runStart: TaskRunStart): Promise<void> {
     await this.db.db.exec(

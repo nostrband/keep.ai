@@ -15,7 +15,7 @@ ISSUES:
 - total costs on workflow page, with per-day/per-run stats etc
 - script_runs table has same error/logs as handler_runs, I feel logs field is to be deprecated, error field to include a copy from handler_run (btw does handler run have script_run_id?), handler runs batch (producer + downstream consumers) should probably be grouped and shown on script run page, makes sense?
 - what does 'run now' button do? run all producers?
-- auto-fix history shows 0 timestamp (I guess, 1970 year), also it shows task title (same for each attempt), can we instead show something more meaningful? Like minor script version produced by a fix, maybe with commit message? Also maybe 'fix' tool needs to also provide 'title' and 'issue' fields specifically to define the title for the issue, then detaled description if the issue, then fix explanation (already in comment), makes sense?
+- script runs full list shown on workflow page, let's show last 3 and 'View all (N)' button which opens /workflows/<id>/runs page with full list with pagination and filters
 - on homepage workflow has 'active' badge while it has 'maintenance' flag, we should display maintenance somehow - either extra 'fixing' icon near/inside 'active' badge, or separate badge value like 'Fixing' - the workflow is definitely not 'active' in user's mind if it's stopped for maintenance
 - why mutation is created before in_flight status? like it feels like tool wrapper would immediately, unconditionally set the tool status to inflight after mutation row added? or do we still create it but then check input format and set 'failed' if input invalid? what's the logic there?
 - why is maintainer's inbox full of data if it only needs failed handler_run_id?

@@ -391,6 +391,7 @@ export class Agent {
         workflowId: this.task.maintainerContext.workflowId,
         expectedScriptId: this.task.maintainerContext.expectedScriptId,
         scriptStore: this.env.api.scriptStore,
+        taskStore: this.env.api.taskStore,
         producerScheduleStore: this.env.api.producerScheduleStore,
         eventStore: this.env.api.eventStore,
         handlerRunId: this.task.maintainerContext.handlerRunId,

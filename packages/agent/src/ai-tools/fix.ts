@@ -1,11 +1,12 @@
 import { JSONSchema } from "../json-schema";
 import { AITool } from "./types";
-import { Script, ScriptStore, ProducerScheduleStore, EventStore } from "@app/db";
+import { Script, ScriptStore, ProducerScheduleStore, EventStore, TaskStore } from "@app/db";
 import { validateWorkflowScript, isWorkflowFormatScript } from "../workflow-validator";
 import { updateProducerSchedules } from "../producer-schedule-init";
 import { getMostFrequentProducerCron } from "../schedule-utils";
 
 export interface FixInfo {
+  issue: string;
   code: string;
   comment: string;
 }
@@ -39,6 +40,7 @@ export function makeFixTool(opts: {
   /** The script ID that the maintainer is fixing */
   expectedScriptId: string;
   scriptStore: ScriptStore;
+  taskStore?: TaskStore;
   producerScheduleStore?: ProducerScheduleStore;  // For per-producer scheduling (exec-13)
   /** EventStore for releasing reserved events on fix activation */
   eventStore?: EventStore;
@@ -94,6 +96,11 @@ export function makeFixTool(opts: {
       };
 
       await opts.scriptStore.addScript(newScript);
+
+      // Update the maintainer task title with the issue description
+      if (opts.taskStore && info.issue) {
+        await opts.taskStore.updateTaskTitle(opts.maintainerTaskId, info.issue);
+      }
 
       // Race condition check: only activate if planner hasn't updated
       // Compare active_script_id to know if planner changed it while we worked
@@ -167,10 +174,11 @@ Returns:
     inputSchema: {
       type: "object",
       properties: {
+        issue: { type: "string", description: "Short title of the issue found (e.g. 'API response parsing fails on empty arrays')" },
         code: { type: "string", description: "The complete fixed script code" },
-        comment: { type: "string", description: "Brief description of what was fixed" },
+        comment: { type: "string", description: "Explanation of what was fixed and why" },
       },
-      required: ["code", "comment"],
+      required: ["issue", "code", "comment"],
     } as JSONSchema,
   } satisfies AITool;
 }

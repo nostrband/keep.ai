@@ -1,7 +1,8 @@
 import React, { useState, useMemo, useEffect } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import type { Task } from "@app/db";
+import type { Task, Script } from "@app/db";
+import { formatVersion } from "@app/db";
 import {
   useWorkflow,
   useLatestScriptByWorkflowId,
@@ -56,6 +57,21 @@ export default function WorkflowDetailPage() {
     }
     return scriptVersions.find((s: any) => s.id === workflow.active_script_id) || latestScript;
   }, [workflow?.active_script_id, scriptVersions, latestScript]);
+
+  // Build a lookup from maintainer task_id to the script it produced
+  const scriptByTaskId = useMemo(() => {
+    const map = new Map<string, Script>();
+    for (const s of scriptVersions) {
+      if (s.task_id && s.minor_version > 0) {
+        // Fix scripts have minor_version > 0; keep the latest one per task
+        const existing = map.get(s.task_id);
+        if (!existing || s.minor_version > existing.minor_version) {
+          map.set(s.task_id, s as Script);
+        }
+      }
+    }
+    return map;
+  }, [scriptVersions]);
 
   // Clear workflow notifications when viewing this workflow
   // This prevents re-notifying user for errors they've already seen
@@ -454,41 +470,54 @@ export default function WorkflowDetailPage() {
               </div>
             )}
 
+            {/* Intent Section - shows goal, inputs, outputs, constraints */}
+            <WorkflowIntentSection intentSpecJson={workflow.intent_spec} />
+
             {/* Auto-Fix History Section - shows maintainer tasks for this workflow */}
             {maintainerTasks.length > 0 && (
               <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
                 <h2 className="text-lg font-semibold text-gray-900 mb-4">Auto-Fix History</h2>
                 <div className="space-y-3">
-                  {maintainerTasks.map((task: Task) => (
-                    <Link
-                      key={task.id}
-                      to={`/tasks/${task.id}`}
-                      className="block p-4 border border-gray-200 rounded-lg hover:border-gray-300 hover:shadow-sm transition-all"
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="font-medium text-gray-900">{task.title || `Auto-fix ${task.id.slice(0, 8)}`}</span>
-                            <TaskStatusBadge state={task.state} defaultLabel="Pending" />
-                          </div>
-                          {task.error && (
-                            <p className="text-sm text-red-600 mb-1 line-clamp-2">
-                              {task.error}
-                            </p>
-                          )}
-                          <div className="text-xs text-gray-500">
-                            {new Date(task.timestamp).toLocaleString()}
+                  {maintainerTasks.map((task: Task) => {
+                    const fixScript = scriptByTaskId.get(task.id);
+                    return (
+                      <Link
+                        key={task.id}
+                        to={`/tasks/${task.id}`}
+                        className="block p-4 border border-gray-200 rounded-lg hover:border-gray-300 hover:shadow-sm transition-all"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="font-medium text-gray-900">{task.title || `Auto-fix ${task.id.slice(0, 8)}`}</span>
+                              <TaskStatusBadge state={task.state} defaultLabel="Pending" />
+                              {fixScript && (
+                                <span className="text-xs text-gray-500 font-mono">
+                                  v{formatVersion(fixScript.major_version, fixScript.minor_version)}
+                                </span>
+                              )}
+                            </div>
+                            {fixScript?.change_comment && (
+                              <p className="text-sm text-gray-600 mb-1 line-clamp-2">
+                                {fixScript.change_comment}
+                              </p>
+                            )}
+                            {task.error && (
+                              <p className="text-sm text-red-600 mb-1 line-clamp-2">
+                                {task.error}
+                              </p>
+                            )}
+                            <div className="text-xs text-gray-500">
+                              {new Date(task.timestamp * 1000).toLocaleString()}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    </Link>
-                  ))}
+                      </Link>
+                    );
+                  })}
                 </div>
               </div>
             )}
-
-            {/* Intent Section - shows goal, inputs, outputs, constraints */}
-            <WorkflowIntentSection intentSpecJson={workflow.intent_spec} />
 
             {/* Script Section */}
             {activeScript && (

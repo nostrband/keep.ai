@@ -127,7 +127,7 @@ describe("Fix Tool", () => {
       });
 
       const result = await fixTool.execute!(
-        { code: "console.log('fixed');", comment: "Fixed the bug" },
+        { issue: "Console output broken", code: "console.log('fixed');", comment: "Fixed the bug" },
         createToolCallOptions()
       ) as FixResult;
 
@@ -152,7 +152,7 @@ describe("Fix Tool", () => {
       });
 
       const result = await fixTool.execute!(
-        { code: "console.log('fixed');", comment: "Fixed" },
+        { issue: "Test issue", code: "console.log('fixed');", comment: "Fixed" },
         createToolCallOptions()
       ) as FixResult;
 
@@ -179,7 +179,7 @@ describe("Fix Tool", () => {
       });
 
       const result = await fixTool.execute!(
-        { code: "console.log('fixed');", comment: "Bug fix" },
+        { issue: "Test issue", code: "console.log('fixed');", comment: "Bug fix" },
         createToolCallOptions()
       ) as FixResult;
 
@@ -203,7 +203,7 @@ describe("Fix Tool", () => {
       });
 
       const result = await fixTool.execute!(
-        { code: "fixed code", comment: "Fix" },
+        { issue: "Test issue", code: "fixed code", comment: "Fix" },
         createToolCallOptions()
       ) as FixResult;
 
@@ -224,7 +224,7 @@ describe("Fix Tool", () => {
       });
 
       const result = await fixTool.execute!(
-        { code: "fixed code", comment: "Fix" },
+        { issue: "Test issue", code: "fixed code", comment: "Fix" },
         createToolCallOptions()
       ) as FixResult;
 
@@ -246,7 +246,7 @@ describe("Fix Tool", () => {
       });
 
       await fixTool.execute!(
-        { code: "fixed code", comment: "Fix" },
+        { issue: "Test issue", code: "fixed code", comment: "Fix" },
         createToolCallOptions()
       );
 
@@ -271,7 +271,7 @@ describe("Fix Tool", () => {
       });
 
       await fixTool.execute!(
-        { code: "fixed code", comment: "Fix" },
+        { issue: "Test issue", code: "fixed code", comment: "Fix" },
         createToolCallOptions()
       );
 
@@ -298,7 +298,7 @@ describe("Fix Tool", () => {
       });
 
       const result = await fixTool.execute!(
-        { code: "console.log('persisted');", comment: "Persisted fix" },
+        { issue: "Test issue", code: "console.log('persisted');", comment: "Persisted fix" },
         createToolCallOptions()
       ) as FixResult;
 
@@ -328,7 +328,7 @@ describe("Fix Tool", () => {
       });
 
       const result = await fixTool.execute!(
-        { code: "console.log('fix for v2');", comment: "Fix for original script" },
+        { issue: "Test issue", code: "console.log('fix for v2');", comment: "Fix for original script" },
         createToolCallOptions()
       ) as FixResult;
 
@@ -357,7 +357,7 @@ describe("Fix Tool", () => {
       });
 
       const result = await fixTool.execute!(
-        { code: "stale fix", comment: "Fix based on old version" },
+        { issue: "Test issue", code: "stale fix", comment: "Fix based on old version" },
         createToolCallOptions()
       ) as FixResult;
 
@@ -383,7 +383,7 @@ describe("Fix Tool", () => {
       });
 
       await fixTool.execute!(
-        { code: "stale fix", comment: "Stale" },
+        { issue: "Test issue", code: "stale fix", comment: "Stale" },
         createToolCallOptions()
       );
 
@@ -407,7 +407,7 @@ describe("Fix Tool", () => {
       });
 
       await fixTool.execute!(
-        { code: "stale fix", comment: "Should not update active_script_id" },
+        { issue: "Test issue", code: "stale fix", comment: "Should not update active_script_id" },
         createToolCallOptions()
       );
 
@@ -436,7 +436,7 @@ describe("Fix Tool", () => {
       });
 
       const executeResult = await fixTool.execute!(
-        { code: "fixed code", comment: "Fix" },
+        { issue: "Test issue", code: "fixed code", comment: "Fix" },
         createToolCallOptions()
       ) as FixResult;
 
@@ -467,7 +467,7 @@ describe("Fix Tool", () => {
       });
 
       await fixTool.execute!(
-        { code: "stale fix", comment: "Stale fix" },
+        { issue: "Test issue", code: "stale fix", comment: "Stale fix" },
         createToolCallOptions()
       );
 
@@ -487,7 +487,7 @@ describe("Fix Tool", () => {
 
       await expect(
         fixTool.execute!(
-          { code: "code", comment: "comment" },
+          { issue: "Test issue", code: "code", comment: "comment" },
           createToolCallOptions()
         )
       ).rejects.toThrow("Workflow not found: non-existent-workflow");
@@ -506,7 +506,7 @@ describe("Fix Tool", () => {
 
       await expect(
         fixTool.execute!(
-          { code: "code", comment: "comment" },
+          { issue: "Test issue", code: "code", comment: "comment" },
           createToolCallOptions()
         )
       ).rejects.toThrow("Workflow workflow-1 has no active script");
@@ -526,7 +526,7 @@ describe("Fix Tool", () => {
 
       await expect(
         fixTool.execute!(
-          { code: "code", comment: "comment" },
+          { issue: "Test issue", code: "code", comment: "comment" },
           createToolCallOptions()
         )
       ).rejects.toThrow("Original script not found: non-existent-script");
@@ -549,7 +549,7 @@ describe("Fix Tool", () => {
       });
 
       const result1 = await fixTool1.execute!(
-        { code: "fix 1", comment: "First fix" },
+        { issue: "Test issue", code: "fix 1", comment: "First fix" },
         createToolCallOptions()
       ) as FixResult;
 
@@ -565,7 +565,7 @@ describe("Fix Tool", () => {
       });
 
       const result2 = await fixTool2.execute!(
-        { code: "fix 2", comment: "Second fix" },
+        { issue: "Test issue", code: "fix 2", comment: "Second fix" },
         createToolCallOptions()
       ) as FixResult;
 
@@ -589,7 +589,7 @@ describe("Fix Tool", () => {
       });
 
       const result = await fixTool.execute!(
-        { code: "fixed", comment: "Fix" },
+        { issue: "Test issue", code: "fixed", comment: "Fix" },
         createToolCallOptions()
       ) as FixResult;
 
