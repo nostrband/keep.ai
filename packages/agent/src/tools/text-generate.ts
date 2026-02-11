@@ -4,7 +4,7 @@ import { getEnv } from "../env";
 import { getModelName } from "../model";
 import debug from "debug";
 import { AuthError, LogicError, NetworkError, InternalError, classifyHttpError, isClassifiedError, formatUsageForEvent } from "../errors";
-import { defineReadOnlyTool, Tool } from "./types";
+import { defineTool, Tool } from "./types";
 
 const debugTextGenerate = debug("TextGenerate");
 
@@ -54,17 +54,14 @@ interface Output {
 
 /**
  * Create the Text.generate tool.
- * This is a read-only tool - can be used outside Items.withItem().
  */
 export function makeTextGenerateTool(getContext: () => EvalContext): Tool<Input, Output> {
-  return defineReadOnlyTool({
+  return defineTool({
     namespace: "Text",
     name: "generate",
     description: `Generate text based on a prompt using AI.
 Takes a prompt and optional temperature/max_chars parameters, returns generated text.
-Temperature controls randomness (0=deterministic, 1=very random), default 0.3.
-
-ℹ️ Not a mutation - can be used outside Items.withItem().`,
+Temperature controls randomness (0=deterministic, 1=very random), default 0.3.`,
     inputSchema,
     outputSchema,
     execute: async (input) => {

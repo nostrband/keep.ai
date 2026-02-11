@@ -5,7 +5,7 @@ import { getEnv } from "../env";
 import { fileUtils } from "@app/node";
 import debug from "debug";
 import { AuthError, LogicError, NetworkError, PermissionError, InternalError, classifyHttpError, isClassifiedError, formatUsageForEvent } from "../errors";
-import { defineReadOnlyTool, Tool } from "./types";
+import { defineTool, Tool } from "./types";
 
 const debugImgExplain = debug("ImagesExplain");
 
@@ -67,21 +67,18 @@ interface Output {
 
 /**
  * Create the Images.explain tool.
- * This is a read-only tool - can be used outside Items.withItem().
  */
 export function makeImagesExplainTool(
   fileStore: FileStore,
   userPath: string | undefined,
   getContext: () => EvalContext
 ): Tool<Input, Output> {
-  return defineReadOnlyTool({
+  return defineTool({
     namespace: "Images",
     name: "explain",
     description: `Analyze and explain images using AI vision model.
 Takes an image file path/ID and a question about the image, uploads the image to an AI vision model and returns the textual explanation.
-Supports png, jpeg, webp and gif image formats.
-
-ℹ️ Not a mutation - can be used outside Items.withItem().`,
+Supports png, jpeg, webp and gif image formats.`,
     inputSchema,
     outputSchema,
     execute: async (input) => {

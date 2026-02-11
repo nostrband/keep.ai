@@ -4,7 +4,7 @@ import { getEnv } from "../env";
 import { getTextModelName } from "../model";
 import debug from "debug";
 import { AuthError, LogicError, NetworkError, InternalError, classifyHttpError, isClassifiedError, formatUsageForEvent } from "../errors";
-import { defineReadOnlyTool, Tool } from "./types";
+import { defineTool, Tool } from "./types";
 
 const debugTextSummarize = debug("TextSummarize");
 
@@ -52,17 +52,14 @@ interface Output {
 
 /**
  * Create the Text.summarize tool.
- * This is a read-only tool - can be used outside Items.withItem().
  */
 export function makeTextSummarizeTool(getContext: () => EvalContext): Tool<Input, Output> {
-  return defineReadOnlyTool({
+  return defineTool({
     namespace: "Text",
     name: "summarize",
     description: `Summarize text to a specified maximum length using AI.
 Takes input text and optional maximum character count, returns a concise summary.
-Uses temperature 0 and no reasoning for straightforward summarization.
-
-ℹ️ Not a mutation - can be used outside Items.withItem().`,
+Uses temperature 0 and no reasoning for straightforward summarization.`,
     inputSchema,
     outputSchema,
     execute: async (input) => {

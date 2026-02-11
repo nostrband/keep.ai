@@ -5,7 +5,7 @@ import { getEnv } from "../env";
 import { fileUtils } from "@app/node";
 import debug from "debug";
 import { AuthError, LogicError, NetworkError, PermissionError, InternalError, classifyHttpError, isClassifiedError, formatUsageForEvent } from "../errors";
-import { defineReadOnlyTool, Tool } from "./types";
+import { defineTool, Tool } from "./types";
 
 const debugPdfExplain = debug("PdfExplain");
 
@@ -65,20 +65,17 @@ interface Output {
 
 /**
  * Create the Pdf.explain tool.
- * This is a read-only tool - can be used outside Items.withItem().
  */
 export function makePdfExplainTool(
   fileStore: FileStore,
   userPath: string | undefined,
   getContext: () => EvalContext
 ): Tool<Input, Output> {
-  return defineReadOnlyTool({
+  return defineTool({
     namespace: "Pdf",
     name: "explain",
     description: `Analyze and explain PDF documents using AI.
-Takes a PDF file path/ID and a question about the document, uploads the PDF to an AI model and returns the textual explanation.
-
-ℹ️ Not a mutation - can be used outside Items.withItem().`,
+Takes a PDF file path/ID and a question about the document, uploads the PDF to an AI model and returns the textual explanation.`,
     inputSchema,
     outputSchema,
     execute: async (input) => {

@@ -4,7 +4,7 @@ import { getEnv } from "../env";
 import { getTextModelName } from "../model";
 import debug from "debug";
 import { AuthError, LogicError, NetworkError, InternalError, classifyHttpError, isClassifiedError, formatUsageForEvent } from "../errors";
-import { defineReadOnlyTool, Tool } from "./types";
+import { defineTool, Tool } from "./types";
 
 const debugTextClassify = debug("TextClassify");
 
@@ -60,17 +60,14 @@ interface Output {
 
 /**
  * Create the Text.classify tool.
- * This is a read-only tool - can be used outside Items.withItem().
  */
 export function makeTextClassifyTool(getContext: () => EvalContext): Tool<Input, Output> {
-  return defineReadOnlyTool({
+  return defineTool({
     namespace: "Text",
     name: "classify",
     description: `Classify text into one of several classes based on its content using AI.
 Takes input text and a list of possible classes (each with id and description), and returns the most appropriate class id.
-Uses temperature 0 and light reasoning for consistent classification decisions.
-
-ℹ️ Not a mutation - can be used outside Items.withItem().`,
+Uses temperature 0 and light reasoning for consistent classification decisions.`,
     inputSchema,
     outputSchema,
     execute: async (input) => {

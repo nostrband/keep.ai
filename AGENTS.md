@@ -26,6 +26,9 @@ Succinct learnings about how to RUN the project:
 **Development**:
 - `cd apps/web && npm run build:frontend && cd ../apps/server && npm run build:all && npm start` - single nodejs process that hosts background workers and serves the web app
 
+**Debugging**:
+To check current database state, read pubkey from `~/.keep.ai/current_user.txt` and then use `sqlite3 ~/.keep.ai/<pubkey>/data.db` to read the state (no mutations! will break cr-sqlite sync).
+
 **DB**
 - cr-sqlite requires all NOT NULL columns in CRR tables to have DEFAULT values
 - cr-sqlite requires NO UNIQUE indexes on CRR tables aside from primary key, enforce unique-ness at code level, make sure select-before-insert always runs inside a tx to avoid races 

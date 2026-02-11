@@ -4,7 +4,7 @@ import { getEnv } from "../env";
 import { getTextModelName } from "../model";
 import debug from "debug";
 import { AuthError, LogicError, NetworkError, InternalError, classifyHttpError, formatUsageForEvent } from "../errors";
-import { defineReadOnlyTool, Tool } from "./types";
+import { defineTool, Tool } from "./types";
 
 const debugTextExtract = debug("TextExtract");
 
@@ -44,17 +44,14 @@ interface Output {
 
 /**
  * Create the Text.extract tool.
- * This is a read-only tool - can be used outside Items.withItem().
  */
 export function makeTextExtractTool(getContext: () => EvalContext): Tool<Input, Output> {
-  return defineReadOnlyTool({
+  return defineTool({
     namespace: "Text",
     name: "extract",
     description: `Extract structured data from text according to a JSON schema using AI.
 Takes input text and a JSON schema, and returns the extracted data in JSON format.
-Uses temperature 0 and light reasoning for reliable parsing.
-
-ℹ️ Not a mutation - can be used outside Items.withItem().`,
+Uses temperature 0 and light reasoning for reliable parsing.`,
     inputSchema,
     outputSchema,
     execute: async (input) => {

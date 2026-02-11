@@ -5,7 +5,7 @@ import { getEnv } from "../env";
 import { fileUtils } from "@app/node";
 import debug from "debug";
 import { AuthError, LogicError, NetworkError, PermissionError, InternalError, classifyHttpError, isClassifiedError, formatUsageForEvent } from "../errors";
-import { defineReadOnlyTool, Tool } from "./types";
+import { defineTool, Tool } from "./types";
 
 const debugAudioExplain = debug("AudioExplain");
 
@@ -68,21 +68,18 @@ interface Output {
 
 /**
  * Create the Audio.explain tool.
- * This is a read-only tool - can be used outside Items.withItem().
  */
 export function makeAudioExplainTool(
   fileStore: FileStore,
   userPath: string | undefined,
   getContext: () => EvalContext
 ): Tool<Input, Output> {
-  return defineReadOnlyTool({
+  return defineTool({
     namespace: "Audio",
     name: "explain",
     description: `Analyze and explain audio files using AI.
 Takes an audio file path/ID and a question about the audio, uploads the audio to an AI model and returns the textual explanation or transcription.
-Supports wav, mp3, mp4, mpeg, m4a, mpga, aac, flac, webm audio formats up to 10MB.
-
-ℹ️ Not a mutation - can be used outside Items.withItem().`,
+Supports wav, mp3, mp4, mpeg, m4a, mpga, aac, flac, webm audio formats up to 10MB.`,
     inputSchema,
     outputSchema,
     execute: async (input) => {

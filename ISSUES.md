@@ -1,11 +1,9 @@
 
 
 ISSUES:
-- 'idle' with 'server error' doesn't seem right, we can't really know - still not fixed, idle shows for a while after 'server offline' shows up, also let's rename server offline to 'offline' (it's not clear if we're offline or server down) and make it look like 'idle' badge but red with red dot - same style, same badge reused
 - outputs still not written to db?
 - "Gmail newsletter" input title is untrusted, need to show host-managed input type/source pair
 - input types must be hardcoded by each connector, and source names
-- inputs are marked with └─ but outputs with 
 - reconciliation doesn't seem to work, not implemented right? and host-managed mutation retries? 
 - outputs only include namespace, need tool name too (at getOutputStatsByWorkflow)
 - why is 'Text.summarize' is listed as output/mutation under one input, but not listed in the outputs list?
@@ -13,11 +11,11 @@ ISSUES:
 - we have to make sure task-scheduler can't launch more that 1 task per workflow, meaning several maintainer tasks + planner - planner first, maintainers one by one second
 - stack traces have no line number of any other hint at where the issue is - just 'not a function' or some such, plus script run page doesn't show which handler was running, and I guess when auto-fix will run it also needs info on which handler failed
 - provide hints into what constitutes mutations vs not, not sure if current prompts include this
-- LLM calls are 'mutations' because they produce side-effects (tokens spent), the 'output' records should show costs - thus mutation ledger probably needs one more button
+- LLM calls are 'mutations' because they produce side-effects (tokens spent), the 'output' records should show costs - thus mutation ledger probably needs one more column
 - total costs on workflow page, with per-day/per-run stats etc
 - script_runs table has same error/logs as handler_runs, I feel logs field is to be deprecated, error field to include a copy from handler_run (btw does handler run have script_run_id?), handler runs batch (producer + downstream consumers) should probably be grouped and shown on script run page, makes sense?
 - what does 'run now' button do? run all producers?
-- schedule on workflow page is still cron expr, should be human readable, but maybe it's also impl detail - the actual schedule is now inside each producer, right? workflow-scheduler should take that into account, not script/workflow 'cron' field, also 'schedule' tool seems no longer needed right?
+- auto-fix history shows 0 timestamp (I guess, 1970 year), also it shows task title (same for each attempt), can we instead show something more meaningful? Like minor script version produced by a fix, maybe with commit message? Also maybe 'fix' tool needs to also provide 'title' and 'issue' fields specifically to define the title for the issue, then detaled description if the issue, then fix explanation (already in comment), makes sense?
 - on homepage workflow has 'active' badge while it has 'maintenance' flag, we should display maintenance somehow - either extra 'fixing' icon near/inside 'active' badge, or separate badge value like 'Fixing' - the workflow is definitely not 'active' in user's mind if it's stopped for maintenance
 - why mutation is created before in_flight status? like it feels like tool wrapper would immediately, unconditionally set the tool status to inflight after mutation row added? or do we still create it but then check input format and set 'failed' if input invalid? what's the logic there?
 - why is maintainer's inbox full of data if it only needs failed handler_run_id?
