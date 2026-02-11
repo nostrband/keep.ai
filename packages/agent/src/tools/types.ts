@@ -21,6 +21,9 @@ export interface Tool<TInput = unknown, TOutput = unknown> {
   /** Optional JSON Schema for output validation */
   outputSchema?: JSONSchema;
 
+  /** Output type for input registration validation (e.g., "email", "row", "page") */
+  outputType?: string;
+
   /** Execute the tool with validated input */
   execute: (input: TInput) => Promise<TOutput>;
 

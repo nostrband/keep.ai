@@ -947,6 +947,142 @@ describe("Topics Tools", () => {
     });
   });
 
+  describe("Topics.registerInput with validation", () => {
+    it("should accept valid source/type from registry (Gmail/email)", async () => {
+      const validInputTypes = new Map<string, Set<string>>([
+        ["Gmail", new Set(["email"])],
+        ["GoogleSheets", new Set(["row"])],
+        ["System", new Set(["time", "random"])],
+      ]);
+
+      const registerInputTool = makeTopicsRegisterInputTool(
+        inputStore,
+        () => "workflow-1",
+        () => "run-1",
+        validInputTypes
+      );
+
+      const inputId = await registerInputTool.execute({
+        source: "Gmail",
+        type: "email",
+        id: "email-123",
+        title: 'Test email',
+      });
+
+      expect(inputId).toBeDefined();
+      expect(typeof inputId).toBe("string");
+    });
+
+    it("should accept System builtins (System/time, System/random)", async () => {
+      const validInputTypes = new Map<string, Set<string>>([
+        ["Gmail", new Set(["email"])],
+        ["System", new Set(["time", "random"])],
+      ]);
+
+      const registerInputTool = makeTopicsRegisterInputTool(
+        inputStore,
+        () => "workflow-1",
+        () => "run-1",
+        validInputTypes
+      );
+
+      const inputId1 = await registerInputTool.execute({
+        source: "System",
+        type: "time",
+        id: "time-1",
+        title: 'Scheduled check',
+      });
+      expect(inputId1).toBeDefined();
+
+      const inputId2 = await registerInputTool.execute({
+        source: "System",
+        type: "random",
+        id: "random-1",
+        title: 'Random trigger',
+      });
+      expect(inputId2).toBeDefined();
+    });
+
+    it("should reject invalid source with descriptive error listing valid sources", async () => {
+      const validInputTypes = new Map<string, Set<string>>([
+        ["Gmail", new Set(["email"])],
+        ["GoogleSheets", new Set(["row"])],
+        ["System", new Set(["time", "random"])],
+      ]);
+
+      const registerInputTool = makeTopicsRegisterInputTool(
+        inputStore,
+        () => "workflow-1",
+        () => "run-1",
+        validInputTypes
+      );
+
+      await expect(registerInputTool.execute({
+        source: "InvalidSource",
+        type: "email",
+        id: "123",
+        title: 'Test',
+      })).rejects.toThrow(/Invalid source 'InvalidSource'/);
+
+      // Should list valid sources
+      await expect(registerInputTool.execute({
+        source: "InvalidSource",
+        type: "email",
+        id: "123",
+        title: 'Test',
+      })).rejects.toThrow(/Gmail/);
+    });
+
+    it("should reject invalid type for valid source with descriptive error", async () => {
+      const validInputTypes = new Map<string, Set<string>>([
+        ["Gmail", new Set(["email"])],
+        ["GoogleSheets", new Set(["row"])],
+      ]);
+
+      const registerInputTool = makeTopicsRegisterInputTool(
+        inputStore,
+        () => "workflow-1",
+        () => "run-1",
+        validInputTypes
+      );
+
+      await expect(registerInputTool.execute({
+        source: "Gmail",
+        type: "row",
+        id: "123",
+        title: 'Test',
+      })).rejects.toThrow(/Invalid type 'row' for source 'Gmail'/);
+
+      // Should list valid types for that source
+      await expect(registerInputTool.execute({
+        source: "Gmail",
+        type: "row",
+        id: "123",
+        title: 'Test',
+      })).rejects.toThrow(/email/);
+    });
+
+    it("should skip validation when no registry provided (backward compat)", async () => {
+      const registerInputTool = makeTopicsRegisterInputTool(
+        inputStore,
+        () => "workflow-1",
+        () => "run-1"
+        // No validInputTypes parameter
+      );
+
+      // Should work with any source/type
+      const inputId = await registerInputTool.execute({
+        source: "anything",
+        type: "whatever",
+        id: "123",
+        title: 'Test',
+      });
+
+      expect(inputId).toBeDefined();
+      expect(typeof inputId).toBe("string");
+    });
+  });
+
   describe("Integration scenarios", () => {
     it("should support typical producer-consumer workflow", async () => {
       // Producer publishes events

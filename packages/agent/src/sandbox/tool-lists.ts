@@ -163,11 +163,10 @@ export function createWorkflowTools(config: ToolListConfig): AnyTool[] {
     // User notifications
     makeUserSendTool(api, userSendContext),
 
-    // Topics API (exec-03, exec-15)
+    // Topics API (exec-03, exec-15) — peek, getByIds, publish added here; registerInput added after connector tools
     makeTopicsPeekTool(api.eventStore, getWorkflowId, getHandlerRunId),
     makeTopicsGetByIdsTool(api.eventStore, getWorkflowId),
     makeTopicsPublishTool(api.eventStore, getWorkflowId, getHandlerRunId, getPhase, getHandlerName, getWorkflowConfig),
-    makeTopicsRegisterInputTool(api.inputStore, getWorkflowId, getHandlerRunId),
   ];
 
   // Add Google service tools if connection manager is available
@@ -180,6 +179,26 @@ export function createWorkflowTools(config: ToolListConfig): AnyTool[] {
       makeNotionTool(getContext, connectionManager)
     );
   }
+
+  // Build valid input types registry from tools with outputType
+  const validInputTypes = new Map<string, Set<string>>();
+  for (const tool of tools) {
+    if (tool.outputType) {
+      let types = validInputTypes.get(tool.namespace);
+      if (!types) {
+        types = new Set<string>();
+        validInputTypes.set(tool.namespace, types);
+      }
+      types.add(tool.outputType);
+    }
+  }
+  // Add System builtins
+  validInputTypes.set("System", new Set(["time", "random"]));
+
+  // Add registerInput with validation registry
+  tools.push(
+    makeTopicsRegisterInputTool(api.inputStore, getWorkflowId, getHandlerRunId, validInputTypes)
+  );
 
   return tools;
 }

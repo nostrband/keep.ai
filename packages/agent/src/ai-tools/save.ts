@@ -133,6 +133,7 @@ export function makeSaveTool(opts: {
         if (wasInMaintenance) {
           await opts.scriptStore.updateWorkflowFields(workflow.id, {
             maintenance: false,
+            maintenance_fix_count: 0,
             next_run_timestamp: new Date().toISOString(),
           }, tx);
         }

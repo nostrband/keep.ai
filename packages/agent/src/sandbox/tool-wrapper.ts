@@ -257,6 +257,11 @@ Example: await ${ns}.${name}(<input>)
         desc.push(...["===INPUT===", printJsonSchema(tool.inputSchema)]);
       if (tool.outputSchema)
         desc.push(...["===OUTPUT===", printJsonSchema(tool.outputSchema)]);
+      if (tool.outputType)
+        desc.push(...[
+          "===INPUT REGISTRATION===",
+          `When registering data from this tool as input, use: Topics.registerInput({ source: '${ns}', type: '${tool.outputType}', ... })`
+        ]);
       const doc = desc.join("\n");
 
       // Initialize namespace

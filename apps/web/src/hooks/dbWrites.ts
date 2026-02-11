@@ -160,26 +160,17 @@ export function useUpdateWorkflow() {
       status?: string;
       title?: string;
       cron?: string;
-      events?: string;
       next_run_timestamp?: string;
     }) => {
       if (!api) throw new Error("Script store not available");
 
-      // Get the current workflow first
-      const workflow = await api.scriptStore.getWorkflow(input.workflowId);
-      if (!workflow) throw new Error("Workflow not found");
+      const fields: Parameters<typeof api.scriptStore.updateWorkflowFields>[1] = {};
+      if (input.status !== undefined) fields.status = input.status;
+      if (input.title !== undefined) fields.title = input.title;
+      if (input.cron !== undefined) fields.cron = input.cron;
+      if (input.next_run_timestamp !== undefined) fields.next_run_timestamp = input.next_run_timestamp;
 
-      // Update the workflow with new values
-      await api.scriptStore.updateWorkflow({
-        ...workflow,
-        ...(input.status !== undefined && { status: input.status }),
-        ...(input.title !== undefined && { title: input.title }),
-        ...(input.cron !== undefined && { cron: input.cron }),
-        ...(input.events !== undefined && { events: input.events }),
-        ...(input.next_run_timestamp !== undefined && { next_run_timestamp: input.next_run_timestamp }),
-      });
-
-      return workflow;
+      await api.scriptStore.updateWorkflowFields(input.workflowId, fields);
     },
     onSuccess: (_result, { workflowId }) => {
       // Invalidate workflow-related queries to get fresh data

@@ -59,45 +59,10 @@ function formatTimestamp(timestamp: number): string {
 
 /**
  * Get display name for source/type combination.
+ * Values come from validated tool metadata (namespace + outputType).
  */
 function formatSourceType(source: string, type: string): string {
-  const sourceMap: Record<string, string> = {
-    gmail: "Gmail",
-    slack: "Slack",
-    sheets: "Google Sheets",
-    calendar: "Google Calendar",
-    drive: "Google Drive",
-    github: "GitHub",
-    notion: "Notion",
-    trello: "Trello",
-    asana: "Asana",
-    jira: "Jira",
-    webhook: "Webhook",
-    http: "HTTP",
-    rss: "RSS Feed",
-    email: "Email",
-  };
-
-  const typeMap: Record<string, string> = {
-    email: "Email",
-    message: "Message",
-    row: "Row",
-    event: "Event",
-    file: "File",
-    issue: "Issue",
-    pr: "Pull Request",
-    task: "Task",
-    page: "Page",
-    item: "Item",
-    notification: "Notification",
-    webhook: "Webhook",
-    request: "Request",
-  };
-
-  const displaySource = sourceMap[source.toLowerCase()] || source;
-  const displayType = typeMap[type.toLowerCase()] || type;
-
-  return `${displaySource} / ${displayType}`;
+  return `${source} / ${type}`;
 }
 
 /**

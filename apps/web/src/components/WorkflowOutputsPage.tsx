@@ -55,28 +55,10 @@ function formatTimestamp(timestamp: number): string {
 
 /**
  * Get display name for a connector namespace.
+ * Values come from validated tool metadata (namespace).
  */
 function formatConnector(namespace: string): string {
-  const connectorMap: Record<string, string> = {
-    gmail: "Gmail",
-    "google.gmail": "Gmail",
-    slack: "Slack",
-    sheets: "Google Sheets",
-    "google.sheets": "Google Sheets",
-    calendar: "Google Calendar",
-    "google.calendar": "Google Calendar",
-    drive: "Google Drive",
-    "google.drive": "Google Drive",
-    github: "GitHub",
-    notion: "Notion",
-    trello: "Trello",
-    asana: "Asana",
-    jira: "Jira",
-    http: "HTTP",
-    webhook: "Webhook",
-  };
-
-  return connectorMap[namespace.toLowerCase()] || namespace;
+  return namespace;
 }
 
 /**

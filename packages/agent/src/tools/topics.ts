@@ -411,17 +411,6 @@ Note: Phase-restricted to 'producer' or 'next' phase only.`,
 // Topics.registerInput
 // ============================================================================
 
-const registerInputInputSchema: JSONSchema = {
-  type: "object",
-  properties: {
-    source: { type: "string", description: "Connector name (e.g., 'gmail', 'slack', 'sheets')" },
-    type: { type: "string", description: "Type within source (e.g., 'email', 'message', 'row')" },
-    id: { type: "string", description: "External identifier from source system" },
-    title: { type: "string", description: "Human-readable description for user display" },
-  },
-  required: ["source", "type", "id", "title"],
-};
-
 const registerInputOutputSchema: JSONSchema = {
   type: "string",
   description: "The generated inputId",
@@ -446,12 +435,36 @@ type RegisterInputOutput = string;
  * to establish causal tracking.
  *
  * Phase: producer only (enforced by caller)
+ *
+ * @param validInputTypes - Optional registry of valid source→type mappings.
+ *   When provided, source and type are validated against it before registration.
  */
 export function makeTopicsRegisterInputTool(
   inputStore: InputStore,
   getWorkflowId: () => string | undefined,
-  getHandlerRunId: () => string | undefined
+  getHandlerRunId: () => string | undefined,
+  validInputTypes?: Map<string, Set<string>>
 ): Tool<RegisterInputInput, RegisterInputOutput> {
+  // Build description with valid pairs if registry is provided
+  let validPairsDoc = "";
+  if (validInputTypes && validInputTypes.size > 0) {
+    const pairs = Array.from(validInputTypes.entries())
+      .map(([source, types]) => `  ${source}: ${Array.from(types).join(", ")}`)
+      .join("\n");
+    validPairsDoc = `\n\nValid source/type pairs:\n${pairs}`;
+  }
+
+  const registerInputInputSchema: JSONSchema = {
+    type: "object",
+    properties: {
+      source: { type: "string", description: "Connector namespace (e.g., 'Gmail', 'GoogleSheets', 'System')" },
+      type: { type: "string", description: "Type within source (e.g., 'email', 'row', 'page')" },
+      id: { type: "string", description: "External identifier from source system" },
+      title: { type: "string", description: "Human-readable description for user display" },
+    },
+    required: ["source", "type", "id", "title"],
+  };
+
   return defineTool({
     namespace: "Topics",
     name: "registerInput",
@@ -462,7 +475,7 @@ The returned inputId must be passed to Topics.publish() to establish causal trac
 
 Example:
   const inputId = await Topics.registerInput({
-    source: "gmail",
+    source: "Gmail",
     type: "email",
     id: email.id,
     title: \`Email from \${email.from}: "\${email.subject}"\`
@@ -475,7 +488,7 @@ Example:
       inputId,  // Required in producer phase
       payload: { id: email.id, from: email.from, subject: email.subject }
     }
-  });
+  });${validPairsDoc}
 
 Note: Phase-restricted to 'producer' phase only.`,
     inputSchema: registerInputInputSchema,
@@ -485,6 +498,23 @@ Note: Phase-restricted to 'producer' phase only.`,
       const workflowId = getWorkflowId();
       if (!workflowId) {
         throw new Error("Topics.registerInput requires a workflow context");
+      }
+
+      // Validate source/type against registry if provided
+      if (validInputTypes) {
+        const validTypes = validInputTypes.get(input.source);
+        if (!validTypes) {
+          const validSources = Array.from(validInputTypes.keys()).join(", ");
+          throw new Error(
+            `Invalid source '${input.source}'. Valid sources: ${validSources}`
+          );
+        }
+        if (!validTypes.has(input.type)) {
+          const validTypesList = Array.from(validTypes).join(", ");
+          throw new Error(
+            `Invalid type '${input.type}' for source '${input.source}'. Valid types: ${validTypesList}`
+          );
+        }
       }
 
       const handlerRunId = getHandlerRunId() || "";

@@ -60,6 +60,7 @@ export function makeGmailTool(
   return defineReadOnlyTool({
     namespace: "Gmail",
     name: "api",
+    outputType: "email",
     description: `Access Gmail API with various methods. Supported methods: ${SUPPORTED_METHODS.join(", ")}. For all methods that require userId param, it will be automatically set to 'me'. Returns dynamic results based on the method used. Knowledge of param and output structure is expected from the assistant. REQUIRED: 'account' parameter must be the email address of the connected Gmail account.
 
 ℹ️ Not a mutation - can be used outside Items.withItem().`,

@@ -1,8 +1,9 @@
 
 
 ISSUES:
-- outputs still not written to db?
 - "Gmail newsletter" input title is untrusted, need to show host-managed input type/source pair
+- Show diff should also expand the comment to view long ones untruncated
+- after auto-fix shouldn't we retry immediately instead of waiting full scheduling cycle?
 - input types must be hardcoded by each connector, and source names
 - reconciliation doesn't seem to work, not implemented right? and host-managed mutation retries? 
 - outputs only include namespace, need tool name too (at getOutputStatsByWorkflow)

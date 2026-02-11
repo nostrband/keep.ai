@@ -115,6 +115,7 @@ export function makeNotionTool(
   return defineTool({
     namespace: "Notion",
     name: "api",
+    outputType: "page",
     description: `Access Notion API with various methods. Supported methods: ${SUPPORTED_METHODS.join(", ")}. Returns dynamic results based on the method used. Knowledge of param and output structure is expected from the assistant. REQUIRED: 'account' parameter must be the workspace_id of the connected Notion workspace.
 
 ⚠️ MUTATION INFO:

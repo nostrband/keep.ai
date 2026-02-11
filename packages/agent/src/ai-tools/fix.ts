@@ -109,9 +109,10 @@ export function makeFixTool(opts: {
       if (shouldActivate) {
         // No race - make this fix the active script
         // Also save handler_config if validation extracted it (exec-05)
-        const updates: { active_script_id: string; maintenance: boolean; next_run_timestamp: string; handler_config?: string } = {
+        const updates: { active_script_id: string; maintenance: boolean; maintenance_fix_count: number; next_run_timestamp: string; handler_config?: string } = {
           active_script_id: newScript.id,
           maintenance: false,
+          maintenance_fix_count: 0,
           next_run_timestamp: new Date().toISOString(),
         };
         if (workflowConfig) {
@@ -144,6 +145,7 @@ export function makeFixTool(opts: {
         // Fix is saved but not activated; clear maintenance so planner's version runs
         await opts.scriptStore.updateWorkflowFields(opts.workflowId, {
           maintenance: false,
+          maintenance_fix_count: 0,
         });
       }
 

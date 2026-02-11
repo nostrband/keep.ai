@@ -788,15 +788,16 @@ When fixing workflow scripts:
 - Producer schedules (user expectation)
 - Phase structure (prepare/mutate/next order)
 - Producer/consumer \`publishes\` declarations (would break event routing)
+- \`Topics.registerInput\` source and type values (would break input deduplication — inputs are keyed by source+type+id)
 
 ### Must Preserve
 - Event messageId generation logic (for idempotency)
 - Reservation structure in prepare
 - Single mutation per mutate phase
-- Input registration logic (Topics.registerInput calls)
+- Input registration logic (Topics.registerInput calls) including source, type, and id derivation
 - inputId linkage in producer publish calls
 
-If fix requires changing topic names, subscriptions, or publishes declarations, fail explicitly and explain why re-planning is needed.
+If fix requires changing topic names, subscriptions, publishes declarations, or registerInput source/type, fail explicitly and explain why re-planning is needed.
 
 ## If You Cannot Fix It
 

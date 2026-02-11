@@ -73,6 +73,7 @@ export function makeGDocsTool(
   return defineTool({
     namespace: "GoogleDocs",
     name: "api",
+    outputType: "document",
     description: `Access Google Docs API with various methods. Supported methods: ${SUPPORTED_METHODS.join(", ")}. Returns dynamic results based on the method used. Knowledge of param and output structure is expected from the assistant. REQUIRED: 'account' parameter must be the email address of the connected Google Docs account.
 
 ⚠️ MUTATION INFO:

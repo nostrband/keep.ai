@@ -13,73 +13,18 @@ interface WorkflowInputsSummaryProps {
 
 /**
  * Get a display-friendly name for a source/type combination.
+ * Values come from validated tool metadata (namespace + outputType).
  */
 function formatSourceType(source: string, type: string): string {
-  // Common source mappings
-  const sourceMap: Record<string, string> = {
-    gmail: "Gmail",
-    slack: "Slack",
-    sheets: "Google Sheets",
-    calendar: "Google Calendar",
-    drive: "Google Drive",
-    github: "GitHub",
-    notion: "Notion",
-    trello: "Trello",
-    asana: "Asana",
-    jira: "Jira",
-    webhook: "Webhook",
-    http: "HTTP",
-    rss: "RSS Feed",
-    email: "Email",
-  };
-
-  // Type display names
-  const typeMap: Record<string, string> = {
-    email: "Emails",
-    message: "Messages",
-    row: "Rows",
-    event: "Events",
-    file: "Files",
-    issue: "Issues",
-    pr: "Pull Requests",
-    task: "Tasks",
-    page: "Pages",
-    item: "Items",
-    notification: "Notifications",
-    webhook: "Webhooks",
-    request: "Requests",
-  };
-
-  const displaySource = sourceMap[source.toLowerCase()] || source;
-  const displayType = typeMap[type.toLowerCase()] || type;
-
-  return `${displaySource} ${displayType}`;
+  return `${source} ${type}s`;
 }
 
 /**
  * Get a display-friendly name for a connector namespace.
+ * Values come from validated tool metadata (namespace).
  */
 function formatConnector(namespace: string): string {
-  const connectorMap: Record<string, string> = {
-    gmail: "Gmail",
-    "google.gmail": "Gmail",
-    slack: "Slack",
-    sheets: "Google Sheets",
-    "google.sheets": "Google Sheets",
-    calendar: "Google Calendar",
-    "google.calendar": "Google Calendar",
-    drive: "Google Drive",
-    "google.drive": "Google Drive",
-    github: "GitHub",
-    notion: "Notion",
-    trello: "Trello",
-    asana: "Asana",
-    jira: "Jira",
-    http: "HTTP",
-    webhook: "Webhook",
-  };
-
-  return connectorMap[namespace.toLowerCase()] || namespace;
+  return namespace;
 }
 
 /**
