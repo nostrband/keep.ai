@@ -501,6 +501,24 @@ export class EventStore {
   }
 
   /**
+   * Check if any pending events exist for a workflow (any topic).
+   * Efficient single query for scheduler consumer-only work detection.
+   */
+  async hasAnyPendingForWorkflow(
+    workflowId: string,
+    tx?: DBInterface
+  ): Promise<boolean> {
+    const db = tx || this.db.db;
+
+    const results = await db.execO<{ found: number }>(
+      `SELECT 1 as found FROM events WHERE workflow_id = ? AND status = 'pending' LIMIT 1`,
+      [workflowId]
+    );
+
+    return !!(results && results.length > 0);
+  }
+
+  /**
    * Get events reserved by a handler run.
    */
   async getReservedByRun(

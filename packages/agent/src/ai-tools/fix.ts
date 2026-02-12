@@ -109,11 +109,15 @@ export function makeFixTool(opts: {
       if (shouldActivate) {
         // No race - make this fix the active script
         // Also save handler_config if validation extracted it (exec-05)
-        const updates: { active_script_id: string; maintenance: boolean; maintenance_fix_count: number; next_run_timestamp: string; handler_config?: string } = {
+        // Set pending_retry_run_id so the scheduler creates a targeted retry session
+        // Don't reset maintenance_fix_count here — it accumulates across fix cycles.
+        // It's reset only on successful workflow completion (handleWorkerSignal "done")
+        // or when escalateToUser is called.
+        const updates: { active_script_id: string; maintenance: boolean; next_run_timestamp: string; pending_retry_run_id: string; handler_config?: string } = {
           active_script_id: newScript.id,
           maintenance: false,
-          maintenance_fix_count: 0,
           next_run_timestamp: new Date().toISOString(),
+          pending_retry_run_id: opts.handlerRunId || '',
         };
         if (workflowConfig) {
           updates.handler_config = JSON.stringify(workflowConfig);
@@ -136,9 +140,26 @@ export function makeFixTool(opts: {
           }
         }
 
-        // Release events reserved by the failed handler run so the retry session can find them
-        if (opts.eventStore && opts.handlerRunId) {
-          await opts.eventStore.releaseEvents(opts.handlerRunId);
+        // Belt-and-suspenders: reset producer schedules to now so the workflow
+        // also works through normal scheduling if the retry path fails
+        if (opts.producerScheduleStore) {
+          try {
+            const schedules = await opts.producerScheduleStore.getForWorkflow(opts.workflowId);
+            const now = Date.now();
+            for (const schedule of schedules) {
+              if (schedule.next_run_at > now) {
+                await opts.producerScheduleStore.upsert({
+                  workflow_id: schedule.workflow_id,
+                  producer_name: schedule.producer_name,
+                  schedule_type: schedule.schedule_type,
+                  schedule_value: schedule.schedule_value,
+                  next_run_at: now,
+                });
+              }
+            }
+          } catch (error) {
+            // Don't fail the fix save if schedule reset fails
+          }
         }
       } else {
         // Race detected - planner updated the script

@@ -104,6 +104,7 @@ export interface Workflow {
   active_script_id: string;       // ID of the script version that should execute when workflow runs
   handler_config: string;         // JSON WorkflowConfig from exec-05 validation (topics, producers, consumers)
   intent_spec: string;            // JSON IntentSpec from exec-17 (empty string if not yet extracted)
+  pending_retry_run_id: string;   // Handler run ID to retry on next scheduler tick (empty = no pending retry)
 }
 
 export class ScriptStore {
@@ -621,9 +622,9 @@ export class ScriptStore {
   async addWorkflow(workflow: Workflow, tx?: DBInterface): Promise<void> {
     const db = tx || this.db.db;
     await db.exec(
-      `INSERT INTO workflows (id, title, task_id, chat_id, timestamp, cron, events, status, next_run_timestamp, maintenance, maintenance_fix_count, active_script_id, handler_config, intent_spec)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [workflow.id, workflow.title, workflow.task_id, workflow.chat_id || '', workflow.timestamp, workflow.cron, workflow.events, workflow.status, workflow.next_run_timestamp, workflow.maintenance ? 1 : 0, workflow.maintenance_fix_count || 0, workflow.active_script_id || '', workflow.handler_config || '', workflow.intent_spec || '']
+      `INSERT INTO workflows (id, title, task_id, chat_id, timestamp, cron, events, status, next_run_timestamp, maintenance, maintenance_fix_count, active_script_id, handler_config, intent_spec, pending_retry_run_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [workflow.id, workflow.title, workflow.task_id, workflow.chat_id || '', workflow.timestamp, workflow.cron, workflow.events, workflow.status, workflow.next_run_timestamp, workflow.maintenance ? 1 : 0, workflow.maintenance_fix_count || 0, workflow.active_script_id || '', workflow.handler_config || '', workflow.intent_spec || '', workflow.pending_retry_run_id || '']
     );
   }
 
@@ -642,7 +643,7 @@ export class ScriptStore {
   // Get a workflow by ID
   async getWorkflow(id: string): Promise<Workflow | null> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, title, task_id, chat_id, timestamp, cron, events, status, next_run_timestamp, maintenance, maintenance_fix_count, active_script_id, handler_config, intent_spec
+      `SELECT id, title, task_id, chat_id, timestamp, cron, events, status, next_run_timestamp, maintenance, maintenance_fix_count, active_script_id, handler_config, intent_spec, pending_retry_run_id
        FROM workflows
        WHERE id = ?`,
       [id]
@@ -668,13 +669,14 @@ export class ScriptStore {
       active_script_id: (row.active_script_id as string) || '',
       handler_config: (row.handler_config as string) || '',
       intent_spec: (row.intent_spec as string) || '',
+      pending_retry_run_id: (row.pending_retry_run_id as string) || '',
     };
   }
 
   // Get workflow by task_id
   async getWorkflowByTaskId(task_id: string): Promise<Workflow | null> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, title, task_id, chat_id, timestamp, cron, events, status, next_run_timestamp, maintenance, maintenance_fix_count, active_script_id, handler_config, intent_spec
+      `SELECT id, title, task_id, chat_id, timestamp, cron, events, status, next_run_timestamp, maintenance, maintenance_fix_count, active_script_id, handler_config, intent_spec, pending_retry_run_id
        FROM workflows
        WHERE task_id = ?
        LIMIT 1`,
@@ -701,13 +703,14 @@ export class ScriptStore {
       active_script_id: (row.active_script_id as string) || '',
       handler_config: (row.handler_config as string) || '',
       intent_spec: (row.intent_spec as string) || '',
+      pending_retry_run_id: (row.pending_retry_run_id as string) || '',
     };
   }
 
   // Get workflow by chat_id (Spec 09)
   async getWorkflowByChatId(chat_id: string): Promise<Workflow | null> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, title, task_id, chat_id, timestamp, cron, events, status, next_run_timestamp, maintenance, maintenance_fix_count, active_script_id, handler_config, intent_spec
+      `SELECT id, title, task_id, chat_id, timestamp, cron, events, status, next_run_timestamp, maintenance, maintenance_fix_count, active_script_id, handler_config, intent_spec, pending_retry_run_id
        FROM workflows
        WHERE chat_id = ?
        LIMIT 1`,
@@ -734,6 +737,7 @@ export class ScriptStore {
       active_script_id: (row.active_script_id as string) || '',
       handler_config: (row.handler_config as string) || '',
       intent_spec: (row.intent_spec as string) || '',
+      pending_retry_run_id: (row.pending_retry_run_id as string) || '',
     };
   }
 
@@ -743,7 +747,7 @@ export class ScriptStore {
     offset: number = 0
   ): Promise<Workflow[]> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, title, task_id, chat_id, timestamp, cron, events, status, next_run_timestamp, maintenance, maintenance_fix_count, active_script_id, handler_config, intent_spec
+      `SELECT id, title, task_id, chat_id, timestamp, cron, events, status, next_run_timestamp, maintenance, maintenance_fix_count, active_script_id, handler_config, intent_spec, pending_retry_run_id
        FROM workflows
        ORDER BY timestamp DESC
        LIMIT ? OFFSET ?`,
@@ -767,6 +771,7 @@ export class ScriptStore {
       active_script_id: (row.active_script_id as string) || '',
       handler_config: (row.handler_config as string) || '',
       intent_spec: (row.intent_spec as string) || '',
+      pending_retry_run_id: (row.pending_retry_run_id as string) || '',
     }));
   }
 
@@ -804,7 +809,7 @@ export class ScriptStore {
   // Note: timestamp is NOT included - it's the creation timestamp and should never be updated
   async updateWorkflowFields(
     workflowId: string,
-    fields: Partial<Pick<Workflow, 'next_run_timestamp' | 'status' | 'cron' | 'maintenance' | 'maintenance_fix_count' | 'active_script_id' | 'title' | 'handler_config' | 'intent_spec'>>,
+    fields: Partial<Pick<Workflow, 'next_run_timestamp' | 'status' | 'cron' | 'maintenance' | 'maintenance_fix_count' | 'active_script_id' | 'title' | 'handler_config' | 'intent_spec' | 'pending_retry_run_id'>>,
     tx?: DBInterface
   ): Promise<void> {
     const db = tx || this.db.db;
@@ -847,6 +852,10 @@ export class ScriptStore {
     if (fields.intent_spec !== undefined) {
       setClauses.push('intent_spec = ?');
       values.push(fields.intent_spec);
+    }
+    if (fields.pending_retry_run_id !== undefined) {
+      setClauses.push('pending_retry_run_id = ?');
+      values.push(fields.pending_retry_run_id);
     }
 
     if (setClauses.length === 0) return;
@@ -953,6 +962,7 @@ export class ScriptStore {
         active_script_id: (row.active_script_id as string) || '',
         handler_config: (row.handler_config as string) || '',
         intent_spec: (row.intent_spec as string) || '',
+        pending_retry_run_id: (row.pending_retry_run_id as string) || '',
       };
 
       const lastActivity = row.last_activity as string;

@@ -350,6 +350,7 @@ export class KeepDbApi {
         active_script_id: "",  // No active script yet, will be set when first script is saved
         handler_config: "",  // Will be set when script is saved (exec-05)
         intent_spec: "",  // Will be extracted after first planner save (exec-17)
+        pending_retry_run_id: "",  // No pending retry
       };
 
       // Create the matching workflow

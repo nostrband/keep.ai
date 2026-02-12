@@ -8,7 +8,10 @@ import type { ConnectionManager } from "@app/connectors";
 import {
   executeWorkflowSessionIfIdle,
   resumeIncompleteSessions,
+  retryWorkflowSession,
+  canStartSession,
   type SessionResult,
+  type SessionTrigger,
 } from "./session-orchestration";
 import type { HandlerExecutionContext } from "./handler-state-machine";
 import { initializeProducerSchedules } from "./producer-schedule-init";
@@ -53,11 +56,11 @@ export class WorkflowScheduler {
   /**
    * Handle signals about execution outcomes
    */
-  private handleWorkerSignal(signal: WorkflowExecutionSignal): void {
+  private async handleWorkerSignal(signal: WorkflowExecutionSignal): Promise<void> {
     this.debug("Received signal:", signal);
 
     switch (signal.type) {
-      case 'retry':
+      case 'retry': {
         // Get or create retry state
         const currentState = this.workflowRetryState.get(signal.workflowId) || {
           retryCount: 0,
@@ -81,16 +84,12 @@ export class WorkflowScheduler {
             `Workflow ${signal.workflowId} exceeded max retries (${currentState.retryCount}/${WorkflowScheduler.MAX_NETWORK_RETRIES}), escalating to user attention (${signal.errorType || 'network'}): ${signal.error || 'Max retries exceeded'}`
           );
 
-          // Mark workflow as error status so user can see it needs attention
-          // Use updateWorkflowFields to only update status, preserving all other fields
-          // Note: The script_run already has error_type='network' from the last failed attempt,
-          // which triggers WorkflowNotifications when the workflows table changes
-          this.api.scriptStore.updateWorkflowFields(signal.workflowId, {
+          // Mark workflow as error status and clear pending_retry_run_id
+          await this.api.scriptStore.updateWorkflowFields(signal.workflowId, {
             status: 'error',
-          }).then(() => {
-            // Clear retry state only after successful DB update
-            this.workflowRetryState.delete(signal.workflowId);
-          }).catch(err => this.debug('Failed to update workflow status:', err));
+            pending_retry_run_id: '',
+          });
+          this.workflowRetryState.delete(signal.workflowId);
           break;
         }
 
@@ -108,6 +107,7 @@ export class WorkflowScheduler {
           `Workflow ${signal.workflowId} retry scheduled in ${actualDelayMs}ms (attempt ${currentState.retryCount}/${WorkflowScheduler.MAX_NETWORK_RETRIES}, originalRunId: ${currentState.originalRunId})`
         );
         break;
+      }
 
       case 'payment_required':
         this.globalPauseUntil = Date.now() + 10 * 60 * 1000;
@@ -118,6 +118,8 @@ export class WorkflowScheduler {
 
       case 'done':
         this.workflowRetryState.delete(signal.workflowId);
+        // Reset maintenance fix count on successful completion
+        await this.api.scriptStore.resetMaintenanceFixCount(signal.workflowId);
         this.debug(`Workflow ${signal.workflowId} completed successfully, retry state cleared`);
         break;
 
@@ -315,15 +317,51 @@ export class WorkflowScheduler {
 
       this.debug(`Found ${activeWorkflows.length} active workflows`);
 
-      // Check which workflows should run based on per-producer schedules
       const currentTime = Date.now();
-      const dueWorkflows = [];
+      const context = this.createExecutionContext();
+
+      // Priority 1: Check pending_retry_run_id — unified retry recovery
+      for (const workflow of activeWorkflows) {
+        if (!workflow.pending_retry_run_id) continue;
+
+        // Skip if in retry backoff (transient errors)
+        const retryState = this.workflowRetryState.get(workflow.id);
+        if (retryState && retryState.nextStart > currentTime) {
+          this.debug(
+            `Skipping retry for workflow ${workflow.id} in backoff until ${new Date(retryState.nextStart).toISOString()}`
+          );
+          continue;
+        }
+
+        // Check single-threaded constraint
+        const canStart = await canStartSession(this.api, workflow.id);
+        if (!canStart) {
+          this.debug(`Skipping retry for workflow ${workflow.id}: another session is active`);
+          continue;
+        }
+
+        this.debug(
+          `Executing retry for workflow ${workflow.id} (${workflow.title}), pending_retry_run_id=${workflow.pending_retry_run_id}`
+        );
+
+        try {
+          const result = await retryWorkflowSession(workflow, workflow.pending_retry_run_id, context);
+          await this.postSessionResult(workflow, result);
+        } catch (error) {
+          this.debug("failed to process retry workflow:", error);
+        }
+
+        return true;
+      }
+
+      // Priority 2: Check which workflows should run based on per-producer schedules
+      const dueWorkflows: { workflow: Workflow; trigger: SessionTrigger }[] = [];
 
       for (const workflow of activeWorkflows) {
         try {
           const dueProducers = await this.api.producerScheduleStore.getDueProducers(workflow.id);
           if (dueProducers.length > 0) {
-            dueWorkflows.push(workflow);
+            dueWorkflows.push({ workflow, trigger: 'schedule' });
             this.debug(
               `Workflow ${workflow.id} (${workflow.title}) has ${dueProducers.length} due producers`
             );
@@ -333,12 +371,46 @@ export class WorkflowScheduler {
         }
       }
 
+      // Priority 3: Consumer-only work detection
+      // For active workflows not already in dueWorkflows and not in retry backoff
+      const dueWorkflowIds = new Set(dueWorkflows.map(d => d.workflow.id));
+      for (const workflow of activeWorkflows) {
+        if (dueWorkflowIds.has(workflow.id)) continue;
+        if (workflow.pending_retry_run_id) continue; // Already handled above (in backoff)
+
+        const retryState = this.workflowRetryState.get(workflow.id);
+        if (retryState && retryState.nextStart > currentTime) continue;
+
+        try {
+          // Check for pending events (any topic)
+          const hasPending = await this.api.eventStore.hasAnyPendingForWorkflow(workflow.id);
+          if (hasPending) {
+            dueWorkflows.push({ workflow, trigger: 'event' });
+            this.debug(`Workflow ${workflow.id} (${workflow.title}) has consumer-only work (pending events)`);
+            continue;
+          }
+
+          // Check for due wakeAt times
+          const dueConsumers = await this.api.handlerStateStore.getConsumersWithDueWakeAt(workflow.id);
+          if (dueConsumers.length > 0) {
+            dueWorkflows.push({ workflow, trigger: 'event' });
+            this.debug(`Workflow ${workflow.id} (${workflow.title}) has consumer-only work (due wakeAt)`);
+          }
+        } catch (error) {
+          this.debug(`Error checking consumer work for workflow ${workflow.id}:`, error);
+        }
+      }
+      // TODO: Optimize consumer-only detection for large numbers of workflows.
+      // Currently does 2 queries per active workflow per tick. For 50+ workflows,
+      // consider a batch query: SELECT DISTINCT workflow_id FROM events WHERE status='pending'
+      // UNION SELECT workflow_id FROM handler_state WHERE wake_at > 0 AND wake_at <= ?
+
       // Filter out workflows in retry backoff
-      const availableWorkflows = dueWorkflows.filter((w) => {
-        const retryState = this.workflowRetryState.get(w.id);
+      const availableWorkflows = dueWorkflows.filter(({ workflow }) => {
+        const retryState = this.workflowRetryState.get(workflow.id);
         if (retryState && retryState.nextStart > currentTime) {
           this.debug(
-            `Skipping workflow ${w.id} in backoff until ${new Date(
+            `Skipping workflow ${workflow.id} in backoff until ${new Date(
               retryState.nextStart
             ).toISOString()}`
           );
@@ -351,16 +423,16 @@ export class WorkflowScheduler {
 
       // Execute first available workflow
       if (availableWorkflows.length > 0) {
-        const workflow = availableWorkflows[0];
+        const { workflow, trigger } = availableWorkflows[0];
         const retryState = this.workflowRetryState.get(workflow.id);
 
         this.debug(
           `Triggering workflow: ${workflow.title} (${workflow.id})`,
-          retryState ? `(retry #${retryState.retryCount} of ${retryState.originalRunId})` : '(fresh run)'
+          retryState ? `(retry #${retryState.retryCount} of ${retryState.originalRunId})` : `(fresh run, trigger=${trigger})`
         );
 
         try {
-          await this.executeNewFormatWorkflow(workflow);
+          await this.executeNewFormatWorkflow(workflow, trigger);
         } catch (error) {
           this.debug("failed to process workflow:", error);
         }
@@ -380,13 +452,13 @@ export class WorkflowScheduler {
    * This uses the executeWorkflowSessionIfIdle function which enforces
    * single-threaded execution (only one session per workflow at a time).
    */
-  private async executeNewFormatWorkflow(workflow: Workflow): Promise<void> {
-    this.debug(`Executing workflow ${workflow.id} via session orchestration`);
+  private async executeNewFormatWorkflow(workflow: Workflow, trigger: SessionTrigger = 'schedule'): Promise<void> {
+    this.debug(`Executing workflow ${workflow.id} via session orchestration (trigger: ${trigger})`);
 
     const context = this.createExecutionContext();
     const result = await executeWorkflowSessionIfIdle(
       workflow,
-      'schedule', // Scheduler-triggered workflows are always 'schedule' trigger
+      trigger,
       context
     );
 
@@ -396,13 +468,21 @@ export class WorkflowScheduler {
       return;
     }
 
+    await this.postSessionResult(workflow, result);
+  }
+
+  /**
+   * Common post-session handling: route maintenance results and emit signals.
+   * Used by both executeNewFormatWorkflow and pending_retry_run_id handling.
+   */
+  private async postSessionResult(workflow: Workflow, result: SessionResult): Promise<void> {
     // Route maintenance results to enterMaintenanceMode before signaling
     if (result.status === 'maintenance') {
       await this.enterMaintenanceModeForSession(workflow, result);
     }
 
     // Handle session result by emitting appropriate signals
-    this.handleSessionResult(workflow.id, result);
+    await this.handleSessionResult(workflow.id, result);
   }
 
   /**
@@ -456,12 +536,12 @@ export class WorkflowScheduler {
   /**
    * Handle the result of a session execution and emit appropriate signals.
    */
-  private handleSessionResult(workflowId: string, result: SessionResult): void {
+  private async handleSessionResult(workflowId: string, result: SessionResult): Promise<void> {
     switch (result.status) {
       case 'completed':
         this.debug(`Session ${result.sessionId} completed for workflow ${workflowId}`);
         // Signal success to scheduler (same as old-format completion)
-        this.handleWorkerSignal({
+        await this.handleWorkerSignal({
           type: 'done',
           workflowId,
           timestamp: Date.now(),
@@ -480,7 +560,7 @@ export class WorkflowScheduler {
         this.debug(`Session ${result.sessionId} failed for workflow ${workflowId}: ${result.error}`);
         // Session-orchestration already set workflow status to 'error'
         // Signal that user needs attention
-        this.handleWorkerSignal({
+        await this.handleWorkerSignal({
           type: 'needs_attention',
           workflowId,
           timestamp: Date.now(),
@@ -494,12 +574,29 @@ export class WorkflowScheduler {
         this.debug(`Session ${result.sessionId} entered maintenance for workflow ${workflowId}: ${result.error}`);
         // enterMaintenanceModeForSession already handled DB work
         // Signal maintenance mode to clear retry state
-        this.handleWorkerSignal({
+        await this.handleWorkerSignal({
           type: 'maintenance',
           workflowId,
           timestamp: Date.now(),
           error: result.error || 'Logic error - entering maintenance',
           errorType: 'logic',
+          scriptRunId: result.sessionId,
+        });
+        break;
+
+      case 'transient':
+        this.debug(`Session ${result.sessionId} hit transient error for workflow ${workflowId}: ${result.error}`);
+        // Set pending_retry_run_id for retry after backoff
+        await this.api.scriptStore.updateWorkflowFields(workflowId, {
+          pending_retry_run_id: result.handlerRunId || '',
+        });
+        // Use existing backoff mechanism
+        await this.handleWorkerSignal({
+          type: 'retry',
+          workflowId,
+          timestamp: Date.now(),
+          error: result.error || 'Transient error',
+          errorType: 'network',
           scriptRunId: result.sessionId,
         });
         break;
