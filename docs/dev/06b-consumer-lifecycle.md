@@ -158,7 +158,7 @@ For time-based patterns, `prepare` can include `wakeAt` to request a specific wa
 
 ### Purpose
 
-Perform **exactly one external mutation**.
+Perform **at most one external mutation**.
 
 ### Signature
 
@@ -166,17 +166,18 @@ Perform **exactly one external mutation**.
 async mutate(ctx, prepared) → void
 ```
 
-The `mutate` handler is a **pure function** of `prepared.data`. All decisions (insert vs update, target selection) must be made in `prepare` and passed via `data`.
+The `mutate` handler is a **deterministic function** of `prepared.data` — it may branch on `prepared.data` to decide which mutation to call (or none), but all data needed for those decisions must be computed in `prepare` and passed via `data`.
 
 ### Allowed Operations
 
-* **At most one mutator call**
+* **Zero or one mutator calls** — `mutate` may branch on `prepared.data` and choose not to call any mutation
 
 ### Forbidden Operations
 
 * All external reads
 * Topic operations (peek, publish)
 * Multiple mutations
+* Returning data — `mutate`'s return value is discarded by the host
 
 ### Mutation is Terminal
 
@@ -197,6 +198,14 @@ async mutate(ctx, prepared) {
 ```
 
 The mutation result is captured by the host and passed to `next`.
+
+### No Mutation Called
+
+If `mutate` completes without calling any mutation tool, no mutation record is created. The host transitions directly to `next` with `mutationResult = { status: 'none' }`. This is the expected path when `mutate` branches on `prepared.data` and determines no external mutation is needed.
+
+All data that `next` needs in this case must already be in `prepared.data`.
+
+Reserved events are still consumed on commit — the consumer claimed these events and completed its run, so they are done regardless of whether a mutation was called.
 
 ### Host-Owned Execution
 

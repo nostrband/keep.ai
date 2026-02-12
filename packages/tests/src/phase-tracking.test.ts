@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { DBInterface, KeepDb, KeepDbApi, Mutation } from "@app/db";
+import { DBInterface, KeepDb, KeepDbApi } from "@app/db";
 import { createDBNode } from "@app/node";
 import { ToolWrapper, ExecutionPhase, OperationType, EvalContext } from "@app/agent";
 import { z } from "zod";
@@ -173,106 +173,44 @@ describe("ToolWrapper Phase Tracking", () => {
       expect(() => wrapper.checkPhaseAllowed('mutate')).not.toThrow();
     });
 
-    it("should reset currentMutation when phase changes", () => {
+    it("should reset mutateContext and createdMutation when phase changes", () => {
       const wrapper = new ToolWrapper({
         tools: [],
         api,
         getContext: () => createMockContext(),
       });
 
-      const mockMutation: Mutation = {
-        id: "mut-1",
-        handler_run_id: "run-1",
-        workflow_id: "workflow-1",
-        tool_namespace: "Test",
-        tool_method: "mutate",
-        params: "{}",
-        idempotency_key: "",
-        status: "pending",
-        result: "",
-        error: "",
-        reconcile_attempts: 0,
-        last_reconcile_at: 0,
-        next_reconcile_at: 0,
-        resolved_by: "",
-        resolved_at: 0,
-        ui_title: "",
-        created_at: Date.now(),
-        updated_at: Date.now(),
-      };
-
-      wrapper.setCurrentMutation(mockMutation);
-      expect(wrapper.getCurrentMutation()).toEqual(mockMutation);
+      wrapper.setMutateContext({ handlerRunId: "run-1", workflowId: "workflow-1", uiTitle: "Test" });
+      expect(wrapper.getCreatedMutation()).toBeNull(); // not created yet
 
       wrapper.setPhase('prepare');
-      expect(wrapper.getCurrentMutation()).toBeNull();
+      expect(wrapper.getCreatedMutation()).toBeNull();
     });
   });
 
-  describe("Mutation tracking", () => {
-    it("should set and get current mutation", () => {
+  describe("Mutation context tracking", () => {
+    it("should set and get mutate context", () => {
       const wrapper = new ToolWrapper({
         tools: [],
         api,
         getContext: () => createMockContext(),
       });
 
-      const mockMutation: Mutation = {
-        id: "mut-1",
-        handler_run_id: "run-1",
-        workflow_id: "workflow-1",
-        tool_namespace: "Gmail",
-        tool_method: "sendEmail",
-        params: '{"to":"alice@example.com"}',
-        idempotency_key: "",
-        status: "in_flight",
-        result: "",
-        error: "",
-        reconcile_attempts: 0,
-        last_reconcile_at: 0,
-        next_reconcile_at: 0,
-        resolved_by: "",
-        resolved_at: 0,
-        ui_title: "",
-        created_at: Date.now(),
-        updated_at: Date.now(),
-      };
-
-      wrapper.setCurrentMutation(mockMutation);
-      expect(wrapper.getCurrentMutation()).toEqual(mockMutation);
+      wrapper.setMutateContext({ handlerRunId: "run-1", workflowId: "workflow-1", uiTitle: "Send email" });
+      // No mutation created yet — getCreatedMutation returns null until a mutation tool is called
+      expect(wrapper.getCreatedMutation()).toBeNull();
     });
 
-    it("should clear mutation when set to null", () => {
+    it("should clear mutate context when set to null", () => {
       const wrapper = new ToolWrapper({
         tools: [],
         api,
         getContext: () => createMockContext(),
       });
 
-      const mockMutation: Mutation = {
-        id: "mut-1",
-        handler_run_id: "run-1",
-        workflow_id: "workflow-1",
-        tool_namespace: "Test",
-        tool_method: "mutate",
-        params: "{}",
-        idempotency_key: "",
-        status: "pending",
-        result: "",
-        error: "",
-        reconcile_attempts: 0,
-        last_reconcile_at: 0,
-        next_reconcile_at: 0,
-        resolved_by: "",
-        resolved_at: 0,
-        ui_title: "",
-        created_at: Date.now(),
-        updated_at: Date.now(),
-      };
-
-      wrapper.setCurrentMutation(mockMutation);
-      wrapper.setCurrentMutation(null);
-      expect(wrapper.getCurrentMutation()).toBeNull();
+      wrapper.setMutateContext({ handlerRunId: "run-1", workflowId: "workflow-1" });
+      wrapper.setMutateContext(null);
+      expect(wrapper.getCreatedMutation()).toBeNull();
     });
   });
 

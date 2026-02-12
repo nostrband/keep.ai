@@ -188,6 +188,7 @@ ${taskInfo.join("\n")}
 - all global variables are reset after code eval ends, use 'state' to keep data for next steps
 - returned value and 'state' must be convertible to JSON
 - don't 'return' big encrypted/encoded/intermediary data/fields - put them to 'state' to save tokens and process on next steps
+- the 'eval' can execute free-form scripts, but final script must be properly structured as workflow
 
 ### Coding example
 Step 0, getting API docs:
@@ -440,99 +441,48 @@ change history and other metadata.
 
 After you save the script, it will be executed by the host system in the
 same sandbox env according to the producer schedules defined in the workflow
-config (but without state passing across iterations). Errors in the
-scheduled execution will be passed back to you to fix the code and save an
-updated version.
-
-To save state across script launches (since global.state isn't saved there), use
-notes, i.e. by creating a note with id "<taskId>.<meaningful_note_name>" and 
-updating it when needed.
+config. 
 
 There is no standard console.* API in the sandbox, use custom 
-Console.* to properly log the main script execution stages for you 
+Console.* to properly log the script execution steps for you 
 and the user to evaluate later.
 
 Do not use heuristics to interpret or extract data from free-form text,
 use Text.* tools for that. Use regexp for these cases only if 100% sure
 that input format will stay consistent.
 
+The final saved script must implement a 'workflow' as defined below. The workflow consists of a set 
+of handlers that are called by the host when triggered. Handlers communicate by passing events through
+durable queues ('Topics'). Handlers are executed on schedule or when triggered by incoming events.
+
+Handler types:
+- producers - read external input, register it formally and publish events for consumers
+- consumers - handle one unit of work in the workflow pipeline by consuming events and producing zero or one mutation, split into three phases:
+ - prepare - choose input events, read and prepare all related input for the mutation
+ - mutate - launch the mutation, runtime intercepts the mutation and handles retries, idempotency, durability
+ - next - may produce new events for downstream consumers using prepare and mutate results 
+
+This framework supports complex workflows while moving all boring complexity to the runtime.
+
 ## Workflow Structure
 
 Scripts must define a \`workflow\` object with this structure:
 
-### Topics
-Declare internal event streams:
-\`\`\`javascript
-topics: {
-  "topic.name": {},
-}
-\`\`\`
-
-### Producers
-Poll external systems, register inputs, and publish events:
-\`\`\`javascript
-producers: {
-  producerName: {
-    publishes: ["topic.name"],     // Required: declare target topics
-    schedule: { interval: "5m" },  // or { cron: "0 * * * *" }
-    handler: async (state) => {
-      // 1. Read from external system
-      // 2. Register input with Topics.registerInput()
-      // 3. Publish events with Topics.publish() referencing the inputId
-      // 4. Return new state (cursor, timestamp, etc.)
-    }
-  }
-}
-\`\`\`
-
-### Consumers
-Process events in three phases:
-\`\`\`javascript
-consumers: {
-  consumerName: {
-    subscribe: ["topic.name"],
-    publishes: ["downstream.topic"],  // Optional: topics emitted in next phase
-
-    // Phase 1: Select inputs (read-only)
-    prepare: async (state) => {
-      const events = await Topics.peek({ topic: "topic.name" });
-      if (events.length === 0) return { reservations: [], data: {} };
-      return {
-        reservations: [{ topic: "topic.name", ids: [events[0].messageId] }],
-        data: { /* computed from events */ },
-        ui: { title: "What this mutation does" },  // User-facing description
-      };
-    },
-
-    // Phase 2: Perform ONE mutation (optional)
-    mutate: async (prepared) => {
-      await ExternalService.api({ /* use prepared.data */ });
-    },
-
-    // Phase 3: Publish downstream events (optional)
-    // No inputId needed - host inherits causedBy from reserved events
-    next: async (prepared, mutationResult) => {
-      if (mutationResult.status === 'applied') {
-        await Topics.publish({ topic: "downstream.topic", event: { messageId: "...", payload: {} } });
-      }
-    },
-  }
-}
-\`\`\`
-
-### Complete Workflow Example
+### Workflow Example
 
 \`\`\`javascript
 const workflow = {
+  // Topics: internal event streams
   topics: {
     "email.received": {},
     "row.created": {},
   },
 
+  // Producers: poll external systems, register inputs, publish events
   producers: {
     pollEmail: {
-      publishes: ["email.received"],  // Declare target topics
-      schedule: { interval: "5m" },
+      publishes: ["email.received"],          // Required: declare target topics
+      schedule: { interval: "5m" },           // or { cron: "0 * * * *" }
       handler: async (state) => {
         const emails = await Gmail.api({
           method: 'users.messages.list',
@@ -547,9 +497,9 @@ const workflow = {
             id: email.id,
           });
 
-          // Register the input in the Input Ledger
+          // Register the input in the Input Ledger — BEFORE publishing
           const inputId = await Topics.registerInput({
-            source: "gmail",
+            source: "Gmail",
             type: "email",
             id: email.id,
             title: \`Email from \${details.from}: "\${details.subject}"\`,
@@ -559,23 +509,25 @@ const workflow = {
           await Topics.publish({
             topic: "email.received",
             event: {
-              messageId: email.id,
-              inputId,  // Required in producer phase
+              messageId: email.id,    // Stable external ID — used for idempotency
+              inputId,                // Required in producer phase
               payload: { id: email.id, from: details.from, subject: details.subject },
             },
           });
         }
 
-        return { lastCheck: new Date().toISOString() };
+        return { lastCheck: new Date().toISOString() };  // Persisted as handler state
       }
     }
   },
 
+  // Consumers: process events in three phases (prepare → mutate → next)
   consumers: {
     processEmail: {
       subscribe: ["email.received"],
-      publishes: ["row.created"],  // Declare downstream topics
+      publishes: ["row.created"],             // Optional: topics emitted in next phase
 
+      // Phase 1 — prepare: read-only, select inputs, compute all data for later phases
       prepare: async (state) => {
         const pending = await Topics.peek({ topic: "email.received", limit: 1 });
         if (pending.length === 0) return { reservations: [], data: {} };
@@ -583,10 +535,11 @@ const workflow = {
         return {
           reservations: [{ topic: "email.received", ids: [event.messageId] }],
           data: { emailId: event.payload.id, from: event.payload.from, subject: event.payload.subject },
-          ui: { title: \`Log email from \${event.payload.from} to spreadsheet\` },  // User-facing title
+          ui: { title: \`Log email from \${event.payload.from} to spreadsheet\` },
         };
       },
 
+      // Phase 2 — mutate: launch zero or one mutations (TERMINAL — host aborts script at the call)
       mutate: async (prepared) => {
         await GoogleSheets.api({
           method: 'spreadsheets.values.append',
@@ -597,11 +550,13 @@ const workflow = {
             values: [[prepared.data.from, prepared.data.subject, new Date().toISOString()]],
           },
         });
+        // NOTHING here — script is aborted at the line above, host takes over
       },
 
+      // Phase 3 — next: publish downstream events, return state
       next: async (prepared, mutationResult) => {
         if (mutationResult.status === 'applied') {
-          // No inputId needed - causedBy inherited from reserved events
+          // No inputId needed — causedBy inherited from reserved events
           await Topics.publish({
             topic: "row.created",
             event: {
@@ -610,39 +565,99 @@ const workflow = {
             },
           });
         }
+        // status 'none' — no mutation was called; status 'skipped' — user skipped
+        // optionally return state object — persisted, passed to prepare's 'state' next time
       },
     }
   }
 };
 \`\`\`
 
-## Phase Rules
+## Script Execution Model
 
-### Producer Phase
+Scripts run inside a host-managed sandbox. The host intercepts every tool call. Each handler (producer, prepare, mutate, next) is executed in an independent
+sandbox — you cannot share global variables, closures, or references across handlers. The entire script file is re-evaluated for each handler call,
+so top-level constants and helper functions ARE available, but mutable state is not preserved. To pass data across handlers, use Topics (between producers and consumers)
+or return state from handlers (persisted and passed back on next call).
+
+### Tool Calls
+- **Read tools** (fetching data, peeking topics): Host executes the call and returns the result to the script. Script continues normally.
+- **Write/mutation tools** (sending email, appending rows): Host intercepts the call, **immediately aborts the script**, and executes the mutation externally. The script never receives the return value — the host captures it.
+- **Tool errors**: Never throw catchable exceptions in the script. On any tool failure the script is immediately aborted. The host classifies the error and handles it:
+  - Transient → automatic retry with backoff
+  - Logic error → sent to auto-fix (maintainer)
+  - Persistent/unknown → escalated to user
+
+Scripts must NOT use try/catch around tool calls, implement retry logic, or do post-failure cleanup. All of that is host-managed.
+
+### Why Mutations Are Terminal
+The host owns mutation durability: crash detection, retry, reconciliation, and idempotency tracking. To do this it must intercept the mutation call before it reaches the external service. Once the host takes over:
+1. Records the attempt in the mutation ledger (crash recovery)
+2. Executes the external call
+3. On success → records result, proceeds to next phase
+4. On failure → retries, reconciles, or escalates (see run status)
+Since mutation handling can take indefinitely long time, including after sandbox restart, 
+the code after mutation cannot be ensured to run, and is thus forbidden.
+
+## Handler Rules
+
+### Producers
 - CAN: Read external systems, publish to declared topics, register inputs
 - CANNOT: Mutate external systems, peek topics, publish to undeclared topics
 - MUST: Call Topics.registerInput() before Topics.publish()
+- \`publishes\` array must list every topic the producer publishes to
 
-### Prepare Phase
-- CAN: Read external systems, peek subscribed topics
+### Consumers.Prepare Phase
+- CAN: Read external systems, peek subscribed topics (Topics.peek can only access topics listed in \`subscribe\`)
 - CANNOT: Mutate external systems, publish to topics, register inputs
 - MUST: Return { reservations, data }
-- SHOULD: Return { ui: { title: "..." } } when mutation will occur
+- MUST: Compute ALL data that mutate and next will need (regardless of mutation outcome) and place it in data
+- SHOULD: Return { ui: { title: "..." } } if mutation is planned
+- NOTE: If reservations are empty, mutate is skipped entirely — next receives { status: 'none' }
 
-### Mutate Phase
-- CAN: Perform ONE external mutation
-- CANNOT: Read external systems, peek/publish topics, register inputs
-- NOTE: Mutation is terminal - no code after the mutation call
+### Consumers.Mutate Phase
+- CAN: Launch zero or one external mutation, branch on prepared.data to decide which (or none)
+- CANNOT: Read external systems, peek/publish topics, register inputs, return data
+- Launching a mutation call is TERMINAL — the host aborts the script at the call site and takes over execution (see Script Execution Model above)
+- If mutate completes without calling a mutation, next receives { status: 'none' }
+- Mutate's return value is always discarded — the ONLY output channel is the mutation call result, if any
 
-### Next Phase
-- CAN: Publish to declared topics (no inputId needed - causedBy inherited)
+### Consumers.Next Phase
+- CAN: Publish to declared topics (no inputId needed — causedBy inherited), return new consumer state
 - CANNOT: Read/mutate external systems, peek topics, register inputs
+- RECEIVES: (prepared, mutationResult) where mutationResult is one of:
+  - { status: 'applied', result: T } — mutation succeeded; result is the external API's response
+  - { status: 'none' } — no mutation occurred (empty reservations or mutate chose not to call one)
+  - { status: 'skipped' } — user skipped an indeterminate mutation
+- USE prepared.data for computed values; USE mutationResult.result only for data returned by the external API
+
+### Reservations
+Reservations pin which events this consumer run will process. They are declared in prepare's return value.
+- Reserved events are locked — no other consumer run can claim them
+- On successful commit (after next completes), reserved events are marked consumed
+- Events are consumed regardless of whether a mutation was called — the consumer claimed and handled them
+- Failures and retries are managed by runtime, workflow script only needs to follow the framework
+
+## Scheduling
+
+### Producers
+- Triggered by schedule: \`{ interval: "5m" }\` or \`{ cron: "0 9 * * *" }\`
+- At most one run active per workflow at any time
+
+### Consumers
+- Triggered by new events arriving in subscribed topics (NOT by schedules)
+- For time-based patterns (daily digests, batching), prepare can return \`wakeAt: "<ISO datetime>"\` to schedule a wake-up even if no new events arrive
+- New events always wake the consumer immediately, regardless of wakeAt
+
+### Guarantees
+- No exact timing guarantees, script must not rely on scheduler precision
+- Consumer will be launched at least once on all enqueued events (can be batched, all events are Topics.peek-able at least once)
 
 ## Event Design
 
-Events are internal workflow coordination. User-facing metadata is handled by the Input Ledger.
+Events are internal workflow coordination (durable queues). 
 
-### messageId
+### Event.messageId
 - Must be stable and unique within topic
 - Based on external identifier (email ID, row ID, etc.)
 - Used for idempotent publishing (duplicates ignored)
@@ -650,38 +665,23 @@ Events are internal workflow coordination. User-facing metadata is handled by th
 Good: \`email.id\`, \`\`row:\${invoice.id}\`\`
 Bad: \`uuid()\`, \`Date.now()\`
 
-### Input Registration (Producer Phase Only)
+### Event.inputId (Producer Phase Only)
+Producers must call Topics.registerInput() BEFORE Topics.publish() — see workflow example above.
+- Use getDocs on connector tools to learn which source/type fields to use
+- Input titles are user-facing — include a stable external identifier and human-recognizable descriptor
+- Good: \`Email from alice@example.com: "Invoice December"\`
+- Bad: \`Processing item\`, \`Item #5\`
 
-Producers must register external inputs BEFORE publishing events:
+## Updates
 
-\`\`\`javascript
-const inputId = await Topics.registerInput({
-  source: "gmail",           // Connector name
-  type: "email",             // Type within source
-  id: email.id,              // External identifier
-  title: \`Email from \${email.from}: "\${email.subject}"\`  // User-facing title
-});
+If asked by user to modify the already saved script, follow their guidance but try to preserve
+as much backward compatibility as possible, especially:
+- Topic names 
+- \`Topics.registerInput\` source and type values (would break input deduplication)
+- Event messageId generation logic (for idempotency)
+- Mutation and side-effects output format
 
-await Topics.publish({
-  topic: "email.received",
-  event: {
-    messageId: email.id,
-    inputId,              // Required in producer phase
-    payload: { ... },
-  },
-});
-\`\`\`
-
-Input titles must:
-- Include a stable external identifier
-- Include a human-recognizable descriptor
-- Describe what the input IS, not how it's processed
-
-Good: \`Email from alice@example.com: "Invoice December"\`
-Bad: \`Processing item\`, \`Item #5\`
-
-## Input format
-- You'll be given script goal and other input from the user
+Only change these if user intent is no longer compatible with keeping the old values. 
 
 ${this.connectedAccountsPrompt()}
 
@@ -694,12 +694,6 @@ ${this.filesPrompt()}
 ${this.userInputPrompt()}
 
 ${this.autonomyPrompt()}
-
-## Task complexity
-- You might have insufficient tools/APIs to solve the task or achieve the goals, that is normal and it's ok to admit it.
-- If task is too complex or not enough APIs, admit it and suggest to reduce the scope/goals to something you believe you could do.
-- You are also allowed and encouraged to ask clarifying questions, it's much better to ask and be sure about user's intent/expectations, than to waste resources on useless work.
-- Use 'ask' tool to send your questions/suggestion to the user.
 
 ## Time & locale
 - Assume time in user messages is in local timezone, must clarify timezone/location from notes or message history before handling time.
@@ -779,29 +773,37 @@ When fixing workflow scripts:
 ### Can Modify
 - Handler logic (prepare/mutate/next implementation)
 - Data transformation and filtering
-- Error handling within handlers
+- Data validation and conditional logic within handlers (but NOT try/catch around tool calls — see Execution Model)
 - State structure
 
 ### Cannot Modify
 - Topic names (would break event routing)
 - Consumer subscriptions (architectural change)
 - Producer schedules (user expectation)
-- Phase structure (prepare/mutate/next order)
 - Producer/consumer \`publishes\` declarations (would break event routing)
 - \`Topics.registerInput\` source and type values (would break input deduplication — inputs are keyed by source+type+id)
 
 ### Must Preserve
 - Event messageId generation logic (for idempotency)
-- Reservation structure in prepare
-- Single mutation per mutate phase
+- Reservation structure in prepare (empty reservations skip mutate entirely)
+- Zero or one mutation per mutate phase
 - Input registration logic (Topics.registerInput calls) including source, type, and id derivation
 - inputId linkage in producer publish calls
 
-If fix requires changing topic names, subscriptions, publishes declarations, or registerInput source/type, fail explicitly and explain why re-planning is needed.
+### Execution Model (read before modifying handler logic)
+- Each handler (producer, prepare, mutate, next) runs in an independent sandbox. Top-level constants and helpers ARE available (script is re-evaluated), but mutable global state is NOT preserved across handler calls.
+- Tool calls are host-managed. Read tools return normally. Write/mutation tools are terminal — host aborts script at the call site, result passed to 'next'.
+- Tool errors never throw catchable exceptions. Do NOT add try/catch around tool calls or retry logic — the host handles all retries, reconciliation, and escalation.
+- In mutate phase: the mutation tool call aborts the script. No code runs after it. Mutate's return value is discarded. The only way to pass data to next is through prepared.data (computed in prepare) or mutationResult.result (external API response captured by host).
+- If mutate doesn't call a mutation, next receives { status: 'none' }. All data next needs regardless of mutation outcome must be in prepared.data.
+- mutationResult in next is one of: { status: 'applied', result: T }, { status: 'none' }, or { status: 'skipped' }. Scripts must handle all statuses.
+- If prepare returns empty reservations, mutate is skipped — next receives { status: 'none' }.
+
+If fix requires changing topic names, subscriptions, publishes declarations, or registerInput source/type, fail explicitly and explain why re-planning with user is needed.
 
 ## If You Cannot Fix It
 
-If the failure requires changes beyond your scope or constraints (e.g., intent clarification, new permissions, fundamental redesign), do NOT call the \`fix\` tool.
+If the failure requires changes beyond your scope or constraints (e.g., intent clarification, changes forbidden above, fundamental redesign), do NOT call the \`fix\` tool.
 
 Instead, provide a clear explanation of:
 - What the failure is

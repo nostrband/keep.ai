@@ -213,8 +213,8 @@ function getMutationResultForNextPhase(mutation: Mutation | null): MutationResul
       return { status: "none" };
 
     case "pending":
-      // Mutation handler ran but didn't call any mutation tool
-      // Treat as no mutation
+      // Should not happen — mutations are now created directly in in_flight status.
+      // If reached, treat as no mutation for safety.
       return { status: "none" };
 
     default:
@@ -1043,8 +1043,9 @@ return await workflow.consumers.${run.handler_name}.prepare(__state__);
   ) => {
     const mutation = await api.mutationStore.getByHandlerRunId(run.id);
 
-    if (!mutation || mutation.status === "pending") {
-      // Not started yet, execute mutate handler
+    if (!mutation) {
+      // No mutation record yet — either first attempt or mutate previously
+      // completed without calling a mutation tool. Execute mutate handler.
       await executeMutate(api, run, context);
     } else if (mutation.status === "in_flight") {
       // Crashed mid-mutation → uncertain outcome
@@ -1245,17 +1246,6 @@ async function executeMutate(
     ? JSON.parse(run.prepare_result)
     : { reservations: [], data: undefined };
 
-  // Create mutation record BEFORE executing
-  // Extract ui.title from prepareResult for user-facing display (exec-15)
-  let mutation = await api.mutationStore.getByHandlerRunId(run.id);
-  if (!mutation) {
-    mutation = await api.mutationStore.create({
-      handler_run_id: run.id,
-      workflow_id: run.workflow_id,
-      ui_title: prepareResult.ui?.title,
-    });
-  }
-
   const { sandbox, toolWrapper, logs } = await createHandlerSandbox(
     workflow,
     context,
@@ -1263,10 +1253,14 @@ async function executeMutate(
   );
 
   try {
-    // Set mutate phase first, then current mutation
-    // (setPhase resets currentMutation, so it must come before setCurrentMutation)
+    // Set mutate phase first, then mutate context for lazy mutation creation
+    // (setPhase resets mutateContext, so it must come before setMutateContext)
     toolWrapper.setPhase("mutate");
-    toolWrapper.setCurrentMutation(mutation);
+    toolWrapper.setMutateContext({
+      handlerRunId: run.id,
+      workflowId: run.workflow_id,
+      uiTitle: prepareResult.ui?.title,
+    });
 
     // Inject prepared data
     sandbox.setGlobal({ __prepared__: prepareResult });
@@ -1282,8 +1276,8 @@ return await workflow.consumers.${run.handler_name}.mutate(__prepared__);
       signal: context.abortController?.signal,
     });
 
-    // Re-fetch mutation to get updated status
-    const updatedMutation = await api.mutationStore.get(mutation.id);
+    // Check if a mutation was created during execution (lazy creation by tool-wrapper)
+    const mutation = await api.mutationStore.getByHandlerRunId(run.id);
 
     if (!result.ok) {
       // Handle error based on mutation state
@@ -1291,15 +1285,15 @@ return await workflow.consumers.${run.handler_name}.mutate(__prepared__);
         sandbox.context?.classifiedError ||
         new LogicError(result.error, { source: "consumer.mutate" });
 
-      if (updatedMutation) {
+      if (mutation) {
         if (isDefiniteFailure(classifiedError)) {
           await api.mutationStore.markFailed(
-            updatedMutation.id,
+            mutation.id,
             classifiedError.message
           );
-        } else if (updatedMutation.status === "in_flight") {
+        } else if (mutation.status === "in_flight") {
           // Uncertain outcome - attempt immediate reconciliation (exec-18)
-          await handleUncertainOutcome(api, updatedMutation, classifiedError.message);
+          await handleUncertainOutcome(api, mutation, classifiedError.message);
         }
       }
       // State machine will read mutation status on next iteration
@@ -1308,17 +1302,15 @@ return await workflow.consumers.${run.handler_name}.mutate(__prepared__);
 
     // If mutation was executed (status is in_flight), mark as applied
     // Atomic checkpoint: markApplied + updatePhase in a single transaction
-    if (updatedMutation && updatedMutation.status === "in_flight") {
+    if (mutation && mutation.status === "in_flight") {
       await api.db.db.tx(async (tx: DBInterface) => {
-        await api.mutationStore.markApplied(updatedMutation.id, JSON.stringify(result.result), tx);
+        await api.mutationStore.markApplied(mutation.id, JSON.stringify(result.result), tx);
         await api.handlerRunStore.updatePhase(run.id, "mutated", tx);
       });
-    } else if (updatedMutation && updatedMutation.status === "pending") {
-      // Mutate handler didn't call any mutation tool - mark as applied with null result
-      await api.db.db.tx(async (tx: DBInterface) => {
-        await api.mutationStore.markApplied(updatedMutation.id, JSON.stringify(null), tx);
-        await api.handlerRunStore.updatePhase(run.id, "mutated", tx);
-      });
+    } else if (!mutation) {
+      // Mutate handler completed without calling any mutation tool — no mutation record.
+      // Just transition phase; next will receive { status: 'none' }.
+      await api.handlerRunStore.updatePhase(run.id, "mutated");
     }
 
     // Save logs if any
@@ -1329,17 +1321,17 @@ return await workflow.consumers.${run.handler_name}.mutate(__prepared__);
   } catch (error) {
     // Use getRunStatusForError instead of ensureClassified (per exec-12)
     const { error: classifiedError } = getRunStatusForError(error, "consumer.mutate");
-    const updatedMutation = await api.mutationStore.get(mutation.id);
+    const mutation = await api.mutationStore.getByHandlerRunId(run.id);
 
-    if (updatedMutation) {
+    if (mutation) {
       if (isDefiniteFailure(classifiedError)) {
         await api.mutationStore.markFailed(
-          updatedMutation.id,
+          mutation.id,
           classifiedError.message
         );
-      } else if (updatedMutation.status === "in_flight") {
+      } else if (mutation.status === "in_flight") {
         // Uncertain outcome - attempt immediate reconciliation (exec-18)
-        await handleUncertainOutcome(api, updatedMutation, classifiedError.message);
+        await handleUncertainOutcome(api, mutation, classifiedError.message);
       }
     }
     // State machine will read mutation status on next iteration

@@ -1,4 +1,4 @@
-import { KeepDbApi, Mutation } from "@app/db";
+import { KeepDbApi, type Mutation } from "@app/db";
 import { EvalContext, EvalGlobal } from "./sandbox";
 import debug from "debug";
 import { ClassifiedError, isClassifiedError, LogicError, WorkflowPausedError } from "../errors";
@@ -94,7 +94,10 @@ export class ToolWrapper {
   // Phase tracking state (exec-03a/exec-04)
   private currentPhase: ExecutionPhase = null;
   private mutationExecuted: boolean = false;
-  private currentMutation: Mutation | null = null;
+  /** Context for lazy mutation creation — set before mutate phase, used when mutation tool is called */
+  private mutateContext: { handlerRunId: string; workflowId: string; uiTitle?: string } | null = null;
+  /** Mutation record created on demand when mutation tool is actually called */
+  private createdMutation: Mutation | null = null;
 
   constructor(config: ToolWrapperConfig) {
     this.tools = config.tools;
@@ -123,7 +126,8 @@ export class ToolWrapper {
   setPhase(phase: ExecutionPhase): void {
     this.currentPhase = phase;
     this.mutationExecuted = false;
-    this.currentMutation = null;
+    this.mutateContext = null;
+    this.createdMutation = null;
   }
 
   /**
@@ -134,23 +138,21 @@ export class ToolWrapper {
   }
 
   /**
-   * Set the current mutation record for the mutate phase.
-   * Must be called before entering mutate phase to enable mutation tracking.
-   *
-   * @param mutation - The mutation record from the mutations table
+   * Set context for lazy mutation creation in the mutate phase.
+   * Must be called before entering mutate phase.
+   * The actual mutation record is created only when a mutation tool is called.
    */
-  setCurrentMutation(mutation: Mutation | null): void {
-    this.currentMutation = mutation;
+  setMutateContext(ctx: { handlerRunId: string; workflowId: string; uiTitle?: string } | null): void {
+    this.mutateContext = ctx;
+    this.createdMutation = null;
   }
 
   /**
-   * Get the current mutation record.
-   * Used by mutation tools to record tool info before external calls.
-   *
-   * @returns The current mutation record, or null if not in mutate phase
+   * Get the mutation record created during this mutate phase.
+   * Returns null if mutate handler didn't call any mutation tool.
    */
-  getCurrentMutation(): Mutation | null {
-    return this.currentMutation;
+  getCreatedMutation(): Mutation | null {
+    return this.createdMutation;
   }
 
   /**
@@ -335,14 +337,18 @@ Example: await ${ns}.${name}(<input>)
       const operationType = this.getOperationType(tool, validatedInput);
       this.checkPhaseAllowed(operationType);
 
-      // Before executing a mutation tool, record tool info on the mutation record.
+      // Before executing a mutation tool, create the mutation record directly in in_flight status.
+      // No "pending" state — the record is only created when a mutation is actually called.
       // This enables crash recovery (in_flight detection) and output tracking
       // (tool_namespace/tool_method are used by the UI to display outputs).
-      if (operationType === 'mutate' && this.currentMutation && this.currentPhase === 'mutate') {
-        await this.api.mutationStore.markInFlight(this.currentMutation.id, {
+      if (operationType === 'mutate' && this.mutateContext && this.currentPhase === 'mutate') {
+        this.createdMutation = await this.api.mutationStore.createInFlight({
+          handler_run_id: this.mutateContext.handlerRunId,
+          workflow_id: this.mutateContext.workflowId,
           tool_namespace: ns,
           tool_method: name,
           params: JSON.stringify(validatedInput),
+          ui_title: this.mutateContext.uiTitle,
         });
       }
 

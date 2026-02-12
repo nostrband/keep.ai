@@ -1,14 +1,11 @@
 
 
 ISSUES:
-- "Gmail newsletter" input title is untrusted, need to show host-managed input type/source pair
 - Show diff should also expand the comment to view long ones untruncated
-- after auto-fix shouldn't we retry immediately instead of waiting full scheduling cycle?
 - output names are namespaces - very vague, we should probably transform ns.method to something human-readable, or have connector declare 'Output name' variable
-- input types must be hardcoded by each connector, and source names
 - reconciliation doesn't seem to work, not implemented right? and host-managed mutation retries? 
 - outputs only include namespace, need tool name too (at getOutputStatsByWorkflow)
-- why is 'Text.summarize' is listed as output/mutation under one input, but not listed in the outputs list?
+- Message: Failed at Gmail.api: request to https://gmail.googleapis.com/gmail/v1/users/me/messages?q=is%3Aunread%20%28from%3Anoreply%20OR%20from%3Anewsletter%20OR%20from%3Adigest%20OR%20from%3Anotification%20OR%20subject%3A%28newsletter%20OR%20digest%20OR%20weekly%20OR%20daily%20OR%20update%29%29&maxResults=10 failed, reason: getaddrinfo EAI_AGAIN gmail.googleapis.com - classified as logic, why?
 - fix macos builds
 - we have to make sure task-scheduler can't launch more that 1 task per workflow, meaning several maintainer tasks + planner - planner first, maintainers one by one second
 - stack traces have no line number of any other hint at where the issue is - just 'not a function' or some such, plus script run page doesn't show which handler was running, and I guess when auto-fix will run it also needs info on which handler failed

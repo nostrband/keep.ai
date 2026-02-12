@@ -84,6 +84,21 @@ export interface CreateMutationInput {
 }
 
 /**
+ * Input for creating a mutation directly in in_flight status.
+ * Used when mutation tool is intercepted — no "pending" state needed.
+ */
+export interface CreateInFlightInput {
+  handler_run_id: string;
+  workflow_id: string;
+  tool_namespace: string;
+  tool_method: string;
+  params: string;
+  idempotency_key?: string;
+  /** User-facing title from prepareResult.ui.title (exec-15) */
+  ui_title?: string;
+}
+
+/**
  * Input for updating a mutation.
  */
 export interface UpdateMutationInput {
@@ -191,6 +206,64 @@ export class MutationStore {
       params: "",
       idempotency_key: "",
       status: "pending",
+      result: "",
+      error: "",
+      reconcile_attempts: 0,
+      last_reconcile_at: 0,
+      next_reconcile_at: 0,
+      resolved_by: "",
+      resolved_at: 0,
+      ui_title: uiTitle,
+      created_at: now,
+      updated_at: now,
+    };
+  }
+
+  /**
+   * Create a mutation directly in in_flight status with tool info.
+   * Skips the "pending" state — used when the tool-wrapper intercepts a mutation tool call.
+   * Each handler run can have at most one mutation (1:1 relationship).
+   */
+  async createInFlight(input: CreateInFlightInput, tx?: DBInterface): Promise<Mutation> {
+    if (!tx) {
+      return this.db.db.tx((tx) => this.createInFlight(input, tx));
+    }
+    const db = tx;
+
+    // Check uniqueness: one mutation per handler_run_id
+    const existing = await this.getByHandlerRunId(input.handler_run_id, db);
+    if (existing) {
+      throw new Error(`Mutation already exists for handler run ${input.handler_run_id}`);
+    }
+
+    const id = bytesToHex(randomBytes(16));
+    const now = Date.now();
+    const uiTitle = input.ui_title || "";
+
+    await db.exec(
+      `INSERT INTO mutations (
+        id, handler_run_id, workflow_id, tool_namespace, tool_method,
+        params, idempotency_key, status, result, error,
+        reconcile_attempts, last_reconcile_at, next_reconcile_at,
+        resolved_by, resolved_at, ui_title, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'in_flight', '', '', 0, 0, 0, '', 0, ?, ?, ?)`,
+      [
+        id, input.handler_run_id, input.workflow_id,
+        input.tool_namespace, input.tool_method,
+        input.params, input.idempotency_key || "",
+        uiTitle, now, now,
+      ]
+    );
+
+    return {
+      id,
+      handler_run_id: input.handler_run_id,
+      workflow_id: input.workflow_id,
+      tool_namespace: input.tool_namespace,
+      tool_method: input.tool_method,
+      params: input.params,
+      idempotency_key: input.idempotency_key || "",
+      status: "in_flight",
       result: "",
       error: "",
       reconcile_attempts: 0,
