@@ -22,7 +22,6 @@ const SUPPORTED_METHODS = [
   "documents.batchUpdate",
 ] as const;
 
-// Read-only methods (can be used outside Items.withItem)
 const READ_METHODS = new Set<string>([
   "documents.get",
 ]);
@@ -74,11 +73,7 @@ export function makeGDocsTool(
     namespace: "GoogleDocs",
     name: "api",
     outputType: "document",
-    description: `Access Google Docs API with various methods. Supported methods: ${SUPPORTED_METHODS.join(", ")}. Returns dynamic results based on the method used. Knowledge of param and output structure is expected from the assistant. REQUIRED: 'account' parameter must be the email address of the connected Google Docs account.
-
-⚠️ MUTATION INFO:
-- Read methods (can use outside Items.withItem): documents.get
-- Write methods (MUST use inside Items.withItem): documents.create, documents.batchUpdate`,
+    description: `Access Google Docs API with various methods. Supported methods: ${SUPPORTED_METHODS.join(", ")}. Returns dynamic results based on the method used. Knowledge of param and output structure is expected from the assistant. REQUIRED: 'account' parameter must be the email address of the connected Google Docs account.`,
     inputSchema,
     isReadOnly: (params) => READ_METHODS.has(params.method),
     execute: async (input) => {

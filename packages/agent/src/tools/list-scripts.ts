@@ -32,7 +32,6 @@ type Output = OutputItem[];
 
 /**
  * Create the Scripts.list tool.
- * This is a read-only tool - can be used outside Items.withItem().
  * Only available during planning/maintenance.
  */
 export function makeListScriptsTool(scriptStore: ScriptStore): Tool<Input, Output> {
@@ -41,8 +40,7 @@ export function makeListScriptsTool(scriptStore: ScriptStore): Tool<Input, Outpu
     name: "list",
     description: `List the latest versions of scripts for distinct task_ids (all fields except 'code').
 
-\u26a0\ufe0f This tool is only available during planning/maintenance. Do not use in production scripts.
-\u2139\ufe0f Not a mutation - can be used outside Items.withItem().`,
+\u26a0\ufe0f This tool is only available during planning/maintenance. Do not use in production scripts.`,
     inputSchema,
     outputSchema,
     execute: async () => {

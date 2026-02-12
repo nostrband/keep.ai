@@ -62,7 +62,6 @@ interface Output {
 
 /**
  * Create the Web.download tool.
- * This is a mutation - must be called inside Items.withItem().
  */
 export function makeWebDownloadTool(
   fileStore: FileStore,
@@ -75,9 +74,7 @@ export function makeWebDownloadTool(
     description: `Download a file from a URL and save it to local filesystem and database.
 Fetches the file directly from the URL (up to 10MB), detects MIME type from response headers,
 and stores the file data using the same system as Files.save.
-Returns the created file record with metadata.
-
-⚠️ MUTATION - must be called inside Items.withItem().`,
+Returns the created file record with metadata.`,
     inputSchema,
     outputSchema,
     isReadOnly: () => false,

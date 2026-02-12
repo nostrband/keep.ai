@@ -62,7 +62,6 @@ type Output = File;
 
 /**
  * Create the Files.save tool.
- * This is a mutation - must be called inside Items.withItem().
  */
 export function makeSaveFileTool(
   fileStore: FileStore,
@@ -75,9 +74,7 @@ export function makeSaveFileTool(
     description: `Save file data to local filesystem and database.
 Accepts either plain text content, raw bytes, or base64-encoded data.
 File will be stored in <userPath>/files/ with SHA256 hash as filename and added to the database.
-Returns the created file record with metadata.
-
-⚠️ MUTATION - must be called inside Items.withItem().`,
+Returns the created file record with metadata.`,
     inputSchema,
     outputSchema,
     isReadOnly: () => false,

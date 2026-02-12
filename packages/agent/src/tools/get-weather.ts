@@ -141,15 +141,12 @@ interface Output {
 
 /**
  * Create the Weather.get tool.
- * This is a read-only tool - can be used outside Items.withItem().
  */
 export function makeGetWeatherTool(getContext: () => EvalContext): Tool<Input, Output> {
   return defineReadOnlyTool({
     namespace: "Weather",
     name: "get",
-    description: `Get weather forecast for a specified location for up to 16 days. If location not found, try higher-level location name. If user didn't specify location, try to get user's location from Notes or message history (Memory.* APIs).
-
-ℹ️ Not a mutation - can be used outside Items.withItem().`,
+    description: `Get weather forecast for a specified location for up to 16 days. If location not found, try higher-level location name. If user didn't specify location, try to get user's location from Notes or message history (Memory.* APIs).`,
     inputSchema,
     outputSchema,
     execute: async (params) => {

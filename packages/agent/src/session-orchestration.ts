@@ -803,7 +803,7 @@ export async function retryWorkflowSession(
   }
 
   // 3. Compute phase reset
-  const startPhase = getStartPhaseForRetry(failedRun.phase);
+  const startPhase = getStartPhaseForRetry(failedRun.phase, failedRun.handler_type);
   const copyResults = shouldCopyResults(failedRun.phase);
 
   log(
@@ -864,8 +864,9 @@ export async function retryWorkflowSession(
         pending_retry_run_id: '',
       }, tx);
 
-      // c. If pre-mutation reset, release events from failed run
-      if (startPhase === "preparing") {
+      // c. Release reserved events for consumer pre-mutation resets
+      // Only consumers reserve events (during preparing→prepared), producers never do
+      if (failedRun.handler_type === "consumer" && !copyResults) {
         await api.eventStore.releaseEvents(failedRun.id, tx);
       }
     });

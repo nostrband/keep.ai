@@ -164,7 +164,7 @@ Example: await ${ns}.${name}(<input>)
         // Validate input using inputSchema if present
         let validatedInput = input;
         if (tool.inputSchema) {
-          const result = validateJsonSchema(tool.inputSchema, input);
+          const result = validateJsonSchema(tool.inputSchema, input, { strict: true });
           if (!result.valid) {
             this.debug(
               `Bad input for '${ns}.${name}' input ${JSON.stringify(

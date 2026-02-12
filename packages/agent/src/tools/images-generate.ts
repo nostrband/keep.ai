@@ -86,7 +86,6 @@ interface Output {
 
 /**
  * Create the Images.generate tool.
- * This is a mutation (creates files) - must be called inside Items.withItem().
  */
 export function makeImagesGenerateTool(
   fileStore: FileStore,
@@ -98,9 +97,7 @@ export function makeImagesGenerateTool(
     name: "generate",
     description: `Generate images using AI image generation model.
 Takes a textual prompt describing the desired image and an optional aspect ratio.
-Generates images and saves them to files. Returns information about the generated image files.
-
-⚠️ MUTATION - must be called inside Items.withItem().`,
+Generates images and saves them to files. Returns information about the generated image files.`,
     inputSchema,
     outputSchema,
     isReadOnly: () => false,

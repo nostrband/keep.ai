@@ -36,7 +36,6 @@ interface Output {
 
 /**
  * Create the User.send tool.
- * This is a mutation - must be called inside Items.withItem().
  */
 export function makeUserSendTool(api: KeepDbApi, context?: UserSendContext): Tool<Input, Output> {
   return defineTool({
@@ -44,9 +43,7 @@ export function makeUserSendTool(api: KeepDbApi, context?: UserSendContext): Too
     name: "send",
     description: `Send a message to the user.
 This is useful for scripts to send execution results to user.
-The message will create a notification that appears in the user's notification list.
-
-\u26a0\ufe0f MUTATION - must be called inside Items.withItem().`,
+The message will create a notification that appears in the user's notification list.`,
     inputSchema,
     outputSchema,
     isReadOnly: () => false,

@@ -31,7 +31,6 @@ const SUPPORTED_METHODS = [
 
 type NotionMethod = (typeof SUPPORTED_METHODS)[number];
 
-// Read-only methods (can be used outside Items.withItem)
 const READ_METHODS = new Set<string>([
   "databases.query",
   "databases.retrieve",
@@ -116,11 +115,7 @@ export function makeNotionTool(
     namespace: "Notion",
     name: "api",
     outputType: "page",
-    description: `Access Notion API with various methods. Supported methods: ${SUPPORTED_METHODS.join(", ")}. Returns dynamic results based on the method used. Knowledge of param and output structure is expected from the assistant. REQUIRED: 'account' parameter must be the workspace_id of the connected Notion workspace.
-
-⚠️ MUTATION INFO:
-- Read methods (can use outside Items.withItem): databases.query, databases.retrieve, pages.retrieve, blocks.children.list, search
-- Write methods (MUST use inside Items.withItem): pages.create, pages.update, blocks.children.append`,
+    description: `Access Notion API with various methods. Supported methods: ${SUPPORTED_METHODS.join(", ")}. Returns dynamic results based on the method used. Knowledge of param and output structure is expected from the assistant. REQUIRED: 'account' parameter must be the workspace_id of the connected Notion workspace.`,
     inputSchema,
     isReadOnly: (params) => READ_METHODS.has(params.method),
     execute: async (input) => {

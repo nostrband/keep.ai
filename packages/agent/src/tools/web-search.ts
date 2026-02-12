@@ -84,15 +84,12 @@ type Input = InputObject | string;
 
 /**
  * Create the Web.search tool.
- * This is a read-only tool - can be used outside Items.withItem().
  */
 export function makeWebSearchTool(getContext: () => EvalContext): Tool<Input, unknown> {
   return defineReadOnlyTool({
     namespace: "Web",
     name: "search",
-    description: `Search the web using Exa API and get content from relevant web pages. Returns search results with full text content. Text content is usually cached, use live: true to get up to date results for time-sensitive data (prices, latest news, etc).
-
-ℹ️ Not a mutation - can be used outside Items.withItem().`,
+    description: `Search the web using Exa API and get content from relevant web pages. Returns search results with full text content. Text content is usually cached, use live: true to get up to date results for time-sensitive data (prices, latest news, etc).`,
     inputSchema,
     execute: async (context) => {
       let query: string;

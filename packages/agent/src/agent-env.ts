@@ -668,9 +668,13 @@ Bad: \`uuid()\`, \`Date.now()\`
 ### Event.inputId (Producer Phase Only)
 Producers must call Topics.registerInput() BEFORE Topics.publish() — see workflow example above.
 - Use getDocs on connector tools to learn which source/type fields to use
-- Input titles are user-facing — include a stable external identifier and human-recognizable descriptor
-- Good: \`Email from alice@example.com: "Invoice December"\`
-- Bad: \`Processing item\`, \`Item #5\`
+- Input titles are user-facing — include a human-recognizable descriptor, not internal ids or vague description
+ - Good: \`Email from alice@example.com: "Invoice December"\`
+ - Bad: \`Processing item\`, \`Item #5\`, \`Email abc123lkd3\`
+
+## Logging
+
+Include proper logs using Console.log tool to simplify future debugging and maintenance.
 
 ## Updates
 

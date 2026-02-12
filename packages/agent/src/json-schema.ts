@@ -28,18 +28,59 @@ export interface JSONSchema {
 const ajv = new Ajv({ useDefaults: true, allErrors: true });
 addFormats(ajv as any);
 
+// Strict ajv instance that rejects additional properties
+const ajvStrict = new Ajv({ useDefaults: true, allErrors: true });
+addFormats(ajvStrict as any);
+
 // Cache compiled validators keyed by schema reference
 const validatorCache = new WeakMap<JSONSchema, ReturnType<typeof ajv.compile>>();
+const strictValidatorCache = new WeakMap<JSONSchema, ReturnType<typeof ajvStrict.compile>>();
+
+/**
+ * Recursively inject `additionalProperties: false` into object schemas
+ * that have `properties` but don't explicitly set `additionalProperties`.
+ */
+function strictifySchema(schema: JSONSchema): JSONSchema {
+  const result = { ...schema };
+
+  if (result.type === "object" && result.properties && result.additionalProperties === undefined) {
+    result.additionalProperties = false;
+    result.properties = Object.fromEntries(
+      Object.entries(result.properties).map(([k, v]) => [k, strictifySchema(v)])
+    );
+  }
+
+  if (result.items) result.items = strictifySchema(result.items);
+  if (result.anyOf) result.anyOf = result.anyOf.map(strictifySchema);
+
+  return result;
+}
 
 /**
  * Validate a value against a JSON Schema.
  * Applies defaults during validation via ajv's useDefaults option.
  * Returns the (potentially mutated) value with defaults filled in.
+ * When strict is true, rejects unknown properties on objects.
  */
 export function validateJsonSchema(
   schema: JSONSchema,
-  value: unknown
+  value: unknown,
+  { strict = false }: { strict?: boolean } = {}
 ): { valid: boolean; errors: string[]; value: unknown } {
+  if (strict) {
+    let validate = strictValidatorCache.get(schema);
+    if (!validate) {
+      validate = ajvStrict.compile(strictifySchema(schema));
+      strictValidatorCache.set(schema, validate);
+    }
+    const valid = validate(value);
+    if (valid) return { valid: true, errors: [], value };
+    const errors = (validate.errors || []).map(
+      (e: any) => `${e.instancePath || e.dataPath || "/"} ${e.message || "unknown error"}`
+    );
+    return { valid: false, errors, value };
+  }
+
   let validate = validatorCache.get(schema);
   if (!validate) {
     validate = ajv.compile(schema);

@@ -53,7 +53,6 @@ type Output = string;
 
 /**
  * Create the Memory.createNote tool.
- * This is a mutation - must be called inside Items.withItem().
  */
 export function makeCreateNoteTool(
   noteStore: NoteStore,
@@ -66,9 +65,7 @@ export function makeCreateNoteTool(
 ALWAYS check if closely relevant note already exists and prefer updating existing one, only create new notes if no existing note fits or if asked explicitly by user.
 Notes are useful for you (the assistant) to store project-specific information, reminders, ideas, or any other text-based content.
 Tags help organize and categorize notes for easy retrieval later.
-Maximum 500 notes, and title+content+tags size must not exceed 50KB.
-
-⚠️ MUTATION - must be called inside Items.withItem().`,
+Maximum 500 notes, and title+content+tags size must not exceed 50KB.`,
     inputSchema,
     outputSchema,
     isReadOnly: () => false,

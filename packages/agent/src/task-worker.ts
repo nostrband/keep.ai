@@ -611,7 +611,7 @@ export class TaskWorker {
       scriptToUse.major_version
     );
     const changelog = priorScripts
-      .filter(s => s.minor_version < scriptToUse.minor_version)
+      .filter(s => s.minor_version > 0 && s.minor_version < scriptToUse.minor_version)
       .sort((a, b) => b.minor_version - a.minor_version) // newest first
       .map(s => ({
         version: formatVersion(s.major_version, s.minor_version),

@@ -43,7 +43,6 @@ type Output = {
 
 /**
  * Create the Scripts.get tool.
- * This is a read-only tool - can be used outside Items.withItem().
  * Only available during planning/maintenance.
  */
 export function makeGetScriptTool(
@@ -55,8 +54,7 @@ export function makeGetScriptTool(
     name: "get",
     description: `Get a script by ID, or get the latest script for current task if no ID provided.
 
-\u26a0\ufe0f This tool is only available during planning/maintenance. Do not use in production scripts.
-\u2139\ufe0f Not a mutation - can be used outside Items.withItem().`,
+\u26a0\ufe0f This tool is only available during planning/maintenance. Do not use in production scripts.`,
     inputSchema,
     outputSchema,
     execute: async (input) => {

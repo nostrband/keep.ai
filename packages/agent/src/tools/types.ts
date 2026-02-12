@@ -30,7 +30,7 @@ export interface Tool<TInput = unknown, TOutput = unknown> {
   /**
    * Determine if a tool call with given params is read-only.
    * If absent, all calls are assumed to be mutations (writes).
-   * Used by withItem to enforce mutation restrictions.
+   * Used to enforce handler phase restrictions (mutations only in 'mutate' phase).
    */
   isReadOnly?: (params: TInput) => boolean;
 }

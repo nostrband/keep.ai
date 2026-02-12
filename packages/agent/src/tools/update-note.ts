@@ -52,7 +52,6 @@ type Output = string;
 
 /**
  * Create the Memory.updateNote tool.
- * This is a mutation - must be called inside Items.withItem().
  */
 export function makeUpdateNoteTool(
   noteStore: NoteStore,
@@ -63,9 +62,7 @@ export function makeUpdateNoteTool(
     name: "updateNote",
     description: `Update an existing note by ID. You can modify title, content, tags, and/or priority.
 Only the fields you specify will be updated - other fields remain unchanged.
-Title+content+tags size must not exceed 50KB after update.
-
-⚠️ MUTATION - must be called inside Items.withItem().`,
+Title+content+tags size must not exceed 50KB after update.`,
     inputSchema,
     outputSchema,
     isReadOnly: () => false,

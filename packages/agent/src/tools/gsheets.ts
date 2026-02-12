@@ -28,7 +28,6 @@ const SUPPORTED_METHODS = [
   "spreadsheets.batchUpdate",
 ] as const;
 
-// Read-only methods (can be used outside Items.withItem)
 const READ_METHODS = new Set<string>([
   "spreadsheets.get",
   "spreadsheets.values.get",
@@ -86,11 +85,7 @@ export function makeGSheetsTool(
     namespace: "GoogleSheets",
     name: "api",
     outputType: "row",
-    description: `Access Google Sheets API with various methods. Supported methods: ${SUPPORTED_METHODS.join(", ")}. Returns dynamic results based on the method used. Knowledge of param and output structure is expected from the assistant. REQUIRED: 'account' parameter must be the email address of the connected Google Sheets account.
-
-⚠️ MUTATION INFO:
-- Read methods (can use outside Items.withItem): spreadsheets.get, spreadsheets.values.get, spreadsheets.values.batchGet
-- Write methods (MUST use inside Items.withItem): spreadsheets.create, spreadsheets.values.update, spreadsheets.values.append, spreadsheets.values.clear, spreadsheets.values.batchUpdate, spreadsheets.batchUpdate`,
+    description: `Access Google Sheets API with various methods. Supported methods: ${SUPPORTED_METHODS.join(", ")}. Returns dynamic results based on the method used. Knowledge of param and output structure is expected from the assistant. REQUIRED: 'account' parameter must be the email address of the connected Google Sheets account.`,
     inputSchema,
     isReadOnly: (params) => READ_METHODS.has(params.method),
     execute: async (input) => {

@@ -248,9 +248,13 @@ export class ToolWrapper {
       const name = tool.name;
 
       // Format documentation
+      const isReadOnly = tool.isReadOnly !== undefined;
+      const mutationNotice = isReadOnly
+        ? ``
+        : `\n⚠️ Mutation — can only be used in the 'mutate' consumer phase.`;
       const desc = [
         "===DESCRIPTION===",
-        tool.description +
+        tool.description + mutationNotice +
           `
 Example: await ${ns}.${name}(<input>)
 `,
@@ -313,7 +317,7 @@ Example: await ${ns}.${name}(<input>)
       // Validate input
       let validatedInput = input;
       if (tool.inputSchema) {
-        const result = validateJsonSchema(tool.inputSchema, input);
+        const result = validateJsonSchema(tool.inputSchema, input, { strict: true });
         if (!result.valid) {
           this.debug(
             `Bad input for '${ns}.${name}' input ${JSON.stringify(input)} errors ${result.errors.join("; ")}`

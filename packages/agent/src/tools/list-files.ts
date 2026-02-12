@@ -47,7 +47,6 @@ type Output = File[];
 
 /**
  * Create the Files.list tool.
- * This is a read-only tool - can be used outside Items.withItem().
  */
 export function makeListFilesTool(fileStore: FileStore): Tool<Input, Output> {
   return defineReadOnlyTool({
@@ -55,9 +54,7 @@ export function makeListFilesTool(fileStore: FileStore): Tool<Input, Output> {
     name: "list",
     description: `List files from the database with optional pagination support.
 Returns file metadata ordered by upload time (most recent first).
-Use this to browse through uploaded files or get an overview of what files exist.
-
-ℹ️ Not a mutation - can be used outside Items.withItem().`,
+Use this to browse through uploaded files or get an overview of what files exist.`,
     inputSchema,
     outputSchema,
     execute: async (input: Input): Promise<Output> => {

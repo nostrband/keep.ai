@@ -33,6 +33,7 @@ To check current database state, read pubkey from `~/.keep.ai/current_user.txt` 
 - cr-sqlite requires all NOT NULL columns in CRR tables to have DEFAULT values
 - cr-sqlite requires NO UNIQUE indexes on CRR tables aside from primary key, enforce unique-ness at code level, make sure select-before-insert always runs inside a tx to avoid races 
 - if you do ALTER table on CRR tables then you can't write to these tables in the same migration (same tx) - split this migration into two and do writes in the second one
+- also if you RENAME a column, you must update all records referencing this column in crsql_change_history in the same migration, like "update crsql_change_history set cid='<new_column_name>' where `table`='<table_name>' and cid='<old_column_name>';"
 - there's no crsql_as_crr_undo to stop CRR-tracking on tables, tracked tables can't be deleted, they must be marked deprecated, code using them removed, tables left as is
 - use `crsql_as_crr` when creating tables that should be synched, use `crsql_begin_alter`/`crsql_commit_alter` when altering synched tables, see other migrations as examples.
 

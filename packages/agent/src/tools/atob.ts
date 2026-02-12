@@ -16,15 +16,12 @@ type Output = string;
 
 /**
  * Create the Util.atob tool.
- * This is a read-only tool - can be used outside Items.withItem().
  */
 export function makeAtobTool(): Tool<Input, Output> {
   return defineReadOnlyTool({
     namespace: "Util",
     name: "atob",
-    description: `Decode base64 or base64url encoded string to binary string, similar to Window.atob() (but with base64url support).
-
-\u2139\ufe0f Not a mutation - can be used outside Items.withItem().`,
+    description: `Decode base64 or base64url encoded string to binary string, similar to Window.atob() (but with base64url support).`,
     inputSchema,
     outputSchema,
     execute: async (input: string) => {

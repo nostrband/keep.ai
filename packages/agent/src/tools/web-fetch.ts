@@ -111,15 +111,12 @@ interface Output {
 
 /**
  * Create the Web.fetchParse tool.
- * This is a read-only tool - can be used outside Items.withItem().
  */
 export function makeWebFetchTool(getContext: () => EvalContext): Tool<Input, Output> {
   return defineReadOnlyTool({
     namespace: "Web",
     name: "fetchParse",
-    description: `Fetch content from a specific URL using Exa API. Returns the full text content of the webpage or API endpoint. Use live: true to get up-to-date content for time-sensitive data.
-
-ℹ️ Not a mutation - can be used outside Items.withItem().`,
+    description: `Fetch content from a specific URL using Exa API. Returns the full text content of the webpage or API endpoint. Use live: true to get up-to-date content for time-sensitive data.`,
     inputSchema,
     outputSchema,
     execute: async (params) => {

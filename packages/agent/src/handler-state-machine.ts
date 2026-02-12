@@ -12,6 +12,7 @@ import {
   KeepDbApi,
   HandlerRun,
   HandlerRunPhase,
+  HandlerType,
   HandlerErrorType,
   RunStatus,
   isTerminalStatus,
@@ -255,13 +256,18 @@ export function shouldCopyResults(phase: HandlerRunPhase): boolean {
  * Get the starting phase for a retry run based on the previous run's phase.
  *
  * Per exec-10 spec:
- * - Before mutation (preparing, prepared, mutating with failed mutation): Start fresh from preparing
- * - After mutation (mutated, emitting): Resume from emitting with copied results
+ * - Producers always reset to "pending" (no mutation concept)
+ * - Consumers before mutation (preparing, prepared, mutating with failed mutation): Start fresh from preparing
+ * - Consumers after mutation (mutated, emitting): Resume from emitting with copied results
  *
  * @param previousPhase - The phase at which the previous run stopped
+ * @param handlerType - The handler type (producer or consumer)
  * @returns The phase the retry run should start at
  */
-export function getStartPhaseForRetry(previousPhase: HandlerRunPhase): HandlerRunPhase {
+export function getStartPhaseForRetry(previousPhase: HandlerRunPhase, handlerType: HandlerType): HandlerRunPhase {
+  if (handlerType === "producer") {
+    return "pending";
+  }
   if (shouldCopyResults(previousPhase)) {
     // Can't reset - mutation happened, resume from emitting
     return "emitting";
@@ -310,7 +316,7 @@ export async function createRetryRun(
 ): Promise<HandlerRun> {
   const { previousRun, previousRunStatus, reason, api } = params;
 
-  const startPhase = getStartPhaseForRetry(previousRun.phase);
+  const startPhase = getStartPhaseForRetry(previousRun.phase, previousRun.handler_type);
   const copyResults = shouldCopyResults(previousRun.phase);
 
   log(
@@ -333,8 +339,9 @@ export async function createRetryRun(
       tx
     );
 
-    // 2. Release reserved events (when resetting to preparing — no mutation applied)
-    if (startPhase === "preparing") {
+    // 2. Release reserved events for consumer pre-mutation resets
+    // Only consumers reserve events (during preparing→prepared), producers never do
+    if (previousRun.handler_type === "consumer" && !copyResults) {
       await api.eventStore.releaseEvents(previousRun.id, tx);
     }
 

@@ -38,7 +38,6 @@ interface Output {
 /**
  * Create the Console.log tool.
  * This is read-only (logging doesn't mutate user-controlled external state).
- * Allowed outside Items.withItem() per spec.
  */
 export function makeConsoleLogTool(getContext: () => EvalContext): Tool<Input, Output> {
   return defineReadOnlyTool({
@@ -46,9 +45,7 @@ export function makeConsoleLogTool(getContext: () => EvalContext): Tool<Input, O
     name: "log",
     description: `Log messages to console for debugging and monitoring.
 Accepts log messages with different severity levels (log, warn, error).
-Messages are timestamped and stored in run logs.
-
-\u2139\ufe0f Not a mutation - can be used outside Items.withItem().`,
+Messages are timestamped and stored in run logs.`,
     inputSchema,
     outputSchema,
     execute: async (input) => {

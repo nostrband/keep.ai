@@ -64,7 +64,6 @@ interface Output {
 
 /**
  * Create the Files.read tool.
- * This is a read-only tool - can be used outside Items.withItem().
  */
 export function makeReadFileTool(fileStore: FileStore, userPath?: string): Tool<Input, Output> {
   return defineReadOnlyTool({
@@ -72,9 +71,7 @@ export function makeReadFileTool(fileStore: FileStore, userPath?: string): Tool<
     name: "read",
     description: `Read file content from local filesystem using file ID from database.
 Takes a file path, extracts the filename (without extension) to use as ID to look up the file in the database.
-If found, reads the actual file content from <userPath>/files/<db_file.path> and returns file info with content bytes.
-
-ℹ️ Not a mutation - can be used outside Items.withItem().`,
+If found, reads the actual file content from <userPath>/files/<db_file.path> and returns file info with content bytes.`,
     inputSchema,
     outputSchema,
     execute: async (input: Input): Promise<Output> => {

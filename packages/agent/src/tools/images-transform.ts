@@ -116,7 +116,6 @@ interface Output {
 
 /**
  * Create the Images.transform tool.
- * This is a mutation (creates files) - must be called inside Items.withItem().
  */
 export function makeImagesTransformTool(
   fileStore: FileStore,
@@ -128,9 +127,7 @@ export function makeImagesTransformTool(
     name: "transform",
     description: `Transform/modify images using AI image generation model based on one or more input images.
 Takes existing image files (up to 5) and a textual prompt describing the desired transformation, then generates new images based on the inputs.
-Supports png, jpeg, webp and gif input formats. Returns information about the generated image files.
-
-⚠️ MUTATION - must be called inside Items.withItem().`,
+Supports png, jpeg, webp and gif input formats. Returns information about the generated image files.`,
     inputSchema,
     outputSchema,
     isReadOnly: () => false,

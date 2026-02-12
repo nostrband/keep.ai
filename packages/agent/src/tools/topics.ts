@@ -458,7 +458,7 @@ export function makeTopicsRegisterInputTool(
     type: "object",
     properties: {
       source: { type: "string", description: "Connector namespace (e.g., 'Gmail', 'GoogleSheets', 'System')" },
-      type: { type: "string", description: "Type within source (e.g., 'email', 'row', 'page')" },
+      type: { type: "string", description: "Type within source (e.g., 'email', 'row', 'page') - see docs of each connector method for proper types" },
       id: { type: "string", description: "External identifier from source system" },
       title: { type: "string", description: "Human-readable description for user display" },
     },

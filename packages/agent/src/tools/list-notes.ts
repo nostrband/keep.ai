@@ -51,7 +51,6 @@ type Output = NoteListItem[];
 
 /**
  * Create the Memory.listNotesMetadata tool.
- * This is a read-only tool - can be used outside Items.withItem().
  */
 export function makeListNotesTool(noteStore: NoteStore): Tool<Input, Output> {
   return defineReadOnlyTool({
@@ -59,9 +58,7 @@ export function makeListNotesTool(noteStore: NoteStore): Tool<Input, Output> {
     name: "listNotesMetadata",
     description: `List notes with optional filtering by priority and pagination support.
 Returns note metadata (everything except content field) ordered by updated time (most recent first).
-Use this to browse through notes or get an overview of what notes exist.
-
-ℹ️ Not a mutation - can be used outside Items.withItem().`,
+Use this to browse through notes or get an overview of what notes exist.`,
     inputSchema,
     outputSchema,
     execute: async (input: Input): Promise<Output> => {

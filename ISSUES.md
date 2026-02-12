@@ -1,6 +1,7 @@
 
 
 ISSUES:
+- remove sandboxapi
 - Show diff should also expand the comment to view long ones untruncated
 - output names are namespaces - very vague, we should probably transform ns.method to something human-readable, or have connector declare 'Output name' variable
 - reconciliation doesn't seem to work, not implemented right? and host-managed mutation retries? 

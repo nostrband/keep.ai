@@ -22,7 +22,6 @@ type Output = void;
 
 /**
  * Create the Memory.deleteNote tool.
- * This is a mutation - must be called inside Items.withItem().
  */
 export function makeDeleteNoteTool(
   noteStore: NoteStore,
@@ -31,9 +30,7 @@ export function makeDeleteNoteTool(
   return defineTool({
     namespace: "Memory",
     name: "deleteNote",
-    description: `Delete a note by its ID. Returns an error if the note doesn't exist.
-
-⚠️ MUTATION - must be called inside Items.withItem().`,
+    description: `Delete a note by its ID. Returns an error if the note doesn't exist.`,
     inputSchema,
     isReadOnly: () => false,
     execute: async (input: Input): Promise<Output> => {

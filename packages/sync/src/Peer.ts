@@ -321,6 +321,15 @@ export class Peer extends EventEmitter<{
     transport: Transport,
     peerId: string
   ): Promise<void> {
+    const peer = this.peers.get(peerId);
+    if (peer?.syncPromise) {
+      peer.syncCancel = true;
+      try {
+        await peer.syncPromise;
+      } catch {
+        // syncPeer may have already failed, ignore
+      }
+    }
     this.peers.delete(peerId);
     this.debug(`Peer '${peerId}' disconnected`);
   }
@@ -419,34 +428,40 @@ export class Peer extends EventEmitter<{
 
     try {
       // Larger batch doesn't improve timing on desktop browser
-      const batches = chunk(deserializeChanges(changes), 2000);
-      const changeBatches = chunk(changes, 2000);
+      const BATCH_SIZE = 2000;
+      const batches = chunk(deserializeChanges(changes), BATCH_SIZE);
+      const changeBatches = chunk(changes, BATCH_SIZE);
 
       for (let i = 0; i < batches.length; i++) {
         const batch = batches[i];
         const changeBatch = changeBatches[i];
         const start = Date.now();
 
-        await this.db.tx(async (tx: DBInterface) => {
-          // Apply changes to crsql_changes
-          await tx.execManyArgs(
-            `INSERT INTO crsql_changes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            batch.map((change) => [
-              change.table,
-              change.pk,
-              change.cid,
-              change.val,
-              change.col_version,
-              change.db_version,
-              change.site_id,
-              change.cl,
-              change.seq,
-            ])
-          );
+        try {
+          await this.db.tx(async (tx: DBInterface) => {
+            // Apply changes to crsql_changes
+            await tx.execManyArgs(
+              `INSERT INTO crsql_changes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              batch.map((change) => [
+                change.table,
+                change.pk,
+                change.cid,
+                change.val,
+                change.col_version,
+                change.db_version,
+                change.site_id,
+                change.cl,
+                change.seq,
+              ])
+            );
 
-          // Atomically write to crsql_change_history in the same transaction
-          await this.writeChangesToHistory(changeBatch, tx);
-        });
+            // Atomically write to crsql_change_history in the same transaction
+            await this.writeChangesToHistory(changeBatch, tx);
+          });
+        } catch (error) {
+          console.error("Error applying change batch:", error, batch, changeBatch);
+          throw error;
+        }
 
         this.debug(
           `Applied batch of size ${batch.length} in ${Date.now() - start} ms`
@@ -693,7 +708,7 @@ export class Peer extends EventEmitter<{
 
   private updatePeerCursor(peerId: string, changes: PeerChange[]) {
     const peer = this.peers.get(peerId);
-    if (!peer) throw new Error("Unknown peer");
+    if (!peer) return; // peer disconnected, nothing to update
 
     // We know peer knows these changes
     updateCursor(peer.cursor, changes);
@@ -875,8 +890,9 @@ export class Peer extends EventEmitter<{
       // Now checkLocalChanges will send by itself
       peer.active = true;
     } catch (error) {
-      this.debug("Error sending changes to", peer, error);
-      throw error;
+      this.debug("Error syncing peer", peer.id, error);
+      // Don't re-throw: syncPromise is not always awaited,
+      // an unhandled rejection would crash the process
     }
   }
 

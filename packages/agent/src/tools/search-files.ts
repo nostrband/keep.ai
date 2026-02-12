@@ -53,7 +53,6 @@ type Output = File[];
 
 /**
  * Create the Files.search tool.
- * This is a read-only tool - can be used outside Items.withItem().
  */
 export function makeSearchFilesTool(fileStore: FileStore): Tool<Input, Output> {
   return defineReadOnlyTool({
@@ -61,9 +60,7 @@ export function makeSearchFilesTool(fileStore: FileStore): Tool<Input, Output> {
     name: "search",
     description: `Search through files using query string.
 Returns file metadata ordered by upload time (most recent first).
-Searches across file id, name, path, and summary fields.
-
-ℹ️ Not a mutation - can be used outside Items.withItem().`,
+Searches across file id, name, path, and summary fields.`,
     inputSchema,
     outputSchema,
     execute: async (input: Input): Promise<Output> => {

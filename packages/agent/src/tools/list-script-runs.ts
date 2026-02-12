@@ -43,7 +43,6 @@ type Output = OutputItem[];
 
 /**
  * Create the Scripts.listRuns tool.
- * This is a read-only tool - can be used outside Items.withItem().
  * Only available during planning/maintenance.
  */
 export function makeListScriptRunsTool(
@@ -55,8 +54,7 @@ export function makeListScriptRunsTool(
     name: "listRuns",
     description: `Get list of script runs for a task ID. If no task_id provided, uses current task. Returns all script run fields except result and logs.
 
-\u26a0\ufe0f This tool is only available during planning/maintenance. Do not use in production scripts.
-\u2139\ufe0f Not a mutation - can be used outside Items.withItem().`,
+\u26a0\ufe0f This tool is only available during planning/maintenance. Do not use in production scripts.`,
     inputSchema,
     outputSchema,
     execute: async (input) => {

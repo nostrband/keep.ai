@@ -60,7 +60,6 @@ type Output = SearchNoteResult[];
 
 /**
  * Create the Memory.searchNotes tool.
- * This is a read-only tool - can be used outside Items.withItem().
  */
 export function makeSearchNotesTool(noteStore: NoteStore): Tool<Input, Output> {
   return defineReadOnlyTool({
@@ -69,9 +68,7 @@ export function makeSearchNotesTool(noteStore: NoteStore): Tool<Input, Output> {
     description: `Search through notes using keywords, tags, or regular expressions.
 Returns note metadata (everything except content field) but includes content snippets when content matches.
 Results are ordered by updated time (most recent first).
-You can combine multiple search criteria - all must match for a note to be included.
-
-ℹ️ Not a mutation - can be used outside Items.withItem().`,
+You can combine multiple search criteria - all must match for a note to be included.`,
     inputSchema,
     outputSchema,
     execute: async (input: Input): Promise<Output> => {

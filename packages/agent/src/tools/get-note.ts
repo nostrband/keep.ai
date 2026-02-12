@@ -35,15 +35,12 @@ type Output = Note;
 
 /**
  * Create the Memory.getNote tool.
- * This is a read-only tool - can be used outside Items.withItem().
  */
 export function makeGetNoteTool(noteStore: NoteStore): Tool<Input, Output> {
   return defineReadOnlyTool({
     namespace: "Memory",
     name: "getNote",
-    description: `Get a specific note by its ID, including full content. Returns the complete note data.
-
-ℹ️ Not a mutation - can be used outside Items.withItem().`,
+    description: `Get a specific note by its ID, including full content. Returns the complete note data.`,
     inputSchema,
     outputSchema,
     execute: async (input: Input): Promise<Output> => {

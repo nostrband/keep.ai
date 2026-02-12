@@ -40,7 +40,6 @@ type Output = OutputItem[];
 
 /**
  * Create the Scripts.history tool.
- * This is a read-only tool - can be used outside Items.withItem().
  * Only available during planning/maintenance.
  */
 export function makeScriptHistoryTool(scriptStore: ScriptStore): Tool<Input, Output> {
@@ -49,8 +48,7 @@ export function makeScriptHistoryTool(scriptStore: ScriptStore): Tool<Input, Out
     name: "history",
     description: `Get all script versions for a given task_id (all fields except 'code').
 
-\u26a0\ufe0f This tool is only available during planning/maintenance. Do not use in production scripts.
-\u2139\ufe0f Not a mutation - can be used outside Items.withItem().`,
+\u26a0\ufe0f This tool is only available during planning/maintenance. Do not use in production scripts.`,
     inputSchema,
     outputSchema,
     execute: async (input) => {

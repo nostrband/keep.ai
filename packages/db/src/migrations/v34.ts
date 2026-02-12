@@ -45,4 +45,10 @@ export async function migrateV34(
   await tx.exec(
     `CREATE INDEX IF NOT EXISTS idx_scripts_major_minor_version ON scripts(major_version DESC, minor_version DESC)`
   );
+
+  // Update records in crsql_change_history table
+  await tx.exec(
+    "UPDATE crsql_change_history SET cid='major_version' WHERE `table`='scripts' AND cid='version'"
+  );
+
 }
