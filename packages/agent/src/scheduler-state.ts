@@ -100,14 +100,23 @@ export class SchedulerStateManager {
 
   /**
    * Called when consumer run commits.
-   * Clears the dirty flag since consumer processed events.
+   *
+   * Only clears dirty when the consumer had no reservations (nothing to
+   * consume).  When the consumer DID reserve events it means there may be
+   * more pending work in the topic, so dirty stays true and the session's
+   * consumer loop will re-enter prepare to check for the next event.
    *
    * @param workflowId - Workflow ID
    * @param consumerName - Consumer that committed
+   * @param hadReservations - Whether the committed run reserved (consumed) events
    */
-  onConsumerCommit(workflowId: string, consumerName: string): void {
-    this.setConsumerDirty(workflowId, consumerName, false);
-    log(`Consumer ${workflowId}/${consumerName} dirty=false (committed)`);
+  onConsumerCommit(workflowId: string, consumerName: string, hadReservations: boolean): void {
+    if (!hadReservations) {
+      this.setConsumerDirty(workflowId, consumerName, false);
+      log(`Consumer ${workflowId}/${consumerName} dirty=false (committed, no reservations)`);
+    } else {
+      log(`Consumer ${workflowId}/${consumerName} dirty kept (committed, had reservations)`);
+    }
   }
 
   /**

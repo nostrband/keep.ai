@@ -12,6 +12,7 @@ ISSUES:
 - Message: Failed at Gmail.api: request to https://gmail.googleapis.com/gmail/v1/users/me/messages?q=is%3Aunread%20%28from%3Anoreply%20OR%20from%3Anewsletter%20OR%20from%3Adigest%20OR%20from%3Anotification%20OR%20subject%3A%28newsletter%20OR%20digest%20OR%20weekly%20OR%20daily%20OR%20update%29%29&maxResults=10 failed, reason: getaddrinfo EAI_AGAIN gmail.googleapis.com - classified as logic, why?
 - so after auto-fix escalates is 'Automation Paused: Manual Intervention Required' message auto-posted to planner?
 - after planner creates new version, how is it activated by user? or automatically? 
+- http://localhost:3001/workflow/3696cb757fe4dd5c7ca3e601ef80e625/outputs?connector=User filters by connector but numbers on filters show global counts
 - fix macos builds
 - we have to make sure task-scheduler can't launch more that 1 task per workflow, meaning several maintainer tasks + planner - planner first, maintainers one by one second
 - stack traces have no line number of any other hint at where the issue is - just 'not a function' or some such, plus script run page doesn't show which handler was running, and I guess when auto-fix will run it also needs info on which handler failed

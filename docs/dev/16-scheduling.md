@@ -207,7 +207,10 @@ On scheduler tick:
 On run commit:
   Set handler.queued = false
   For producers: compute and store next_run_at
-  For consumers: set dirty = false, set wakeAt from PrepareResult
+  For consumers:
+    If consumer had no reservations: set dirty = false
+    If consumer had reservations: dirty stays true (more work may exist)
+    Set wakeAt from PrepareResult
 ```
 
 ### Initial State (on deploy)
@@ -416,7 +419,7 @@ The scheduler responds to run status changes:
 
 | Run Status | Scheduler Action |
 |------------|------------------|
-| `committed` | Record `wakeAt`; clear dirty/queued flags; check for next triggers |
+| `committed` | Record `wakeAt`; clear dirty only if no reservations (consumers), clear queued (producers); check for next triggers |
 | `paused:transient` | Schedule retry after backoff; triggers accumulate |
 | `paused:approval` | Pause workflow; await user action |
 | `paused:reconciliation` | Pause workflow; await resolution |

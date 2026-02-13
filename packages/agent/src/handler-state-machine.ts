@@ -1040,7 +1040,7 @@ return await workflow.consumers.${run.handler_name}.prepare(__state__);
       // Nothing to process, skip to committed
       log(`Handler run ${run.id} (consumer): prepared → committed (no reservations)`);
       await commitConsumer(api, run, undefined);
-      context.schedulerState?.onConsumerCommit(run.workflow_id, run.handler_name);
+      context.schedulerState?.onConsumerCommit(run.workflow_id, run.handler_name, false);
     } else {
       // Has work to do, go to mutating
       log(`Handler run ${run.id} (consumer): prepared → mutating`);
@@ -1144,7 +1144,7 @@ return await workflow.consumers.${run.handler_name}.prepare(__state__);
       // No next handler, commit
       log(`Handler run ${run.id} (consumer): emitting → committed (no next handler)`);
       await commitConsumer(api, run, undefined);
-      context.schedulerState?.onConsumerCommit(run.workflow_id, run.handler_name);
+      context.schedulerState?.onConsumerCommit(run.workflow_id, run.handler_name, true);
       return;
     }
 
@@ -1200,7 +1200,7 @@ return await workflow.consumers.${run.handler_name}.next(__prepared__, __mutatio
 
       // Commit with new state
       await commitConsumer(api, run, result.result);
-      context.schedulerState?.onConsumerCommit(run.workflow_id, run.handler_name);
+      context.schedulerState?.onConsumerCommit(run.workflow_id, run.handler_name, true);
 
       // Save logs if any
       if (logs.length > 0) {
