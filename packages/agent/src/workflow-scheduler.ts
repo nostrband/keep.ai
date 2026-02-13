@@ -364,6 +364,24 @@ export class WorkflowScheduler {
       const currentTime = Date.now();
       const context = this.createExecutionContext();
 
+      // Ensure scheduler state is initialized for all active workflows.
+      // Handles workflows that became active since startup (e.g. unpaused).
+      // Must run before priority checks so consumers have correct dirty flags
+      // when sessions execute.
+      for (const workflow of activeWorkflows) {
+        if (!this.schedulerState.isWorkflowTracked(workflow.id) && workflow.handler_config) {
+          try {
+            const config = JSON.parse(workflow.handler_config) as WorkflowConfig;
+            if (config.consumers && Object.keys(config.consumers).length > 0) {
+              this.schedulerState.initializeForWorkflow(workflow.id, config);
+              this.debug(`Auto-initialized scheduler state for workflow ${workflow.id} (${workflow.title})`);
+            }
+          } catch {
+            // Invalid config, skip
+          }
+        }
+      }
+
       // Priority 1: Check pending_retry_run_id — unified retry recovery
       for (const workflow of activeWorkflows) {
         if (!workflow.pending_retry_run_id) continue;
@@ -424,19 +442,6 @@ export class WorkflowScheduler {
 
         const retryState = this.workflowRetryState.get(workflow.id);
         if (retryState && retryState.nextStart > currentTime) continue;
-
-        // Initialize scheduler state for workflows not yet tracked (handles new deploys between ticks)
-        if (!this.schedulerState.isWorkflowTracked(workflow.id) && workflow.handler_config) {
-          try {
-            const config = JSON.parse(workflow.handler_config) as WorkflowConfig;
-            if (config.consumers && Object.keys(config.consumers).length > 0) {
-              this.schedulerState.initializeForWorkflow(workflow.id, config);
-              this.debug(`Auto-initialized scheduler state for workflow ${workflow.id} (${workflow.title})`);
-            }
-          } catch {
-            // Invalid config, skip
-          }
-        }
 
         // Check if any consumer is dirty (new events since last run) — in-memory
         const dirtyConsumers = this.schedulerState.getDirtyConsumers(workflow.id);
