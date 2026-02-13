@@ -65,7 +65,6 @@ Only the fields you specify will be updated - other fields remain unchanged.
 Title+content+tags size must not exceed 50KB after update.`,
     inputSchema,
     outputSchema,
-    isReadOnly: () => false,
     execute: async (input: Input): Promise<Output> => {
       const { id, title, content, tags, priority } = input;
 

@@ -223,6 +223,24 @@ for (const [name, c] of Object.entries(consumerConfig)) {
   }
 }
 
+// Reject topics published to but not subscribed by any consumer
+const publishedTopics = new Set();
+for (const p of Object.values(producerConfig)) {
+  for (const t of p.publishes) publishedTopics.add(t);
+}
+for (const c of Object.values(consumerConfig)) {
+  for (const t of c.publishes) publishedTopics.add(t);
+}
+const subscribedTopics = new Set();
+for (const c of Object.values(consumerConfig)) {
+  for (const t of c.subscribe) subscribedTopics.add(t);
+}
+for (const topic of publishedTopics) {
+  if (!subscribedTopics.has(topic)) {
+    throw new Error(\`Topic '\${topic}' is published to but no consumer subscribes to it\`);
+  }
+}
+
 // Return extracted config
 return {
   topics: Object.keys(workflow.topics || {}),

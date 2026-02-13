@@ -24,11 +24,19 @@ import { ERROR_BAD_REQUEST, ERROR_PAYMENT_REQUIRED } from "./agent";
 import { TaskSignalHandler } from "./task-worker-signal";
 import type { ConnectionManager } from "@app/connectors";
 import { formatIntentForPrompt, parseIntentSpec } from "./intent-extract";
+import { activateScript } from "./activate-script";
 
 /**
  * Generate a concise title from the first user message.
  * Extracts text content and truncates to ~60 chars at word boundary.
  */
+/** Prepend line numbers matching stack trace lines (e.g. "  1 | ..."). */
+function numberLines(code: string): string {
+  const lines = code.split("\n");
+  const width = String(lines.length).length;
+  return lines.map((line, i) => `${String(i + 1).padStart(width)} | ${line}`).join("\n");
+}
+
 function generateTitleFromInbox(inbox: string[]): string | undefined {
   if (!inbox.length) return undefined;
 
@@ -331,6 +339,18 @@ export class TaskWorker {
             threadId: task.thread_id,
             asks: currentAsks,
           });
+        } else if (taskType === "maintainer" && maintainerContext) {
+          // Maintainer: handle activation BEFORE marking task complete.
+          // Crash safety: if we crash between activation and finishTask,
+          // the task will be retried on restart, and the maintainer will
+          // re-run and detect the fix was already applied.
+          await this.handleMaintainerCompletion(task, result, maintainerContext, agent);
+          await this.finishTask(task, taskReply, "");
+
+          this.debug(`Maintainer task done:`, {
+            reply: taskReply,
+            threadId: task.thread_id,
+          });
         } else {
           // Single-shot task finished
           await this.finishTask(task, taskReply, "");
@@ -341,11 +361,9 @@ export class TaskWorker {
           });
         }
 
-        // Send reply/asks to recipient (replier inbox or user)
-        // Maintainer tasks don't write to user chat - handle separately
-        if (taskType === "maintainer" && maintainerContext) {
-          await this.handleMaintainerCompletion(task, result, maintainerContext, agent);
-        } else {
+        // Send reply/asks to recipient (non-maintainer tasks)
+        // Maintainer tasks don't write to user chat - handled above
+        if (!(taskType === "maintainer" && maintainerContext)) {
           await this.handleReply(taskType, task, currentAsks, result);
         }
 
@@ -697,7 +715,7 @@ ${changelogText}
 
 ## Script Code
 \`\`\`javascript
-${context.scriptCode}
+${numberLines(context.scriptCode)}
 \`\`\`
 
 ---
@@ -721,10 +739,17 @@ If you cannot fix this issue autonomously, explain why without calling the \`fix
 
   /**
    * Handle completion of a maintainer task.
-   * Checks if the fix tool was called and handles various outcomes:
-   * - Fix applied: workflow will re-run automatically (set by fix tool)
-   * - Fix not applied (race condition): planner updated script, maintainer fix is stale
-   * - Fix not called: maintainer couldn't fix, escalate to user with explanation
+   *
+   * This is called BEFORE finishTask for crash safety: if we crash between
+   * activation and marking the task complete, the task will be retried on
+   * restart and the maintainer will re-run.
+   *
+   * Outcomes:
+   * - Fix called + shouldActivate: activate the fix via api.activateScript,
+   *   then update producer schedule configs and denormalize cron
+   * - Fix called + !shouldActivate: planner updated the script while we worked,
+   *   do nothing (planner's version is active, user will manage it)
+   * - Fix NOT called: maintainer couldn't fix, escalate to user
    */
   private async handleMaintainerCompletion(
     task: Task,
@@ -732,38 +757,55 @@ If you cannot fix this issue autonomously, explain why without calling the \`fix
     context: MaintainerContext,
     agent: ReplAgent
   ): Promise<void> {
-    // Check if fix tool was called using the agent's callback-tracked flag
-    const fixCalled = agent.fixCalled;
-    this.debug("Maintainer completion - fix called:", fixCalled);
+    const fixResult = agent.fixResult;
+    this.debug("Maintainer completion - fix result:", fixResult ? `script ${fixResult.script.id}` : "none");
 
-    if (fixCalled) {
-      // Fix was attempted - the fix tool handles updating workflow
-      // Check if it was actually applied by checking workflow state
-      const workflow = await this.api.scriptStore.getWorkflow(context.workflowId);
-      if (workflow && !workflow.maintenance) {
-        // Maintenance flag was cleared - either fix applied or race condition handled
-        this.debug("Maintainer fix processed, maintenance flag cleared");
-        return;
-      }
-      // If maintenance is still set, something went wrong - clear it
-      if (workflow?.maintenance) {
-        await this.api.scriptStore.updateWorkflowFields(context.workflowId, {
-          maintenance: false,
-        });
-      }
+    if (!fixResult) {
+      // Fix was NOT called - maintainer couldn't fix the issue
+      // Escalate to user with maintainer's explanation
+      this.debug("Maintainer did not call fix tool - escalating to user");
+
+      const explanation = this.getLastAssistantMessage(agent);
+      await this.escalateMaintainerFailure(
+        context.workflowId,
+        context.scriptRunId,
+        explanation || "The maintainer was unable to automatically fix this issue."
+      );
       return;
     }
 
-    // Fix was NOT called - maintainer couldn't fix the issue
-    // Escalate to user with maintainer's explanation
-    this.debug("Maintainer did not call fix tool - escalating to user");
+    // Fix was called — check if we should activate
+    // Race condition check: only activate if planner hasn't updated active_script_id
+    const workflow = await this.api.scriptStore.getWorkflow(context.workflowId);
+    if (!workflow) {
+      this.debug("Maintainer completion: workflow not found", context.workflowId);
+      return;
+    }
 
-    const explanation = this.getLastAssistantMessage(agent);
-    await this.escalateMaintainerFailure(
-      context.workflowId,
-      context.scriptRunId,
-      explanation || "The maintainer was unable to automatically fix this issue."
-    );
+    const shouldActivate = workflow.active_script_id === context.expectedScriptId;
+    this.debug("Maintainer completion - shouldActivate:", shouldActivate,
+      `(active=${workflow.active_script_id}, expected=${context.expectedScriptId})`);
+
+    if (!shouldActivate) {
+      // Race detected: planner updated the script while maintainer was working.
+      // The fix was saved but we don't activate it.
+      // Don't clear maintenance or fix count — the planner's version is active
+      // and user will manage activation via UI.
+      this.debug("Maintainer fix saved but not activated (planner updated script)");
+      return;
+    }
+
+    // Activate the fix: set active_script_id, clear maintenance, reset schedules,
+    // sync producer schedule configs, denormalize cron — all in one call
+    await activateScript(this.api, {
+      workflowId: context.workflowId,
+      scriptId: fixResult.script.id,
+      workflowConfig: fixResult.workflowConfig,
+      handlerConfig: fixResult.workflowConfig ? JSON.stringify(fixResult.workflowConfig) : undefined,
+      pendingRetryRunId: context.handlerRunId || '',
+    });
+
+    this.debug("Maintainer fix activated:", fixResult.script.id);
   }
 
   /**

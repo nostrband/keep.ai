@@ -7,7 +7,7 @@ import { makeEvalTool } from "./ai-tools/eval";
 import { makeFinishTool } from "./ai-tools/finish";
 import { makeAskTool } from "./ai-tools/ask";
 import { makeSaveTool } from "./ai-tools/save";
-import { makeFixTool } from "./ai-tools/fix";
+import { makeFixTool, FixResult } from "./ai-tools/fix";
 import { AITool } from "./ai-tools/types";
 
 export const ERROR_BAD_REQUEST = "BAD_REQUEST";
@@ -260,8 +260,8 @@ export class Agent {
     reasoningTokens: 0,
   };
   public openRouterUsage = { cost: 0 };
-  /** Whether the fix tool was called during the agent loop (maintainer only) */
-  public fixCalled = false;
+  /** Result of the fix tool if called during the agent loop (maintainer only) */
+  public fixResult: FixResult | null = null;
   private modelName: string;
   private apiKey: string;
   private baseURL: string;
@@ -392,11 +392,8 @@ export class Agent {
         expectedScriptId: this.task.maintainerContext.expectedScriptId,
         scriptStore: this.env.api.scriptStore,
         taskStore: this.env.api.taskStore,
-        producerScheduleStore: this.env.api.producerScheduleStore,
-        eventStore: this.env.api.eventStore,
-        handlerRunId: this.task.maintainerContext.handlerRunId,
-        onCalled: () => {
-          this.fixCalled = true;
+        onCalled: (result) => {
+          this.fixResult = result;
         },
       });
     } else {
@@ -420,7 +417,6 @@ export class Agent {
         scriptStore: this.env.api.scriptStore,
         chatStore: this.env.api.chatStore,
         db: this.env.api.db,
-        producerScheduleStore: this.env.api.producerScheduleStore,
       });
     }
 

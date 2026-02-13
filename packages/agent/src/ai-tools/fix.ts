@@ -1,9 +1,7 @@
 import { JSONSchema } from "../json-schema";
 import { AITool } from "./types";
-import { Script, ScriptStore, ProducerScheduleStore, EventStore, TaskStore } from "@app/db";
-import { validateWorkflowScript, isWorkflowFormatScript } from "../workflow-validator";
-import { updateProducerSchedules } from "../producer-schedule-init";
-import { getMostFrequentProducerCron } from "../schedule-utils";
+import { Script, ScriptStore, TaskStore } from "@app/db";
+import { validateWorkflowScript, isWorkflowFormatScript, WorkflowConfig } from "../workflow-validator";
 
 export interface FixInfo {
   issue: string;
@@ -14,14 +12,13 @@ export interface FixInfo {
 /**
  * Result of the fix tool.
  * The fix is always saved as a new minor version.
- * activated = true means the fix became the active script.
- * activated = false means the planner updated the script while maintainer was running,
- * so the fix was saved but not activated.
+ * Activation is NOT done here — it's handled by handleMaintainerCompletion
+ * after the maintainer session completes.
  */
 export interface FixResult {
   script: Script;
-  /** Whether the fix became the active script (false if race condition detected) */
-  activated: boolean;
+  /** Extracted workflow config from validation (if applicable) */
+  workflowConfig?: WorkflowConfig;
 }
 
 /**
@@ -29,10 +26,11 @@ export interface FixResult {
  * The fix tool only increments minor_version (not major_version),
  * preserving the script's major version from when the maintainer started.
  *
- * Race condition handling:
- * If the planner has updated the script (new active_script_id) while the maintainer
- * was running, the fix is still saved but not activated. The maintainer's work is
- * never discarded.
+ * The fix tool ONLY saves a new script version and updates the task title.
+ * Activation (setting active_script_id, clearing maintenance, resetting schedules)
+ * is handled by handleMaintainerCompletion after the maintainer session completes.
+ * This prevents race conditions where mid-session activation allows the scheduler
+ * to run the workflow while the maintainer is still working.
  */
 export function makeFixTool(opts: {
   maintainerTaskId: string;
@@ -41,11 +39,6 @@ export function makeFixTool(opts: {
   expectedScriptId: string;
   scriptStore: ScriptStore;
   taskStore?: TaskStore;
-  producerScheduleStore?: ProducerScheduleStore;  // For per-producer scheduling (exec-13)
-  /** EventStore for releasing reserved events on fix activation */
-  eventStore?: EventStore;
-  /** Handler run ID whose reserved events should be released */
-  handlerRunId?: string;
   /** Optional callback invoked when the fix tool is called */
   onCalled?: (result: FixResult) => void;
 }) {
@@ -53,23 +46,13 @@ export function makeFixTool(opts: {
     execute: async (info: FixInfo): Promise<FixResult> => {
       // Validate workflow script structure if it uses the new workflow format (exec-05)
       // Old-format scripts (inline code) are not validated
-      let workflowConfig;
+      let workflowConfig: WorkflowConfig | undefined;
       if (isWorkflowFormatScript(info.code)) {
         const validation = await validateWorkflowScript(info.code);
         if (!validation.valid) {
           throw new Error(`Script validation failed: ${validation.error}`);
         }
         workflowConfig = validation.config;
-      }
-
-      // Get workflow to find current active script
-      const workflow = await opts.scriptStore.getWorkflow(opts.workflowId);
-      if (!workflow) {
-        throw new Error(`Workflow not found: ${opts.workflowId}`);
-      }
-
-      if (!workflow.active_script_id) {
-        throw new Error(`Workflow ${opts.workflowId} has no active script`);
       }
 
       // Get the script the maintainer was working on
@@ -102,77 +85,9 @@ export function makeFixTool(opts: {
         await opts.taskStore.updateTaskTitle(opts.maintainerTaskId, info.issue);
       }
 
-      // Race condition check: only activate if planner hasn't updated
-      // Compare active_script_id to know if planner changed it while we worked
-      const shouldActivate = workflow.active_script_id === opts.expectedScriptId;
-
-      if (shouldActivate) {
-        // No race - make this fix the active script
-        // Also save handler_config if validation extracted it (exec-05)
-        // Set pending_retry_run_id so the scheduler creates a targeted retry session
-        // Don't reset maintenance_fix_count here — it accumulates across fix cycles.
-        // It's reset only on successful workflow completion (handleWorkerSignal "done")
-        // or when escalateToUser is called.
-        const updates: { active_script_id: string; maintenance: boolean; next_run_timestamp: string; pending_retry_run_id: string; handler_config?: string } = {
-          active_script_id: newScript.id,
-          maintenance: false,
-          next_run_timestamp: new Date().toISOString(),
-          pending_retry_run_id: opts.handlerRunId || '',
-        };
-        if (workflowConfig) {
-          updates.handler_config = JSON.stringify(workflowConfig);
-        }
-        await opts.scriptStore.updateWorkflowFields(opts.workflowId, updates);
-
-        // Update per-producer schedules (exec-13)
-        if (workflowConfig && opts.producerScheduleStore) {
-          try {
-            await updateProducerSchedules(opts.workflowId, workflowConfig, opts.producerScheduleStore);
-            // Denormalize schedule info to workflow for display
-            const cron = getMostFrequentProducerCron(workflowConfig.producers);
-            const nextRunAt = await opts.producerScheduleStore.getNextScheduledTime(opts.workflowId);
-            await opts.scriptStore.updateWorkflowFields(opts.workflowId, {
-              cron,
-              next_run_timestamp: nextRunAt ? new Date(nextRunAt).toISOString() : '',
-            });
-          } catch (error) {
-            // Don't fail the fix save if schedule update fails
-          }
-        }
-
-        // Belt-and-suspenders: reset producer schedules to now so the workflow
-        // also works through normal scheduling if the retry path fails
-        if (opts.producerScheduleStore) {
-          try {
-            const schedules = await opts.producerScheduleStore.getForWorkflow(opts.workflowId);
-            const now = Date.now();
-            for (const schedule of schedules) {
-              if (schedule.next_run_at > now) {
-                await opts.producerScheduleStore.upsert({
-                  workflow_id: schedule.workflow_id,
-                  producer_name: schedule.producer_name,
-                  schedule_type: schedule.schedule_type,
-                  schedule_value: schedule.schedule_value,
-                  next_run_at: now,
-                });
-              }
-            }
-          } catch (error) {
-            // Don't fail the fix save if schedule reset fails
-          }
-        }
-      } else {
-        // Race detected - planner updated the script
-        // Fix is saved but not activated; clear maintenance so planner's version runs
-        await opts.scriptStore.updateWorkflowFields(opts.workflowId, {
-          maintenance: false,
-          maintenance_fix_count: 0,
-        });
-      }
-
       const result: FixResult = {
         script: newScript,
-        activated: shouldActivate,
+        workflowConfig,
       };
 
       // Invoke callback if provided
@@ -188,11 +103,7 @@ Call this tool when you have identified and fixed the bug in the script.
 If you cannot fix the issue, do NOT call this tool - provide an explanation instead.
 
 The fix will be saved as a new minor version (e.g., 1.0 → 1.1).
-If no other changes occurred, the workflow will immediately re-run to verify it works.
-
-Returns:
-- activated: true if the fix became active and workflow will re-run
-- activated: false if the planner updated the script while you were working (your fix was saved but not activated)
+After you finish, the workflow will automatically re-run to verify it works.
 `,
     inputSchema: {
       type: "object",

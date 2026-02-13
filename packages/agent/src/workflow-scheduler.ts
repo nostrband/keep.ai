@@ -16,6 +16,7 @@ import {
 import type { HandlerExecutionContext } from "./handler-state-machine";
 import { initializeProducerSchedules } from "./producer-schedule-init";
 import type { WorkflowConfig } from "./workflow-validator";
+import { SchedulerStateManager } from "./scheduler-state";
 
 export interface WorkflowSchedulerConfig {
   api: KeepDbApi;
@@ -38,6 +39,9 @@ export class WorkflowScheduler {
 
   // Global pause for PAYMENT_REQUIRED errors
   private globalPauseUntil: number = 0;
+
+  // In-memory scheduler state for dirty flags and wakeAt caching
+  private schedulerState: SchedulerStateManager = new SchedulerStateManager();
 
   // Maximum number of consecutive network error retries before escalating to user
   // After this many retries, the workflow needs user attention
@@ -179,6 +183,13 @@ export class WorkflowScheduler {
       this.debug("Error resuming incomplete sessions:", e);
     }
 
+    // Initialize scheduler state for all active workflows (sets consumers dirty for restart recovery)
+    try {
+      await this.initializeSchedulerState();
+    } catch (e) {
+      this.debug("Error initializing scheduler state:", e);
+    }
+
     // Ensure producer schedules exist for all active workflows
     try {
       await this.ensureProducerSchedules();
@@ -239,6 +250,38 @@ export class WorkflowScheduler {
   }
 
   /**
+   * Initialize scheduler state for all active workflows on startup.
+   * Sets all consumers dirty (conservative — may cause one extra prepare per consumer).
+   * Loads persisted wakeAt values from DB.
+   */
+  private async initializeSchedulerState(): Promise<void> {
+    const allWorkflows = await this.api.scriptStore.listWorkflows(1000, 0);
+    const activeWithConfig = allWorkflows.filter(
+      (w) => w.status === "active" && w.handler_config && w.handler_config.trim() !== ''
+    );
+
+    for (const workflow of activeWithConfig) {
+      try {
+        const config: WorkflowConfig = JSON.parse(workflow.handler_config!);
+        // Set all consumers dirty on startup (restart recovery)
+        this.schedulerState.initializeForWorkflow(workflow.id, config);
+
+        // Load persisted wakeAt values from DB
+        const handlerStates = await this.api.handlerStateStore.listByWorkflow(workflow.id);
+        for (const hs of handlerStates) {
+          if (hs.wake_at > 0 && config.consumers?.[hs.handler_name]) {
+            this.schedulerState.setWakeAt(workflow.id, hs.handler_name, hs.wake_at);
+          }
+        }
+      } catch (e) {
+        this.debug(`Failed to initialize scheduler state for workflow ${workflow.id}:`, e);
+      }
+    }
+
+    this.debug(`Initialized scheduler state for ${activeWithConfig.length} active workflows`);
+  }
+
+  /**
    * Create the execution context needed for session-based workflow execution.
    */
   private createExecutionContext(): HandlerExecutionContext {
@@ -246,6 +289,7 @@ export class WorkflowScheduler {
       api: this.api,
       connectionManager: this.connectionManager,
       userPath: this.userPath,
+      schedulerState: this.schedulerState,
     };
   }
 
@@ -371,7 +415,7 @@ export class WorkflowScheduler {
         }
       }
 
-      // Priority 3: Consumer-only work detection
+      // Priority 3: Consumer-only work detection (in-memory, zero DB queries)
       // For active workflows not already in dueWorkflows and not in retry backoff
       const dueWorkflowIds = new Set(dueWorkflows.map(d => d.workflow.id));
       for (const workflow of activeWorkflows) {
@@ -381,29 +425,34 @@ export class WorkflowScheduler {
         const retryState = this.workflowRetryState.get(workflow.id);
         if (retryState && retryState.nextStart > currentTime) continue;
 
-        try {
-          // Check for pending events (any topic)
-          const hasPending = await this.api.eventStore.hasAnyPendingForWorkflow(workflow.id);
-          if (hasPending) {
-            dueWorkflows.push({ workflow, trigger: 'event' });
-            this.debug(`Workflow ${workflow.id} (${workflow.title}) has consumer-only work (pending events)`);
-            continue;
+        // Initialize scheduler state for workflows not yet tracked (handles new deploys between ticks)
+        if (!this.schedulerState.isWorkflowTracked(workflow.id) && workflow.handler_config) {
+          try {
+            const config = JSON.parse(workflow.handler_config) as WorkflowConfig;
+            if (config.consumers && Object.keys(config.consumers).length > 0) {
+              this.schedulerState.initializeForWorkflow(workflow.id, config);
+              this.debug(`Auto-initialized scheduler state for workflow ${workflow.id} (${workflow.title})`);
+            }
+          } catch {
+            // Invalid config, skip
           }
+        }
 
-          // Check for due wakeAt times
-          const dueConsumers = await this.api.handlerStateStore.getConsumersWithDueWakeAt(workflow.id);
-          if (dueConsumers.length > 0) {
-            dueWorkflows.push({ workflow, trigger: 'event' });
-            this.debug(`Workflow ${workflow.id} (${workflow.title}) has consumer-only work (due wakeAt)`);
-          }
-        } catch (error) {
-          this.debug(`Error checking consumer work for workflow ${workflow.id}:`, error);
+        // Check if any consumer is dirty (new events since last run) — in-memory
+        const dirtyConsumers = this.schedulerState.getDirtyConsumers(workflow.id);
+        if (dirtyConsumers.length > 0) {
+          dueWorkflows.push({ workflow, trigger: 'event' });
+          this.debug(`Workflow ${workflow.id} (${workflow.title}) has consumer-only work (${dirtyConsumers.length} dirty consumers)`);
+          continue;
+        }
+
+        // Check for due wakeAt times — in-memory
+        const dueConsumers = this.schedulerState.getConsumersWithDueWakeAt(workflow.id);
+        if (dueConsumers.length > 0) {
+          dueWorkflows.push({ workflow, trigger: 'event' });
+          this.debug(`Workflow ${workflow.id} (${workflow.title}) has consumer-only work (due wakeAt)`);
         }
       }
-      // TODO: Optimize consumer-only detection for large numbers of workflows.
-      // Currently does 2 queries per active workflow per tick. For 50+ workflows,
-      // consider a batch query: SELECT DISTINCT workflow_id FROM events WHERE status='pending'
-      // UNION SELECT workflow_id FROM handler_state WHERE wake_at > 0 AND wake_at <= ?
 
       // Filter out workflows in retry backoff
       const availableWorkflows = dueWorkflows.filter(({ workflow }) => {

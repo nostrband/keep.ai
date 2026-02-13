@@ -46,7 +46,6 @@ This is useful for scripts to send execution results to user.
 The message will create a notification that appears in the user's notification list.`,
     inputSchema,
     outputSchema,
-    isReadOnly: () => false,
     execute: async (input) => {
       const notificationId = crypto.randomUUID();
       const timestamp = new Date().toISOString();

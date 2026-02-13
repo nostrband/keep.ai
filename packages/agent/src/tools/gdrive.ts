@@ -82,7 +82,7 @@ export function makeGDriveTool(
     namespace: "GoogleDrive",
     name: "api",
     outputType: "file",
-    description: `Access Google Drive API with various methods. Supported methods: ${SUPPORTED_METHODS.join(", ")}. Returns dynamic results based on the method used. Knowledge of param and output structure is expected from the assistant. REQUIRED: 'account' parameter must be the email address of the connected Google Drive account.`,
+    description: `Access Google Drive API with various methods. Supported methods: ${SUPPORTED_METHODS.join(", ")}. Mutation methods (only usable in 'mutate' handler): ${SUPPORTED_METHODS.filter(m => !READ_METHODS.has(m)).join(", ")}. Returns dynamic results based on the method used. Knowledge of param and output structure is expected from the assistant. REQUIRED: 'account' parameter must be the email address of the connected Google Drive account.`,
     inputSchema,
     isReadOnly: (params) => READ_METHODS.has(params.method),
     execute: async (input) => {

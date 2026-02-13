@@ -3,10 +3,15 @@
 ISSUES:
 - remove sandboxapi
 - Show diff should also expand the comment to view long ones untruncated
+- remove auto-fix task list from workflow page, make script version link to task that created it, then in script version history add a button to open the LLM task/thread 
+- show like 3 last script runs and 'more' button opening page with pagination
+- on script run ('session') page show all handler runs or asc order, each expandable with inputs/outputs/published/consumed events produced by the handler run, and error/logs if it failed, I should be able to trace exactly what was happening during execution
 - output names are namespaces - very vague, we should probably transform ns.method to something human-readable, or have connector declare 'Output name' variable
 - reconciliation doesn't seem to work, not implemented right? and host-managed mutation retries? 
 - outputs only include namespace, need tool name too (at getOutputStatsByWorkflow)
 - Message: Failed at Gmail.api: request to https://gmail.googleapis.com/gmail/v1/users/me/messages?q=is%3Aunread%20%28from%3Anoreply%20OR%20from%3Anewsletter%20OR%20from%3Adigest%20OR%20from%3Anotification%20OR%20subject%3A%28newsletter%20OR%20digest%20OR%20weekly%20OR%20daily%20OR%20update%29%29&maxResults=10 failed, reason: getaddrinfo EAI_AGAIN gmail.googleapis.com - classified as logic, why?
+- so after auto-fix escalates is 'Automation Paused: Manual Intervention Required' message auto-posted to planner?
+- after planner creates new version, how is it activated by user? or automatically? 
 - fix macos builds
 - we have to make sure task-scheduler can't launch more that 1 task per workflow, meaning several maintainer tasks + planner - planner first, maintainers one by one second
 - stack traces have no line number of any other hint at where the issue is - just 'not a function' or some such, plus script run page doesn't show which handler was running, and I guess when auto-fix will run it also needs info on which handler failed

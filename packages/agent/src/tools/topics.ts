@@ -285,7 +285,8 @@ export function makeTopicsPublishTool(
   getHandlerRunId: () => string | undefined,
   getPhase?: () => 'producer' | 'next' | null,
   getHandlerName?: () => string | undefined,
-  getWorkflowConfig?: () => WorkflowConfig | undefined
+  getWorkflowConfig?: () => WorkflowConfig | undefined,
+  onPublish?: (topicName: string) => void
 ): Tool<PublishInput, PublishOutput> {
   return defineTool({
     namespace: "Topics",
@@ -323,7 +324,6 @@ Example (in next phase):
 
 Note: Phase-restricted to 'producer' or 'next' phase only.`,
     inputSchema: publishInputSchema,
-    isReadOnly: () => false, // This is a write operation (creates events)
     execute: async (input: PublishInput): Promise<PublishOutput> => {
       const workflowId = getWorkflowId();
       if (!workflowId) {
@@ -402,6 +402,7 @@ Note: Phase-restricted to 'producer' or 'next' phase only.`,
       // Publish to each topic
       for (const topicName of topics) {
         await eventStore.publishEvent(workflowId, topicName, publishEvent, handlerRunId);
+        onPublish?.(topicName);
       }
     },
   }) as Tool<PublishInput, PublishOutput>;
@@ -493,7 +494,6 @@ Example:
 Note: Phase-restricted to 'producer' phase only.`,
     inputSchema: registerInputInputSchema,
     outputSchema: registerInputOutputSchema,
-    isReadOnly: () => false, // This creates records in the input ledger
     execute: async (input: RegisterInputInput): Promise<RegisterInputOutput> => {
       const workflowId = getWorkflowId();
       if (!workflowId) {

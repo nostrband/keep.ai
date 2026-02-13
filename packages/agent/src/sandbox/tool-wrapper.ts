@@ -247,11 +247,18 @@ export class ToolWrapper {
       const ns = tool.namespace;
       const name = tool.name;
 
-      // Format documentation
-      const isReadOnly = tool.isReadOnly !== undefined;
-      const mutationNotice = isReadOnly
-        ? ``
-        : `\n⚠️ Mutation — can only be used in the 'mutate' consumer phase.`;
+      // Format documentation — classify mutation behavior for docs:
+      // - No isReadOnly → always a mutation
+      // - isReadOnly returns true for empty input → always read-only
+      // - isReadOnly returns false for empty input → mixed (some methods are mutations)
+      let mutationNotice: string;
+      if (!tool.isReadOnly) {
+        mutationNotice = `\n⚠️ Mutation — can only be used in the 'mutate' consumer phase.`;
+      } else if (tool.isReadOnly({} as any)) {
+        mutationNotice = ``;
+      } else {
+        mutationNotice = `\n⚠️ Some methods are mutations — mutations can only be used in the 'mutate' consumer phase.`;
+      }
       const desc = [
         "===DESCRIPTION===",
         tool.description + mutationNotice +

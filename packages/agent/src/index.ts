@@ -70,6 +70,9 @@ export {
   type SaveResult,
 } from "./ai-tools";
 
+// Script activation
+export { activateScript, type ActivateScriptParams } from "./activate-script";
+
 // Environment configuration
 export { setEnv, getEnv, setEnvFromProcess, type Env } from "./env";
 

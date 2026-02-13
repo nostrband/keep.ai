@@ -77,7 +77,6 @@ File will be stored in <userPath>/files/ with SHA256 hash as filename and added 
 Returns the created file record with metadata.`,
     inputSchema,
     outputSchema,
-    isReadOnly: () => false,
     execute: async (input: Input): Promise<Output> => {
       if (!userPath) {
         throw new PermissionError("User path not configured", { source: "Files.save" });

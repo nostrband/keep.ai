@@ -100,7 +100,6 @@ Takes a textual prompt describing the desired image and an optional aspect ratio
 Generates images and saves them to files. Returns information about the generated image files.`,
     inputSchema,
     outputSchema,
-    isReadOnly: () => false,
     execute: async (input) => {
       const { prompt, file_prefix, aspect_ratio = "1:1" } = input;
 

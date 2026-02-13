@@ -1,10 +1,8 @@
 import { JSONSchema } from "../json-schema";
 import { AITool } from "./types";
-import { Script, ScriptStore, ChatStore, CRSqliteDB, DBInterface, ProducerScheduleStore } from "@app/db";
-import { validateWorkflowScript, isWorkflowFormatScript } from "../workflow-validator";
+import { Script, ScriptStore, ChatStore, CRSqliteDB, DBInterface } from "@app/db";
+import { validateWorkflowScript, isWorkflowFormatScript, WorkflowConfig } from "../workflow-validator";
 import { extractIntent } from "../intent-extract";
-import { updateProducerSchedules } from "../producer-schedule-init";
-import { getMostFrequentProducerCron } from "../schedule-utils";
 import debug from "debug";
 
 const log = debug("save-tool");
@@ -29,12 +27,24 @@ const SaveInfoSchema: JSONSchema = {
   required: ["code", "title"],
 };
 
-// Result type for save tool - includes script info and whether it was a maintenance fix
+// Result type for save tool
 export interface SaveResult {
   script: Script;
-  wasMaintenanceFix: boolean;
 }
 
+/**
+ * Create a save tool for the planner agent.
+ *
+ * The save tool ONLY creates a new script version. It does NOT activate the script
+ * (set active_script_id, clear maintenance, update schedules, etc.).
+ *
+ * Exception: for draft→ready transition (first save), it sets status='ready' and
+ * active_script_id since there's no separate activation step for initial creation.
+ *
+ * For subsequent saves, activation is handled separately:
+ * - User clicks "Activate" button in UI
+ * - Future: planner activation step
+ */
 export function makeSaveTool(opts: {
   taskId: string;
   taskRunId: string;
@@ -42,18 +52,18 @@ export function makeSaveTool(opts: {
   scriptStore: ScriptStore;
   chatStore?: ChatStore;  // Optional: for intent extraction (exec-17)
   db?: CRSqliteDB;         // For transaction support
-  producerScheduleStore?: ProducerScheduleStore;  // For per-producer scheduling (exec-13)
 }) {
   return {
     execute: async (info: SaveInfo): Promise<SaveResult> => {
       // Validate workflow script structure if it uses the new workflow format (exec-05)
       // Old-format scripts (inline code) are not validated
+      let workflowConfig: WorkflowConfig | undefined;
       if (isWorkflowFormatScript(info.code)) {
         const validation = await validateWorkflowScript(info.code);
         if (!validation.valid) {
           throw new Error(`Script validation failed: ${validation.error}`);
         }
-        var workflowConfig = validation.config;
+        workflowConfig = validation.config;
       }
 
       const script = await opts.scriptStore.getLatestScriptByTaskId(
@@ -81,9 +91,6 @@ export function makeSaveTool(opts: {
         throw new Error(`Workflow not found for task ${opts.taskId}`);
       }
 
-      // Check if workflow was in maintenance mode (agent auto-fix)
-      const wasInMaintenance = workflow.maintenance;
-
       const newScript: Script = {
         id: crypto.randomUUID(),
         code: info.code,
@@ -97,13 +104,13 @@ export function makeSaveTool(opts: {
         summary: info.summary || "",
         diagram: info.diagram || "",
       };
-      // Wrap script creation and all workflow field updates in a single transaction
-      // to prevent the scheduler from executing old scripts between writes
+
       const shouldUpdateTitle = info.title && (!workflow.title || workflow.title.trim() === '');
 
       const saveOps = async (tx?: DBInterface) => {
         await opts.scriptStore.addScript(newScript, tx);
 
+        // Draft→ready transition: set status and active_script_id for initial creation
         if (workflow.status === 'draft') {
           const updates: { status: string; active_script_id: string; title?: string; handler_config?: string } = {
             status: 'ready',
@@ -117,25 +124,15 @@ export function makeSaveTool(opts: {
           }
           await opts.scriptStore.updateWorkflowFields(workflow.id, updates, tx);
         } else {
-          const updates: { active_script_id: string; title?: string; handler_config?: string } = {
-            active_script_id: newScript.id,
-          };
+          // Subsequent saves: only update title if needed
+          // Do NOT set active_script_id — user must explicitly activate
+          const updates: { title?: string } = {};
           if (shouldUpdateTitle) {
             updates.title = info.title;
           }
-          if (workflowConfig) {
-            updates.handler_config = JSON.stringify(workflowConfig);
+          if (Object.keys(updates).length > 0) {
+            await opts.scriptStore.updateWorkflowFields(workflow.id, updates, tx);
           }
-          await opts.scriptStore.updateWorkflowFields(workflow.id, updates, tx);
-        }
-
-        // If workflow was in maintenance mode, clear it and trigger immediate re-run
-        if (wasInMaintenance) {
-          await opts.scriptStore.updateWorkflowFields(workflow.id, {
-            maintenance: false,
-            maintenance_fix_count: 0,
-            next_run_timestamp: new Date().toISOString(),
-          }, tx);
         }
       };
 
@@ -143,22 +140,6 @@ export function makeSaveTool(opts: {
         await opts.db.db.tx(async (tx) => saveOps(tx));
       } else {
         await saveOps();
-      }
-
-      // Initialize/update per-producer schedules (exec-13)
-      if (workflowConfig && opts.producerScheduleStore) {
-        try {
-          await updateProducerSchedules(workflow.id, workflowConfig, opts.producerScheduleStore);
-          // Denormalize schedule info to workflow for display
-          const cron = getMostFrequentProducerCron(workflowConfig.producers);
-          const nextRunAt = await opts.producerScheduleStore.getNextScheduledTime(workflow.id);
-          await opts.scriptStore.updateWorkflowFields(workflow.id, {
-            cron,
-            next_run_timestamp: nextRunAt ? new Date(nextRunAt).toISOString() : '',
-          });
-        } catch (error) {
-          log(`Failed to update producer schedules for workflow ${workflow.id}:`, error);
-        }
       }
 
       // Intent extraction (exec-17)
@@ -201,15 +182,14 @@ export function makeSaveTool(opts: {
         })();
       }
 
-      // Return both the script and whether this was a maintenance fix
-      // The task-worker will use this to set message metadata
       return {
         script: newScript,
-        wasMaintenanceFix: wasInMaintenance,
       };
     },
     description: `Save the new/updated script code with a workflow title, commit-style comments, summary, and optional flow diagram.
 The title will only be applied if the workflow doesn't already have one.
+The script will be saved as a new version. For the first save, the workflow will be activated automatically.
+For subsequent saves, the user will need to activate the new version.
 `,
     inputSchema: SaveInfoSchema,
   } satisfies AITool;

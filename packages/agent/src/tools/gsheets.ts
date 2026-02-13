@@ -85,7 +85,7 @@ export function makeGSheetsTool(
     namespace: "GoogleSheets",
     name: "api",
     outputType: "row",
-    description: `Access Google Sheets API with various methods. Supported methods: ${SUPPORTED_METHODS.join(", ")}. Returns dynamic results based on the method used. Knowledge of param and output structure is expected from the assistant. REQUIRED: 'account' parameter must be the email address of the connected Google Sheets account.`,
+    description: `Access Google Sheets API with various methods. Supported methods: ${SUPPORTED_METHODS.join(", ")}. Mutation methods (only usable in 'mutate' handler): ${SUPPORTED_METHODS.filter(m => !READ_METHODS.has(m)).join(", ")}. Returns dynamic results based on the method used. Knowledge of param and output structure is expected from the assistant. REQUIRED: 'account' parameter must be the email address of the connected Google Sheets account.`,
     inputSchema,
     isReadOnly: (params) => READ_METHODS.has(params.method),
     execute: async (input) => {

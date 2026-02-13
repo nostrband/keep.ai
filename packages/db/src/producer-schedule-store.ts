@@ -212,6 +212,19 @@ export class ProducerScheduleStore {
   }
 
   /**
+   * Reset all producer schedules for a workflow to run immediately.
+   * Sets next_run_at to now for all producers.
+   */
+  async resetAllNextRunAt(workflowId: string, tx?: DBInterface): Promise<void> {
+    const db = tx || this.db.db;
+    const now = Date.now();
+    await db.exec(
+      `UPDATE producer_schedules SET next_run_at = ?, updated_at = ? WHERE workflow_id = ?`,
+      [now, now, workflowId]
+    );
+  }
+
+  /**
    * Delete all schedules for a workflow.
    */
   async deleteByWorkflow(workflowId: string, tx?: DBInterface): Promise<void> {

@@ -32,7 +32,6 @@ export function makeDeleteNoteTool(
     name: "deleteNote",
     description: `Delete a note by its ID. Returns an error if the note doesn't exist.`,
     inputSchema,
-    isReadOnly: () => false,
     execute: async (input: Input): Promise<Output> => {
       const { id } = input;
       if (!id) throw new Error("Specify note id");

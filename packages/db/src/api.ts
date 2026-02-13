@@ -378,6 +378,59 @@ export class KeepDbApi {
   }
 
   /**
+   * Activate a script version for a workflow.
+   *
+   * This atomically:
+   * 1. Sets active_script_id to the new script
+   * 2. Clears maintenance flag
+   * 3. Sets handler_config (if provided)
+   * 4. Sets pending_retry_run_id (if provided)
+   * 5. Resets all producer schedules to run immediately
+   * 6. If manual=true: also resets maintenance_fix_count
+   *
+   * Used by:
+   * - handleMaintainerCompletion (after fix tool succeeds)
+   * - UI "Activate" button (manual=true)
+   * - Future: planner activation
+   *
+   * @param params - Activation parameters
+   */
+  async activateScript(params: {
+    workflowId: string;
+    scriptId: string;
+    handlerConfig?: string;
+    pendingRetryRunId?: string;
+    manual?: boolean;
+  }): Promise<void> {
+    const { workflowId, scriptId, handlerConfig, pendingRetryRunId, manual } = params;
+
+    await this.db.db.tx(async (tx) => {
+      // Build workflow field updates
+      const fields: Parameters<ScriptStore['updateWorkflowFields']>[1] = {
+        active_script_id: scriptId,
+        maintenance: false,
+      };
+
+      if (handlerConfig !== undefined) {
+        fields.handler_config = handlerConfig;
+      }
+
+      if (pendingRetryRunId !== undefined) {
+        fields.pending_retry_run_id = pendingRetryRunId;
+      }
+
+      if (manual) {
+        fields.maintenance_fix_count = 0;
+      }
+
+      await this.scriptStore.updateWorkflowFields(workflowId, fields, tx);
+
+      // Reset all producer schedules to run immediately
+      await this.producerScheduleStore.resetAllNextRunAt(workflowId, tx);
+    });
+  }
+
+  /**
    * Enter maintenance mode for a workflow when a logic error occurs.
    * This atomically:
    * 1. Increments workflow.maintenance_fix_count

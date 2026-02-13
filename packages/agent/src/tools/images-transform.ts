@@ -130,7 +130,6 @@ Takes existing image files (up to 5) and a textual prompt describing the desired
 Supports png, jpeg, webp and gif input formats. Returns information about the generated image files.`,
     inputSchema,
     outputSchema,
-    isReadOnly: () => false,
     execute: async (input) => {
       const {
         file_paths: filePaths,

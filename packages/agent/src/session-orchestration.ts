@@ -20,6 +20,7 @@ import {
 } from "./handler-state-machine";
 import { WorkflowConfig } from "./workflow-validator";
 import { getRunStatusForError } from "./failure-handling";
+import type { SchedulerStateManager } from "./scheduler-state";
 import debug from "debug";
 
 const log = debug("session-orchestration");
@@ -206,13 +207,18 @@ async function suspendSession(
 
 /**
  * Find a consumer with pending work to process.
+ *
+ * When schedulerState is provided, uses in-memory dirty flags (zero DB queries).
+ * When not provided, falls back to DB queries for backward compatibility.
+ *
  * Returns the first consumer that has:
- * - Pending events in any subscribed topic, OR
- * - A due wakeAt time (for time-based scheduling per docs/dev/16-scheduling.md)
+ * - dirty=true (new events since last commit), OR
+ * - A due wakeAt time (for time-based scheduling)
  */
 export async function findConsumerWithPendingWork(
   api: KeepDbApi,
-  workflow: Workflow
+  workflow: Workflow,
+  schedulerState?: SchedulerStateManager
 ): Promise<{ name: string; reason: "events" | "wakeAt" } | null> {
   if (!workflow.handler_config) {
     return null;
@@ -229,9 +235,29 @@ export async function findConsumerWithPendingWork(
     return null;
   }
 
-  // First check for pending events (higher priority than wakeAt)
+  if (schedulerState) {
+    // In-memory path: check dirty consumers (event-driven)
+    for (const consumerName of Object.keys(config.consumers)) {
+      if (schedulerState.isConsumerDirty(workflow.id, consumerName)) {
+        log(`Found consumer ${consumerName} dirty (in-memory)`);
+        return { name: consumerName, reason: "events" };
+      }
+    }
+
+    // In-memory path: check due wakeAt (time-driven)
+    const dueConsumers = schedulerState.getConsumersWithDueWakeAt(workflow.id);
+    for (const consumerName of dueConsumers) {
+      if (config.consumers[consumerName]) {
+        log(`Found consumer ${consumerName} with due wakeAt (in-memory)`);
+        return { name: consumerName, reason: "wakeAt" };
+      }
+    }
+
+    return null;
+  }
+
+  // Fallback: DB queries when no schedulerState (backward compatibility)
   for (const [consumerName, consumerConfig] of Object.entries(config.consumers)) {
-    // Check if any subscribed topic has pending events
     for (const topicName of consumerConfig.subscribe || []) {
       const pendingCount = await api.eventStore.countPending(
         workflow.id,
@@ -244,10 +270,8 @@ export async function findConsumerWithPendingWork(
     }
   }
 
-  // Then check for due wakeAt times (time-based scheduling)
   const dueConsumers = await api.handlerStateStore.getConsumersWithDueWakeAt(workflow.id);
   if (dueConsumers.length > 0) {
-    // Verify the consumer is actually defined in config
     for (const consumerName of dueConsumers) {
       if (config.consumers[consumerName]) {
         log(`Found consumer ${consumerName} with due wakeAt`);
@@ -443,7 +467,7 @@ export async function executeWorkflowSession(
     let iterations = 0;
 
     while (iterations < maxIterations) {
-      const consumer = await findConsumerWithPendingWork(api, workflow);
+      const consumer = await findConsumerWithPendingWork(api, workflow, context.schedulerState);
       if (!consumer) {
         log(`No more work found for workflow ${workflow.id}`);
         break;
@@ -569,7 +593,7 @@ async function continueSession(
   log(`Continuing session ${session.id} from iteration ${iterations}`);
 
   while (iterations < maxIterations) {
-    const consumer = await findConsumerWithPendingWork(api, workflow);
+    const consumer = await findConsumerWithPendingWork(api, workflow, context.schedulerState);
     if (!consumer) {
       log(`No more work found for session ${session.id}`);
       break;

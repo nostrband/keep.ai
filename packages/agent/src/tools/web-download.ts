@@ -77,7 +77,6 @@ and stores the file data using the same system as Files.save.
 Returns the created file record with metadata.`,
     inputSchema,
     outputSchema,
-    isReadOnly: () => false,
     execute: async (input) => {
       if (!userPath) {
         throw new PermissionError("User path not configured", { source: "Web.download" });

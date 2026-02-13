@@ -31,6 +31,8 @@ const log = debug("scheduler-state");
 interface ConsumerSchedulerState {
   /** New events arrived since last run */
   dirty: boolean;
+  /** Scheduled wake time: 0 = none, >0 = unix ms */
+  wakeAt: number;
 }
 
 /**
@@ -109,6 +111,38 @@ export class SchedulerStateManager {
   }
 
   /**
+   * Set wakeAt time for a consumer.
+   *
+   * @param workflowId - Workflow ID
+   * @param consumerName - Consumer name
+   * @param wakeAtMs - Wake time in unix ms (0 = clear)
+   */
+  setWakeAt(workflowId: string, consumerName: string, wakeAtMs: number): void {
+    this.getConsumerState(workflowId, consumerName).wakeAt = wakeAtMs;
+    log(`Consumer ${workflowId}/${consumerName} wakeAt=${wakeAtMs > 0 ? new Date(wakeAtMs).toISOString() : 'none'}`);
+  }
+
+  /**
+   * Get consumers with due wakeAt times.
+   *
+   * @param workflowId - Workflow ID
+   * @returns Consumer names where wakeAt > 0 && wakeAt <= now
+   */
+  getConsumersWithDueWakeAt(workflowId: string): string[] {
+    const workflow = this.consumerStates.get(workflowId);
+    if (!workflow) return [];
+
+    const now = Date.now();
+    const due: string[] = [];
+    for (const [name, state] of workflow) {
+      if (state.wakeAt > 0 && state.wakeAt <= now) {
+        due.push(name);
+      }
+    }
+    return due;
+  }
+
+  /**
    * Set consumer dirty flag.
    *
    * @param workflowId - Workflow ID
@@ -149,7 +183,7 @@ export class SchedulerStateManager {
 
     let consumer = workflow.get(consumerName);
     if (!consumer) {
-      consumer = { dirty: false };
+      consumer = { dirty: false, wakeAt: 0 };
       workflow.set(consumerName, consumer);
     }
 
@@ -220,6 +254,13 @@ export class SchedulerStateManager {
     }
 
     return producer;
+  }
+
+  /**
+   * Check if a workflow has been initialized in the scheduler state.
+   */
+  isWorkflowTracked(workflowId: string): boolean {
+    return this.consumerStates.has(workflowId);
   }
 
   // ==================== Cleanup ====================

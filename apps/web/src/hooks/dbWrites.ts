@@ -205,15 +205,14 @@ export function useDeletePeer() {
 
 /**
  * Activate a specific script version for a workflow.
- * Instead of creating a new script version (rollback), this just updates
- * the workflow's active_script_id pointer to the target script.
  *
- * Benefits over the old "rollback" approach:
- * - No duplicate script content
- * - No version number inflation
- * - No race conditions on version computation
- * - Idempotent operation (double-click safe)
- * - Better performance (just a pointer update)
+ * Uses api.activateScript with manual=true to atomically:
+ * - Set active_script_id to the target script
+ * - Clear maintenance flag
+ * - Reset maintenance_fix_count (manual activation = fresh start)
+ * - Reset all producer schedules to run immediately
+ *
+ * The script is validated before activation to ensure it belongs to the workflow.
  */
 export function useActivateScriptVersion() {
   const { api } = useDbQuery();
@@ -225,23 +224,21 @@ export function useActivateScriptVersion() {
     }) => {
       if (!api) throw new Error("Script store not available");
 
-      // Use transaction to ensure atomic validation and update
-      // Prevents TOCTOU vulnerability where script could be deleted between check and update
-      return await api.db.db.tx(async (tx) => {
-        // Validate the script exists and belongs to this workflow
-        const script = await api.scriptStore.getScript(input.scriptId, tx);
-        if (!script) throw new Error("Script not found");
-        if (script.workflow_id !== input.workflowId) {
-          throw new Error("Script does not belong to this workflow");
-        }
+      // Validate the script exists and belongs to this workflow
+      const script = await api.scriptStore.getScript(input.scriptId);
+      if (!script) throw new Error("Script not found");
+      if (script.workflow_id !== input.workflowId) {
+        throw new Error("Script does not belong to this workflow");
+      }
 
-        // Update the pointer within the same transaction
-        await api.scriptStore.updateWorkflowFields(input.workflowId, {
-          active_script_id: input.scriptId,
-        }, tx);
-
-        return { scriptId: input.scriptId, version: `${script.major_version}.${script.minor_version}` };
+      // Use the unified activateScript function (manual=true for UI activation)
+      await api.activateScript({
+        workflowId: input.workflowId,
+        scriptId: input.scriptId,
+        manual: true,
       });
+
+      return { scriptId: input.scriptId, version: `${script.major_version}.${script.minor_version}` };
     },
     onSuccess: (_result, { workflowId }) => {
       // Invalidate workflow queries since active_script_id changed

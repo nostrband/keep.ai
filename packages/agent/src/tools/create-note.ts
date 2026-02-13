@@ -68,7 +68,6 @@ Tags help organize and categorize notes for easy retrieval later.
 Maximum 500 notes, and title+content+tags size must not exceed 50KB.`,
     inputSchema,
     outputSchema,
-    isReadOnly: () => false,
     execute: async (input: Input): Promise<Output> => {
       const { title, content, tags, priority, id } = input;
 

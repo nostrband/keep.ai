@@ -38,6 +38,7 @@ import {
   type MutationParams,
 } from "./reconciliation";
 import type { ConnectionManager } from "@app/connectors";
+import type { SchedulerStateManager } from "./scheduler-state";
 import debug from "debug";
 
 const log = debug("handler-state-machine");
@@ -90,6 +91,7 @@ export interface HandlerExecutionContext {
   connectionManager?: ConnectionManager;
   userPath?: string;
   abortController?: AbortController;
+  schedulerState?: SchedulerStateManager;
 }
 
 // ============================================================================
@@ -588,7 +590,8 @@ function clampWakeAt(wakeAt: number, now: number): number {
 async function savePrepareAndReserve(
   api: KeepDbApi,
   run: HandlerRun,
-  prepareResult: PrepareResult
+  prepareResult: PrepareResult,
+  context?: HandlerExecutionContext
 ): Promise<void> {
   const now = Date.now();
 
@@ -631,6 +634,9 @@ async function savePrepareAndReserve(
       tx
     );
   });
+
+  // Update in-memory wakeAt cache
+  context?.schedulerState?.setWakeAt(run.workflow_id, run.handler_name, wakeAtMs);
 
   const wakeAtInfo = wakeAtMs > 0 ? `, wakeAt=${new Date(wakeAtMs).toISOString()}` : "";
   log(`Handler run ${run.id} prepared with ${prepareResult.reservations?.length || 0} reservations${wakeAtInfo}`);
@@ -803,6 +809,7 @@ async function createHandlerSandbox(
     },
     getHandlerName: () => run.handler_name,
     getWorkflowConfig: () => workflowConfig,
+    schedulerState: context.schedulerState,
   });
 
   // Create tool wrapper with the tools
@@ -886,14 +893,14 @@ const producerPhaseHandlers: Record<string, PhaseHandler> = {
       sandbox.setGlobal({ __state__: prevState });
 
       // Execute producer handler
-      const code = `
-${script.code}
+      const code = `${script.code}
 
 return await workflow.producers.${run.handler_name}.handler(__state__);
 `;
       const result = await sandbox.eval(code, {
         timeoutMs: 300_000,
         signal: context.abortController?.signal,
+        filename: `producer:${run.handler_name}`,
       });
 
       if (!result.ok) {
@@ -974,14 +981,14 @@ const consumerPhaseHandlers: Record<string, PhaseHandler> = {
       sandbox.setGlobal({ __state__: prevState });
 
       // Execute prepare handler
-      const code = `
-${script.code}
+      const code = `${script.code}
 
 return await workflow.consumers.${run.handler_name}.prepare(__state__);
 `;
       const result = await sandbox.eval(code, {
         timeoutMs: 300_000,
         signal: context.abortController?.signal,
+        filename: `consumer:${run.handler_name}:prepare`,
       });
 
       if (!result.ok) {
@@ -1006,7 +1013,7 @@ return await workflow.consumers.${run.handler_name}.prepare(__state__);
         return;
       }
 
-      await savePrepareAndReserve(api, run, prepareResult);
+      await savePrepareAndReserve(api, run, prepareResult, context);
 
       // Save logs if any
       if (logs.length > 0) {
@@ -1024,7 +1031,7 @@ return await workflow.consumers.${run.handler_name}.prepare(__state__);
   /**
    * prepared: Decide next phase based on reservations.
    */
-  prepared: async (api: KeepDbApi, run: HandlerRun) => {
+  prepared: async (api: KeepDbApi, run: HandlerRun, context: HandlerExecutionContext) => {
     const prepareResult: PrepareResult = run.prepare_result
       ? JSON.parse(run.prepare_result)
       : { reservations: [] };
@@ -1033,6 +1040,7 @@ return await workflow.consumers.${run.handler_name}.prepare(__state__);
       // Nothing to process, skip to committed
       log(`Handler run ${run.id} (consumer): prepared → committed (no reservations)`);
       await commitConsumer(api, run, undefined);
+      context.schedulerState?.onConsumerCommit(run.workflow_id, run.handler_name);
     } else {
       // Has work to do, go to mutating
       log(`Handler run ${run.id} (consumer): prepared → mutating`);
@@ -1136,6 +1144,7 @@ return await workflow.consumers.${run.handler_name}.prepare(__state__);
       // No next handler, commit
       log(`Handler run ${run.id} (consumer): emitting → committed (no next handler)`);
       await commitConsumer(api, run, undefined);
+      context.schedulerState?.onConsumerCommit(run.workflow_id, run.handler_name);
       return;
     }
 
@@ -1171,14 +1180,14 @@ return await workflow.consumers.${run.handler_name}.prepare(__state__);
       });
 
       // Execute next handler
-      const code = `
-${script.code}
+      const code = `${script.code}
 
 return await workflow.consumers.${run.handler_name}.next(__prepared__, __mutationResult__);
 `;
       const result = await sandbox.eval(code, {
         timeoutMs: 300_000,
         signal: context.abortController?.signal,
+        filename: `consumer:${run.handler_name}:next`,
       });
 
       if (!result.ok) {
@@ -1191,6 +1200,7 @@ return await workflow.consumers.${run.handler_name}.next(__prepared__, __mutatio
 
       // Commit with new state
       await commitConsumer(api, run, result.result);
+      context.schedulerState?.onConsumerCommit(run.workflow_id, run.handler_name);
 
       // Save logs if any
       if (logs.length > 0) {
@@ -1273,14 +1283,14 @@ async function executeMutate(
     sandbox.setGlobal({ __prepared__: prepareResult });
 
     // Execute mutate handler
-    const code = `
-${script.code}
+    const code = `${script.code}
 
 return await workflow.consumers.${run.handler_name}.mutate(__prepared__);
 `;
     const result = await sandbox.eval(code, {
       timeoutMs: 300_000,
       signal: context.abortController?.signal,
+      filename: `consumer:${run.handler_name}:mutate`,
     });
 
     // Check if a mutation was created during execution (lazy creation by tool-wrapper)

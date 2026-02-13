@@ -278,8 +278,7 @@ export class Sandbox {
     if (state.type === "rejected") {
       try {
         const rejection = this.#ctx.dump(state.error);
-        const error = `${rejection.name}: '${rejection.message}' stack:\n${rejection.stack}`;
-        throw new Error(error);
+        throw new Error(formatDumpedError(rejection));
       } finally {
         state.error.dispose();
       }
@@ -566,7 +565,7 @@ export class Sandbox {
         if ("error" in callResult && callResult.error) {
           const errorValue = ctx.dump(callResult.error);
           callResult.error.dispose();
-          throw new Error(String(errorValue));
+          throw new Error(formatDumpedError(errorValue));
         }
 
         const resultHandle = (callResult as { value: QuickJSHandle }).value;
@@ -629,7 +628,7 @@ export class Sandbox {
         const error = ctx.dump(state.error);
         state.error.dispose();
         promiseHandle.dispose();
-        throw new Error(String(error));
+        throw new Error(formatDumpedError(error));
       }
 
       // Execute pending jobs
@@ -638,7 +637,7 @@ export class Sandbox {
         const errorVal = ctx.dump(execResult.error);
         execResult.error.dispose();
         promiseHandle.dispose();
-        throw new Error(String(errorVal));
+        throw new Error(formatDumpedError(errorVal));
       }
 
       // Check if we made progress
@@ -657,9 +656,31 @@ function duplicateStatic(handle: QuickJSHandle): QuickJSHandle {
 
 function renderHostErrorMessage(error: unknown): string {
   if (error instanceof Error) {
-    return error.message || error.name;
+    return error.stack || error.message || error.name;
   }
   return String(error);
+}
+
+/**
+ * Format a dumped QuickJS error value (from ctx.dump on an error handle).
+ * QuickJS errors dump as `{ name, message, stack }` objects — `String()` on
+ * these gives `[object Object]`, losing all information.
+ */
+function formatDumpedError(dumped: unknown): string {
+  if (
+    typeof dumped === "object" &&
+    dumped !== null &&
+    "message" in dumped
+  ) {
+    const err = dumped as { name?: string; message?: string; stack?: string };
+    const name = err.name || "Error";
+    const message = err.message || "";
+    if (err.stack) {
+      return `${name}: ${message}\n${err.stack}`;
+    }
+    return `${name}: ${message}`;
+  }
+  return String(dumped);
 }
 
 function isPromiseLike(value: unknown): value is Promise<unknown> {
@@ -680,7 +701,10 @@ function formatQuickJSError(error: unknown, ctx?: QuickJSContext): string {
       return dumped;
     }
 
-    return error.message ?? "QuickJS unwrap error";
+    // unwrapResult already dumps the error handle into cause as a plain object
+    // (e.g. { name: "TypeError", message: "not a function", stack: "..." }).
+    // Format that dumped object to preserve the stack trace.
+    return formatDumpedError(cause);
   }
 
   const dumped = dumpHandleIfPossible(error, ctx);
@@ -753,7 +777,7 @@ function dumpHandleIfPossible(
 
   try {
     const description = owningContext.dump(value);
-    return String(description);
+    return formatDumpedError(description);
   } finally {
     disposeIfAlive(value);
   }
