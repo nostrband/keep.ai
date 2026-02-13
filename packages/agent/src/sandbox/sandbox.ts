@@ -69,6 +69,14 @@ export class Sandbox {
   #abortedReason?: string;
   #abortedCallback?: () => void;
   #context?: EvalContext;
+  /**
+   * Track pending QuickJSDeferredPromise instances created by host→guest
+   * async function bridges.  Their resolve/reject handles are QuickJS GC
+   * objects that must be freed *before* `rt.dispose()`, otherwise the
+   * C-level assertion `list_empty(&rt->gc_obj_list)` fires an
+   * unrecoverable `abort()`.
+   */
+  #pendingDeferreds = new Set<{ dispose: () => void }>();
 
   constructor(qjs: QuickJSWASMModule, options: SandboxOptions = {}) {
     this.#rt = qjs.newRuntime();
@@ -90,6 +98,14 @@ export class Sandbox {
   }
 
   dispose(): void {
+    // Dispose pending deferreds first — their resolve/reject handles are
+    // QuickJS GC objects.  If we skip this, JS_FreeRuntime asserts and
+    // calls abort(), crashing the process.
+    for (const deferred of this.#pendingDeferreds) {
+      try { deferred.dispose(); } catch { /* already dead — ignore */ }
+    }
+    this.#pendingDeferreds.clear();
+
     this.#ctx.dispose();
     this.#rt.dispose();
     this.#abortedCallback = undefined;
@@ -502,8 +518,16 @@ export class Sandbox {
 
       if (isPromiseLike(result)) {
         const deferred = ctx.newPromise();
+        this.#pendingDeferreds.add(deferred);
+
         (result as Promise<unknown>)
           .then((resolved) => {
+            this.#pendingDeferreds.delete(deferred);
+            // Context may have been disposed while the host promise was
+            // in-flight (e.g. a script error triggered early disposal).
+            // Bail out — the deferred's handles were already cleaned up
+            // by dispose().
+            if (!ctx.alive) return;
             const resolvedHandle = this.hostValueToHandle(
               ctx,
               resolved,
@@ -516,6 +540,8 @@ export class Sandbox {
             }
           })
           .catch((reason) => {
+            this.#pendingDeferreds.delete(deferred);
+            if (!ctx.alive) return;
             const rejectionHandle = ctx.newError(
               renderHostErrorMessage(reason)
             );
@@ -528,7 +554,9 @@ export class Sandbox {
 
         // Wake the ctx up to proceed
         deferred.settled.then(() =>
-          queueMicrotask(() => this.#flushPendingJobs())
+          queueMicrotask(() => {
+            if (this.#rt.alive) this.#flushPendingJobs();
+          })
         );
 
         return deferred.handle;
