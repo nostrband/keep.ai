@@ -73,6 +73,9 @@ export class SchedulerStateManager {
   private producerStates: Map<string, Map<string, ProducerSchedulerState>> =
     new Map();
 
+  // Track which active_script_id was used to initialize each workflow
+  private workflowScriptIds: Map<string, string> = new Map();
+
   // ==================== Consumer Methods ====================
 
   /**
@@ -283,6 +286,7 @@ export class SchedulerStateManager {
   clearWorkflow(workflowId: string): void {
     this.consumerStates.delete(workflowId);
     this.producerStates.delete(workflowId);
+    this.workflowScriptIds.delete(workflowId);
     log(`Cleared all scheduler state for workflow ${workflowId}`);
   }
 
@@ -293,6 +297,7 @@ export class SchedulerStateManager {
   clearAll(): void {
     this.consumerStates.clear();
     this.producerStates.clear();
+    this.workflowScriptIds.clear();
     log("Cleared all scheduler state");
   }
 
@@ -310,16 +315,41 @@ export class SchedulerStateManager {
    */
   initializeForWorkflow(
     workflowId: string,
-    config: WorkflowConfigForScheduler
+    config: WorkflowConfigForScheduler,
+    activeScriptId?: string
   ): void {
+    // Clear old consumer/producer state before setting new ones
+    this.consumerStates.delete(workflowId);
+    this.producerStates.delete(workflowId);
+
+    // Track which script ID this state was built from
+    if (activeScriptId) {
+      this.workflowScriptIds.set(workflowId, activeScriptId);
+    }
+
     // Set all consumers dirty on deploy
     for (const consumerName of Object.keys(config.consumers)) {
       this.setConsumerDirty(workflowId, consumerName, true);
     }
     log(
       `Initialized scheduler state for workflow ${workflowId}: ` +
-        `${Object.keys(config.consumers).length} consumers set dirty`
+        `${Object.keys(config.consumers).length} consumers set dirty` +
+        (activeScriptId ? `, scriptId=${activeScriptId}` : '')
     );
+  }
+
+  /**
+   * Check if a workflow's in-memory state is stale (script changed since initialization).
+   *
+   * @param workflowId - Workflow ID
+   * @param currentActiveScriptId - The workflow's current active_script_id
+   * @returns true if the tracked script ID differs from the current one
+   */
+  isWorkflowStale(workflowId: string, currentActiveScriptId: string): boolean {
+    const trackedScriptId = this.workflowScriptIds.get(workflowId);
+    // If we never tracked a script ID, not stale (backwards compat)
+    if (!trackedScriptId) return false;
+    return trackedScriptId !== currentActiveScriptId;
   }
 
   // ==================== Debug ====================

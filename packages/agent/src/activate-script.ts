@@ -3,19 +3,21 @@
  *
  * Single function for activating a script version. Used by:
  * - handleMaintainerCompletion (after fix tool succeeds)
- * - UI "Activate" button (manual=true)
  * - Future: planner activation
  *
- * Atomically:
- * 1. Sets active_script_id, clears maintenance, resets producer schedules to now
- * 2. Updates producer schedule configs (add/remove/update) if workflowConfig provided
- * 3. Denormalizes cron to workflow for display
+ * The UI "Activate" button calls api.activateScript() directly.
+ *
+ * Atomically (via api.activateScript):
+ * 1. Reads handler_config from the script (single source of truth)
+ * 2. Sets active_script_id, handler_config, clears maintenance
+ * 3. Syncs producer schedules (add/remove/update)
+ *
+ * Then denormalizes cron to workflow for display.
  */
 
 import debug from "debug";
 import { KeepDbApi } from "@app/db";
 import { WorkflowConfig } from "./workflow-validator";
-import { updateProducerSchedules } from "./producer-schedule-init";
 import { getMostFrequentProducerCron } from "./schedule-utils";
 
 const log = debug("activate-script");
@@ -23,10 +25,8 @@ const log = debug("activate-script");
 export interface ActivateScriptParams {
   workflowId: string;
   scriptId: string;
-  /** Extracted workflow config — when provided, schedule configs are synced */
+  /** Extracted workflow config — used for cron denormalization (avoids re-parsing) */
   workflowConfig?: WorkflowConfig;
-  /** Handler config JSON to store on workflow */
-  handlerConfig?: string;
   /** Handler run ID for targeted retry */
   pendingRetryRunId?: string;
   /** Manual activation (UI) — also resets maintenance_fix_count */
@@ -36,34 +36,29 @@ export interface ActivateScriptParams {
 /**
  * Activate a script version for a workflow.
  *
- * This is the SINGLE entry point for all script activations.
- * It handles both the atomic DB operations and the schedule config sync.
+ * handler_config is always read from the script record by api.activateScript() —
+ * it is never passed as a parameter to avoid consistency issues.
  */
 export async function activateScript(
   api: KeepDbApi,
   params: ActivateScriptParams
 ): Promise<void> {
-  const { workflowId, scriptId, workflowConfig, handlerConfig, pendingRetryRunId, manual } = params;
+  const { workflowId, scriptId, workflowConfig, pendingRetryRunId, manual } = params;
 
-  // 1. Atomic DB operations: set active_script_id, clear maintenance,
-  //    set handler_config/pending_retry_run_id, reset producer schedules to now
+  // Atomic DB operations: reads handler_config from script, sets active_script_id,
+  // clears maintenance, syncs producer schedules
   await api.activateScript({
     workflowId,
     scriptId,
-    handlerConfig,
     pendingRetryRunId,
     manual,
   });
 
   log(`Activated script ${scriptId} for workflow ${workflowId}${manual ? ' (manual)' : ''}`);
 
-  // 2. Sync producer schedule configs if workflowConfig is available
-  //    This handles adding/removing/updating schedule types based on the new script
+  // Denormalize schedule info to workflow for display
   if (workflowConfig) {
     try {
-      await updateProducerSchedules(workflowId, workflowConfig, api.producerScheduleStore);
-
-      // 3. Denormalize schedule info to workflow for display
       const cron = getMostFrequentProducerCron(workflowConfig.producers);
       const nextRunAt = await api.producerScheduleStore.getNextScheduledTime(workflowId);
       await api.scriptStore.updateWorkflowFields(workflowId, {
@@ -71,7 +66,7 @@ export async function activateScript(
         next_run_timestamp: nextRunAt ? new Date(nextRunAt).toISOString() : '',
       });
     } catch (error) {
-      log(`Failed to update producer schedules for workflow ${workflowId}:`, error);
+      log(`Failed to denormalize cron for workflow ${workflowId}:`, error);
     }
   }
 }

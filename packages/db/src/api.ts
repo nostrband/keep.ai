@@ -398,11 +398,24 @@ export class KeepDbApi {
   async activateScript(params: {
     workflowId: string;
     scriptId: string;
-    handlerConfig?: string;
     pendingRetryRunId?: string;
     manual?: boolean;
   }): Promise<void> {
-    const { workflowId, scriptId, handlerConfig, pendingRetryRunId, manual } = params;
+    const { workflowId, scriptId, pendingRetryRunId, manual } = params;
+
+    // Read handler_config from the script — single source of truth for new scripts.
+    // Pre-migration scripts may not have handler_config yet; fall back to workflow's
+    // existing handler_config so we don't overwrite it with empty.
+    const script = await this.scriptStore.getScript(scriptId);
+    const scriptConfig = script?.handler_config || '';
+
+    // For schedule sync: resolve effective config before tx.
+    // If script has config, use it. Otherwise fall back to workflow's existing config.
+    let effectiveConfig = scriptConfig;
+    if (!effectiveConfig) {
+      const workflow = await this.scriptStore.getWorkflow(workflowId);
+      effectiveConfig = workflow?.handler_config || '';
+    }
 
     await this.db.db.tx(async (tx) => {
       // Build workflow field updates
@@ -411,8 +424,10 @@ export class KeepDbApi {
         maintenance: false,
       };
 
-      if (handlerConfig !== undefined) {
-        fields.handler_config = handlerConfig;
+      // Only update handler_config when script provides one.
+      // Pre-migration scripts have empty handler_config — preserve workflow's existing value.
+      if (scriptConfig) {
+        fields.handler_config = scriptConfig;
       }
 
       if (pendingRetryRunId !== undefined) {
@@ -425,8 +440,58 @@ export class KeepDbApi {
 
       await this.scriptStore.updateWorkflowFields(workflowId, fields, tx);
 
-      // Reset all producer schedules to run immediately
-      await this.producerScheduleStore.resetAllNextRunAt(workflowId, tx);
+      // Sync producer schedules with resolved config
+      if (effectiveConfig) {
+        try {
+          const config = JSON.parse(effectiveConfig);
+          const producers: Record<string, { schedule?: { interval?: string; cron?: string } }> = config.producers || {};
+          const newProducerNames = new Set(Object.keys(producers));
+
+          // Get existing schedules
+          const existing = await this.producerScheduleStore.getForWorkflow(workflowId, tx);
+
+          // Delete schedules for producers no longer in config
+          for (const schedule of existing) {
+            if (!newProducerNames.has(schedule.producer_name)) {
+              await this.producerScheduleStore.delete(workflowId, schedule.producer_name, tx);
+            }
+          }
+
+          // Upsert schedules for new/changed producers
+          const now = Date.now();
+          for (const [name, producer] of Object.entries(producers)) {
+            const schedule = producer.schedule;
+            if (!schedule) continue;
+
+            const scheduleType = schedule.interval ? 'interval' : schedule.cron ? 'cron' : null;
+            const scheduleValue = schedule.interval || schedule.cron || '';
+            if (!scheduleType || !scheduleValue) continue;
+
+            const existingSchedule = existing.find(s => s.producer_name === name);
+            if (existingSchedule &&
+                existingSchedule.schedule_type === scheduleType &&
+                existingSchedule.schedule_value === scheduleValue) {
+              // Schedule unchanged — just reset next_run_at to run immediately
+              await this.producerScheduleStore.updateAfterRun(workflowId, name, now, tx);
+            } else {
+              // New or changed schedule
+              await this.producerScheduleStore.upsert({
+                workflow_id: workflowId,
+                producer_name: name,
+                schedule_type: scheduleType as 'interval' | 'cron',
+                schedule_value: scheduleValue,
+                next_run_at: now,
+              }, tx);
+            }
+          }
+        } catch {
+          // Invalid JSON — fall back to just resetting existing schedules
+          await this.producerScheduleStore.resetAllNextRunAt(workflowId, tx);
+        }
+      } else {
+        // No config — just reset existing schedules to run immediately
+        await this.producerScheduleStore.resetAllNextRunAt(workflowId, tx);
+      }
     });
   }
 

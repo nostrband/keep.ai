@@ -8,7 +8,7 @@ import {
 import type { Sandbox } from "@app/agent";
 import * as readline from "readline";
 import debug from "debug";
-import { initSandbox, SandboxAPI } from "@app/agent";
+import { initSandbox, ToolWrapper, createTaskTools } from "@app/agent";
 import { KeepDb, KeepDbApi } from "@app/db";
 
 const debugSandbox = debug("cli:sandbox");
@@ -63,17 +63,18 @@ async function runSandboxCommand(type: string): Promise<void> {
       taskThreadId: "",
       type: taskType,
       taskRunId: "",
-      cost: 0, // Accumulated cost from tool calls
+      cost: 0,
       createEvent: async (type, content, tx) => {},
       onLog: async (line:string) => {},
     };
 
-    const sandboxApi = new SandboxAPI({ api, getContext: () => sandbox!.context!, type: taskType });
-    const gl = await sandboxApi.createGlobal();
+    const tools = createTaskTools({ api, getContext: () => sandbox!.context!, userPath });
+    const toolWrapper = new ToolWrapper({ tools, api, getContext: () => sandbox!.context! });
+    const gl = await toolWrapper.createGlobal();
     console.log("global", gl);
     sandbox.setGlobal(gl);
 
-    debugSandbox("Sandbox initialized, tools: ", sandboxApi.tools);
+    debugSandbox("Sandbox initialized, tools: ", toolWrapper.docs);
 
     let state: any | undefined;
     for await (const line of rl) {

@@ -801,7 +801,6 @@ If you cannot fix this issue autonomously, explain why without calling the \`fix
       workflowId: context.workflowId,
       scriptId: fixResult.script.id,
       workflowConfig: fixResult.workflowConfig,
-      handlerConfig: fixResult.workflowConfig ? JSON.stringify(fixResult.workflowConfig) : undefined,
       pendingRetryRunId: context.handlerRunId || '',
     });
 

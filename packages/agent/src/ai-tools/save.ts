@@ -103,6 +103,7 @@ export function makeSaveTool(opts: {
         type: "",
         summary: info.summary || "",
         diagram: info.diagram || "",
+        handler_config: workflowConfig ? JSON.stringify(workflowConfig) : "",
       };
 
       const shouldUpdateTitle = info.title && (!workflow.title || workflow.title.trim() === '');

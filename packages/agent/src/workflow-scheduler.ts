@@ -15,7 +15,7 @@ import {
 } from "./session-orchestration";
 import type { HandlerExecutionContext } from "./handler-state-machine";
 import { initializeProducerSchedules } from "./producer-schedule-init";
-import type { WorkflowConfig } from "./workflow-validator";
+import { isWorkflowFormatScript, validateWorkflowScript, type WorkflowConfig } from "./workflow-validator";
 import { SchedulerStateManager } from "./scheduler-state";
 
 export interface WorkflowSchedulerConfig {
@@ -190,6 +190,13 @@ export class WorkflowScheduler {
       this.debug("Error initializing scheduler state:", e);
     }
 
+    // Backfill handler_config for pre-migration scripts (one-time on startup)
+    try {
+      await this.backfillScriptHandlerConfigs();
+    } catch (e) {
+      this.debug("Error backfilling script handler configs:", e);
+    }
+
     // Ensure producer schedules exist for all active workflows
     try {
       await this.ensureProducerSchedules();
@@ -250,6 +257,47 @@ export class WorkflowScheduler {
   }
 
   /**
+   * Backfill handler_config for pre-migration scripts that have empty handler_config.
+   * Parses script code to extract config and saves it back to the script record.
+   * Also updates the workflow's handler_config if it's empty.
+   */
+  private async backfillScriptHandlerConfigs(): Promise<void> {
+    const allWorkflows = await this.api.scriptStore.listWorkflows(1000, 0);
+    const active = allWorkflows.filter(
+      (w) => w.status === "active" && w.active_script_id
+    );
+
+    for (const workflow of active) {
+      try {
+        const script = await this.api.scriptStore.getScript(workflow.active_script_id);
+        if (!script || script.handler_config) continue;
+
+        // Script has empty handler_config — try to parse from code
+        if (!isWorkflowFormatScript(script.code)) continue;
+
+        const validation = await validateWorkflowScript(script.code);
+        if (!validation.valid || !validation.config) continue;
+
+        const configJson = JSON.stringify(validation.config);
+
+        // Save to script record
+        await this.api.scriptStore.updateScriptHandlerConfig(script.id, configJson);
+        this.debug(`Backfilled handler_config for script ${script.id} (workflow ${workflow.title})`);
+
+        // Also fix workflow's handler_config if empty
+        if (!workflow.handler_config) {
+          await this.api.scriptStore.updateWorkflowFields(workflow.id, {
+            handler_config: configJson,
+          });
+          this.debug(`Backfilled handler_config for workflow ${workflow.id} (${workflow.title})`);
+        }
+      } catch (e) {
+        this.debug(`Failed to backfill handler_config for workflow ${workflow.id}:`, e);
+      }
+    }
+  }
+
+  /**
    * Initialize scheduler state for all active workflows on startup.
    * Sets all consumers dirty (conservative — may cause one extra prepare per consumer).
    * Loads persisted wakeAt values from DB.
@@ -264,7 +312,7 @@ export class WorkflowScheduler {
       try {
         const config: WorkflowConfig = JSON.parse(workflow.handler_config!);
         // Set all consumers dirty on startup (restart recovery)
-        this.schedulerState.initializeForWorkflow(workflow.id, config);
+        this.schedulerState.initializeForWorkflow(workflow.id, config, workflow.active_script_id);
 
         // Load persisted wakeAt values from DB
         const handlerStates = await this.api.handlerStateStore.listByWorkflow(workflow.id);
@@ -355,9 +403,34 @@ export class WorkflowScheduler {
 
       // Filter active workflows - per spec 06, only workflows with status="active" run
       // Draft ("draft"), Ready ("ready"), Paused ("paused"), and Error ("error") workflows do not run on schedule
-      const activeWorkflows = allWorkflows.filter(
-        (w) => w.status === 'active' && !w.maintenance
-      );
+      const activeWorkflows: Workflow[] = [];
+      for (const w of allWorkflows) {
+        if (w.status !== 'active' || w.maintenance) continue;
+
+        // Guard: workflows without handler_config cannot run — pause to prevent infinite loops
+        if (!w.handler_config || !w.handler_config.trim()) {
+          this.debug(`Pausing workflow ${w.id} (${w.title}): missing handler_config`);
+          await this.api.scriptStore.updateWorkflowFields(w.id, { status: 'error' });
+          try {
+            await this.api.notificationStore.saveNotification({
+              id: crypto.randomUUID(),
+              workflow_id: w.id,
+              type: 'escalated',
+              payload: JSON.stringify({
+                error_type: 'missing_config',
+                error_message: 'Workflow has no handler configuration. Re-activate the script to fix.',
+              }),
+              timestamp: new Date().toISOString(),
+              acknowledged_at: '',
+              resolved_at: '',
+              workflow_title: w.title,
+            });
+          } catch { /* notification is best-effort */ }
+          continue;
+        }
+
+        activeWorkflows.push(w);
+      }
 
       this.debug(`Found ${activeWorkflows.length} active workflows`);
 
@@ -369,11 +442,14 @@ export class WorkflowScheduler {
       // Must run before priority checks so consumers have correct dirty flags
       // when sessions execute.
       for (const workflow of activeWorkflows) {
-        if (!this.schedulerState.isWorkflowTracked(workflow.id) && workflow.handler_config) {
+        if (!workflow.handler_config) continue;
+        const needsInit = !this.schedulerState.isWorkflowTracked(workflow.id) ||
+          (workflow.active_script_id && this.schedulerState.isWorkflowStale(workflow.id, workflow.active_script_id));
+        if (needsInit) {
           try {
             const config = JSON.parse(workflow.handler_config) as WorkflowConfig;
             if (config.consumers && Object.keys(config.consumers).length > 0) {
-              this.schedulerState.initializeForWorkflow(workflow.id, config);
+              this.schedulerState.initializeForWorkflow(workflow.id, config, workflow.active_script_id);
               this.debug(`Auto-initialized scheduler state for workflow ${workflow.id} (${workflow.title})`);
             }
           } catch {

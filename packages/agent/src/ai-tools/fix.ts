@@ -76,6 +76,7 @@ export function makeFixTool(opts: {
         type: originalScript.type,
         summary: originalScript.summary,
         diagram: originalScript.diagram,
+        handler_config: workflowConfig ? JSON.stringify(workflowConfig) : '',
       };
 
       await opts.scriptStore.addScript(newScript);

@@ -25,6 +25,7 @@ import {
 import {
   ClassifiedError,
   LogicError,
+  InternalError,
   ErrorType,
 } from "./errors";
 import { getRunStatusForError, isDefiniteFailure } from "./failure-handling";
@@ -874,6 +875,21 @@ const producerPhaseHandlers: Record<string, PhaseHandler> = {
       throw new LogicError(`No active script for workflow ${run.workflow_id}`);
     }
 
+    // Pre-flight check: verify handler exists in active script's config
+    if (workflow.handler_config) {
+      try {
+        const config = JSON.parse(workflow.handler_config) as WorkflowConfig;
+        if (config.producers && !config.producers[run.handler_name]) {
+          throw new InternalError(
+            `Handler '${run.handler_name}' not found in active script — configuration mismatch`
+          );
+        }
+      } catch (e) {
+        if (e instanceof InternalError) throw e;
+        // Invalid JSON config — skip check, let execution proceed
+      }
+    }
+
     const prevState = await api.handlerStateStore.get(
       workflow.id,
       run.handler_name
@@ -960,6 +976,21 @@ const consumerPhaseHandlers: Record<string, PhaseHandler> = {
       : null;
     if (!script) {
       throw new LogicError(`No active script for workflow ${run.workflow_id}`);
+    }
+
+    // Pre-flight check: verify handler exists in active script's config
+    if (workflow.handler_config) {
+      try {
+        const config = JSON.parse(workflow.handler_config) as WorkflowConfig;
+        if (config.consumers && !config.consumers[run.handler_name]) {
+          throw new InternalError(
+            `Handler '${run.handler_name}' not found in active script — configuration mismatch`
+          );
+        }
+      } catch (e) {
+        if (e instanceof InternalError) throw e;
+        // Invalid JSON config — skip check, let execution proceed
+      }
     }
 
     const prevState = await api.handlerStateStore.get(

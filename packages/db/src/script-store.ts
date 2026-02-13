@@ -42,6 +42,7 @@ export interface Script {
   type: string;
   summary: string;
   diagram: string;
+  handler_config: string;
 }
 
 /**
@@ -118,9 +119,18 @@ export class ScriptStore {
   async addScript(script: Script, tx?: DBInterface): Promise<void> {
     const db = tx || this.db.db;
     await db.exec(
-      `INSERT INTO scripts (id, task_id, major_version, minor_version, timestamp, code, change_comment, workflow_id, type, summary, diagram)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [script.id, script.task_id, script.major_version, script.minor_version, script.timestamp, script.code, script.change_comment, script.workflow_id, script.type, script.summary, script.diagram]
+      `INSERT INTO scripts (id, task_id, major_version, minor_version, timestamp, code, change_comment, workflow_id, type, summary, diagram, handler_config)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [script.id, script.task_id, script.major_version, script.minor_version, script.timestamp, script.code, script.change_comment, script.workflow_id, script.type, script.summary, script.diagram, script.handler_config || '']
+    );
+  }
+
+  // Update handler_config for a script (used by backfill for pre-migration scripts)
+  async updateScriptHandlerConfig(id: string, handlerConfig: string, tx?: DBInterface): Promise<void> {
+    const db = tx || this.db.db;
+    await db.exec(
+      `UPDATE scripts SET handler_config = ? WHERE id = ?`,
+      [handlerConfig, id]
     );
   }
 
@@ -128,7 +138,7 @@ export class ScriptStore {
   async getScript(id: string, tx?: DBInterface): Promise<Script | null> {
     const db = tx || this.db.db;
     const results = await db.execO<Record<string, unknown>>(
-      `SELECT id, task_id, major_version, minor_version, timestamp, code, change_comment, workflow_id, type, summary, diagram
+      `SELECT id, task_id, major_version, minor_version, timestamp, code, change_comment, workflow_id, type, summary, diagram, handler_config
        FROM scripts
        WHERE id = ?`,
       [id]
@@ -151,6 +161,7 @@ export class ScriptStore {
       type: row.type as string,
       summary: row.summary as string,
       diagram: row.diagram as string,
+      handler_config: (row.handler_config as string) || '',
     };
   }
 
@@ -160,7 +171,7 @@ export class ScriptStore {
     limit: number = 100,
     offset: number = 0
   ): Promise<Script[]> {
-    let sql = `SELECT id, task_id, major_version, minor_version, timestamp, code, change_comment, workflow_id, type, summary, diagram
+    let sql = `SELECT id, task_id, major_version, minor_version, timestamp, code, change_comment, workflow_id, type, summary, diagram, handler_config
                FROM scripts`;
     const args: (string | number)[] = [];
 
@@ -190,6 +201,7 @@ export class ScriptStore {
       type: row.type as string,
       summary: row.summary as string,
       diagram: row.diagram as string,
+      handler_config: (row.handler_config as string) || '',
     }));
   }
 
@@ -202,7 +214,7 @@ export class ScriptStore {
     // Use a subquery to find the max (major_version, minor_version) tuple for each task_id
     // SQLite doesn't have tuple comparison, so we use a composite key approach
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT s.id, s.task_id, s.major_version, s.minor_version, s.timestamp, s.code, s.change_comment, s.workflow_id, s.type, s.summary, s.diagram
+      `SELECT s.id, s.task_id, s.major_version, s.minor_version, s.timestamp, s.code, s.change_comment, s.workflow_id, s.type, s.summary, s.diagram, s.handler_config
        FROM scripts s
        INNER JOIN (
          SELECT task_id, MAX(major_version * 1000000 + minor_version) as max_composite
@@ -228,13 +240,14 @@ export class ScriptStore {
       type: row.type as string,
       summary: row.summary as string,
       diagram: row.diagram as string,
+      handler_config: (row.handler_config as string) || '',
     }));
   }
 
   // Get scripts by task_id ordered by version (ascending)
   async getScriptsByTaskId(task_id: string): Promise<Script[]> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, task_id, major_version, minor_version, timestamp, code, change_comment, workflow_id, type, summary, diagram
+      `SELECT id, task_id, major_version, minor_version, timestamp, code, change_comment, workflow_id, type, summary, diagram, handler_config
        FROM scripts
        WHERE task_id = ?
        ORDER BY major_version ASC, minor_version ASC`,
@@ -255,13 +268,14 @@ export class ScriptStore {
       type: row.type as string,
       summary: row.summary as string,
       diagram: row.diagram as string,
+      handler_config: (row.handler_config as string) || '',
     }));
   }
 
   // Get the latest script version for a task
   async getLatestScriptByTaskId(task_id: string): Promise<Script | null> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, task_id, major_version, minor_version, timestamp, code, change_comment, workflow_id, type, summary, diagram
+      `SELECT id, task_id, major_version, minor_version, timestamp, code, change_comment, workflow_id, type, summary, diagram, handler_config
        FROM scripts
        WHERE task_id = ?
        ORDER BY major_version DESC, minor_version DESC
@@ -286,13 +300,14 @@ export class ScriptStore {
       type: row.type as string,
       summary: row.summary as string,
       diagram: row.diagram as string,
+      handler_config: (row.handler_config as string) || '',
     };
   }
 
   // Get scripts by workflow_id
   async getScriptsByWorkflowId(workflow_id: string): Promise<Script[]> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, task_id, major_version, minor_version, timestamp, code, change_comment, workflow_id, type, summary, diagram
+      `SELECT id, task_id, major_version, minor_version, timestamp, code, change_comment, workflow_id, type, summary, diagram, handler_config
        FROM scripts
        WHERE workflow_id = ?
        ORDER BY major_version DESC, minor_version DESC`,
@@ -313,6 +328,7 @@ export class ScriptStore {
       type: row.type as string,
       summary: row.summary as string,
       diagram: row.diagram as string,
+      handler_config: (row.handler_config as string) || '',
     }));
   }
 
@@ -590,7 +606,7 @@ export class ScriptStore {
   // Get the latest script version for a workflow
   async getLatestScriptByWorkflowId(workflow_id: string): Promise<Script | null> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, task_id, major_version, minor_version, timestamp, code, change_comment, workflow_id, type, summary, diagram
+      `SELECT id, task_id, major_version, minor_version, timestamp, code, change_comment, workflow_id, type, summary, diagram, handler_config
        FROM scripts
        WHERE workflow_id = ?
        ORDER BY major_version DESC, minor_version DESC
@@ -615,6 +631,7 @@ export class ScriptStore {
       type: row.type as string,
       summary: row.summary as string,
       diagram: row.diagram as string,
+      handler_config: (row.handler_config as string) || '',
     };
   }
 
@@ -1163,7 +1180,7 @@ export class ScriptStore {
     major_version: number
   ): Promise<Script | null> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, task_id, major_version, minor_version, timestamp, code, change_comment, workflow_id, type, summary, diagram
+      `SELECT id, task_id, major_version, minor_version, timestamp, code, change_comment, workflow_id, type, summary, diagram, handler_config
        FROM scripts
        WHERE workflow_id = ? AND major_version = ?
        ORDER BY minor_version DESC
@@ -1188,6 +1205,7 @@ export class ScriptStore {
       type: row.type as string,
       summary: row.summary as string,
       diagram: row.diagram as string,
+      handler_config: (row.handler_config as string) || '',
     };
   }
 
@@ -1218,7 +1236,7 @@ export class ScriptStore {
     major_version: number
   ): Promise<Script[]> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, task_id, major_version, minor_version, timestamp, code, change_comment, workflow_id, type, summary, diagram
+      `SELECT id, task_id, major_version, minor_version, timestamp, code, change_comment, workflow_id, type, summary, diagram, handler_config
        FROM scripts
        WHERE workflow_id = ? AND major_version = ?
        ORDER BY minor_version DESC`,
@@ -1239,6 +1257,7 @@ export class ScriptStore {
       type: row.type as string,
       summary: row.summary as string,
       diagram: row.diagram as string,
+      handler_config: (row.handler_config as string) || '',
     }));
   }
 }

@@ -154,9 +154,6 @@ export {
   type SessionConfig,
 } from "./session-orchestration";
 
-/** @deprecated Use ToolWrapper from './sandbox/tool-wrapper' instead */
-export { SandboxAPI } from "./sandbox/api";
-
 export { AgentEnv as ReplEnv } from "./agent-env";
 
 // Error classification system

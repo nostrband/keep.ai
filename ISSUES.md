@@ -2,6 +2,7 @@
 
 ISSUES:
 - remove sandboxapi
+- add reviewer pass after planner returns if 'save' was called in the last step, make it validate all coding guidelines (no care about intent, find errors that violate our framework that static analysis can't find...) - hmm, maybe this isn't reviewer, it's validator? maybe 'save'/'fix' should do it? makes sense
 - Show diff should also expand the comment to view long ones untruncated
 - remove auto-fix task list from workflow page, make script version link to task that created it, then in script version history add a button to open the LLM task/thread 
 - show like 3 last script runs and 'more' button opening page with pagination
