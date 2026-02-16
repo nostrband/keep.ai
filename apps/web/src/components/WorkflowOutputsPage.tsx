@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { useWorkflow } from "../hooks/dbScriptReads";
 import { useWorkflowMutations } from "../hooks/dbInputReads";
+import { useResolveMutation } from "../hooks/dbWrites";
 import SharedHeader from "./SharedHeader";
 import { Badge, Button } from "../ui";
 import { getWorkflowTitle } from "../lib/workflowUtils";
@@ -96,6 +97,7 @@ export default function WorkflowOutputsPage() {
 
   const { data: workflow, isLoading: isLoadingWorkflow } = useWorkflow(workflowId!);
   const { data: mutations = [], isLoading: isLoadingMutations } = useWorkflowMutations(workflowId!);
+  const resolveMutation = useResolveMutation();
 
   // Filter to only completed mutations (not pending/in_flight)
   const completedMutations = useMemo(
@@ -263,11 +265,39 @@ export default function WorkflowOutputsPage() {
                             {mutation.error}
                           </p>
                         )}
-                        {/* Show warning for indeterminate mutations */}
+                        {/* Show warning + action buttons for indeterminate mutations */}
                         {mutation.status === "indeterminate" && (
-                          <p className="text-sm text-amber-600 mt-2">
-                            Uncertain outcome - needs verification
-                          </p>
+                          <div className="mt-2">
+                            <p className="text-sm text-amber-600">
+                              Uncertain outcome - needs verification
+                            </p>
+                            <div className="flex gap-2 mt-2">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="cursor-pointer text-xs border-red-300 text-red-700 hover:bg-red-50"
+                                disabled={resolveMutation.isPending}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  resolveMutation.mutate({ mutation, action: "did_not_happen" });
+                                }}
+                              >
+                                It didn't happen
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="cursor-pointer text-xs border-amber-300 text-amber-700 hover:bg-amber-50"
+                                disabled={resolveMutation.isPending}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  resolveMutation.mutate({ mutation, action: "skip" });
+                                }}
+                              >
+                                Skip
+                              </Button>
+                            </div>
+                          </div>
                         )}
                       </div>
                     </div>

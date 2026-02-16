@@ -882,17 +882,8 @@ export async function createServer(config: ServerConfig = {}) {
 
   app.get("/api/get_config", async (request, reply) => {
     const currentEnv = getEnv();
-    // Redact sensitive API keys before sending to client
-    const redactedEnv = {
-      ...currentEnv,
-      OPENROUTER_API_KEY: currentEnv.OPENROUTER_API_KEY
-        ? "••••" + currentEnv.OPENROUTER_API_KEY.slice(-4)
-        : undefined,
-      EXA_API_KEY: currentEnv.EXA_API_KEY
-        ? "••••" + currentEnv.EXA_API_KEY.slice(-4)
-        : undefined,
-    };
-    return reply.send({ env: redactedEnv });
+    // API keys are sent as-is — the UI uses type="password" inputs for masking
+    return reply.send({ env: currentEnv });
   });
 
   app.post("/api/set_config", async (request, reply) => {

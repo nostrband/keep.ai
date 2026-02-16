@@ -205,16 +205,20 @@ export class ReconciliationScheduler {
    * Handle exhausted reconciliation attempts.
    */
   private async handleExhausted(mutation: Mutation): Promise<void> {
-    await this.api.mutationStore.markIndeterminate(
-      mutation.id,
-      `Reconciliation exhausted after ${mutation.reconcile_attempts} attempts`
-    );
-
-    // Pause the workflow - needs user resolution
-    await this.api.scriptStore.updateWorkflowFields(mutation.workflow_id, {
-      status: "paused",
+    // Atomic: mark indeterminate + set pending_retry_run_id + pause workflow
+    // pending_retry_run_id must be set atomically when marking indeterminate
+    await this.api.db.db.tx(async (tx: any) => {
+      await this.api.mutationStore.markIndeterminate(
+        mutation.id,
+        `Reconciliation exhausted after ${mutation.reconcile_attempts} attempts`,
+        tx
+      );
+      await this.api.scriptStore.updateWorkflowFields(mutation.workflow_id, {
+        status: "paused",
+        pending_retry_run_id: mutation.handler_run_id,
+      }, tx);
     });
-    log(`Workflow ${mutation.workflow_id} paused due to exhausted reconciliation`);
+    log(`Workflow ${mutation.workflow_id} paused due to exhausted reconciliation, pending_retry_run_id set`);
   }
 
   /**

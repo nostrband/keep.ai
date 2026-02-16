@@ -450,7 +450,9 @@ async function pauseRunForIndeterminate(
   run: HandlerRun,
   reason: string
 ): Promise<void> {
-  // Atomic: pause handler run + workflow in a single transaction
+  // Atomic: pause handler run + set pending_retry_run_id + pause workflow
+  // pending_retry_run_id must be set atomically when marking indeterminate
+  // so the scheduler can find the orphaned run when the user resolves.
   await api.db.db.tx(async (tx: DBInterface) => {
     await api.handlerRunStore.update(run.id, {
       status: "paused:reconciliation" as RunStatus,
@@ -459,10 +461,11 @@ async function pauseRunForIndeterminate(
     }, tx);
     await api.scriptStore.updateWorkflowFields(run.workflow_id, {
       status: "paused",
+      pending_retry_run_id: run.id,
     }, tx);
   });
   log(`Handler run ${run.id} paused:reconciliation: ${reason}`);
-  log(`Workflow ${run.workflow_id} paused due to indeterminate mutation`);
+  log(`Workflow ${run.workflow_id} paused due to indeterminate mutation, pending_retry_run_id set`);
 }
 
 // ============================================================================

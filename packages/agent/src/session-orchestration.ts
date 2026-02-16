@@ -670,9 +670,10 @@ async function continueSession(
  *
  * 1. Finds all workflows with incomplete handler runs (status='active')
  * 2. Skips paused/error workflows (they need user attention)
- * 3. For each incomplete run:
- *    a. In-flight mutation → mark indeterminate, pause workflow (same as before)
- *    b. All other cases → ATOMIC: mark crashed + close session + set pending_retry_run_id
+ * 3. For each incomplete run, applies the mutation-boundary invariant:
+ *    a. In-flight mutation → mark indeterminate + set pending_retry_run_id + pause workflow
+ *    b. Post-mutation (mutated/emitting) → mark crashed + set pending_retry_run_id
+ *    c. Pre-mutation (preparing/prepared/mutating with failed) → mark crashed, NO pending_retry
  * 4. Return — scheduler handles retry via retryWorkflowSession()
  *
  * Note: createRetryRun() is NOT removed from handler-state-machine.ts — it's
@@ -707,32 +708,54 @@ export async function resumeIncompleteSessions(
     for (const run of incompleteRuns) {
       log(`Processing crashed run ${run.id} (${run.handler_type}:${run.handler_name} in phase ${run.phase})`);
 
-      // Check for in-flight mutation (indeterminate state)
+      // Determine if this run crossed the mutation boundary.
+      // The critical boundary is mutation application:
+      // - Pre-mutation (preparing, prepared, mutating with failed/pending/no mutation):
+      //   fresh start is fine, no pending_retry needed, events can be released.
+      // - Indeterminate (mutating with in_flight/indeterminate/needs_reconcile/applied mutation):
+      //   must set pending_retry, events must NOT be released.
+      // - Post-mutation (mutated, emitting):
+      //   must set pending_retry, events must NOT be released, retry copies results.
+
+      const needsPendingRetry = await (async () => {
+        if (run.phase === "mutated" || run.phase === "emitting") return true;
+        if (run.phase === "mutating") {
+          const mutation = await api.mutationStore.getByHandlerRunId(run.id);
+          if (mutation && mutation.status !== "failed" && mutation.status !== "pending") return true;
+        }
+        return false;
+      })();
+
+      // Path A: Indeterminate mutation (mutating + in_flight)
       if (run.phase === "mutating") {
         const mutation = await api.mutationStore.getByHandlerRunId(run.id);
         if (mutation?.status === "in_flight") {
-          // Uncertain outcome - mark indeterminate, don't auto-retry
-          log(`Run ${run.id} has in_flight mutation - marking indeterminate, no auto-retry`);
-          await api.mutationStore.markIndeterminate(
-            mutation.id,
-            "Mutation was in_flight at restart - outcome uncertain"
-          );
-          // Mark run as paused for reconciliation
-          await api.handlerRunStore.update(run.id, {
-            status: "paused:reconciliation",
-            error: "Mutation outcome uncertain - requires user verification",
-            end_timestamp: new Date().toISOString(),
+          // Uncertain outcome - mark indeterminate, set pending_retry, pause workflow
+          log(`Run ${run.id} has in_flight mutation - marking indeterminate`);
+          await api.db.db.tx(async (tx: DBInterface) => {
+            await api.mutationStore.markIndeterminate(
+              mutation.id,
+              "Mutation was in_flight at restart - outcome uncertain",
+              tx
+            );
+            await api.handlerRunStore.update(run.id, {
+              status: "paused:reconciliation",
+              error: "Mutation outcome uncertain - requires user verification",
+              end_timestamp: new Date().toISOString(),
+            }, tx);
+            await api.scriptStore.updateWorkflowFields(workflowId, {
+              status: "paused",
+              pending_retry_run_id: run.id,
+            }, tx);
           });
-          // Per exec-14: Also pause the workflow so scheduler doesn't pick it up
-          await api.scriptStore.updateWorkflowFields(workflowId, {
-            status: "paused",
-          });
-          log(`Workflow ${workflowId} paused due to indeterminate mutation`);
+          log(`Workflow ${workflowId} paused due to indeterminate mutation, pending_retry_run_id set`);
           continue;
         }
       }
 
-      // ATOMIC: mark run crashed + close session + set pending_retry_run_id
+      // Path B & C: Mark crashed + close session
+      // Only set pending_retry_run_id for post-mutation phases (mutated/emitting)
+      // or mutating with non-failed mutation.
       try {
         await api.db.db.tx(async (tx: DBInterface) => {
           // Mark run as crashed
@@ -761,13 +784,15 @@ export async function resumeIncompleteSessions(
             );
           }
 
-          // Set pending_retry_run_id for scheduler pickup
-          await api.scriptStore.updateWorkflowFields(workflowId, {
-            pending_retry_run_id: run.id,
-          }, tx);
+          // Only set pending_retry_run_id when mutation boundary was crossed
+          if (needsPendingRetry) {
+            await api.scriptStore.updateWorkflowFields(workflowId, {
+              pending_retry_run_id: run.id,
+            }, tx);
+          }
         });
 
-        log(`Marked run ${run.id} as crashed, set pending_retry_run_id for scheduler`);
+        log(`Marked run ${run.id} as crashed${needsPendingRetry ? ', set pending_retry_run_id' : ', no pending_retry (pre-mutation)'}`);
       } catch (error) {
         log(`Failed to process crashed run ${run.id}: ${error}`);
         // Best-effort: mark the run as crashed even if the tx failed

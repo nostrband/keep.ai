@@ -376,14 +376,24 @@ export class EventStore {
     const db = tx || this.db.db;
     const now = Date.now();
 
-    // Release events reserved by runs that are terminal or no longer exist
+    // Release events reserved by runs that are terminal or no longer exist.
+    // Phase-based invariant: do NOT release events if the mutation might have
+    // or did happen (mutated/emitting phase, or mutating with non-failed mutation).
     const reserved = await db.execO<{ count: number }>(
       `SELECT COUNT(*) as count FROM events e
        WHERE e.status = 'reserved'
        AND NOT EXISTS (
          SELECT 1 FROM handler_runs h
          WHERE h.id = e.reserved_by_run_id
-         AND h.status = 'active'
+         AND (
+           h.status = 'active'
+           OR h.phase IN ('mutated', 'emitting')
+           OR (h.phase = 'mutating' AND EXISTS (
+             SELECT 1 FROM mutations m
+             WHERE m.handler_run_id = h.id
+             AND m.status NOT IN ('failed', 'pending')
+           ))
+         )
        )`
     );
     const count = reserved?.[0]?.count ?? 0;
@@ -396,7 +406,15 @@ export class EventStore {
        AND NOT EXISTS (
          SELECT 1 FROM handler_runs h
          WHERE h.id = events.reserved_by_run_id
-         AND h.status = 'active'
+         AND (
+           h.status = 'active'
+           OR h.phase IN ('mutated', 'emitting')
+           OR (h.phase = 'mutating' AND EXISTS (
+             SELECT 1 FROM mutations m
+             WHERE m.handler_run_id = h.id
+             AND m.status NOT IN ('failed', 'pending')
+           ))
+         )
        )`,
       [now]
     );

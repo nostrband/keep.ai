@@ -429,6 +429,14 @@ export class WorkflowScheduler {
           continue;
         }
 
+        // Guard: workflows with indeterminate mutations must not run — re-pause
+        const indeterminate = await this.api.mutationStore.getByWorkflow(w.id, { status: "indeterminate" });
+        if (indeterminate.length > 0) {
+          this.debug(`Workflow ${w.id} has indeterminate mutations, re-pausing`);
+          await this.api.scriptStore.updateWorkflowFields(w.id, { status: 'paused' });
+          continue;
+        }
+
         activeWorkflows.push(w);
       }
 

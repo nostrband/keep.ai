@@ -187,14 +187,11 @@ export {
   type ClassifiedResult,
 } from "./failure-handling";
 
-// Indeterminate mutation resolution (exec-14)
+// Indeterminate mutation utilities (exec-14)
 export {
-  resolveIndeterminateMutation,
   getMutationResultForNext,
   getIndeterminateMutations,
   getIndeterminateMutationsForWorkflow,
-  type IndeterminateResolution,
-  type ResolutionResult,
   type MutationResult,
 } from "./indeterminate-resolution";
 

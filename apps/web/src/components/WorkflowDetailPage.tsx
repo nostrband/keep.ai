@@ -39,6 +39,7 @@ export default function WorkflowDetailPage() {
   const { data: scriptVersions = [], isLoading: isLoadingVersions } = useScriptVersionsByWorkflowId(id!);
   const { data: unresolvedError } = useUnresolvedWorkflowError(id!);
   const { data: pendingReconciliation = [] } = usePendingReconciliation(id!);
+  const hasIndeterminate = pendingReconciliation.some((m: any) => m.status === "indeterminate");
   const { data: maintainerTasks = [] } = useMaintainerTasks(id!);
   const success = useAutoHidingMessage({ duration: 3000 });
   const warning = useAutoHidingMessage({ duration: 5000 });
@@ -339,14 +340,24 @@ export default function WorkflowDetailPage() {
                       </Button>
                     )}
                     {(workflow.status === "paused" || workflow.status === "error") && (
-                      <Button
-                        onClick={handleResume}
-                        disabled={updateWorkflowMutation.isPending}
-                        size="sm"
-                        className="cursor-pointer bg-green-600 hover:bg-green-700 text-white"
-                      >
-                        Resume
-                      </Button>
+                      hasIndeterminate ? (
+                        <Button
+                          onClick={() => navigate(`/workflow/${workflow.id}/outputs?filter=indeterminate`)}
+                          size="sm"
+                          className="cursor-pointer bg-amber-600 hover:bg-amber-700 text-white"
+                        >
+                          Resolve
+                        </Button>
+                      ) : (
+                        <Button
+                          onClick={handleResume}
+                          disabled={updateWorkflowMutation.isPending}
+                          size="sm"
+                          className="cursor-pointer bg-green-600 hover:bg-green-700 text-white"
+                        >
+                          Resume
+                        </Button>
+                      )
                     )}
 
                     {/* Secondary actions: Run now, Test run, Edit */}

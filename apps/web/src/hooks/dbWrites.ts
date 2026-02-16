@@ -4,6 +4,7 @@ import { notifyTablesChanged, queryClient } from "../queryClient";
 import { qk } from "./queryKeys";
 import { useDbQuery } from "./dbQuery";
 import { File } from "@app/db";
+import type { Mutation } from "@app/db";
 
 export function useCreateTask() {
   const { api } = useDbQuery();
@@ -313,6 +314,87 @@ export function useDisconnectConnection(apiEndpoint: string) {
       if (api) {
         notifyTablesChanged(["connections"], true, api);
       }
+    },
+  });
+}
+
+/**
+ * Resolve an indeterminate mutation.
+ *
+ * Two actions:
+ * - "did_not_happen": Mark mutation failed, release events, clear pending_retry
+ * - "skip": Mark mutation failed (skipped), skip events, commit run, clear pending_retry
+ *
+ * Neither action auto-resumes the workflow — user must manually resume.
+ */
+export function useResolveMutation() {
+  const { api } = useDbQuery();
+
+  return useMutation({
+    mutationFn: async (input: {
+      mutation: Mutation;
+      action: "did_not_happen" | "skip";
+    }) => {
+      if (!api) throw new Error("Database not available");
+
+      const { mutation, action } = input;
+      const run = await api.handlerRunStore.get(mutation.handler_run_id);
+      if (!run) throw new Error("Handler run not found");
+
+      const now = Date.now();
+      const endTimestamp = new Date().toISOString();
+
+      await api.db.db.tx(async (tx: any) => {
+        if (action === "did_not_happen") {
+          // User confirms mutation did not complete
+          await api.mutationStore.update(mutation.id, {
+            status: "failed",
+            resolved_by: "user_assert_failed",
+            resolved_at: now,
+          }, tx);
+          await api.handlerRunStore.update(run.id, {
+            status: "failed:logic" as any,
+            error: "User confirmed mutation did not complete",
+            end_timestamp: endTimestamp,
+          }, tx);
+          // Release reserved events — mutation didn't happen, events can be reprocessed
+          await api.eventStore.releaseEvents(run.id, tx);
+          // Clear pending retry — no retry needed for failed mutation
+          await api.scriptStore.updateWorkflowFields(run.workflow_id, {
+            pending_retry_run_id: '',
+          }, tx);
+        } else {
+          // User wants to skip this event
+          await api.mutationStore.update(mutation.id, {
+            status: "failed",
+            resolved_by: "user_skip",
+            resolved_at: now,
+          }, tx);
+          // Skip events — mark as skipped (not reprocessed)
+          await api.eventStore.skipEvents(run.id, tx);
+          // Mark run as committed (event processed, even though mutation was skipped)
+          await api.handlerRunStore.update(run.id, {
+            phase: "committed" as any,
+            status: "committed" as any,
+            error: "",
+            end_timestamp: endTimestamp,
+          }, tx);
+          await api.scriptStore.incrementHandlerCount(run.script_run_id, tx);
+          // Clear pending retry
+          await api.scriptStore.updateWorkflowFields(run.workflow_id, {
+            pending_retry_run_id: '',
+          }, tx);
+        }
+      });
+
+      return { action, mutationId: mutation.id };
+    },
+    onSuccess: () => {
+      notifyTablesChanged(
+        ["mutations", "handler_runs", "workflows", "events"],
+        true,
+        api!
+      );
     },
   });
 }
