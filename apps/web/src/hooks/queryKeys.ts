@@ -88,4 +88,15 @@ export const qk = {
   inputEvents: (inputId: string) => [{ scope: "inputEvents", inputId }] as const,
   workflowMutations: (workflowId: string) => [{ scope: "workflowMutations", workflowId }] as const,
   pendingReconciliation: (workflowId: string) => [{ scope: "pendingReconciliation", workflowId }] as const,
+
+  // Topic queries
+  workflowTopics: (workflowId: string) => [{ scope: "workflowTopics", workflowId }] as const,
+
+  // Handler run queries
+  handlerRunsBySession: (scriptRunId: string) => [{ scope: "handlerRunsBySession", scriptRunId }] as const,
+  handlerRun: (handlerRunId: string) => [{ scope: "handlerRun", handlerRunId }] as const,
+  handlerRunRetryChain: (handlerRunId: string) => [{ scope: "handlerRunRetryChain", handlerRunId }] as const,
+  mutationByHandlerRun: (handlerRunId: string) => [{ scope: "mutationByHandlerRun", handlerRunId }] as const,
+  eventsByHandlerRun: (handlerRunId: string) => [{ scope: "eventsByHandlerRun", handlerRunId }] as const,
+  eventCountsBySession: (scriptRunId: string) => [{ scope: "eventCountsBySession", scriptRunId }] as const,
 };

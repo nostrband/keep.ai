@@ -1,5 +1,6 @@
 import React from "react";
 import { Badge } from "../ui";
+import type { RunStatus } from "@app/db";
 
 // Workflow status badge - based on workflow.status field
 // Status values: 'draft', 'ready', 'active', 'paused', 'error', 'archived' (Spec 11)
@@ -72,5 +73,29 @@ export function ScriptRunStatusBadge({
     return <Badge variant="default" className={`bg-green-100 text-green-800 ${sizeClass}`}>{labels.success}</Badge>;
   } else {
     return <Badge variant="secondary" className={sizeClass}>{labels.running}</Badge>;
+  }
+}
+
+// Handler run status badge - based on RunStatus
+export function HandlerRunStatusBadge({ status }: { status: RunStatus }) {
+  switch (status) {
+    case "committed":
+      return <Badge className="bg-green-50 text-green-700 border border-green-300">committed</Badge>;
+    case "active":
+      return <Badge className="bg-blue-50 text-blue-700 border border-blue-300">active</Badge>;
+    case "paused:transient":
+      return <Badge className="bg-yellow-50 text-yellow-700 border border-yellow-300">paused:transient</Badge>;
+    case "paused:approval":
+      return <Badge className="bg-amber-50 text-amber-700 border border-amber-300">paused:approval</Badge>;
+    case "paused:reconciliation":
+      return <Badge className="bg-amber-50 text-amber-700 border border-amber-300">paused:reconciliation</Badge>;
+    case "failed:logic":
+      return <Badge className="bg-red-50 text-red-700 border border-red-300">failed:logic</Badge>;
+    case "failed:internal":
+      return <Badge className="bg-red-50 text-red-700 border border-red-300">failed:internal</Badge>;
+    case "crashed":
+      return <Badge className="bg-red-50 text-red-700 border border-red-300">crashed</Badge>;
+    default:
+      return <Badge variant="outline">{status}</Badge>;
   }
 }

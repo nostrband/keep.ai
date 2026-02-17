@@ -632,6 +632,74 @@ export class EventStore {
   }
 
   /**
+   * Get events associated with a handler run (created by or reserved by).
+   * Returns events ordered by created_at ASC.
+   */
+  async getByHandlerRunId(
+    handlerRunId: string,
+    tx?: DBInterface
+  ): Promise<{ created: Event[]; reserved: Event[] }> {
+    const db = tx || this.db.db;
+
+    const createdResults = await db.execO<Record<string, unknown>>(
+      `SELECT * FROM events WHERE created_by_run_id = ? ORDER BY created_at`,
+      [handlerRunId]
+    );
+
+    const reservedResults = await db.execO<Record<string, unknown>>(
+      `SELECT * FROM events WHERE reserved_by_run_id = ? ORDER BY created_at`,
+      [handlerRunId]
+    );
+
+    return {
+      created: (createdResults || []).map((row) => this.mapRowToEvent(row)),
+      reserved: (reservedResults || []).map((row) => this.mapRowToEvent(row)),
+    };
+  }
+
+  /**
+   * Get event counts grouped by handler run IDs.
+   * Returns created count (events published by run) and consumed count
+   * (events reserved/consumed by run) for each handler run.
+   */
+  async getCountsByHandlerRunIds(
+    handlerRunIds: string[],
+    tx?: DBInterface
+  ): Promise<Record<string, { created: number; consumed: number }>> {
+    if (handlerRunIds.length === 0) return {};
+    const db = tx || this.db.db;
+
+    const placeholders = handlerRunIds.map(() => "?").join(", ");
+
+    const createdRows = await db.execO<{ run_id: string; cnt: number }>(
+      `SELECT created_by_run_id as run_id, COUNT(*) as cnt
+       FROM events WHERE created_by_run_id IN (${placeholders})
+       GROUP BY created_by_run_id`,
+      handlerRunIds
+    );
+
+    const consumedRows = await db.execO<{ run_id: string; cnt: number }>(
+      `SELECT reserved_by_run_id as run_id, COUNT(*) as cnt
+       FROM events WHERE reserved_by_run_id IN (${placeholders})
+       GROUP BY reserved_by_run_id`,
+      handlerRunIds
+    );
+
+    const result: Record<string, { created: number; consumed: number }> = {};
+    for (const id of handlerRunIds) {
+      result[id] = { created: 0, consumed: 0 };
+    }
+    for (const row of createdRows || []) {
+      if (result[row.run_id]) result[row.run_id].created = row.cnt;
+    }
+    for (const row of consumedRows || []) {
+      if (result[row.run_id]) result[row.run_id].consumed = row.cnt;
+    }
+
+    return result;
+  }
+
+  /**
    * Delete all events for a topic.
    */
   async deleteByTopic(topicId: string, tx?: DBInterface): Promise<void> {

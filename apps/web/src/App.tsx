@@ -19,6 +19,7 @@ import TaskRunDetailPage from "./components/TaskRunDetailPage";
 import ScriptsPage from "./components/ScriptsPage";
 import ScriptDetailPage from "./components/ScriptDetailPage";
 import ScriptRunDetailPage from "./components/ScriptRunDetailPage";
+import HandlerRunDetailPage from "./components/HandlerRunDetailPage";
 import WorkflowsPage from "./components/WorkflowsPage";
 import WorkflowDetailPage from "./components/WorkflowDetailPage";
 import WorkflowInputsPage from "./components/WorkflowInputsPage";
@@ -367,6 +368,7 @@ function App() {
         <Route path="/scripts" element={<ScriptsPage />} />
         <Route path="/scripts/:id" element={<ScriptDetailPage />} />
         <Route path="/scripts/:id/runs/:runId" element={<ScriptRunDetailPage />} />
+        <Route path="/scripts/:id/runs/:runId/handler/:handlerRunId" element={<HandlerRunDetailPage />} />
         <Route path="/notes" element={<NotesPage />} />
         <Route path="/notes/:id" element={<NoteDetailPage />} />
         <Route path="/files" element={<FilesPage />} />

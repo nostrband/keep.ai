@@ -10,6 +10,7 @@ import {
   useInputMutations,
   useInputEvents,
 } from "../hooks/dbInputReads";
+import { useWorkflowTopicMap } from "../hooks/dbHandlerRunReads";
 import SharedHeader from "./SharedHeader";
 import { Badge } from "../ui";
 import { getWorkflowTitle } from "../lib/workflowUtils";
@@ -93,6 +94,7 @@ export default function InputDetailPage() {
   const { data: input, isLoading: isLoadingInput } = useInput(inputId!);
   const { data: mutations = [], isLoading: isLoadingMutations } = useInputMutations(inputId!);
   const { data: events = [], isLoading: isLoadingEvents } = useInputEvents(inputId!);
+  const { data: topicMap = {} } = useWorkflowTopicMap(workflowId!);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   // Compute status from events
@@ -271,12 +273,15 @@ export default function InputDetailPage() {
                       className="flex items-center justify-between p-2 bg-gray-50 rounded text-sm"
                     >
                       <div className="flex items-center gap-2">
-                        <span className="font-mono text-xs text-gray-500">
-                          {event.id.slice(0, 8)}
-                        </span>
                         <Badge variant="outline" className="text-xs">
                           {event.status}
                         </Badge>
+                        <span className="text-xs font-medium text-gray-600">
+                          {topicMap[event.topic_id] || event.topic_id.slice(0, 8)}
+                        </span>
+                        <span className="font-mono text-xs text-gray-500">
+                          {event.message_id}
+                        </span>
                       </div>
                       <span className="text-xs text-gray-500">
                         {formatShortTime(event.created_at)}
