@@ -1,11 +1,12 @@
-import React, { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import React, { useState, useCallback, useRef, useEffect } from "react";
 import ChatInterface from "./ChatInterface";
 import SharedHeader from "./SharedHeader";
-import { QuickReplyButtons } from "./QuickReplyButtons";
+// TODO v2: re-enable structured ask UI
+// import { QuickReplyButtons } from "./QuickReplyButtons";
 import { useAddMessage } from "../hooks/dbWrites";
 import { useFileUpload } from "../hooks/useFileUpload";
-import { useTaskByChatId } from "../hooks/dbTaskReads";
-import { parseAsks } from "@app/proto";
+// import { useTaskByChatId } from "../hooks/dbTaskReads";
+// import { parseAsks } from "@app/proto";
 import {
   PromptInput,
   PromptInputAttachment,
@@ -36,26 +37,23 @@ export default function ChatPage() {
   const id = "main"; // Static chat ID
   const [input, setInput] = useState("");
   const [promptHeight, setPromptHeight] = useState(0);
-  const [isQuickReplySubmitting, setIsQuickReplySubmitting] = useState(false);
+  // TODO v2: re-enable structured ask UI
+  // const [isQuickReplySubmitting, setIsQuickReplySubmitting] = useState(false);
   const promptContainerRef = useRef<HTMLDivElement>(null);
   const addMessage = useAddMessage();
   const { uploadFiles, uploadState } = useFileUpload();
   // TODO: re-enable autonomy mode toggle for v2
   // const { mode: autonomyMode, toggleMode: toggleAutonomyMode, isLoaded: isAutonomyLoaded } = useAutonomyPreference();
 
-  // Get task associated with this chat for quick-reply buttons
-  const { data: task } = useTaskByChatId(id);
-
-  // Spec 10: Parse quick-reply options from task.asks directly (not from taskState)
-  const quickReplyOptions = useMemo(() => {
-    if (!task) return [];
-    // Only show options when task is in wait or asks state
-    if (task.state !== "wait" && task.state !== "asks") return [];
-    if (!task.asks) return [];
-
-    const parsed = parseAsks(task.asks);
-    return parsed.options || [];
-  }, [task]);
+  // TODO v2: re-enable structured ask UI
+  // const { data: task } = useTaskByChatId(id);
+  // const quickReplyOptions = useMemo(() => {
+  //   if (!task) return [];
+  //   if (task.state !== "wait" && task.state !== "asks") return [];
+  //   if (!task.asks) return [];
+  //   const parsed = parseAsks(task.asks);
+  //   return parsed.options || [];
+  // }, [task]);
 
   const handleSubmit = useCallback(async (message: PromptInputMessage) => {
     const hasText = Boolean(message.text);
@@ -107,24 +105,20 @@ export default function ChatPage() {
     setInput("");
   }, [addMessage, uploadFiles]);
 
-  // Handle quick-reply button selection
-  const handleQuickReply = useCallback((option: string) => {
-    // Set local state immediately to prevent double-clicks
-    setIsQuickReplySubmitting(true);
-
-    // Send the selected option as a user message
-    addMessage.mutate({
-      chatId: id,
-      role: "user",
-      content: option,
-      files: [],
-    }, {
-      onSettled: () => {
-        // Reset local state when mutation completes (success or error)
-        setIsQuickReplySubmitting(false);
-      }
-    });
-  }, [addMessage]);
+  // TODO v2: re-enable structured ask UI
+  // const handleQuickReply = useCallback((option: string) => {
+  //   setIsQuickReplySubmitting(true);
+  //   addMessage.mutate({
+  //     chatId: id,
+  //     role: "user",
+  //     content: option,
+  //     files: [],
+  //   }, {
+  //     onSettled: () => {
+  //       setIsQuickReplySubmitting(false);
+  //     }
+  //   });
+  // }, [addMessage]);
 
   // Track prompt input height changes
   useEffect(() => {
@@ -185,14 +179,7 @@ export default function ChatPage() {
             </div>
           )}
 
-          {/* Quick-reply buttons when agent is waiting for user input */}
-          {quickReplyOptions.length > 0 && (
-            <QuickReplyButtons
-              options={quickReplyOptions}
-              onSelect={handleQuickReply}
-              disabled={addMessage.isPending || isQuickReplySubmitting || uploadState.isUploading}
-            />
-          )}
+          {/* TODO v2: re-enable structured ask UI (QuickReplyButtons) */}
 
           <PromptInput
             onSubmit={handleSubmit}

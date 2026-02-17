@@ -1,3 +1,6 @@
+// TODO v2: Structured asks are disabled for v1. LLM asks in plain text.
+// This parser is kept for potential v2 use and backward compat with existing data.
+
 /**
  * Structured ask format stored in task state.
  * Used by the UI to display quick-reply buttons.

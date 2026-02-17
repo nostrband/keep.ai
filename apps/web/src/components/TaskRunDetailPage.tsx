@@ -177,17 +177,7 @@ export default function TaskRunDetailPage() {
                   </div>
                 )}
 
-                {/* Input Asks (Spec 10: only asks is shown now) */}
-                {taskRun.input_asks && (
-                  <div>
-                    <h3 className="text-sm font-medium text-gray-700 mb-2">
-                      Input Asks
-                    </h3>
-                    <div className="prose prose-sm max-w-none bg-gray-50 p-3 rounded">
-                      <Response>{taskRun.input_asks}</Response>
-                    </div>
-                  </div>
-                )}
+                {/* TODO v2: re-enable structured asks display */}
 
                 {/* Inbox Content */}
                 {taskRun.inbox && (
@@ -201,17 +191,7 @@ export default function TaskRunDetailPage() {
                   </div>
                 )}
 
-                {/* Output Asks (Spec 10: only asks is shown now) */}
-                {taskRun.output_asks && (
-                  <div>
-                    <h3 className="text-sm font-medium text-gray-700 mb-2">
-                      Output Asks
-                    </h3>
-                    <div className="prose prose-sm max-w-none">
-                      <Response>{taskRun.output_asks}</Response>
-                    </div>
-                  </div>
-                )}
+                {/* TODO v2: re-enable structured asks display */}
 
                 {/* Reply and Error */}
                 {taskRun.reply && (

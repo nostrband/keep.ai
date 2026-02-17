@@ -166,15 +166,7 @@ export default function TaskDetailPage() {
               </div>
             </div>
 
-            {/* Task Asks (Spec 10: only asks is shown now) */}
-            {task.asks && (
-              <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
-                <h2 className="text-lg font-semibold text-gray-900 mb-4">Asks</h2>
-                <div className="prose prose-sm max-w-none">
-                  <Response>{task.asks}</Response>
-                </div>
-              </div>
-            )}
+            {/* TODO v2: re-enable structured asks display */}
 
             {/* Workflow Section */}
             {workflow && (

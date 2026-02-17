@@ -1380,8 +1380,13 @@ return await workflow.consumers.${run.handler_name}.mutate(__prepared__);
           // Uncertain outcome - attempt immediate reconciliation (exec-18)
           await handleUncertainOutcome(api, mutation, classifiedError.message);
         }
+        // State machine will read mutation status on next iteration
+      } else {
+        // No mutation record — error occurred before mutation was created
+        // (e.g., input validation failure). This is a definite failure;
+        // without failRun the state machine loops forever re-executing mutate.
+        await failRun(api, run, classifiedError, context);
       }
-      // State machine will read mutation status on next iteration
       return;
     } else if (mutation && mutation.status === "applied") {
       // Mutation was already applied (e.g. by tool wrapper but abort didn't fire).
@@ -1418,8 +1423,12 @@ return await workflow.consumers.${run.handler_name}.mutate(__prepared__);
         // Uncertain outcome - attempt immediate reconciliation (exec-18)
         await handleUncertainOutcome(api, mutation, classifiedError.message);
       }
+      // State machine will read mutation status on next iteration
+    } else {
+      // No mutation record — error before mutation was created.
+      // Must failRun or the state machine loops forever.
+      await failRun(api, run, classifiedError, context);
     }
-    // State machine will read mutation status on next iteration
   } finally {
     sandbox.dispose();
   }

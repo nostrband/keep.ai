@@ -1,3 +1,4 @@
+// TODO v2: QuickReplyButtons disabled for v1. Structured asks not yet ready.
 import React from "react";
 import { Suggestions, Suggestion, Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "../ui";
 

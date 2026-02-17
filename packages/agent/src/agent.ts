@@ -5,7 +5,8 @@ import debug from "debug";
 import { AgentEnv } from "./agent-env";
 import { makeEvalTool } from "./ai-tools/eval";
 import { makeFinishTool } from "./ai-tools/finish";
-import { makeAskTool } from "./ai-tools/ask";
+// TODO v2: re-enable structured ask tool (disabled - LLM asks in plain text for now)
+// import { makeAskTool } from "./ai-tools/ask";
 import { makeSaveTool } from "./ai-tools/save";
 import { makeFixTool, FixResult } from "./ai-tools/fix";
 import { AITool } from "./ai-tools/types";
@@ -269,7 +270,8 @@ export class Agent {
   private sandbox: Sandbox;
   private readonly task: AgentTask;
   private readonly taskRunId: string;
-  private asks?: string;
+  // TODO v2: re-enable structured asks
+  // private asks?: string;
   private debug = debug("agent:Agent");
 
   constructor(
@@ -286,7 +288,8 @@ export class Agent {
     this.env = env;
     this.task = task;
     this.taskRunId = taskRunId;
-    if (task.asks) this.asks = task.asks;
+    // TODO v2: re-enable structured asks
+    // if (task.asks) this.asks = task.asks;
   }
 
   async loop(
@@ -332,7 +335,8 @@ export class Agent {
     }
 
     // Custom user message (worker)
-    const user = await this.env.buildUser(this.task.id, input, this.asks);
+    // TODO v2: re-enable structured asks (was: this.asks)
+    const user = await this.env.buildUser(this.task.id, input);
     if (user) {
       const userMessage: AssistantUIMessage = {
         id: crypto.randomUUID(),
@@ -397,19 +401,20 @@ export class Agent {
         },
       });
     } else {
-      tools.ask = makeAskTool({
-        onAsk: (info) => {
-          if (!info.asks) throw new Error("Asks not provided");
-          stopped = true;
-          output = {
-            kind: "wait",
-            steps: input.step + 1,
-            patch: {
-              asks: info.formattedAsks,
-            },
-          };
-        },
-      });
+      // TODO v2: re-enable structured ask tool
+      // tools.ask = makeAskTool({
+      //   onAsk: (info) => {
+      //     if (!info.asks) throw new Error("Asks not provided");
+      //     stopped = true;
+      //     output = {
+      //       kind: "wait",
+      //       steps: input.step + 1,
+      //       patch: {
+      //         asks: info.formattedAsks,
+      //       },
+      //     };
+      //   },
+      // });
       tools.save = makeSaveTool({
         taskId: this.task.id,
         taskRunId: this.taskRunId,

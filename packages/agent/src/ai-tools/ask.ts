@@ -1,3 +1,5 @@
+// TODO v2: This structured ask tool is disabled for v1.
+// LLM asks questions in plain text instead. See agent.ts for where this was registered.
 import { JSONSchema } from "../json-schema";
 import { AITool } from "./types";
 
