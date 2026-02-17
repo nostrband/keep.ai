@@ -5,7 +5,13 @@
  */
 
 import createDebug from "debug";
-import { AuthError, NetworkError, classifyHttpError } from "@app/proto";
+import {
+  AuthError,
+  InternalError,
+  NetworkError,
+  classifyHttpError,
+  type ClassifiedError,
+} from "@app/proto";
 import type { OAuthConfig, OAuthCredentials, TokenResponse } from "./types";
 
 const debug = createDebug("keep:connectors:oauth");
@@ -18,6 +24,56 @@ export type RevokeResult = {
   success: boolean;
   reason: "revoked" | "not_supported" | "failed";
 };
+
+/**
+ * Classify an OAuth error by error code first, falling back to HTTP status.
+ *
+ * OAuth providers (Google, Notion) return HTTP 400 for token expiry/revocation
+ * (`invalid_grant`), which generic HTTP classification treats as LogicError.
+ * This function uses the OAuth error code for accurate classification.
+ *
+ * NOTE: AuthErrors created here have empty serviceId/accountId because OAuthHandler
+ * is generic and doesn't know the connection identity. ConnectionManager enriches
+ * AuthErrors from the refresh path with proper serviceId/accountId before re-throwing.
+ */
+function classifyOAuthError(
+  statusCode: number,
+  errorCode: string | undefined,
+  userMessage: string,
+  options: { source: string; cause: Error }
+): ClassifiedError {
+  switch (errorCode) {
+    // Auth errors — user must re-authenticate
+    // serviceId/accountId are empty; ConnectionManager enriches before re-throwing
+    case "invalid_grant":
+    case "access_denied":
+    case "login_required":
+    case "consent_required":
+    case "interaction_required":
+      return new AuthError(userMessage, { ...options, serviceId: "", accountId: "", errorCode });
+
+    // Internal errors — our OAuth configuration is wrong
+    case "invalid_client":
+    case "unauthorized_client":
+    case "unsupported_grant_type":
+    case "invalid_scope":
+      return new InternalError(userMessage, options);
+
+    // Network errors — provider-side issues
+    case "server_error":
+    case "temporarily_unavailable":
+      return new NetworkError(userMessage, { ...options, statusCode });
+  }
+
+  // No recognized OAuth error code — check for 401 explicitly
+  // (classifyHttpError no longer creates AuthError for 401)
+  if (statusCode === 401) {
+    return new AuthError(userMessage, { ...options, serviceId: "", accountId: "" });
+  }
+
+  // Fall back to HTTP status classification
+  return classifyHttpError(statusCode, userMessage, options);
+}
 
 export class OAuthHandler {
   constructor(
@@ -99,7 +155,7 @@ export class OAuthHandler {
       debug("Token exchange failed: %s %s", response.status, errorText);
       const errorCode = parseOAuthErrorCode(errorText);
       const userMessage = getOAuthUserMessage(errorCode);
-      throw classifyHttpError(response.status, userMessage, {
+      throw classifyOAuthError(response.status, errorCode, userMessage, {
         source: "oauth.exchangeCode",
         cause: new Error(`Token exchange failed: ${response.status} - ${errorText}`),
       });
@@ -147,7 +203,7 @@ export class OAuthHandler {
       debug("Token refresh failed: %s %s", response.status, errorText);
       const errorCode = parseOAuthErrorCode(errorText);
       const userMessage = getOAuthUserMessage(errorCode);
-      throw classifyHttpError(response.status, userMessage, {
+      throw classifyOAuthError(response.status, errorCode, userMessage, {
         source: "oauth.refreshToken",
         cause: new Error(`Token refresh failed: ${response.status} - ${errorText}`),
       });

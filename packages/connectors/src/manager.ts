@@ -410,7 +410,7 @@ export class ConnectionManager {
     // Load credentials from file
     const creds = await this.store.load(id);
     if (!creds) {
-      throw new AuthError(`No credentials for ${connectionId}`, { source: "ConnectionManager.getCredentials" });
+      throw new AuthError(`No credentials for ${connectionId}`, { source: "ConnectionManager.getCredentials", serviceId: id.service, accountId: id.accountId });
     }
 
     // Check if token needs refresh
@@ -423,7 +423,7 @@ export class ConnectionManager {
       if (needsRefresh) {
         if (!creds.refreshToken) {
           await this.markError(id, "Token expired, no refresh token");
-          throw new AuthError(`Token expired for ${connectionId}`, { source: "ConnectionManager.getCredentials" });
+          throw new AuthError(`Token expired for ${connectionId}`, { source: "ConnectionManager.getCredentials", serviceId: id.service, accountId: id.accountId });
         }
 
         // Check if a refresh is already in progress for this connection
@@ -453,11 +453,23 @@ export class ConnectionManager {
           const message =
             err instanceof Error ? err.message : "Token refresh failed";
           await this.markError(id, message);
-          // Re-throw if already classified, otherwise wrap in AuthError
           if (isClassifiedError(err)) {
+            // Enrich AuthErrors from OAuthHandler with connection identity.
+            // OAuthHandler is generic and creates AuthError with empty serviceId/accountId.
+            if (err instanceof AuthError) {
+              throw new AuthError(err.message, {
+                cause: err.cause,
+                source: err.source,
+                serviceId: id.service,
+                accountId: id.accountId,
+                errorCode: err.errorCode,
+              });
+            }
+            // Non-auth classified errors (NetworkError, etc.) pass through
             throw err;
           }
-          throw new AuthError(message, { source: "ConnectionManager.getCredentials", cause: err instanceof Error ? err : undefined });
+          // Unclassified error from refresh → AuthError with proper identity
+          throw new AuthError(message, { source: "ConnectionManager.getCredentials", serviceId: id.service, accountId: id.accountId, cause: err instanceof Error ? err : undefined });
         }
       }
     }

@@ -4,7 +4,7 @@ import { EvalContext } from "../sandbox/sandbox";
 import { getEnv } from "../env";
 import { fileUtils } from "@app/node";
 import debug from "debug";
-import { AuthError, LogicError, NetworkError, PermissionError, InternalError, classifyHttpError, isClassifiedError, formatUsageForEvent } from "../errors";
+import { ApiKeyError, BalanceError, LogicError, NetworkError, PermissionError, InternalError, classifyHttpError, isClassifiedError, formatUsageForEvent } from "../errors";
 import { defineTool, Tool } from "./types";
 
 const debugPdfExplain = debug("PdfExplain");
@@ -88,7 +88,7 @@ Takes a PDF file path/ID and a question about the document, uploads the PDF to a
       // Get environment variables
       const env = getEnv();
       if (!env.OPENROUTER_API_KEY?.trim()) {
-        throw new AuthError("OpenRouter API key not configured", { source: "Pdf.explain" });
+        throw new ApiKeyError("OpenRouter API key not configured", { source: "Pdf.explain", provider: "openrouter" });
       }
 
       const pdfModel = env.PDF_MODEL || "openai/gpt-oss-120b";
@@ -190,6 +190,12 @@ Takes a PDF file path/ID and a question about the document, uploads the PDF to a
 
         if (!response.ok) {
           const errorText = await response.text();
+          if (response.status === 401) {
+            throw new ApiKeyError(`OpenRouter API key invalid: ${errorText}`, { source: "Pdf.explain", provider: "openrouter" });
+          }
+          if (response.status === 402) {
+            throw new BalanceError(`OpenRouter balance insufficient: ${errorText}`, { source: "Pdf.explain", provider: "openrouter" });
+          }
           throw classifyHttpError(
             response.status,
             `OpenRouter API error: ${response.status} - ${errorText}`,

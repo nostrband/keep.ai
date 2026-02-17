@@ -84,21 +84,24 @@ export class NotificationStore {
     limit?: number;
     before?: string;
   }): Promise<Notification[]> {
-    let sql = `SELECT * FROM notifications`;
+    // LEFT JOIN workflows to fill in empty workflow_title from the workflow record
+    let sql = `SELECT n.id, n.workflow_id, n.type, n.payload, n.timestamp, n.acknowledged_at, n.resolved_at,
+       CASE WHEN n.workflow_title = '' THEN COALESCE(w.title, '') ELSE n.workflow_title END as workflow_title
+       FROM notifications n LEFT JOIN workflows w ON n.workflow_id = w.id`;
     const args: (string | number)[] = [];
     const conditions: string[] = [];
 
     if (opts?.workflowId) {
-      conditions.push("workflow_id = ?");
+      conditions.push("n.workflow_id = ?");
       args.push(opts.workflowId);
     }
 
     if (opts?.unresolvedOnly) {
-      conditions.push("resolved_at = ''");
+      conditions.push("n.resolved_at = ''");
     }
 
     if (opts?.before) {
-      conditions.push("timestamp < ?");
+      conditions.push("n.timestamp < ?");
       args.push(opts.before);
     }
 
@@ -106,7 +109,7 @@ export class NotificationStore {
       sql += " WHERE " + conditions.join(" AND ");
     }
 
-    sql += " ORDER BY timestamp DESC";
+    sql += " ORDER BY n.timestamp DESC";
 
     if (opts?.limit) {
       sql += " LIMIT ?";
@@ -164,9 +167,11 @@ export class NotificationStore {
    */
   async getUnresolvedError(workflowId: string): Promise<Notification | null> {
     const results = await this.db.db.execO<NotificationRow>(
-      `SELECT * FROM notifications
-       WHERE workflow_id = ? AND type = 'error' AND resolved_at = ''
-       ORDER BY timestamp DESC LIMIT 1`,
+      `SELECT n.id, n.workflow_id, n.type, n.payload, n.timestamp, n.acknowledged_at, n.resolved_at,
+       CASE WHEN n.workflow_title = '' THEN COALESCE(w.title, '') ELSE n.workflow_title END as workflow_title
+       FROM notifications n LEFT JOIN workflows w ON n.workflow_id = w.id
+       WHERE n.workflow_id = ? AND n.type = 'error' AND n.resolved_at = ''
+       ORDER BY n.timestamp DESC LIMIT 1`,
       [workflowId]
     );
 
@@ -175,6 +180,25 @@ export class NotificationStore {
     }
 
     return rowToNotification(results[0]);
+  }
+
+  /**
+   * Get all unresolved notifications for a workflow.
+   * Used to show notification banners on the workflow detail page.
+   */
+  async getUnresolvedWorkflowNotifications(workflowId: string): Promise<Notification[]> {
+    const results = await this.db.db.execO<NotificationRow>(
+      `SELECT n.id, n.workflow_id, n.type, n.payload, n.timestamp, n.acknowledged_at, n.resolved_at,
+       CASE WHEN n.workflow_title = '' THEN COALESCE(w.title, '') ELSE n.workflow_title END as workflow_title
+       FROM notifications n LEFT JOIN workflows w ON n.workflow_id = w.id
+       WHERE n.workflow_id = ? AND n.resolved_at = ''
+       ORDER BY n.timestamp DESC`,
+      [workflowId]
+    );
+
+    if (!results) return [];
+
+    return results.map(rowToNotification);
   }
 
   /**

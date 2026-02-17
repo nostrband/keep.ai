@@ -2,6 +2,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import SharedHeader from "./SharedHeader";
 import { NotificationCard } from "./NotificationCard";
 import { useNotifications, useResolveNotification } from "../hooks/useNotifications";
+import { useDbQuery } from "../hooks/dbQuery";
 import { Button } from "../ui";
 import { Notification } from "packages/db/dist";
 
@@ -12,6 +13,7 @@ import { Notification } from "packages/db/dist";
 export default function NotificationsPage() {
   const { workflowId } = useParams<{ workflowId?: string }>();
   const navigate = useNavigate();
+  const { api } = useDbQuery();
   const { data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage } = useNotifications({
     workflowId,
   });
@@ -19,32 +21,44 @@ export default function NotificationsPage() {
 
   const notifications = data?.notifications ?? [];
 
+  const navigateToChat = async (notification: Notification, seedMessage: string) => {
+    if (!api) return;
+    try {
+      const workflow = await api.scriptStore.getWorkflow(notification.workflow_id);
+      if (workflow?.chat_id) {
+        navigate(`/chats/${workflow.chat_id}?message=${encodeURIComponent(seedMessage)}`);
+        return;
+      }
+    } catch {
+      // fall through
+    }
+    navigate(`/workflows/${notification.workflow_id}`);
+  };
+
   const handleAction = async (notification: Notification, action: string) => {
     switch (action) {
       case "reconnect":
-        // Navigate to settings or open auth dialog
         navigate("/settings");
         break;
       case "check_permissions":
-        // Open workflow to check permissions
         navigate(`/workflows/${notification.workflow_id}`);
         break;
       case "retry":
-        // Navigate to workflow to retry
         navigate(`/workflows/${notification.workflow_id}`);
         break;
       case "view_details":
-        // Navigate to workflow for details
         navigate(`/workflows/${notification.workflow_id}`);
         break;
-      case "replan":
-        // Navigate to workflow to re-plan (user can click Edit to discuss with planner)
-        navigate(`/workflows/${notification.workflow_id}`);
+      case "replan": {
+        const payload = notification.payload ? JSON.parse(notification.payload) : {};
+        const seedMessage = notification.type === "maintenance_failed"
+          ? `The auto-fix failed: ${payload.explanation || "unknown reason"}. Let's discuss how to resolve this.`
+          : `The automation needs help (AI tried ${payload.fix_attempts || 3}x). Let's discuss how to fix this.`;
+        await navigateToChat(notification, seedMessage);
         break;
+      }
       default:
-        // For script_ask answers
         if (action.startsWith("answer_")) {
-          // Resolve the notification after answering
           await resolveNotification.mutateAsync(notification.id);
         }
     }

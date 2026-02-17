@@ -10,6 +10,8 @@ import {
   NetworkError,
   LogicError,
   InternalError,
+  ApiKeyError,
+  BalanceError,
   ClassifiedError,
 } from "@app/proto";
 
@@ -45,11 +47,19 @@ describe("Failure Handling (exec-12)", () => {
     it("should map internal errors to failed:internal", () => {
       expect(errorTypeToRunStatus("internal")).toBe("failed:internal");
     });
+
+    it("should map api_key errors to failed:internal", () => {
+      expect(errorTypeToRunStatus("api_key")).toBe("failed:internal");
+    });
+
+    it("should map balance errors to failed:internal", () => {
+      expect(errorTypeToRunStatus("balance")).toBe("failed:internal");
+    });
   });
 
   describe("getRunStatusForError", () => {
     it("should classify AuthError and return paused:approval", () => {
-      const error = new AuthError("Token expired");
+      const error = new AuthError("Token expired", { serviceId: "gmail", accountId: "test@gmail.com" });
       const result = getRunStatusForError(error);
       expect(result.status).toBe("paused:approval");
       expect(result.error).toBe(error);
@@ -78,6 +88,20 @@ describe("Failure Handling (exec-12)", () => {
 
     it("should classify InternalError and return failed:internal", () => {
       const error = new InternalError("Null pointer");
+      const result = getRunStatusForError(error);
+      expect(result.status).toBe("failed:internal");
+      expect(result.error).toBe(error);
+    });
+
+    it("should classify ApiKeyError and return failed:internal", () => {
+      const error = new ApiKeyError("API key not set", { provider: "openrouter" });
+      const result = getRunStatusForError(error);
+      expect(result.status).toBe("failed:internal");
+      expect(result.error).toBe(error);
+    });
+
+    it("should classify BalanceError and return failed:internal", () => {
+      const error = new BalanceError("Payment required", { provider: "openrouter" });
       const result = getRunStatusForError(error);
       expect(result.status).toBe("failed:internal");
       expect(result.error).toBe(error);
@@ -143,7 +167,7 @@ describe("Failure Handling (exec-12)", () => {
     });
 
     it("should return false for auth errors (may be indeterminate)", () => {
-      const error = new AuthError("Token expired mid-request");
+      const error = new AuthError("Token expired mid-request", { serviceId: "gmail", accountId: "test@gmail.com" });
       expect(isDefiniteFailure(error)).toBe(false);
     });
 

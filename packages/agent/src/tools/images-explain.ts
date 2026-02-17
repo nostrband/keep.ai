@@ -4,7 +4,7 @@ import { EvalContext } from "../sandbox/sandbox";
 import { getEnv } from "../env";
 import { fileUtils } from "@app/node";
 import debug from "debug";
-import { AuthError, LogicError, NetworkError, PermissionError, InternalError, classifyHttpError, isClassifiedError, formatUsageForEvent } from "../errors";
+import { ApiKeyError, BalanceError, LogicError, NetworkError, PermissionError, InternalError, classifyHttpError, isClassifiedError, formatUsageForEvent } from "../errors";
 import { defineTool, Tool } from "./types";
 
 const debugImgExplain = debug("ImagesExplain");
@@ -91,7 +91,7 @@ Supports png, jpeg, webp and gif image formats.`,
       // Get environment variables
       const env = getEnv();
       if (!env.OPENROUTER_API_KEY?.trim()) {
-        throw new AuthError("OpenRouter API key not configured", { source: "Images.explain" });
+        throw new ApiKeyError("OpenRouter API key not configured", { source: "Images.explain", provider: "openrouter" });
       }
 
       const imageModel = env.IMAGE_MODEL || "google/gemini-3-pro-image-preview";
@@ -188,6 +188,12 @@ Supports png, jpeg, webp and gif image formats.`,
 
         if (!response.ok) {
           const errorText = await response.text();
+          if (response.status === 401) {
+            throw new ApiKeyError(`OpenRouter API key invalid: ${errorText}`, { source: "Images.explain", provider: "openrouter" });
+          }
+          if (response.status === 402) {
+            throw new BalanceError(`OpenRouter balance insufficient: ${errorText}`, { source: "Images.explain", provider: "openrouter" });
+          }
           throw classifyHttpError(
             response.status,
             `OpenRouter API error: ${response.status} - ${errorText}`,

@@ -2,9 +2,9 @@ import { JSONSchema } from "../json-schema";
 import { EvalContext } from "../sandbox/sandbox";
 import debug from "debug";
 import { google } from "googleapis";
-import { AuthError, classifyGoogleApiError } from "../errors";
+import { AuthError } from "../errors";
 import type { ConnectionManager } from "@app/connectors";
-import { getGoogleCredentials, createGoogleOAuthClient } from "./google-common";
+import { getGoogleCredentials, createGoogleOAuthClient, classifyGoogleApiError } from "./google-common";
 import { defineReadOnlyTool, Tool } from "./types";
 
 const debugGmail = debug("agent:gmail");
@@ -138,7 +138,7 @@ export function makeGmailTool(
         });
 
         // Classify the error based on Gmail API response
-        const classified = classifyGoogleApiError(error, "Gmail.api");
+        const classified = classifyGoogleApiError(error, "Gmail.api", "gmail", account);
 
         // If it's an auth error, mark the connection as errored
         if (classified instanceof AuthError) {

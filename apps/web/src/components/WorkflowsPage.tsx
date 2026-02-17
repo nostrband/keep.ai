@@ -1,6 +1,7 @@
 import React, { useMemo } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useWorkflows } from "../hooks/dbScriptReads";
+import { useResumableWorkflows, useResumeWorkflows } from "../hooks/useNotifications";
 import SharedHeader from "./SharedHeader";
 import { Button } from "../ui";
 import { WorkflowStatusBadge } from "./StatusBadge";
@@ -19,6 +20,8 @@ function normalizeFilter(param: string | null): ValidFilter | null {
 
 export default function WorkflowsPage() {
   const { data: workflows = [], isLoading } = useWorkflows();
+  const { data: resumable = [] } = useResumableWorkflows();
+  const resumeMutation = useResumeWorkflows();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const rawFilter = searchParams.get("filter");
@@ -62,6 +65,22 @@ export default function WorkflowsPage() {
             </Link>
           )}
         </div>
+
+        {resumable.length > 0 && (
+          <div className="mb-4 flex items-center justify-between bg-green-50 border border-green-200 rounded-lg p-4">
+            <span className="text-sm text-green-800">
+              {resumable.length} workflow{resumable.length === 1 ? "" : "s"} can be resumed — connection restored
+            </span>
+            <Button
+              size="sm"
+              onClick={() => resumeMutation.mutate(resumable)}
+              disabled={resumeMutation.isPending}
+              className="bg-green-600 hover:bg-green-700 text-white cursor-pointer"
+            >
+              {resumeMutation.isPending ? "Resuming..." : "Resume All"}
+            </Button>
+          </div>
+        )}
 
         {isLoading ? (
           <div className="flex items-center justify-center py-8">

@@ -3,7 +3,7 @@ import { Exa } from "exa-js";
 import { getEnv } from "../env";
 import debug from "debug";
 import { EvalContext } from "../sandbox/sandbox";
-import { AuthError, LogicError, NetworkError, InternalError } from "../errors";
+import { ApiKeyError, LogicError, NetworkError, InternalError } from "../errors";
 import { defineReadOnlyTool, Tool } from "./types";
 
 const debugWebFetch = debug("agent:web-fetch");
@@ -142,7 +142,7 @@ export function makeWebFetchTool(getContext: () => EvalContext): Tool<Input, Out
 
       const apiKey = getEnv().EXA_API_KEY;
       if (!apiKey) {
-        throw new AuthError("EXA_API_KEY environment variable is not set. Web fetch is not configured.", { source: "Web.fetchParse" });
+        throw new ApiKeyError("EXA_API_KEY environment variable is not set. Web fetch is not configured.", { source: "Web.fetchParse", provider: "exa" });
       }
 
       const exa = new Exa(apiKey);

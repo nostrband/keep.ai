@@ -333,9 +333,9 @@ Example: await ${ns}.${name}(<input>)
           const message = `Invalid input for ${ns}.${name}.\nUsage: ${doc}`;
           const logicError = new LogicError(message, { source: `${ns}.${name}` });
 
-          if (this.workflowId && this.abortController) {
+          if (this.workflowId) {
             this.getContext().classifiedError = logicError;
-            this.abortController.abort(message);
+            this.abortController?.abort(message);
           }
 
           throw logicError;
@@ -374,29 +374,43 @@ Example: await ${ns}.${name}(<input>)
           result,
         });
       } catch (e) {
+        let classified: ClassifiedError;
         if (isClassifiedError(e)) {
-          const contextMessage = `Failed at ${ns}.${name}: ${e.message}`;
-          const EnhancedError = e.constructor as new (
-            message: string,
-            options?: { cause?: Error; source?: string }
-          ) => ClassifiedError;
-          throw new EnhancedError(contextMessage, { cause: e.cause, source: e.source || `${ns}.${name}` });
+          // Don't re-create classified errors — re-throw original to preserve
+          // identity (especially AuthError with serviceId/accountId).
+          classified = e;
+        } else {
+          const message = `Failed at ${ns}.${name}: ${e}.\nUsage: ${doc}`;
+          classified = new LogicError(message, {
+            cause: e instanceof Error ? e : undefined,
+            source: `${ns}.${name}`
+          });
         }
-        const message = `Failed at ${ns}.${name}: ${e}.\nUsage: ${doc}`;
-        throw new LogicError(message, {
-          cause: e instanceof Error ? e : undefined,
-          source: `${ns}.${name}`
-        });
+
+        // Store classified error on context so it survives the QuickJS boundary.
+        // Without this, error class info is lost when crossing the sandbox boundary
+        // and the handler state machine falls back to LogicError.
+        if (this.workflowId) {
+          this.getContext().classifiedError = classified;
+          this.abortController?.abort(classified.message);
+        }
+
+        throw classified;
       }
 
       // Validate output
       if (tool.outputSchema) {
         const outResult = validateJsonSchema(tool.outputSchema, result);
         if (!outResult.valid) {
-          throw new LogicError(
+          const outError = new LogicError(
             `Invalid output from ${ns}.${name}: ${outResult.errors.join("; ")}`,
             { source: `${ns}.${name}` }
           );
+          if (this.workflowId) {
+            this.getContext().classifiedError = outError;
+            this.abortController?.abort(outError.message);
+          }
+          throw outError;
         }
       }
 

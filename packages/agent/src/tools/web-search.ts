@@ -3,7 +3,7 @@ import { Exa } from "exa-js";
 import { getEnv } from "../env";
 import debug from "debug";
 import { EvalContext } from "../sandbox/sandbox";
-import { AuthError, LogicError, InternalError } from "../errors";
+import { ApiKeyError, LogicError, InternalError } from "../errors";
 import { defineReadOnlyTool, Tool } from "./types";
 
 const debugWebSearch = debug("agent:web-search");
@@ -122,7 +122,7 @@ export function makeWebSearchTool(getContext: () => EvalContext): Tool<Input, un
 
       const apiKey = getEnv().EXA_API_KEY;
       if (!apiKey) {
-        throw new AuthError("EXA_API_KEY environment variable is not set. Web search is not configured.", { source: "Web.search" });
+        throw new ApiKeyError("EXA_API_KEY environment variable is not set. Web search is not configured.", { source: "Web.search", provider: "exa" });
       }
 
       const exa = new Exa(apiKey);

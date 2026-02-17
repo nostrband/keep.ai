@@ -1,8 +1,6 @@
 import React, { useState, useMemo, useEffect } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import type { Task, Script } from "@app/db";
-import { formatVersion } from "@app/db";
 import {
   useWorkflow,
   useLatestScriptByWorkflowId,
@@ -10,18 +8,17 @@ import {
   useScriptVersionsByWorkflowId
 } from "../hooks/dbScriptReads";
 import { useChat } from "../hooks/dbChatReads";
-import { useMaintainerTasks } from "../hooks/dbTaskReads";
 import { useUpdateWorkflow, useActivateScriptVersion } from "../hooks/dbWrites";
 import SharedHeader from "./SharedHeader";
 import ScriptDiff from "./ScriptDiff";
 import { Badge, Button } from "../ui";
 import { Archive, RotateCcw } from "lucide-react";
 import { workflowNotifications } from "../lib/WorkflowNotifications";
-import { WorkflowStatusBadge, ScriptRunStatusBadge, TaskStatusBadge } from "./StatusBadge";
+import { WorkflowStatusBadge, ScriptRunStatusBadge } from "./StatusBadge";
 import { formatCronSchedule } from "../lib/formatCronSchedule";
 import { useAutoHidingMessage } from "../hooks/useAutoHidingMessage";
-import { WorkflowErrorAlert } from "./WorkflowErrorAlert";
-import { useUnresolvedWorkflowError } from "../hooks/useNotifications";
+import { WorkflowNotificationBanners } from "./WorkflowNotificationBanners";
+import { useUnresolvedWorkflowNotifications } from "../hooks/useNotifications";
 import { getWorkflowTitle } from "../lib/workflowUtils";
 import { WorkflowInputsSummary } from "./WorkflowInputsSummary";
 import { WorkflowIntentSection } from "./WorkflowIntentSection";
@@ -37,10 +34,9 @@ export default function WorkflowDetailPage() {
   const { data: latestScript } = useLatestScriptByWorkflowId(id!);
   const { data: scriptRuns = [], isLoading: isLoadingRuns } = useScriptRunsByWorkflowId(id!);
   const { data: scriptVersions = [], isLoading: isLoadingVersions } = useScriptVersionsByWorkflowId(id!);
-  const { data: unresolvedError } = useUnresolvedWorkflowError(id!);
+  const { data: unresolvedNotifications = [] } = useUnresolvedWorkflowNotifications(id!);
   const { data: pendingReconciliation = [] } = usePendingReconciliation(id!);
   const hasIndeterminate = pendingReconciliation.some((m: any) => m.status === "indeterminate");
-  const { data: maintainerTasks = [] } = useMaintainerTasks(id!);
   const success = useAutoHidingMessage({ duration: 3000 });
   const warning = useAutoHidingMessage({ duration: 5000 });
   const [showVersionHistory, setShowVersionHistory] = useState(false);
@@ -58,21 +54,6 @@ export default function WorkflowDetailPage() {
     }
     return scriptVersions.find((s: any) => s.id === workflow.active_script_id) || latestScript;
   }, [workflow?.active_script_id, scriptVersions, latestScript]);
-
-  // Build a lookup from maintainer task_id to the script it produced
-  const scriptByTaskId = useMemo(() => {
-    const map = new Map<string, Script>();
-    for (const s of scriptVersions) {
-      if (s.task_id && s.minor_version > 0) {
-        // Fix scripts have minor_version > 0; keep the latest one per task
-        const existing = map.get(s.task_id);
-        if (!existing || s.minor_version > existing.minor_version) {
-          map.set(s.task_id, s as Script);
-        }
-      }
-    }
-    return map;
-  }, [scriptVersions]);
 
   // Clear workflow notifications when viewing this workflow
   // This prevents re-notifying user for errors they've already seen
@@ -255,10 +236,8 @@ export default function WorkflowDetailPage() {
           </div>
         ) : (
           <div className="bg-white rounded-lg border border-gray-200 p-6">
-            {/* Error Alert - show unresolved errors at the top */}
-            {unresolvedError && (
-              <WorkflowErrorAlert notification={unresolvedError} />
-            )}
+            {/* Notification Banners - show unresolved notifications at the top */}
+            <WorkflowNotificationBanners notifications={unresolvedNotifications} workflowId={id!} />
 
             {/* Reconciliation Alert - show when mutations have uncertain outcomes */}
             {pendingReconciliation.length > 0 && (
@@ -484,52 +463,6 @@ export default function WorkflowDetailPage() {
             {/* Intent Section - shows goal, inputs, outputs, constraints */}
             <WorkflowIntentSection intentSpecJson={workflow.intent_spec} />
 
-            {/* Auto-Fix History Section - shows maintainer tasks for this workflow */}
-            {maintainerTasks.length > 0 && (
-              <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
-                <h2 className="text-lg font-semibold text-gray-900 mb-4">Auto-Fix History</h2>
-                <div className="space-y-3">
-                  {maintainerTasks.map((task: Task) => {
-                    const fixScript = scriptByTaskId.get(task.id);
-                    return (
-                      <Link
-                        key={task.id}
-                        to={`/tasks/${task.id}`}
-                        className="block p-4 border border-gray-200 rounded-lg hover:border-gray-300 hover:shadow-sm transition-all"
-                      >
-                        <div className="flex items-center justify-between">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2 mb-1">
-                              <span className="font-medium text-gray-900">{task.title || `Auto-fix ${task.id.slice(0, 8)}`}</span>
-                              <TaskStatusBadge state={task.state} defaultLabel="Pending" />
-                              {fixScript && (
-                                <span className="text-xs text-gray-500 font-mono">
-                                  v{formatVersion(fixScript.major_version, fixScript.minor_version)}
-                                </span>
-                              )}
-                            </div>
-                            {fixScript?.change_comment && (
-                              <p className="text-sm text-gray-600 mb-1 line-clamp-2">
-                                {fixScript.change_comment}
-                              </p>
-                            )}
-                            {task.error && (
-                              <p className="text-sm text-red-600 mb-1 line-clamp-2">
-                                {task.error}
-                              </p>
-                            )}
-                            <div className="text-xs text-gray-500">
-                              {new Date(task.timestamp * 1000).toLocaleString()}
-                            </div>
-                          </div>
-                        </div>
-                      </Link>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
             {/* Script Section */}
             {activeScript && (
               <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
@@ -607,6 +540,15 @@ export default function WorkflowDetailPage() {
                                       {isActive && (
                                         <Badge className="bg-blue-100 text-blue-800 text-xs">Active</Badge>
                                       )}
+                                      {version.task_id && (
+                                        <Link
+                                          to={`/tasks/${version.task_id}`}
+                                          className="text-xs text-gray-400 hover:text-blue-600"
+                                          onClick={(e) => e.stopPropagation()}
+                                        >
+                                          Task
+                                        </Link>
+                                      )}
                                     </div>
                                     {version.change_comment && (
                                       <p className="text-sm text-gray-600 mt-1 line-clamp-1">
@@ -666,7 +608,17 @@ export default function WorkflowDetailPage() {
 
             {/* Script Runs List */}
             <div className="bg-white rounded-lg border border-gray-200 p-6">
-              <h2 className="text-lg font-semibold text-gray-900 mb-4">Script Runs</h2>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-semibold text-gray-900">Script Runs</h2>
+                {scriptRuns.length > 0 && (
+                  <Link
+                    to={`/workflow/${id}/runs`}
+                    className="text-sm text-blue-600 hover:text-blue-800"
+                  >
+                    View all
+                  </Link>
+                )}
+              </div>
               {isLoadingRuns ? (
                 <div className="flex items-center justify-center py-4">
                   <div>Loading script runs...</div>
@@ -677,7 +629,7 @@ export default function WorkflowDetailPage() {
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {scriptRuns.map((run: any) => (
+                  {scriptRuns.slice(0, 3).map((run: any) => (
                     <Link
                       key={run.id}
                       to={`/scripts/${run.script_id}/runs/${run.id}`}
@@ -707,7 +659,6 @@ export default function WorkflowDetailPage() {
                             {/* Show cost if any (stored in microdollars, display as dollars) */}
                             {run.cost > 0 && (
                               <span className="flex items-center gap-1">
-                                <span>💵</span>
                                 <span>{(run.cost / 1000000).toFixed(2)}</span>
                               </span>
                             )}
@@ -716,6 +667,14 @@ export default function WorkflowDetailPage() {
                       </div>
                     </Link>
                   ))}
+                  {scriptRuns.length > 3 && (
+                    <Link
+                      to={`/workflow/${id}/runs`}
+                      className="block text-center text-sm text-blue-600 hover:text-blue-800 py-2"
+                    >
+                      View all {scriptRuns.length} runs
+                    </Link>
+                  )}
                 </div>
               )}
             </div>

@@ -36,6 +36,8 @@ export function errorTypeToRunStatus(errorType: ErrorType): RunStatus {
     network: "paused:transient",
     logic: "failed:logic",
     internal: "failed:internal",
+    api_key: "failed:internal",
+    balance: "failed:internal",
   };
   return mapping[errorType];
 }

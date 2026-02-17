@@ -201,6 +201,49 @@ async function suspendSession(
   log(`Session ${session.id} suspended: ${reason}`);
 }
 
+/**
+ * Handle an auth/permission error from a handler run.
+ * Fails the session, sets workflow to error, and creates a notification
+ * so the user knows they need to reconnect.
+ */
+async function handleApprovalNeeded(
+  api: KeepDbApi,
+  session: ScriptRun,
+  result: HandlerResult,
+  workflow: Workflow
+): Promise<SessionResult> {
+  const errorMsg = result.error || "Authorization required";
+  const errType = result.errorType || "auth";
+
+  await failSession(api, session, errorMsg, errType);
+
+  // Create an "error" notification so the user sees an auth banner
+  try {
+    await api.notificationStore.saveNotification({
+      id: crypto.randomUUID(),
+      workflow_id: workflow.id,
+      type: "error",
+      payload: JSON.stringify({
+        error_type: errType,
+        service: result.serviceId,
+        account: result.accountId,
+        message: errorMsg,
+      }),
+      timestamp: new Date().toISOString(),
+      acknowledged_at: "",
+      resolved_at: "",
+      workflow_title: workflow.title,
+    });
+  } catch { /* notification is best-effort */ }
+
+  return {
+    status: "failed",
+    error: errorMsg,
+    errorType: errType,
+    sessionId: session.id,
+  };
+}
+
 // ============================================================================
 // Work Detection
 // ============================================================================
@@ -447,6 +490,10 @@ export async function executeWorkflowSession(
             };
           }
 
+          if (result.status === "paused:approval") {
+            return handleApprovalNeeded(api, session, result, workflow);
+          }
+
           if (isPausedStatus(result.status)) {
             await suspendSession(
               api,
@@ -522,6 +569,10 @@ export async function executeWorkflowSession(
           handlerRunId: handlerRun.id,
           handlerName: consumer.name,
         };
+      }
+
+      if (result.status === "paused:approval") {
+        return handleApprovalNeeded(api, session, result, workflow);
       }
 
       if (isPausedStatus(result.status)) {
@@ -646,6 +697,10 @@ async function continueSession(
         handlerRunId: handlerRun.id,
         handlerName: consumer.name,
       };
+    }
+
+    if (result.status === "paused:approval") {
+      return handleApprovalNeeded(api, session, result, workflow);
     }
 
     if (isPausedStatus(result.status)) {
@@ -965,6 +1020,10 @@ export async function retryWorkflowSession(
         handlerRunId: retryRun.id,
         handlerName: failedRun.handler_name,
       };
+    }
+
+    if (handlerResult.status === "paused:approval") {
+      return handleApprovalNeeded(api, session, handlerResult, workflow);
     }
 
     if (isPausedStatus(handlerResult.status)) {

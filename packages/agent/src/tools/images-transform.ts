@@ -7,7 +7,7 @@ import { fileUtils } from "@app/node";
 import { detectBufferMime, mimeToExt } from "@app/node";
 import fs from "fs";
 import debug from "debug";
-import { AuthError, LogicError, NetworkError, PermissionError, InternalError, classifyHttpError, isClassifiedError, formatUsageForEvent } from "../errors";
+import { ApiKeyError, BalanceError, LogicError, NetworkError, PermissionError, InternalError, classifyHttpError, isClassifiedError, formatUsageForEvent } from "../errors";
 import { defineTool, Tool } from "./types";
 
 const debugImgTransform = debug("ImagesTransform");
@@ -145,7 +145,7 @@ Supports png, jpeg, webp and gif input formats. Returns information about the ge
       // Get environment variables
       const env = getEnv();
       if (!env.OPENROUTER_API_KEY?.trim()) {
-        throw new AuthError("OpenRouter API key not configured", { source: "Images.transform" });
+        throw new ApiKeyError("OpenRouter API key not configured", { source: "Images.transform", provider: "openrouter" });
       }
 
       const imageModel = env.IMAGE_MODEL || "google/gemini-3-pro-image-preview";
@@ -263,6 +263,12 @@ Supports png, jpeg, webp and gif input formats. Returns information about the ge
 
         if (!response.ok) {
           const errorText = await response.text();
+          if (response.status === 401) {
+            throw new ApiKeyError(`OpenRouter API key invalid: ${errorText}`, { source: "Images.transform", provider: "openrouter" });
+          }
+          if (response.status === 402) {
+            throw new BalanceError(`OpenRouter balance insufficient: ${errorText}`, { source: "Images.transform", provider: "openrouter" });
+          }
           throw classifyHttpError(
             response.status,
             `OpenRouter API error: ${response.status} - ${errorText}`,

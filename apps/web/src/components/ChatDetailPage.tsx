@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import ChatInterface from "./ChatInterface";
 import SharedHeader from "./SharedHeader";
 import { useAddMessage } from "../hooks/dbWrites";
@@ -29,6 +29,7 @@ type PromptInputMessage = {
 export default function ChatDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const chatId = id || "main"; // Fallback to "main" if no ID
   const [input, setInput] = useState("");
   const [promptHeight, setPromptHeight] = useState(0);
@@ -36,6 +37,17 @@ export default function ChatDetailPage() {
   const addMessage = useAddMessage();
   const { uploadFiles, uploadState } = useFileUpload();
   const { data: workflow } = useWorkflowByChatId(chatId);
+
+  // Pre-fill input from ?message= search param (e.g. from "Discuss with AI" on notifications)
+  useEffect(() => {
+    const message = searchParams.get("message");
+    if (message) {
+      setInput(message);
+      // Clear the param from the URL without navigation
+      searchParams.delete("message");
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleWorkflowClick = () => {
     if (workflow) {

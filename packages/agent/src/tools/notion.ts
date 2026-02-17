@@ -12,7 +12,15 @@ import { JSONSchema } from "../json-schema";
 import { Client } from "@notionhq/client";
 import debug from "debug";
 import { EvalContext } from "../sandbox/sandbox";
-import { AuthError, LogicError, classifyNotionError } from "../errors";
+import {
+  AuthError,
+  LogicError,
+  PermissionError,
+  NetworkError,
+  InternalError,
+  classifyHttpError,
+  type ClassifiedError,
+} from "../errors";
 import type { ConnectionManager, Connection, OAuthCredentials } from "@app/connectors";
 import { defineTool, Tool } from "./types";
 
@@ -55,7 +63,7 @@ async function getNotionCredentials(
     if (connections.length === 0) {
       throw new AuthError(
         "Notion not connected. Please connect a Notion workspace in Settings.",
-        { source: toolName }
+        { source: toolName, serviceId: "notion", accountId: "" }
       );
     }
     // Show workspace names for better UX
@@ -73,6 +81,83 @@ async function getNotionCredentials(
 
   const connectionId = { service: "notion", accountId };
   return connectionManager.getCredentials(connectionId);
+}
+
+/**
+ * Classify a Notion API error into a typed ClassifiedError.
+ *
+ * Notion API error structure:
+ * - status: HTTP status code
+ * - code: Notion error code (e.g., "unauthorized", "restricted_resource", "object_not_found")
+ * - message: Human-readable error message
+ *
+ * @param err The Notion API error
+ * @param source The tool that made the API call
+ * @param serviceId The connector service ID ("notion")
+ * @param accountId The account identifier (workspace_id)
+ */
+function classifyNotionError(
+  err: any,
+  source: string,
+  serviceId: string,
+  accountId: string
+): ClassifiedError {
+  // Notion API errors have status, code, and message
+  const status = err?.status || err?.response?.status || err?.code;
+  const notionCode = err?.code as string | undefined;
+  const message = err?.message || err?.body?.message || String(err);
+
+  // Handle Notion-specific error codes first (before HTTP status)
+  if (notionCode) {
+    switch (notionCode) {
+      case 'unauthorized':
+      case 'invalid_token':
+        return new AuthError('Notion authentication failed. Please reconnect your workspace.', {
+          cause: err, source, serviceId, accountId,
+        });
+
+      case 'restricted_resource':
+        return new PermissionError('Notion access denied. The integration may not have access to this page or database.', { cause: err, source });
+
+      case 'object_not_found':
+        return new LogicError(`Notion resource not found: ${message}`, { cause: err, source });
+
+      case 'validation_error':
+      case 'invalid_json':
+      case 'invalid_request':
+      case 'invalid_request_url':
+        return new LogicError(`Notion request error: ${message}`, { cause: err, source });
+
+      case 'rate_limited':
+        return new NetworkError('Notion rate limit exceeded. Please try again later.', { cause: err, source, statusCode: 429 });
+
+      case 'internal_server_error':
+      case 'service_unavailable':
+        return new NetworkError(`Notion service error: ${message}`, { cause: err, source, statusCode: 500 });
+
+      case 'conflict_error':
+        return new LogicError(`Notion conflict: ${message}`, { cause: err, source });
+
+      case 'database_connection_unavailable':
+        return new NetworkError('Notion database temporarily unavailable. Please try again.', { cause: err, source });
+    }
+  }
+
+  // Handle numeric HTTP status codes
+  if (typeof status === 'number') {
+    // Handle 401 explicitly — classifyHttpError doesn't create AuthError
+    if (status === 401) {
+      return new AuthError(`Notion authentication failed (401): ${message}`, {
+        cause: err, source, serviceId, accountId,
+      });
+    }
+    return classifyHttpError(status, message, { cause: err, source });
+  }
+
+  // Unrecognized error shape — internal error
+  return new InternalError(`Unclassified Notion API error: ${message}`, {
+    cause: err instanceof Error ? err : undefined, source,
+  });
 }
 
 const inputSchema: JSONSchema = {
@@ -196,7 +281,7 @@ export function makeNotionTool(
         });
 
         // Classify the error based on Notion API response
-        const classified = classifyNotionError(error, "Notion.api");
+        const classified = classifyNotionError(error, "Notion.api", "notion", account);
 
         // If it's an auth error, mark the connection as errored
         if (classified instanceof AuthError) {

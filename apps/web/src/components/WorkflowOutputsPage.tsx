@@ -89,7 +89,12 @@ function getMutationTitle(mutation: Mutation): string {
 export default function WorkflowOutputsPage() {
   const { id: workflowId } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
-  const [statusFilter, setStatusFilter] = useState<FilterStatus>("all");
+  const initialFilter = searchParams.get("filter");
+  const [statusFilter, setStatusFilter] = useState<FilterStatus>(
+    initialFilter === "indeterminate" || initialFilter === "applied" || initialFilter === "failed"
+      ? initialFilter
+      : "all"
+  );
   const [searchQuery, setSearchQuery] = useState("");
 
   // Get connector filter from URL params (from dashboard click)

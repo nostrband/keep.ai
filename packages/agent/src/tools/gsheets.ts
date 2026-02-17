@@ -9,9 +9,9 @@ import { JSONSchema } from "../json-schema";
 import { EvalContext } from "../sandbox/sandbox";
 import debug from "debug";
 import { google } from "googleapis";
-import { AuthError, classifyGoogleApiError } from "../errors";
+import { AuthError } from "../errors";
 import type { ConnectionManager } from "@app/connectors";
-import { getGoogleCredentials, createGoogleOAuthClient } from "./google-common";
+import { getGoogleCredentials, createGoogleOAuthClient, classifyGoogleApiError } from "./google-common";
 import { defineTool, Tool } from "./types";
 
 const debugSheets = debug("agent:gsheets");
@@ -163,7 +163,7 @@ export function makeGSheetsTool(
         });
 
         // Classify the error based on Google API response
-        const classified = classifyGoogleApiError(error, "GoogleSheets.api");
+        const classified = classifyGoogleApiError(error, "GoogleSheets.api", "gsheets", account);
 
         // If it's an auth error, mark the connection as errored
         if (classified instanceof AuthError) {

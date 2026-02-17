@@ -23,6 +23,7 @@ import {
   DBInterface,
 } from "@app/db";
 import {
+  AuthError,
   ClassifiedError,
   LogicError,
   InternalError,
@@ -56,6 +57,10 @@ export interface HandlerResult {
   status: RunStatus;
   error?: string;
   errorType?: HandlerErrorType | "";
+  /** Connector service ID from the error (e.g. "gmail", "gdrive") */
+  serviceId?: string;
+  /** Connector account ID from the error (e.g. "user@gmail.com") */
+  accountId?: string;
 }
 
 /**
@@ -93,6 +98,10 @@ export interface HandlerExecutionContext {
   userPath?: string;
   abortController?: AbortController;
   schedulerState?: SchedulerStateManager;
+  /** Service ID from the last classified error (set by failRun for AuthError) */
+  errorServiceId?: string;
+  /** Account ID from the last classified error (set by failRun for AuthError) */
+  errorAccountId?: string;
 }
 
 // ============================================================================
@@ -142,6 +151,8 @@ function errorTypeToHandlerErrorType(type: ErrorType): HandlerErrorType {
     case "logic":
       return "logic";
     case "internal":
+    case "api_key":
+    case "balance":
       return "unknown";
     default:
       return "unknown";
@@ -168,6 +179,8 @@ function errorTypeToRunStatus(type: ErrorType): RunStatus {
     case "logic":
       return "failed:logic";
     case "internal":
+    case "api_key":
+    case "balance":
       return "failed:internal";
     default:
       return "failed:logic"; // Default to repair-eligible
@@ -390,7 +403,8 @@ export async function createRetryRun(
 async function failRun(
   api: KeepDbApi,
   run: HandlerRun,
-  error: ClassifiedError
+  error: ClassifiedError,
+  context?: HandlerExecutionContext
 ): Promise<void> {
   const errorType = errorTypeToHandlerErrorType(error.type);
   const status = errorTypeToRunStatus(error.type);
@@ -401,6 +415,11 @@ async function failRun(
     error_type: errorType,
     end_timestamp: new Date().toISOString(),
   });
+  // Extract serviceId/accountId from AuthError into context for notification creation
+  if (context && error instanceof AuthError) {
+    context.errorServiceId = error.serviceId;
+    context.errorAccountId = error.accountId;
+  }
   log(`Handler run ${run.id} ${status}: ${error.message} (${errorType})`);
 }
 
@@ -927,7 +946,7 @@ return await workflow.producers.${run.handler_name}.handler(__state__);
         const classifiedError =
           sandbox.context?.classifiedError ||
           new LogicError(result.error, { source: "producer.handler" });
-        await failRun(api, run, classifiedError);
+        await failRun(api, run, classifiedError, context);
         return;
       }
 
@@ -941,7 +960,7 @@ return await workflow.producers.${run.handler_name}.handler(__state__);
     } catch (error) {
       // Use getRunStatusForError instead of ensureClassified (per exec-12)
       const { error: classifiedError } = getRunStatusForError(error, "producer.handler");
-      await failRun(api, run, classifiedError);
+      await failRun(api, run, classifiedError, context);
     } finally {
       sandbox.dispose();
     }
@@ -1029,7 +1048,7 @@ return await workflow.consumers.${run.handler_name}.prepare(__state__);
         const classifiedError =
           sandbox.context?.classifiedError ||
           new LogicError(result.error, { source: "consumer.prepare" });
-        await failRun(api, run, classifiedError);
+        await failRun(api, run, classifiedError, context);
         return;
       }
 
@@ -1056,7 +1075,7 @@ return await workflow.consumers.${run.handler_name}.prepare(__state__);
     } catch (error) {
       // Use getRunStatusForError instead of ensureClassified (per exec-12)
       const { error: classifiedError } = getRunStatusForError(error, "consumer.prepare");
-      await failRun(api, run, classifiedError);
+      await failRun(api, run, classifiedError, context);
     } finally {
       sandbox.dispose();
     }
@@ -1228,7 +1247,7 @@ return await workflow.consumers.${run.handler_name}.next(__prepared__, __mutatio
         const classifiedError =
           sandbox.context?.classifiedError ||
           new LogicError(result.error, { source: "consumer.next" });
-        await failRun(api, run, classifiedError);
+        await failRun(api, run, classifiedError, context);
         return;
       }
 
@@ -1243,7 +1262,7 @@ return await workflow.consumers.${run.handler_name}.next(__prepared__, __mutatio
     } catch (error) {
       // Use getRunStatusForError instead of ensureClassified (per exec-12)
       const { error: classifiedError } = getRunStatusForError(error, "consumer.next");
-      await failRun(api, run, classifiedError);
+      await failRun(api, run, classifiedError, context);
     } finally {
       sandbox.dispose();
     }
@@ -1335,6 +1354,11 @@ return await workflow.consumers.${run.handler_name}.mutate(__prepared__);
       const classifiedError =
         sandbox.context?.classifiedError ||
         new LogicError(result.error, { source: "consumer.mutate" });
+      // Extract service info from AuthError for notification creation
+      if (classifiedError instanceof AuthError) {
+        context.errorServiceId = classifiedError.serviceId;
+        context.errorAccountId = classifiedError.accountId;
+      }
 
       if (mutation) {
         if (isDefiniteFailure(classifiedError)) {
@@ -1372,6 +1396,11 @@ return await workflow.consumers.${run.handler_name}.mutate(__prepared__);
   } catch (error) {
     // Use getRunStatusForError instead of ensureClassified (per exec-12)
     const { error: classifiedError } = getRunStatusForError(error, "consumer.mutate");
+    // Extract service info from AuthError for notification creation
+    if (classifiedError instanceof AuthError) {
+      context.errorServiceId = classifiedError.serviceId;
+      context.errorAccountId = classifiedError.accountId;
+    }
     const mutation = await api.mutationStore.getByHandlerRunId(run.id);
 
     if (mutation) {
@@ -1411,6 +1440,9 @@ export async function executeHandler(
   context: HandlerExecutionContext
 ): Promise<HandlerResult> {
   const { api } = context;
+  // Clear stale service info from any previous handler run
+  context.errorServiceId = undefined;
+  context.errorAccountId = undefined;
 
   while (true) {
     // Always read fresh state from DB
@@ -1432,6 +1464,8 @@ export async function executeHandler(
         status: run.status,
         error: run.error || undefined,
         errorType: run.error_type || undefined,
+        serviceId: context.errorServiceId,
+        accountId: context.errorAccountId,
       };
     }
 
@@ -1465,12 +1499,14 @@ export async function executeHandler(
       // Unexpected error in phase handler itself
       // Use getRunStatusForError instead of ensureClassified (per exec-12)
       const { status, error: classifiedError } = getRunStatusForError(error, "handler-state-machine");
-      await failRun(api, run, classifiedError);
+      await failRun(api, run, classifiedError, context);
       return {
         phase: run.phase,
         status,
         error: classifiedError.message,
         errorType: errorTypeToHandlerErrorType(classifiedError.type),
+        serviceId: classifiedError instanceof AuthError ? classifiedError.serviceId : undefined,
+        accountId: classifiedError instanceof AuthError ? classifiedError.accountId : undefined,
       };
     }
 

@@ -1,6 +1,8 @@
+import { useState, useRef, useEffect } from "react";
 import { Notification } from "packages/db/dist";
 import { Button } from "../ui";
 import { openBugReport } from "../lib/bugReport";
+import { X, Bug } from "lucide-react";
 
 interface ErrorPayload {
   error_type?: "auth" | "permission" | "network" | "internal";
@@ -52,6 +54,41 @@ function getRelativeTime(timestamp: string): string {
   return `${diffDays} day${diffDays === 1 ? "" : "s"} ago`;
 }
 
+/**
+ * Expandable text component that detects clamping and shows "Show more"/"Show less" toggle.
+ */
+function ExpandableText({ text, className }: { text: string; className?: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const [isClamped, setIsClamped] = useState(false);
+  const textRef = useRef<HTMLParagraphElement>(null);
+
+  useEffect(() => {
+    const el = textRef.current;
+    if (el) {
+      setIsClamped(el.scrollHeight > el.clientHeight);
+    }
+  }, [text]);
+
+  return (
+    <div>
+      <p
+        ref={textRef}
+        className={`text-sm text-gray-600 mt-1 ${expanded ? "" : "line-clamp-3"} ${className || ""}`}
+      >
+        {text}
+      </p>
+      {isClamped && (
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="text-sm text-blue-600 hover:text-blue-800 mt-1 cursor-pointer"
+        >
+          {expanded ? "Show less" : "Show more"}
+        </button>
+      )}
+    </div>
+  );
+}
+
 interface NotificationCardProps {
   notification: Notification;
   onAction?: (notification: Notification, action: string) => void;
@@ -68,12 +105,23 @@ export function NotificationCard({
   const isResolved = !!notification.resolved_at;
   const relativeTime = getRelativeTime(notification.timestamp);
 
+  const handleReportIssue = () => {
+    const payload = parsePayload<any>(notification.payload);
+    openBugReport({
+      errorType: notification.type,
+      message: payload?.message || payload?.explanation || payload?.reason || "",
+      workflowId: notification.workflow_id,
+      workflowTitle: notification.workflow_title,
+      timestamp: notification.timestamp,
+    });
+  };
+
   const renderContent = () => {
     switch (notification.type) {
       case "error":
         return <ErrorCard notification={notification} onAction={onAction} />;
       case "escalated":
-        return <EscalatedCard notification={notification} />;
+        return <EscalatedCard notification={notification} onAction={onAction} />;
       case "maintenance_failed":
         return <MaintenanceFailedCard notification={notification} onAction={onAction} />;
       case "script_message":
@@ -87,41 +135,51 @@ export function NotificationCard({
 
   return (
     <div
-      className={`border rounded-lg p-4 ${
+      className={`relative border rounded-lg p-4 ${
         isResolved ? "bg-gray-50 border-gray-200" : "bg-white border-gray-300"
       }`}
     >
+      {/* Top-right action icons: report + dismiss */}
+      {!isResolved && (
+        <div className="absolute top-2 right-2 flex items-center gap-1">
+          <button
+            onClick={handleReportIssue}
+            className="p-1 text-gray-300 hover:text-gray-500 cursor-pointer rounded hover:bg-gray-100"
+            title="Report issue"
+          >
+            <Bug className="w-3.5 h-3.5" />
+          </button>
+          {onResolve && (
+            <button
+              onClick={() => onResolve(notification)}
+              className="p-1 text-gray-300 hover:text-gray-500 cursor-pointer rounded hover:bg-gray-100"
+              title="Dismiss"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+      )}
+
       {renderContent()}
 
-      {/* Footer with workflow title and time */}
+      {/* Footer with workflow title (clickable) and time */}
       <div className="mt-3 flex items-center justify-between text-sm text-gray-500">
-        <span>{notification.workflow_title || "Unknown workflow"} · {relativeTime}</span>
+        <span>
+          {onViewWorkflow ? (
+            <button
+              onClick={() => onViewWorkflow(notification)}
+              className="hover:text-gray-700 underline cursor-pointer"
+            >
+              {notification.workflow_title || "Unknown workflow"}
+            </button>
+          ) : (
+            notification.workflow_title || "Unknown workflow"
+          )}
+          {" "}&middot; {relativeTime}
+        </span>
         {isResolved && (
           <span className="text-green-600 font-medium">Resolved</span>
-        )}
-      </div>
-
-      {/* Actions */}
-      <div className="mt-3 flex gap-2 flex-wrap">
-        {onViewWorkflow && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => onViewWorkflow(notification)}
-            className="text-gray-600"
-          >
-            View workflow →
-          </Button>
-        )}
-        {!isResolved && onResolve && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => onResolve(notification)}
-            className="text-gray-500"
-          >
-            Dismiss
-          </Button>
         )}
       </div>
     </div>
@@ -156,20 +214,9 @@ function ErrorCard({
 
   const actionButton = actionButtons[errorType];
 
-  const handleReportIssue = () => {
-    openBugReport({
-      errorType,
-      service,
-      message,
-      workflowId: notification.workflow_id,
-      workflowTitle: notification.workflow_title,
-      timestamp: notification.timestamp,
-    });
-  };
-
   return (
     <div>
-      <div className="flex items-start gap-3">
+      <div className="flex items-start gap-3 pr-16">
         <span className="text-xl">⚠️</span>
         <div className="flex-1">
           <h3 className="font-medium text-gray-900">
@@ -178,23 +225,15 @@ function ErrorCard({
           <p className="text-sm text-gray-600 mt-1">{message}</p>
         </div>
       </div>
-      {!notification.resolved_at && (
+      {!notification.resolved_at && onAction && actionButton && (
         <div className="mt-3 flex gap-2">
-          {onAction && actionButton && (
-            <Button
-              size="sm"
-              onClick={() => onAction(notification, actionButton.action)}
-            >
-              {actionButton.label}
-            </Button>
-          )}
           <Button
             size="sm"
             variant="outline"
-            onClick={handleReportIssue}
-            className="text-gray-600"
+            className="cursor-pointer border-red-300 text-red-700 hover:bg-red-50"
+            onClick={() => onAction(notification, actionButton.action)}
           >
-            Report Issue
+            {actionButton.label}
           </Button>
         </div>
       )}
@@ -202,28 +241,24 @@ function ErrorCard({
   );
 }
 
-function EscalatedCard({ notification }: { notification: Notification }) {
+function EscalatedCard({
+  notification,
+  onAction,
+}: {
+  notification: Notification;
+  onAction?: (notification: Notification, action: string) => void;
+}) {
   const payload = parsePayload<EscalatedPayload>(notification.payload);
   const fixAttempts = payload?.fix_attempts || 3;
   const reason = payload?.reason;
 
-  const handleReportIssue = () => {
-    openBugReport({
-      errorType: "escalated",
-      message: `AI tried ${fixAttempts}x but couldn't fix it${reason ? `: ${reason}` : ""}`,
-      workflowId: notification.workflow_id,
-      workflowTitle: notification.workflow_title,
-      timestamp: notification.timestamp,
-    });
-  };
-
   return (
     <div>
-      <div className="flex items-start gap-3">
+      <div className="flex items-start gap-3 pr-16">
         <span className="text-xl">⛔</span>
         <div className="flex-1">
           <h3 className="font-medium text-gray-900">
-            Automation paused - needs your help
+            Automation paused — needs your help
           </h3>
           <p className="text-sm text-gray-600 mt-1">
             AI tried {fixAttempts}x but couldn't fix it
@@ -231,15 +266,15 @@ function EscalatedCard({ notification }: { notification: Notification }) {
           </p>
         </div>
       </div>
-      {!notification.resolved_at && (
-        <div className="mt-3">
+      {!notification.resolved_at && onAction && (
+        <div className="mt-3 flex gap-2">
           <Button
             size="sm"
             variant="outline"
-            onClick={handleReportIssue}
-            className="text-gray-600"
+            className="cursor-pointer border-amber-300 text-amber-700 hover:bg-amber-50"
+            onClick={() => onAction(notification, "replan")}
           >
-            Report Issue
+            Discuss with AI
           </Button>
         </div>
       )}
@@ -257,46 +292,26 @@ function MaintenanceFailedCard({
   const payload = parsePayload<MaintenanceFailedPayload>(notification.payload);
   const explanation = payload?.explanation || "The auto-fix attempt was unsuccessful.";
 
-  const handleReportIssue = () => {
-    openBugReport({
-      errorType: "maintenance_failed",
-      message: explanation,
-      workflowId: notification.workflow_id,
-      workflowTitle: notification.workflow_title,
-      timestamp: notification.timestamp,
-    });
-  };
-
   return (
     <div>
-      <div className="flex items-start gap-3">
+      <div className="flex items-start gap-3 pr-16">
         <span className="text-xl">🔧</span>
         <div className="flex-1">
           <h3 className="font-medium text-gray-900">
-            Auto-fix failed - Re-plan needed
+            Auto-fix failed — your input needed
           </h3>
-          <p className="text-sm text-gray-600 mt-1 line-clamp-3">
-            {explanation}
-          </p>
+          <ExpandableText text={explanation} />
         </div>
       </div>
-      {!notification.resolved_at && (
+      {!notification.resolved_at && onAction && (
         <div className="mt-3 flex gap-2">
-          {onAction && (
-            <Button
-              size="sm"
-              onClick={() => onAction(notification, "replan")}
-            >
-              Re-plan
-            </Button>
-          )}
           <Button
             size="sm"
             variant="outline"
-            onClick={handleReportIssue}
-            className="text-gray-600"
+            className="cursor-pointer border-amber-300 text-amber-700 hover:bg-amber-50"
+            onClick={() => onAction(notification, "replan")}
           >
-            Report Issue
+            Discuss with AI
           </Button>
         </div>
       )}
@@ -310,14 +325,14 @@ function ScriptMessageCard({ notification }: { notification: Notification }) {
   const message = payload?.message || "Message from automation";
 
   return (
-    <div className="flex items-start gap-3">
+    <div className="flex items-start gap-3 pr-16">
       <span className="text-xl">📬</span>
       <div className="flex-1">
         <h3 className="font-medium text-gray-900">
           {title || message.split("\n")[0].slice(0, 50)}
         </h3>
         {(title || message.length > 50) && (
-          <p className="text-sm text-gray-600 mt-1 line-clamp-2">{message}</p>
+          <ExpandableText text={message} />
         )}
       </div>
     </div>
@@ -338,7 +353,7 @@ function ScriptAskCard({
 
   return (
     <div>
-      <div className="flex items-start gap-3">
+      <div className="flex items-start gap-3 pr-16">
         <span className="text-xl">❓</span>
         <div className="flex-1">
           <h3 className="font-medium text-gray-900">{question}</h3>
@@ -353,7 +368,8 @@ function ScriptAskCard({
             <Button
               key={index}
               size="sm"
-              variant={index === 0 ? "default" : "outline"}
+              variant="outline"
+              className="cursor-pointer"
               onClick={() => onAction(notification, `answer_${index}`)}
             >
               {option}

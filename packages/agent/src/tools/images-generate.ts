@@ -7,7 +7,7 @@ import { fileUtils } from "@app/node";
 import { detectBufferMime, mimeToExt } from "@app/node";
 import fs from "fs";
 import debug from "debug";
-import { AuthError, LogicError, NetworkError, PermissionError, InternalError, classifyHttpError, isClassifiedError, formatUsageForEvent } from "../errors";
+import { ApiKeyError, BalanceError, LogicError, NetworkError, PermissionError, InternalError, classifyHttpError, isClassifiedError, formatUsageForEvent } from "../errors";
 import { defineTool, Tool } from "./types";
 
 const debugImg = debug("ImagesGenerate");
@@ -110,7 +110,7 @@ Generates images and saves them to files. Returns information about the generate
       // Get environment variables
       const env = getEnv();
       if (!env.OPENROUTER_API_KEY?.trim()) {
-        throw new AuthError("OpenRouter API key not configured", { source: "Images.generate" });
+        throw new ApiKeyError("OpenRouter API key not configured", { source: "Images.generate", provider: "openrouter" });
       }
 
       const imageModel = env.IMAGE_MODEL || "google/gemini-3-pro-image-preview";
@@ -147,6 +147,12 @@ Generates images and saves them to files. Returns information about the generate
 
         if (!response.ok) {
           const errorText = await response.text();
+          if (response.status === 401) {
+            throw new ApiKeyError(`OpenRouter API key invalid: ${errorText}`, { source: "Images.generate", provider: "openrouter" });
+          }
+          if (response.status === 402) {
+            throw new BalanceError(`OpenRouter balance insufficient: ${errorText}`, { source: "Images.generate", provider: "openrouter" });
+          }
           throw classifyHttpError(
             response.status,
             `OpenRouter API error: ${response.status} - ${errorText}`,

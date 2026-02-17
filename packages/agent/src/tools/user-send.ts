@@ -52,6 +52,17 @@ The message will create a notification that appears in the user's notification l
 
       // If we have workflow context, create a notification (Spec 01)
       if (context?.workflowId) {
+        // Resolve workflow title: use context, or look up from DB if empty
+        let workflowTitle = context.workflowTitle || '';
+        if (!workflowTitle) {
+          try {
+            const workflow = await api.scriptStore.getWorkflow(context.workflowId);
+            workflowTitle = workflow?.title || '';
+          } catch {
+            // ignore lookup failure
+          }
+        }
+
         await api.notificationStore.saveNotification({
           id: notificationId,
           workflow_id: context.workflowId,
@@ -63,7 +74,7 @@ The message will create a notification that appears in the user's notification l
           timestamp: timestamp,
           acknowledged_at: '',
           resolved_at: '',
-          workflow_title: context.workflowTitle || '',
+          workflow_title: workflowTitle,
         });
       } else {
         // Fallback for non-workflow context: save to chat_messages

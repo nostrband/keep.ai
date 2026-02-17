@@ -3,7 +3,7 @@ import { EvalContext } from "../sandbox/sandbox";
 import { getEnv } from "../env";
 import { getModelName } from "../model";
 import debug from "debug";
-import { AuthError, LogicError, NetworkError, InternalError, classifyHttpError, isClassifiedError, formatUsageForEvent } from "../errors";
+import { ApiKeyError, BalanceError, LogicError, NetworkError, InternalError, classifyHttpError, isClassifiedError, formatUsageForEvent } from "../errors";
 import { defineTool, Tool } from "./types";
 
 const debugTextGenerate = debug("TextGenerate");
@@ -69,7 +69,7 @@ Temperature controls randomness (0=deterministic, 1=very random), default 0.3.`,
 
       const env = getEnv();
       if (!env.OPENROUTER_API_KEY?.trim()) {
-        throw new AuthError("OpenRouter API key not configured", { source: "Text.generate" });
+        throw new ApiKeyError("OpenRouter API key not configured", { source: "Text.generate", provider: "openrouter" });
       }
 
       const model = getModelName();
@@ -110,6 +110,12 @@ If the prompt is malformed, unclear, inappropriate, or you cannot fulfill the re
 
         if (!response.ok) {
           const errorText = await response.text();
+          if (response.status === 401) {
+            throw new ApiKeyError(`OpenRouter API key invalid: ${errorText}`, { source: "Text.generate", provider: "openrouter" });
+          }
+          if (response.status === 402) {
+            throw new BalanceError(`OpenRouter balance insufficient: ${errorText}`, { source: "Text.generate", provider: "openrouter" });
+          }
           throw classifyHttpError(
             response.status,
             `OpenRouter API error: ${response.status} - ${errorText}`,

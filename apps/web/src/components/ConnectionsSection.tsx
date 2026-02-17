@@ -8,9 +8,10 @@
  */
 
 import { useState, useEffect, useRef } from "react";
-import { Mail, HardDrive, Sheet, FileText, BookOpen, MoreVertical, Plus, RefreshCw, Unlink, Check, AlertCircle, Pencil } from "lucide-react";
+import { Mail, HardDrive, Sheet, FileText, BookOpen, MoreVertical, Plus, RefreshCw, Unlink, Check, AlertCircle, Pencil, CheckCircle } from "lucide-react";
 import { useConnections } from "../hooks/dbConnectionReads";
 import { useUpdateConnectionLabel, useDisconnectConnection } from "../hooks/dbWrites";
+import { useResumableWorkflows, useResumeWorkflows } from "../hooks/useNotifications";
 import { useAutoHidingMessage } from "../hooks/useAutoHidingMessage";
 import { API_ENDPOINT } from "../const";
 import { openUrl } from "../lib/url-utils";
@@ -323,6 +324,81 @@ function ServiceGroup({
 }
 
 /**
+ * Modal shown after reconnecting a service that has resumable workflows.
+ */
+function ResumeWorkflowsModal({
+  service,
+  onClose,
+}: {
+  service: string;
+  onClose: () => void;
+}) {
+  const { data: workflows = [], isLoading } = useResumableWorkflows(service);
+  const resumeMutation = useResumeWorkflows();
+
+  // Auto-close if no resumable workflows
+  useEffect(() => {
+    if (!isLoading && workflows.length === 0) {
+      onClose();
+    }
+  }, [isLoading, workflows.length, onClose]);
+
+  if (isLoading || workflows.length === 0) return null;
+
+  const serviceName = getServiceInfo(service)?.name || service;
+
+  const handleResumeAll = () => {
+    resumeMutation.mutate(workflows, {
+      onSuccess: () => onClose(),
+    });
+  };
+
+  return (
+    <div
+      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-lg p-6 max-w-md w-full mx-4 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center gap-3 mb-4">
+          <div className="p-2 bg-green-100 rounded-full">
+            <CheckCircle className="w-5 h-5 text-green-600" />
+          </div>
+          <h3 className="text-lg font-semibold text-gray-900">Connection restored</h3>
+        </div>
+        <p className="text-gray-600 mb-4">
+          {workflows.length} workflow{workflows.length === 1 ? " was" : "s were"} paused due to {serviceName} authentication. Resume {workflows.length === 1 ? "it" : "them"} now?
+        </p>
+        {workflows.length <= 5 && (
+          <ul className="mb-4 space-y-1">
+            {workflows.map((w) => (
+              <li key={w.workflowId} className="text-sm text-gray-700 flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-gray-400 flex-shrink-0" />
+                {w.title}
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="flex gap-3 justify-end">
+          <Button variant="outline" onClick={onClose}>
+            Later
+          </Button>
+          <Button
+            onClick={handleResumeAll}
+            disabled={resumeMutation.isPending}
+            className="bg-green-600 hover:bg-green-700 text-white cursor-pointer"
+          >
+            {resumeMutation.isPending ? "Resuming..." : "Resume All"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
  * Main ConnectionsSection component.
  */
 export default function ConnectionsSection() {
@@ -330,10 +406,15 @@ export default function ConnectionsSection() {
   const updateLabelMutation = useUpdateConnectionLabel();
   const disconnectMutation = useDisconnectConnection(API_ENDPOINT);
   const [pendingService, setPendingService] = useState<string | null>(null);
+  const [resumeService, setResumeService] = useState<string | null>(null);
   const [checkingConnections, setCheckingConnections] = useState<Set<string>>(new Set());
   const success = useAutoHidingMessage({ duration: 3000 });
   const [error, setError] = useState<string | null>(null);
   const pendingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Snapshot of connected-status connection count when connect flow starts.
+  // Used to detect when a NEW connected connection appears (handles reconnect case
+  // where an old expired/error connection already exists for the service).
+  const connectedCountAtStartRef = useRef<number>(0);
 
   // Cleanup pending timeout on unmount
   useEffect(() => {
@@ -344,15 +425,20 @@ export default function ConnectionsSection() {
     };
   }, []);
 
-  // Clear pending state when connection for that service appears
+  // Clear pending state when a new "connected" connection for that service appears
   // Note: success.show is stable (wrapped in useCallback), so we only depend on it
   useEffect(() => {
-    if (pendingService && connections.some((c) => c.service === pendingService)) {
+    if (!pendingService) return;
+    const connectedCount = connections.filter(
+      (c) => c.service === pendingService && c.status === "connected"
+    ).length;
+    if (connectedCount > connectedCountAtStartRef.current) {
       // Clear the timeout since connection was successful
       if (pendingTimeoutRef.current) {
         clearTimeout(pendingTimeoutRef.current);
         pendingTimeoutRef.current = null;
       }
+      setResumeService(pendingService);
       setPendingService(null);
       success.show("Account connected successfully!");
     }
@@ -361,6 +447,10 @@ export default function ConnectionsSection() {
   const handleConnect = async (serviceId: string) => {
     try {
       setError(null);
+      // Snapshot current connected count so we can detect new connections
+      connectedCountAtStartRef.current = connections.filter(
+        (c) => c.service === serviceId && c.status === "connected"
+      ).length;
       setPendingService(serviceId);
 
       const response = await fetch(`${API_ENDPOINT}/connectors/${serviceId}/connect`, {
@@ -521,6 +611,13 @@ export default function ConnectionsSection() {
           />
         ))}
       </div>
+
+      {resumeService && (
+        <ResumeWorkflowsModal
+          service={resumeService}
+          onClose={() => setResumeService(null)}
+        />
+      )}
     </div>
   );
 }

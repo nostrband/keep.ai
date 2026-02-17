@@ -2,7 +2,9 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { qk } from "./queryKeys";
 import { useDbQuery } from "./dbQuery";
+import { notifyTablesChanged } from "../queryClient";
 import { Notification } from "packages/db/dist";
+import { useConnections } from "./dbConnectionReads";
 
 export interface NotificationsResult {
   notifications: Notification[];
@@ -78,9 +80,11 @@ export function useAcknowledgeNotification() {
       await api.notificationStore.acknowledgeNotification(id);
     },
     onSuccess: () => {
-      // Invalidate notifications queries
-      queryClient.invalidateQueries({ queryKey: qk.notifications() });
-      queryClient.invalidateQueries({ queryKey: qk.unresolvedNotifications() });
+      // Invalidate all notification-related queries
+      queryClient.invalidateQueries({ queryKey: [{ scope: "notifications" }] });
+      queryClient.invalidateQueries({ queryKey: [{ scope: "unresolvedNotifications" }] });
+      queryClient.invalidateQueries({ queryKey: [{ scope: "unresolvedWorkflowNotifications" }] });
+      queryClient.invalidateQueries({ queryKey: [{ scope: "notification" }] });
     },
   });
 }
@@ -98,9 +102,11 @@ export function useResolveNotification() {
       await api.notificationStore.resolveNotification(id);
     },
     onSuccess: () => {
-      // Invalidate notifications queries
-      queryClient.invalidateQueries({ queryKey: qk.notifications() });
-      queryClient.invalidateQueries({ queryKey: qk.unresolvedNotifications() });
+      // Invalidate all notification-related queries
+      queryClient.invalidateQueries({ queryKey: [{ scope: "notifications" }] });
+      queryClient.invalidateQueries({ queryKey: [{ scope: "unresolvedNotifications" }] });
+      queryClient.invalidateQueries({ queryKey: [{ scope: "unresolvedWorkflowNotifications" }] });
+      queryClient.invalidateQueries({ queryKey: [{ scope: "notification" }] });
     },
   });
 }
@@ -120,5 +126,131 @@ export function useUnresolvedWorkflowError(workflowId: string) {
     },
     meta: { tables: ["notifications"] },
     enabled: !!api && !!workflowId,
+  });
+}
+
+/**
+ * Hook to get ALL unresolved notifications for a specific workflow.
+ * Used for showing notification banners on the workflow detail page.
+ */
+export function useUnresolvedWorkflowNotifications(workflowId: string) {
+  const { api } = useDbQuery();
+
+  return useQuery({
+    queryKey: qk.unresolvedWorkflowNotifications(workflowId),
+    queryFn: async (): Promise<Notification[]> => {
+      if (!api || !workflowId) return [];
+      return await api.notificationStore.getUnresolvedWorkflowNotifications(workflowId);
+    },
+    meta: { tables: ["notifications"] },
+    enabled: !!api && !!workflowId,
+  });
+}
+
+export interface ResumableWorkflow {
+  workflowId: string;
+  title: string;
+  notificationId: string;
+  service: string;
+}
+
+/**
+ * Hook to find workflows that can be resumed after a service reconnection.
+ * Cross-references unresolved auth error notifications with connected services.
+ */
+export function useResumableWorkflows(service?: string) {
+  const { api } = useDbQuery();
+  const { data: connections = [] } = useConnections();
+
+  return useQuery({
+    queryKey: [{ scope: "resumableWorkflows", service }],
+    queryFn: async (): Promise<ResumableWorkflow[]> => {
+      if (!api) return [];
+
+      const notifications = await api.notificationStore.getNotifications({
+        unresolvedOnly: true,
+      });
+
+      // Filter to auth errors
+      const authErrors = notifications.filter((n) => {
+        if (n.type !== "error") return false;
+        try {
+          const payload = JSON.parse(n.payload);
+          return payload.error_type === "auth";
+        } catch {
+          return false;
+        }
+      });
+
+      // Build set of connected service:account pairs
+      const connectedInstances = new Set(
+        connections
+          .filter((c) => c.status === "connected")
+          .map((c) => `${c.service}:${c.accountId}`)
+      );
+      const connectedServices = new Set(
+        connections.filter((c) => c.status === "connected").map((c) => c.service)
+      );
+
+      // Keep only those where the specific connector instance is now connected
+      const resumable: ResumableWorkflow[] = [];
+      for (const n of authErrors) {
+        let rawSvc: string;
+        let rawAccount: string;
+        try {
+          const p = JSON.parse(n.payload);
+          rawSvc = p.service || "";
+          rawAccount = p.account || "";
+        } catch {
+          continue;
+        }
+        if (!rawSvc) continue;
+        // If account is specified, check the specific instance; otherwise just the service
+        const isConnected = rawAccount
+          ? connectedInstances.has(`${rawSvc}:${rawAccount}`)
+          : connectedServices.has(rawSvc);
+        if (!isConnected) continue;
+        if (service && rawSvc !== service) continue;
+        resumable.push({
+          workflowId: n.workflow_id,
+          title: n.workflow_title || n.workflow_id,
+          notificationId: n.id,
+          service: rawSvc,
+        });
+      }
+
+      return resumable;
+    },
+    meta: { tables: ["notifications", "connections"] },
+    enabled: !!api,
+  });
+}
+
+/**
+ * Batch mutation to resume workflows and resolve their auth notifications.
+ */
+export function useResumeWorkflows() {
+  const { api } = useDbQuery();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (workflows: ResumableWorkflow[]) => {
+      if (!api) throw new Error("API not available");
+
+      for (const w of workflows) {
+        await api.scriptStore.updateWorkflowFields(w.workflowId, { status: "active" });
+        await api.notificationStore.resolveNotification(w.notificationId);
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [{ scope: "notifications" }] });
+      queryClient.invalidateQueries({ queryKey: [{ scope: "unresolvedNotifications" }] });
+      queryClient.invalidateQueries({ queryKey: [{ scope: "unresolvedWorkflowNotifications" }] });
+      queryClient.invalidateQueries({ queryKey: [{ scope: "notification" }] });
+      queryClient.invalidateQueries({ queryKey: [{ scope: "resumableWorkflows" }] });
+      queryClient.invalidateQueries({ queryKey: qk.allWorkflows() });
+
+      notifyTablesChanged(["notifications", "workflows"], true, api!);
+    },
   });
 }

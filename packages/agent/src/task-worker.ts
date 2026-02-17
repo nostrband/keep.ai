@@ -765,7 +765,10 @@ If you cannot fix this issue autonomously, explain why without calling the \`fix
       // Escalate to user with maintainer's explanation
       this.debug("Maintainer did not call fix tool - escalating to user");
 
-      const explanation = this.getLastAssistantMessage(agent);
+      // Use result.reply (the model's final output) as the explanation.
+      const explanation = result.kind === "done" || result.kind === "wait"
+        ? result.reply
+        : undefined;
       await this.escalateMaintainerFailure(
         context.workflowId,
         context.scriptRunId,
@@ -805,23 +808,6 @@ If you cannot fix this issue autonomously, explain why without calling the \`fix
     });
 
     this.debug("Maintainer fix activated:", fixResult.script.id);
-  }
-
-  /**
-   * Extract the last assistant text message from agent history.
-   * Used to get maintainer's explanation when it cannot fix an issue.
-   */
-  private getLastAssistantMessage(agent: ReplAgent): string | undefined {
-    for (let i = agent.history.length - 1; i >= 0; i--) {
-      const message = agent.history[i];
-      if (message.role !== "assistant" || !message.parts) continue;
-      for (const part of message.parts) {
-        if (part.type === "text" && (part as any).text) {
-          return (part as any).text;
-        }
-      }
-    }
-    return undefined;
   }
 
   /**

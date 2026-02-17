@@ -21,6 +21,8 @@ export {
   NetworkError,
   LogicError,
   InternalError,
+  ApiKeyError,
+  BalanceError,
   WorkflowPausedError,
 
   // Type guards
@@ -32,8 +34,6 @@ export {
   classifyHttpError,
   classifyFileError,
   classifyGenericError,
-  classifyGoogleApiError,
-  classifyNotionError,
   ensureClassified,
 
   // Usage formatting

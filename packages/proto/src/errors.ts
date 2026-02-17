@@ -11,7 +11,7 @@
  */
 
 /** Error type enum for classification */
-export type ErrorType = 'auth' | 'permission' | 'network' | 'logic' | 'internal';
+export type ErrorType = 'auth' | 'permission' | 'network' | 'logic' | 'internal' | 'api_key' | 'balance';
 
 /** Base class for classified errors */
 export abstract class ClassifiedError extends Error {
@@ -58,17 +58,27 @@ export abstract class ClassifiedError extends Error {
 export class AuthError extends ClassifiedError {
   readonly type = 'auth' as const;
 
+  /** Connector service ID (e.g. "gmail", "gdrive", "notion") */
+  readonly serviceId: string;
+
+  /** Account identifier (e.g. email address, workspace ID) */
+  readonly accountId: string;
+
   /** OAuth error code if available (e.g., 'invalid_grant') */
   readonly errorCode?: string;
 
-  constructor(message: string, options?: { cause?: Error; source?: string; errorCode?: string }) {
+  constructor(message: string, options: { cause?: Error; source?: string; serviceId: string; accountId: string; errorCode?: string }) {
     super(message, options);
+    this.serviceId = options.serviceId;
+    this.accountId = options.accountId;
     this.errorCode = options?.errorCode;
   }
 
   toJSON() {
     return {
       ...super.toJSON(),
+      serviceId: this.serviceId,
+      accountId: this.accountId,
       errorCode: this.errorCode,
     };
   }
@@ -153,6 +163,62 @@ export class InternalError extends ClassifiedError {
 }
 
 /**
+ * API key error - Missing or invalid API key for a non-OAuth service.
+ *
+ * Routed to: User (must configure API key)
+ * Auto-retry: No
+ *
+ * Unlike AuthError (OAuth connector), this is for API keys configured in
+ * environment variables (e.g., OPENROUTER_API_KEY, EXA_API_KEY).
+ * Requires different notification/action than OAuth reconnect.
+ */
+export class ApiKeyError extends ClassifiedError {
+  readonly type = 'api_key' as const;
+
+  /** Provider name (e.g. "openrouter", "exa") */
+  readonly provider: string;
+
+  constructor(message: string, options: { cause?: Error; source?: string; provider: string }) {
+    super(message, options);
+    this.provider = options.provider;
+  }
+
+  toJSON() {
+    return {
+      ...super.toJSON(),
+      provider: this.provider,
+    };
+  }
+}
+
+/**
+ * Balance error - Insufficient funds or payment required.
+ *
+ * Routed to: User (must add funds)
+ * Auto-retry: No
+ *
+ * HTTP triggers: 402 Payment Required
+ */
+export class BalanceError extends ClassifiedError {
+  readonly type = 'balance' as const;
+
+  /** Provider name (e.g. "openrouter") */
+  readonly provider: string;
+
+  constructor(message: string, options: { cause?: Error; source?: string; provider: string }) {
+    super(message, options);
+    this.provider = options.provider;
+  }
+
+  toJSON() {
+    return {
+      ...super.toJSON(),
+      provider: this.provider,
+    };
+  }
+}
+
+/**
  * Check if an error is a ClassifiedError
  */
 export function isClassifiedError(error: unknown): error is ClassifiedError {
@@ -181,8 +247,12 @@ export function classifyHttpError(
   message: string,
   options?: { cause?: Error; source?: string }
 ): ClassifiedError {
+  // NOTE: 401 is NOT mapped to AuthError here because this generic classifier
+  // doesn't know the service identity (serviceId/accountId) that AuthError requires.
+  // Connector-specific classifiers handle 401 → AuthError with valid identity.
+  // Non-connector callers handle 401 → ApiKeyError with provider before calling this.
   if (statusCode === 401) {
-    return new AuthError(message, options);
+    return new InternalError(`Authentication failed (401): ${message}`, options);
   }
 
   if (statusCode === 403) {
@@ -247,17 +317,9 @@ export function classifyGenericError(
 ): ClassifiedError {
   const message = err.message.toLowerCase();
 
-  // Check for auth-related keywords
-  if (
-    message.includes('unauthorized') ||
-    message.includes('authentication') ||
-    message.includes('oauth') ||
-    message.includes('token expired') ||
-    message.includes('invalid credentials') ||
-    message.includes('login required')
-  ) {
-    return new AuthError(err.message, { cause: err, source });
-  }
+  // NOTE: Auth-related keywords are NOT matched here. If a connector throws an
+  // unclassified auth error, that's a bug in the connector. AuthError must only
+  // be created by connectors with valid serviceId/accountId.
 
   // Check for permission-related keywords
   if (
@@ -346,97 +408,6 @@ export class WorkflowPausedError extends Error {
  */
 export function isWorkflowPausedError(error: unknown): error is WorkflowPausedError {
   return error instanceof WorkflowPausedError;
-}
-
-/**
- * Create a classified error from Google API errors (Gmail, etc.)
- *
- * @param err The Google API error
- * @param source The tool that made the API call
- */
-export function classifyGoogleApiError(
-  err: any,
-  source?: string
-): ClassifiedError {
-  // Google API errors have a response with status
-  const status = err?.response?.status || err?.status || err?.code;
-
-  if (typeof status === 'number') {
-    const message = err?.response?.data?.error?.message || err.message || String(err);
-    return classifyHttpError(status, message, { cause: err, source });
-  }
-
-  // Check for specific Google API error types
-  const message = err?.message || String(err);
-
-  if (message.includes('invalid_grant') || message.includes('Token has been expired or revoked')) {
-    return new AuthError('Gmail authentication expired. Please reconnect your account.', { cause: err, source });
-  }
-
-  return classifyGenericError(err instanceof Error ? err : new Error(String(err)), source);
-}
-
-/**
- * Create a classified error from Notion API errors.
- *
- * Notion API error structure:
- * - status: HTTP status code
- * - code: Notion error code (e.g., "unauthorized", "restricted_resource", "object_not_found")
- * - message: Human-readable error message
- *
- * @param err The Notion API error
- * @param source The tool that made the API call
- */
-export function classifyNotionError(
-  err: any,
-  source?: string
-): ClassifiedError {
-  // Notion API errors have status, code, and message
-  const status = err?.status || err?.response?.status || err?.code;
-  const notionCode = err?.code as string | undefined;
-  const message = err?.message || err?.body?.message || String(err);
-
-  // Handle numeric HTTP status codes
-  if (typeof status === 'number') {
-    return classifyHttpError(status, message, { cause: err, source });
-  }
-
-  // Handle Notion-specific error codes
-  if (notionCode) {
-    switch (notionCode) {
-      case 'unauthorized':
-      case 'invalid_token':
-        return new AuthError('Notion authentication failed. Please reconnect your workspace.', { cause: err, source });
-
-      case 'restricted_resource':
-        return new PermissionError('Notion access denied. The integration may not have access to this page or database.', { cause: err, source });
-
-      case 'object_not_found':
-        return new LogicError(`Notion resource not found: ${message}`, { cause: err, source });
-
-      case 'validation_error':
-      case 'invalid_json':
-      case 'invalid_request':
-      case 'invalid_request_url':
-        return new LogicError(`Notion request error: ${message}`, { cause: err, source });
-
-      case 'rate_limited':
-        return new NetworkError('Notion rate limit exceeded. Please try again later.', { cause: err, source, statusCode: 429 });
-
-      case 'internal_server_error':
-      case 'service_unavailable':
-        return new NetworkError(`Notion service error: ${message}`, { cause: err, source, statusCode: 500 });
-
-      case 'conflict_error':
-        return new LogicError(`Notion conflict: ${message}`, { cause: err, source });
-
-      case 'database_connection_unavailable':
-        return new NetworkError('Notion database temporarily unavailable. Please try again.', { cause: err, source });
-    }
-  }
-
-  // Fallback to generic classification
-  return classifyGenericError(err instanceof Error ? err : new Error(String(err)), source);
 }
 
 /**

@@ -4,7 +4,7 @@ import { EvalContext } from "../sandbox/sandbox";
 import { getEnv } from "../env";
 import { fileUtils } from "@app/node";
 import debug from "debug";
-import { AuthError, LogicError, NetworkError, PermissionError, InternalError, classifyHttpError, isClassifiedError, formatUsageForEvent } from "../errors";
+import { ApiKeyError, BalanceError, LogicError, NetworkError, PermissionError, InternalError, classifyHttpError, isClassifiedError, formatUsageForEvent } from "../errors";
 import { defineTool, Tool } from "./types";
 
 const debugAudioExplain = debug("AudioExplain");
@@ -92,7 +92,7 @@ Supports wav, mp3, mp4, mpeg, m4a, mpga, aac, flac, webm audio formats up to 10M
       // Get environment variables
       const env = getEnv();
       if (!env.OPENROUTER_API_KEY?.trim()) {
-        throw new AuthError("OpenRouter API key not configured", { source: "Audio.explain" });
+        throw new ApiKeyError("OpenRouter API key not configured", { source: "Audio.explain", provider: "openrouter" });
       }
 
       const audioModel =
@@ -221,6 +221,12 @@ Supports wav, mp3, mp4, mpeg, m4a, mpga, aac, flac, webm audio formats up to 10M
 
         if (!response.ok) {
           const errorText = await response.text();
+          if (response.status === 401) {
+            throw new ApiKeyError(`OpenRouter API key invalid: ${errorText}`, { source: "Audio.explain", provider: "openrouter" });
+          }
+          if (response.status === 402) {
+            throw new BalanceError(`OpenRouter balance insufficient: ${errorText}`, { source: "Audio.explain", provider: "openrouter" });
+          }
           throw classifyHttpError(
             response.status,
             `OpenRouter API error: ${response.status} - ${errorText}`,

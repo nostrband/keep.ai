@@ -3,7 +3,7 @@ import { EvalContext } from "../sandbox/sandbox";
 import { getEnv } from "../env";
 import { getTextModelName } from "../model";
 import debug from "debug";
-import { AuthError, LogicError, NetworkError, InternalError, classifyHttpError, formatUsageForEvent } from "../errors";
+import { ApiKeyError, BalanceError, LogicError, NetworkError, InternalError, classifyHttpError, formatUsageForEvent } from "../errors";
 import { defineTool, Tool } from "./types";
 
 const debugTextExtract = debug("TextExtract");
@@ -64,7 +64,7 @@ Uses temperature 0 and light reasoning for reliable parsing.`,
 
       const env = getEnv();
       if (!env.OPENROUTER_API_KEY?.trim()) {
-        throw new AuthError("OpenRouter API key not configured", { source: "Text.extract" });
+        throw new ApiKeyError("OpenRouter API key not configured", { source: "Text.extract", provider: "openrouter" });
       }
 
       const model = getTextModelName();
@@ -110,6 +110,12 @@ Output only valid JSON matching the schema, no additional text or markdown forma
 
         if (!response.ok) {
           const errorText = await response.text();
+          if (response.status === 401) {
+            throw new ApiKeyError(`OpenRouter API key invalid: ${errorText}`, { source: "Text.extract", provider: "openrouter" });
+          }
+          if (response.status === 402) {
+            throw new BalanceError(`OpenRouter balance insufficient: ${errorText}`, { source: "Text.extract", provider: "openrouter" });
+          }
           throw classifyHttpError(
             response.status,
             `OpenRouter API error: ${response.status} - ${errorText}`,
@@ -155,7 +161,7 @@ Output only valid JSON matching the schema, no additional text or markdown forma
         }
       } catch (error) {
         // Re-throw if already classified
-        if (error instanceof AuthError || error instanceof NetworkError || error instanceof LogicError) {
+        if (error instanceof ApiKeyError || error instanceof BalanceError || error instanceof NetworkError || error instanceof LogicError) {
           throw error;
         }
         throw new InternalError(error instanceof Error ? error.message : String(error), { cause: error instanceof Error ? error : undefined, source: "Text.extract" });
