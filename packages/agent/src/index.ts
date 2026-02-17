@@ -13,7 +13,7 @@ export {
   makePdfExplainTool,
   makeAudioExplainTool,
   makeAtobTool,
-  makeConsoleLogTool,
+  atobCompatAny,
   // Topics API (exec-03)
   makeTopicsPeekTool,
   makeTopicsGetByIdsTool,
@@ -129,6 +129,7 @@ export { initSandbox } from "./sandbox/sandbox";
 // Sandbox tool management (exec-03a)
 export { ToolWrapper, type ToolWrapperConfig, type ExecutionPhase, type OperationType } from "./sandbox/tool-wrapper";
 export { createWorkflowTools, createTaskTools, type ToolListConfig } from "./sandbox/tool-lists";
+export { createBuiltins } from "./sandbox/builtins";
 
 // Workflow validation (exec-05)
 export { validateWorkflowScript, isWorkflowFormatScript, type WorkflowConfig, type ValidationResult } from "./workflow-validator";

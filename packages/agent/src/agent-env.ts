@@ -181,7 +181,7 @@ ${taskInfo.join("\n")}
 
   private jsPrompt(mainAPIs: string[]) {
     return `## JS Sandbox Guidelines ('eval' tool)
-- no fetch, no console.log/error, no direct network or disk, no Window, no Document, no Buffer, no nodejs APIs, etc
+- no fetch, no direct network or disk, no Window, no Document, no Buffer, no nodejs APIs, etc
 - do not wrap your code in '(async () => {...})()' - that's already done for you
 - all API endpoints are async and must be await-ed
 - you MUST 'return' the value that you want to be returned from 'eval' tool
@@ -444,10 +444,6 @@ After you save the script, it will be executed by the host system in the
 same sandbox env according to the producer schedules defined in the workflow
 config. 
 
-There is no standard console.* API in the sandbox, use custom 
-Console.* to properly log the script execution steps for you 
-and the user to evaluate later.
-
 Do not use heuristics to interpret or extract data from free-form text,
 use Text.* tools for that. Use regexp for these cases only if 100% sure
 that input format will stay consistent.
@@ -675,7 +671,7 @@ Producers must call Topics.registerInput() BEFORE Topics.publish() — see workf
 
 ## Logging
 
-Include proper logs using Console.log tool to simplify future debugging and maintenance.
+Include proper logs using console.log to simplify future debugging and maintenance.
 
 ## Updates
 

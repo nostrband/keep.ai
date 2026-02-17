@@ -2,6 +2,7 @@ import { KeepDbApi, type Mutation } from "@app/db";
 import { EvalContext, EvalGlobal } from "./sandbox";
 import debug from "debug";
 import { ClassifiedError, isClassifiedError, LogicError, WorkflowPausedError } from "../errors";
+import { createBuiltins } from "./builtins";
 import type { ConnectionManager } from "@app/connectors";
 import { Tool } from "../tools/types";
 import { validateJsonSchema, printJsonSchema } from "../json-schema";
@@ -316,6 +317,10 @@ Example: await ${ns}.${name}(<input>)
       if (result) return result;
       throw new Error("Not found " + name);
     };
+
+    // Merge builtins (console, atob) after tools so they can't be shadowed
+    const builtins = createBuiltins(this.getContext);
+    Object.assign(global, builtins);
 
     this.toolDocs = toolDocs;
     return global;

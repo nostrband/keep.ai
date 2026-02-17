@@ -30,7 +30,7 @@ export { makeGDriveTool } from "./gdrive";
 export { makeGSheetsTool } from "./gsheets";
 export { makeGDocsTool } from "./gdocs";
 export { makeNotionTool } from "./notion";
-export { makeAtobTool } from "./atob";
+export { makeAtobTool, atobCompatAny } from "./atob";
 export { makeTextExtractTool } from "./text-extract";
 export { makeTextClassifyTool } from "./text-classify";
 export { makeTextSummarizeTool } from "./text-summarize";
@@ -41,7 +41,6 @@ export { makeListScriptsTool } from "./list-scripts";
 export { makeScriptHistoryTool } from "./script-history";
 export { makeListScriptRunsTool } from "./list-script-runs";
 export { makeGetScriptRunTool } from "./get-script-run";
-export { makeConsoleLogTool } from "./console-log";
 // Note: makeItemsListTool removed (exec-02 - deprecated Items infrastructure)
 
 // Topics API (exec-03 - event-driven execution model)

@@ -17,9 +17,7 @@ import type { SchedulerStateManager } from "../scheduler-state";
 type AnyTool = Tool<any, any>;
 
 // Tool makers
-import { makeConsoleLogTool } from "../tools/console-log";
 import { makeGetWeatherTool } from "../tools/get-weather";
-import { makeAtobTool } from "../tools/atob";
 import { makeWebSearchTool } from "../tools/web-search";
 import { makeWebFetchTool } from "../tools/web-fetch";
 import { makeWebDownloadTool } from "../tools/web-download";
@@ -120,12 +118,8 @@ export function createWorkflowTools(config: ToolListConfig): AnyTool[] {
     : undefined;
 
   const tools: AnyTool[] = [
-    // Console (always available)
-    makeConsoleLogTool(getContext),
-
     // Utilities
     makeGetWeatherTool(getContext),
-    makeAtobTool(),
 
     // Web
     makeWebSearchTool(getContext),

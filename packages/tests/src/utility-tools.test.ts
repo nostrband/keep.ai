@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { makeAtobTool, makeConsoleLogTool, type EvalContext } from "@app/agent";
+import { atobCompatAny, createBuiltins, type EvalContext } from "@app/agent";
 
 /**
  * Creates a mock EvalContext for testing.
@@ -16,154 +16,96 @@ function createMockContext(): EvalContext {
   };
 }
 
-describe("Utility Tools", () => {
-  describe("makeAtobTool", () => {
-    it("should decode standard base64 string", async () => {
-      const atobTool = makeAtobTool();
-
-      const result = await atobTool.execute!("SGVsbG8gV29ybGQ=");
-
-      expect(result).toBe("Hello World");
+describe("Utility Builtins", () => {
+  describe("atob (atobCompatAny)", () => {
+    it("should decode standard base64 string", () => {
+      expect(atobCompatAny("SGVsbG8gV29ybGQ=")).toBe("Hello World");
     });
 
-    it("should decode base64url string", async () => {
-      const atobTool = makeAtobTool();
-
+    it("should decode base64url string", () => {
       // base64url uses - instead of + and _ instead of /
-      const result = await atobTool.execute!("SGVsbG8tV29ybGQ_");
-
-      // The decoded result should work
+      const result = atobCompatAny("SGVsbG8tV29ybGQ_");
       expect(typeof result).toBe("string");
     });
 
-    it("should handle missing padding", async () => {
-      const atobTool = makeAtobTool();
-
+    it("should handle missing padding", () => {
       // "Hi" in base64 is "SGk=" but without padding would be "SGk"
-      const result = await atobTool.execute!("SGk");
-
-      expect(result).toBe("Hi");
+      expect(atobCompatAny("SGk")).toBe("Hi");
     });
 
-    it("should handle empty string", async () => {
-      const atobTool = makeAtobTool();
-
-      const result = await atobTool.execute!("");
-
-      expect(result).toBe("");
+    it("should handle empty string", () => {
+      expect(atobCompatAny("")).toBe("");
     });
 
-    it("should handle whitespace in input", async () => {
-      const atobTool = makeAtobTool();
-
-      const result = await atobTool.execute!("SGVs bG8g V29y bGQ=");
-
-      expect(result).toBe("Hello World");
+    it("should handle whitespace in input", () => {
+      expect(atobCompatAny("SGVs bG8g V29y bGQ=")).toBe("Hello World");
     });
 
-    it("should throw error for invalid base64", async () => {
-      const atobTool = makeAtobTool();
-
-      await expect(atobTool.execute!("!!!invalid!!!")).rejects.toThrow();
+    it("should throw error for invalid base64", () => {
+      expect(() => atobCompatAny("!!!invalid!!!")).toThrow();
     });
 
-    it("should decode binary data", async () => {
-      const atobTool = makeAtobTool();
-
+    it("should decode binary data", () => {
       // Base64 for bytes [0, 255, 128]
-      const result = await atobTool.execute!("AP+A");
-
-      expect((result as string).charCodeAt(0)).toBe(0);
-      expect((result as string).charCodeAt(1)).toBe(255);
-      expect((result as string).charCodeAt(2)).toBe(128);
+      const result = atobCompatAny("AP+A");
+      expect(result.charCodeAt(0)).toBe(0);
+      expect(result.charCodeAt(1)).toBe(255);
+      expect(result.charCodeAt(2)).toBe(128);
     });
 
-    it("should decode complex base64url", async () => {
-      const atobTool = makeAtobTool();
-
+    it("should decode complex base64url", () => {
       // Standard base64 with + and / replaced with - and _
-      const result = await atobTool.execute!("YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXo");
-
-      expect(result).toBe("abcdefghijklmnopqrstuvwxyz");
+      expect(atobCompatAny("YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXo")).toBe(
+        "abcdefghijklmnopqrstuvwxyz"
+      );
     });
   });
 
-  describe("makeConsoleLogTool", () => {
+  describe("console builtins", () => {
     let mockContext: EvalContext;
+    let builtins: ReturnType<typeof createBuiltins>;
 
     beforeEach(() => {
       mockContext = createMockContext();
+      builtins = createBuiltins(() => mockContext);
     });
 
-    it("should log a message with log level", async () => {
-      const consoleLogTool = makeConsoleLogTool(() => mockContext);
+    it("should log a message with log level", () => {
+      builtins.console.log("Test message");
 
-      const result = await consoleLogTool.execute!(
-        {
-          type: "log",
-          line: "Test message",
-        });
-
-      expect(result).toEqual({ success: true });
       expect(mockContext.onLog).toHaveBeenCalled();
-
       const loggedLine = (mockContext.onLog as any).mock.calls[0][0];
       expect(loggedLine).toContain("LOG:");
       expect(loggedLine).toContain("'Test message'");
     });
 
-    it("should log a message with warn level", async () => {
-      const consoleLogTool = makeConsoleLogTool(() => mockContext);
-
-      await consoleLogTool.execute!(
-        {
-          type: "warn",
-          line: "Warning message",
-        });
+    it("should log a message with warn level", () => {
+      builtins.console.warn("Warning message");
 
       const loggedLine = (mockContext.onLog as any).mock.calls[0][0];
       expect(loggedLine).toContain("WARN:");
       expect(loggedLine).toContain("'Warning message'");
     });
 
-    it("should log a message with error level", async () => {
-      const consoleLogTool = makeConsoleLogTool(() => mockContext);
-
-      await consoleLogTool.execute!(
-        {
-          type: "error",
-          line: "Error message",
-        });
+    it("should log a message with error level", () => {
+      builtins.console.error("Error message");
 
       const loggedLine = (mockContext.onLog as any).mock.calls[0][0];
       expect(loggedLine).toContain("ERROR:");
       expect(loggedLine).toContain("'Error message'");
     });
 
-    it("should include timestamp in log", async () => {
-      const consoleLogTool = makeConsoleLogTool(() => mockContext);
-
-      await consoleLogTool.execute!(
-        {
-          type: "log",
-          line: "Test",
-        });
+    it("should include timestamp in log", () => {
+      builtins.console.log("Test");
 
       const loggedLine = (mockContext.onLog as any).mock.calls[0][0];
       // ISO timestamp format like [2024-01-15T10:30:00.000Z]
       expect(loggedLine).toMatch(/\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
     });
 
-    it("should truncate long messages", async () => {
-      const consoleLogTool = makeConsoleLogTool(() => mockContext);
-
+    it("should truncate long messages", () => {
       const longMessage = "x".repeat(2000);
-
-      await consoleLogTool.execute!(
-        {
-          type: "log",
-          line: longMessage,
-        });
+      builtins.console.log(longMessage);
 
       const loggedLine = (mockContext.onLog as any).mock.calls[0][0];
       // Should be truncated to ~1000 chars + "..." + formatting
@@ -171,185 +113,114 @@ describe("Utility Tools", () => {
       expect(loggedLine).toContain("...");
     });
 
-    it("should handle empty message", async () => {
-      const consoleLogTool = makeConsoleLogTool(() => mockContext);
+    it("should handle empty message", () => {
+      builtins.console.log("");
 
-      const result = await consoleLogTool.execute!(
-        {
-          type: "log",
-          line: "",
-        });
-
-      expect(result).toEqual({ success: true });
       expect(mockContext.onLog).toHaveBeenCalled();
+    });
+
+    it("should join multiple arguments with spaces", () => {
+      builtins.console.log("hello", 42, "world");
+
+      const loggedLine = (mockContext.onLog as any).mock.calls[0][0];
+      expect(loggedLine).toContain("'hello 42 world'");
+    });
+
+    it("should JSON.stringify non-string arguments", () => {
+      builtins.console.log("data:", { key: "val" });
+
+      const loggedLine = (mockContext.onLog as any).mock.calls[0][0];
+      expect(loggedLine).toContain('data: {"key":"val"}');
     });
 
     // Special character tests per spec: test-console-log-special-chars.md
 
     describe("Special character handling", () => {
-      it("should handle message containing single quotes", async () => {
-        const consoleLogTool = makeConsoleLogTool(() => mockContext);
+      it("should handle message containing single quotes", () => {
+        builtins.console.log("It's a test with 'nested quotes'");
 
-        await consoleLogTool.execute!(
-          {
-            type: "log",
-            line: "It's a test with 'nested quotes'",
-          });
-
-        expect(mockContext.onLog).toHaveBeenCalled();
         const loggedLine = (mockContext.onLog as any).mock.calls[0][0];
-
-        // The message is wrapped in single quotes by the tool
-        // Single quotes in the message are escaped with backslash
-        // Input: It's a test with 'nested quotes'
-        // Output: 'It\'s a test with \'nested quotes\''
         expect(loggedLine).toContain("It\\'s a test with \\'nested quotes\\'");
       });
 
-      it("should handle message containing newlines", async () => {
-        const consoleLogTool = makeConsoleLogTool(() => mockContext);
+      it("should handle message containing newlines", () => {
+        builtins.console.log("Line 1\nLine 2\nLine 3");
 
-        await consoleLogTool.execute!(
-          {
-            type: "log",
-            line: "Line 1\nLine 2\nLine 3",
-          });
-
-        expect(mockContext.onLog).toHaveBeenCalled();
         const loggedLine = (mockContext.onLog as any).mock.calls[0][0];
-
-        // Newlines are passed through without escaping
         expect(loggedLine).toContain("Line 1\nLine 2\nLine 3");
       });
 
-      it("should handle message containing tabs", async () => {
-        const consoleLogTool = makeConsoleLogTool(() => mockContext);
+      it("should handle message containing tabs", () => {
+        builtins.console.log("Column1\tColumn2\tColumn3");
 
-        await consoleLogTool.execute!(
-          {
-            type: "log",
-            line: "Column1\tColumn2\tColumn3",
-          });
-
-        expect(mockContext.onLog).toHaveBeenCalled();
         const loggedLine = (mockContext.onLog as any).mock.calls[0][0];
-
-        // Tabs are passed through without escaping
         expect(loggedLine).toContain("Column1\tColumn2\tColumn3");
       });
 
-      it("should handle message containing carriage returns", async () => {
-        const consoleLogTool = makeConsoleLogTool(() => mockContext);
+      it("should handle message containing carriage returns", () => {
+        builtins.console.log("Line 1\r\nLine 2");
 
-        await consoleLogTool.execute!(
-          {
-            type: "log",
-            line: "Line 1\r\nLine 2",
-          });
-
-        expect(mockContext.onLog).toHaveBeenCalled();
         const loggedLine = (mockContext.onLog as any).mock.calls[0][0];
-
-        // CRLF is passed through without escaping
         expect(loggedLine).toContain("Line 1\r\nLine 2");
       });
 
-      it("should handle message containing unicode characters", async () => {
-        const consoleLogTool = makeConsoleLogTool(() => mockContext);
+      it("should handle message containing unicode characters", () => {
+        builtins.console.log("Hello 世界 🌍 مرحبا");
 
-        await consoleLogTool.execute!(
-          {
-            type: "log",
-            line: "Hello 世界 🌍 مرحبا",
-          });
-
-        expect(mockContext.onLog).toHaveBeenCalled();
         const loggedLine = (mockContext.onLog as any).mock.calls[0][0];
-
-        // Unicode is passed through correctly
         expect(loggedLine).toContain("Hello 世界 🌍 مرحبا");
       });
 
-      it("should handle message containing emojis", async () => {
-        const consoleLogTool = makeConsoleLogTool(() => mockContext);
+      it("should handle message containing emojis", () => {
+        builtins.console.log("Status: ✅ Success 🎉");
 
-        await consoleLogTool.execute!(
-          {
-            type: "log",
-            line: "Status: ✅ Success 🎉",
-          });
-
-        expect(mockContext.onLog).toHaveBeenCalled();
         const loggedLine = (mockContext.onLog as any).mock.calls[0][0];
-
-        // Emojis are passed through correctly
         expect(loggedLine).toContain("Status: ✅ Success 🎉");
       });
 
-      it("should handle message containing backslashes", async () => {
-        const consoleLogTool = makeConsoleLogTool(() => mockContext);
+      it("should handle message containing backslashes", () => {
+        builtins.console.log("Path: C:\\Users\\test\\file.txt");
 
-        await consoleLogTool.execute!(
-          {
-            type: "log",
-            line: "Path: C:\\Users\\test\\file.txt",
-          });
-
-        expect(mockContext.onLog).toHaveBeenCalled();
         const loggedLine = (mockContext.onLog as any).mock.calls[0][0];
-
-        // Backslashes are escaped to prevent ambiguity with quote escaping
         expect(loggedLine).toContain("C:\\\\Users\\\\test\\\\file.txt");
       });
 
-      it("should handle message containing double quotes", async () => {
-        const consoleLogTool = makeConsoleLogTool(() => mockContext);
+      it("should handle message containing double quotes", () => {
+        builtins.console.log('He said "hello" to me');
 
-        await consoleLogTool.execute!(
-          {
-            type: "log",
-            line: 'He said "hello" to me',
-          });
-
-        expect(mockContext.onLog).toHaveBeenCalled();
         const loggedLine = (mockContext.onLog as any).mock.calls[0][0];
-
-        // Double quotes are passed through (message is wrapped in single quotes)
         expect(loggedLine).toContain('He said "hello" to me');
       });
 
-      it("should handle message containing null character", async () => {
-        const consoleLogTool = makeConsoleLogTool(() => mockContext);
+      it("should handle message containing null character", () => {
+        builtins.console.log("Before\0After");
 
-        await consoleLogTool.execute!(
-          {
-            type: "log",
-            line: "Before\0After",
-          });
-
-        expect(mockContext.onLog).toHaveBeenCalled();
         const loggedLine = (mockContext.onLog as any).mock.calls[0][0];
-
-        // Null character is passed through
         expect(loggedLine).toContain("Before\0After");
       });
 
-      it("should handle message with only special characters", async () => {
-        const consoleLogTool = makeConsoleLogTool(() => mockContext);
+      it("should handle message with only special characters", () => {
+        builtins.console.log("!@#$%^&*()_+-=[]{}|;':\",./<>?`~");
 
-        await consoleLogTool.execute!(
-          {
-            type: "log",
-            line: "!@#$%^&*()_+-=[]{}|;':\",./<>?`~",
-          });
-
-        expect(mockContext.onLog).toHaveBeenCalled();
         const loggedLine = (mockContext.onLog as any).mock.calls[0][0];
-
-        // All special characters are passed through (single quotes are escaped)
         expect(loggedLine).toContain("!@#$%^&*()_+-=[]{}|;\\':\",./");
         expect(loggedLine).toContain("<>?`~");
       });
+    });
+  });
+
+  describe("atob builtin", () => {
+    it("should coerce input to string", () => {
+      const mockContext = createMockContext();
+      const builtins = createBuiltins(() => mockContext);
+      // atob builtin calls String(input) before decoding
+      expect(builtins.atob("SGVsbG8gV29ybGQ=")).toBe("Hello World");
+    });
+
+    it("should throw catchable error for invalid input", () => {
+      const mockContext = createMockContext();
+      const builtins = createBuiltins(() => mockContext);
+      expect(() => builtins.atob("!!!invalid!!!")).toThrow();
     });
   });
 });
