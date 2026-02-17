@@ -400,8 +400,10 @@ export class KeepDbApi {
     scriptId: string;
     pendingRetryRunId?: string;
     manual?: boolean;
+    /** When provided, set workflow status atomically in the same transaction */
+    status?: string;
   }): Promise<void> {
-    const { workflowId, scriptId, pendingRetryRunId, manual } = params;
+    const { workflowId, scriptId, pendingRetryRunId, manual, status } = params;
 
     // Read handler_config from the script — single source of truth for new scripts.
     // Pre-migration scripts may not have handler_config yet; fall back to workflow's
@@ -436,6 +438,10 @@ export class KeepDbApi {
 
       if (manual) {
         fields.maintenance_fix_count = 0;
+      }
+
+      if (status) {
+        fields.status = status;
       }
 
       await this.scriptStore.updateWorkflowFields(workflowId, fields, tx);

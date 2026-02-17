@@ -222,6 +222,8 @@ export function useActivateScriptVersion() {
     mutationFn: async (input: {
       workflowId: string;
       scriptId: string;  // The script version to activate
+      /** When provided, set workflow status atomically (e.g. 'active') */
+      status?: string;
     }) => {
       if (!api) throw new Error("Script store not available");
 
@@ -237,6 +239,7 @@ export function useActivateScriptVersion() {
         workflowId: input.workflowId,
         scriptId: input.scriptId,
         manual: true,
+        status: input.status,
       });
 
       return { scriptId: input.scriptId, version: `${script.major_version}.${script.minor_version}` };
@@ -249,7 +252,7 @@ export function useActivateScriptVersion() {
       queryClient.invalidateQueries({ queryKey: qk.workflowScripts(workflowId) });
       queryClient.invalidateQueries({ queryKey: qk.latestWorkflowScript(workflowId) });
 
-      notifyTablesChanged(["workflows"], true, api!);
+      notifyTablesChanged(["workflows", "producer_schedules"], true, api!);
     },
   });
 }

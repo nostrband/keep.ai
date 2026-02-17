@@ -38,12 +38,9 @@ export interface SaveResult {
  * The save tool ONLY creates a new script version. It does NOT activate the script
  * (set active_script_id, clear maintenance, update schedules, etc.).
  *
- * Exception: for draft→ready transition (first save), it sets status='ready' and
- * active_script_id since there's no separate activation step for initial creation.
- *
- * For subsequent saves, activation is handled separately:
- * - User clicks "Activate" button in UI
- * - Future: planner activation step
+ * For draft→ready transition (first save), it sets status='ready' only.
+ * Activation (setting active_script_id, creating producer schedules) is a
+ * separate step triggered by the user clicking "Activate" in the UI.
  */
 export function makeSaveTool(opts: {
   taskId: string;
@@ -111,17 +108,14 @@ export function makeSaveTool(opts: {
       const saveOps = async (tx?: DBInterface) => {
         await opts.scriptStore.addScript(newScript, tx);
 
-        // Draft→ready transition: set status and active_script_id for initial creation
+        // Draft→ready transition: only set status to 'ready' (and title if needed).
+        // Do NOT set active_script_id or handler_config — those are set by activateScript().
         if (workflow.status === 'draft') {
-          const updates: { status: string; active_script_id: string; title?: string; handler_config?: string } = {
+          const updates: { status: string; title?: string } = {
             status: 'ready',
-            active_script_id: newScript.id,
           };
           if (shouldUpdateTitle) {
             updates.title = info.title;
-          }
-          if (workflowConfig) {
-            updates.handler_config = JSON.stringify(workflowConfig);
           }
           await opts.scriptStore.updateWorkflowFields(workflow.id, updates, tx);
         } else {
@@ -189,8 +183,7 @@ export function makeSaveTool(opts: {
     },
     description: `Save the new/updated script code with a workflow title, commit-style comments, summary, and optional flow diagram.
 The title will only be applied if the workflow doesn't already have one.
-The script will be saved as a new version. For the first save, the workflow will be activated automatically.
-For subsequent saves, the user will need to activate the new version.
+The script will be saved as a new version. The user will need to activate it from the workflow page.
 `,
     inputSchema: SaveInfoSchema,
   } satisfies AITool;

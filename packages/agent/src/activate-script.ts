@@ -31,6 +31,8 @@ export interface ActivateScriptParams {
   pendingRetryRunId?: string;
   /** Manual activation (UI) — also resets maintenance_fix_count */
   manual?: boolean;
+  /** When provided, set workflow status atomically (e.g. 'active') */
+  status?: string;
 }
 
 /**
@@ -43,7 +45,7 @@ export async function activateScript(
   api: KeepDbApi,
   params: ActivateScriptParams
 ): Promise<void> {
-  const { workflowId, scriptId, workflowConfig, pendingRetryRunId, manual } = params;
+  const { workflowId, scriptId, workflowConfig, pendingRetryRunId, manual, status } = params;
 
   // Atomic DB operations: reads handler_config from script, sets active_script_id,
   // clears maintenance, syncs producer schedules
@@ -52,6 +54,7 @@ export async function activateScript(
     scriptId,
     pendingRetryRunId,
     manual,
+    status,
   });
 
   log(`Activated script ${scriptId} for workflow ${workflowId}${manual ? ' (manual)' : ''}`);

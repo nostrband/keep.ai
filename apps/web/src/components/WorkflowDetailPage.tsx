@@ -7,7 +7,6 @@ import {
   useScriptRunsByWorkflowId,
   useScriptVersionsByWorkflowId
 } from "../hooks/dbScriptReads";
-import { useChat } from "../hooks/dbChatReads";
 import { useUpdateWorkflow, useActivateScriptVersion } from "../hooks/dbWrites";
 import SharedHeader from "./SharedHeader";
 import ScriptDiff from "./ScriptDiff";
@@ -29,8 +28,6 @@ export default function WorkflowDetailPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { data: workflow, isLoading } = useWorkflow(id!);
-  // Use workflow.chat_id directly (Spec 09) instead of going through task
-  const { data: chat } = useChat(workflow?.chat_id || "");
   const { data: latestScript } = useLatestScriptByWorkflowId(id!);
   const { data: scriptRuns = [], isLoading: isLoadingRuns } = useScriptRunsByWorkflowId(id!);
   const { data: scriptVersions = [], isLoading: isLoadingVersions } = useScriptVersionsByWorkflowId(id!);
@@ -54,6 +51,17 @@ export default function WorkflowDetailPage() {
     }
     return scriptVersions.find((s: any) => s.id === workflow.active_script_id) || latestScript;
   }, [workflow?.active_script_id, scriptVersions, latestScript]);
+
+  // Detect unactivated version: either no active script at all, or a newer major version exists
+  const newerVersion = useMemo(() => {
+    if (!workflow || scriptVersions.length === 0 || !latestScript) return null;
+    // No active script at all — latest version needs activation
+    if (!workflow.active_script_id) return latestScript;
+    // Active script exists but latest has higher major version
+    if (activeScript && latestScript.id !== activeScript.id
+        && latestScript.major_version > activeScript.major_version) return latestScript;
+    return null;
+  }, [workflow, scriptVersions, latestScript, activeScript]);
 
   // Clear workflow notifications when viewing this workflow
   // This prevents re-notifying user for errors they've already seen
@@ -85,14 +93,15 @@ export default function WorkflowDetailPage() {
   }, [workflow?.next_run_timestamp, workflow?.status]);
 
   const handleActivate = async () => {
-    if (!workflow || !activeScript) return;
+    if (!workflow || !newerVersion) return;
 
-    updateWorkflowMutation.mutate({
+    activateMutation.mutate({
       workflowId: workflow.id,
+      scriptId: newerVersion.id,
       status: "active",
     }, {
       onSuccess: () => {
-        success.show("Automation activated!");
+        success.show(`Activated v${newerVersion.major_version}.${newerVersion.minor_version}!`);
       },
     });
   };
@@ -124,14 +133,12 @@ export default function WorkflowDetailPage() {
   };
 
   const handleRunNow = () => {
-    if (!workflow) return;
+    if (!workflow?.active_script_id) return;
 
-    // Set next_run_timestamp to current time to trigger immediate execution
-    const now = new Date().toISOString();
-
-    updateWorkflowMutation.mutate({
+    // Reset all producer schedules to run immediately via activateScript
+    activateMutation.mutate({
       workflowId: workflow.id,
-      next_run_timestamp: now,
+      scriptId: workflow.active_script_id,
     }, {
       onSuccess: () => {
         success.show("Workflow scheduled to run now");
@@ -296,18 +303,20 @@ export default function WorkflowDetailPage() {
                 </div>
                 <div className="flex flex-col items-end gap-2">
                   <div className="flex gap-2">
-                    {/* Primary action button: Activate, Pause, or Resume - always first */}
-                    {workflow.status === "ready" && (
+                    {/* Activate button: shown when there's an unactivated version */}
+                    {newerVersion && (
                       <Button
                         onClick={handleActivate}
-                        disabled={updateWorkflowMutation.isPending}
+                        disabled={activateMutation.isPending}
                         size="sm"
                         className="cursor-pointer bg-green-600 hover:bg-green-700 text-white"
                       >
-                        Activate
+                        {activateMutation.isPending ? "Activating..." : `Activate v${newerVersion.major_version}.${newerVersion.minor_version}`}
                       </Button>
                     )}
-                    {workflow.status === "active" && (
+
+                    {/* Pause/Resume: only when active_script_id is set */}
+                    {workflow.active_script_id && workflow.status === "active" && (
                       <Button
                         onClick={handlePause}
                         disabled={updateWorkflowMutation.isPending}
@@ -318,7 +327,7 @@ export default function WorkflowDetailPage() {
                         Pause
                       </Button>
                     )}
-                    {(workflow.status === "paused" || workflow.status === "error") && (
+                    {workflow.active_script_id && (workflow.status === "paused" || workflow.status === "error") && (
                       hasIndeterminate ? (
                         <Button
                           onClick={() => navigate(`/workflow/${workflow.id}/outputs?filter=indeterminate`)}
@@ -339,11 +348,11 @@ export default function WorkflowDetailPage() {
                       )
                     )}
 
-                    {/* Secondary actions: Run now, Test run, Edit */}
-                    {(workflow.status === "draft" || workflow.status === "ready" || workflow.status === "active") && activeScript && (
+                    {/* Run now: only when active_script_id is set AND status is active */}
+                    {workflow.active_script_id && workflow.status === "active" && (
                       <Button
                         onClick={handleRunNow}
-                        disabled={updateWorkflowMutation.isPending}
+                        disabled={activateMutation.isPending}
                         size="sm"
                         variant="outline"
                         className="cursor-pointer"
@@ -361,7 +370,7 @@ export default function WorkflowDetailPage() {
                         Edit
                       </Button>
                     )}
-                    {/* Archive button for drafts and paused workflows (spec: expand-archive-to-paused-workflows) */}
+                    {/* Archive button for drafts and paused workflows */}
                     {(workflow.status === "draft" || workflow.status === "paused") && (
                       <Button
                         onClick={handleArchive}
@@ -376,7 +385,7 @@ export default function WorkflowDetailPage() {
                     )}
                   </div>
                   {/* Show hint if no script exists yet */}
-                  {workflow.status === "draft" && !activeScript && (
+                  {workflow.status === "draft" && !latestScript && (
                     <div className="text-sm text-gray-500">
                       Script required to activate
                     </div>
@@ -433,32 +442,6 @@ export default function WorkflowDetailPage() {
             {/* Inputs & Outputs Summary */}
             <WorkflowInputsSummary workflowId={workflow.id} />
 
-            {/* Chat Section */}
-            {chat && (
-              <div className="bg-white rounded-lg border border-gray-200 p-6 mb-6">
-                <h2 className="text-lg font-semibold text-gray-900 mb-4">Chat</h2>
-                <Link
-                  to={`/chats/${chat.id}`}
-                  className="block p-4 border border-gray-200 rounded-lg hover:border-gray-300 hover:shadow-sm transition-all"
-                >
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-2">
-                        <span className="font-medium text-gray-900">Chat {chat.id.slice(0, 8)}</span>
-                      </div>
-                      {chat.first_message && (
-                        <p className="text-sm text-gray-600 mb-2 line-clamp-2">
-                          {chat.first_message}
-                        </p>
-                      )}
-                      <div className="text-xs text-gray-500">
-                        Last updated: {new Date(chat.updated_at).toLocaleString()}
-                      </div>
-                    </div>
-                  </div>
-                </Link>
-              </div>
-            )}
 
             {/* Intent Section - shows goal, inputs, outputs, constraints */}
             <WorkflowIntentSection intentSpecJson={workflow.intent_spec} />

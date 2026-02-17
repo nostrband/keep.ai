@@ -1,10 +1,10 @@
-import React, { useState, useCallback, useRef, useEffect } from "react";
+import React, { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import ChatInterface from "./ChatInterface";
 import SharedHeader from "./SharedHeader";
-import { useAddMessage } from "../hooks/dbWrites";
+import { useAddMessage, useActivateScriptVersion } from "../hooks/dbWrites";
 import { useFileUpload } from "../hooks/useFileUpload";
-import { useWorkflowByChatId } from "../hooks/dbScriptReads";
+import { useWorkflowByChatId, useScriptVersionsByWorkflowId, useLatestScriptByWorkflowId } from "../hooks/dbScriptReads";
 import { WorkflowInfoBox } from "./WorkflowInfoBox";
 import {
   PromptInput,
@@ -37,6 +37,28 @@ export default function ChatDetailPage() {
   const addMessage = useAddMessage();
   const { uploadFiles, uploadState } = useFileUpload();
   const { data: workflow } = useWorkflowByChatId(chatId);
+  const { data: scriptVersions = [] } = useScriptVersionsByWorkflowId(workflow?.id || "");
+  const { data: latestScript } = useLatestScriptByWorkflowId(workflow?.id || "");
+  const activateMutation = useActivateScriptVersion();
+
+  // Detect unactivated version
+  const newerVersion = useMemo(() => {
+    if (!workflow || scriptVersions.length === 0 || !latestScript) return null;
+    if (!workflow.active_script_id) return latestScript;
+    const activeScript = scriptVersions.find((s: any) => s.id === workflow.active_script_id);
+    if (activeScript && latestScript.id !== activeScript.id
+        && latestScript.major_version > activeScript.major_version) return latestScript;
+    return null;
+  }, [workflow, scriptVersions, latestScript]);
+
+  const handleActivateVersion = () => {
+    if (!workflow || !newerVersion) return;
+    activateMutation.mutate({
+      workflowId: workflow.id,
+      scriptId: newerVersion.id,
+      status: "active",
+    });
+  };
 
   // Pre-fill input from ?message= search param (e.g. from "Discuss with AI" on notifications)
   useEffect(() => {
@@ -133,7 +155,13 @@ export default function ChatDetailPage() {
       {workflow && (
         <div className="sticky top-[var(--header-height)] z-10 bg-gray-50 border-b border-gray-200">
           <div className="max-w-4xl mx-auto px-6 py-4">
-            <WorkflowInfoBox workflow={workflow} onClick={handleWorkflowClick} />
+            <WorkflowInfoBox
+              workflow={workflow}
+              onClick={handleWorkflowClick}
+              newerVersion={newerVersion}
+              onActivate={handleActivateVersion}
+              activating={activateMutation.isPending}
+            />
           </div>
         </div>
       )}
