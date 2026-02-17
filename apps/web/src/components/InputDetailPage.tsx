@@ -1,13 +1,8 @@
-import React, { useMemo } from "react";
+import React, { useState, useMemo } from "react";
 import { useParams, Link } from "react-router-dom";
 import {
-  Circle,
-  CheckCircle2,
-  XCircle,
-  AlertTriangle,
   Clock,
   ArrowLeft,
-  ChevronRight,
 } from "lucide-react";
 import { useWorkflow } from "../hooks/dbScriptReads";
 import {
@@ -18,7 +13,14 @@ import {
 import SharedHeader from "./SharedHeader";
 import { Badge } from "../ui";
 import { getWorkflowTitle } from "../lib/workflowUtils";
-import type { Mutation, MutationStatus, EventStatus } from "@app/db";
+import {
+  MutationStatusIcon,
+  MutationStatusBadge,
+  MutationResultPanel,
+  ExpandChevron,
+  getMutationTitle,
+} from "./MutationRow";
+import type { MutationStatus, EventStatus } from "@app/db";
 
 /**
  * Format a timestamp for display.
@@ -51,24 +53,6 @@ function formatSourceType(source: string, type: string): string {
   return `${source} / ${type}`;
 }
 
-/**
- * Status icon for mutations.
- */
-function MutationStatusIcon({ status }: { status: MutationStatus }) {
-  switch (status) {
-    case "applied":
-      return <CheckCircle2 className="w-4 h-4 text-green-600" />;
-    case "failed":
-      return <XCircle className="w-4 h-4 text-red-600" />;
-    case "indeterminate":
-      return <AlertTriangle className="w-4 h-4 text-amber-600" />;
-    case "pending":
-    case "in_flight":
-      return <Circle className="w-4 h-4 text-yellow-500 animate-pulse" />;
-    default:
-      return <Circle className="w-4 h-4 text-gray-400" />;
-  }
-}
 
 /**
  * Compute the overall status of an input based on its events.
@@ -93,21 +77,6 @@ function computeInputStatus(events: Array<{ status: EventStatus }>): {
   return { status: "done", label: "Done" };
 }
 
-/**
- * Get display title for a mutation.
- */
-function getMutationTitle(mutation: Mutation): string {
-  if (mutation.ui_title) {
-    return mutation.ui_title;
-  }
-
-  // Fallback to tool namespace/method if no ui_title
-  if (mutation.tool_namespace && mutation.tool_method) {
-    return `${mutation.tool_namespace}.${mutation.tool_method}`;
-  }
-
-  return "Mutation";
-}
 
 /**
  * Input detail view (exec-16).
@@ -124,6 +93,7 @@ export default function InputDetailPage() {
   const { data: input, isLoading: isLoadingInput } = useInput(inputId!);
   const { data: mutations = [], isLoading: isLoadingMutations } = useInputMutations(inputId!);
   const { data: events = [], isLoading: isLoadingEvents } = useInputEvents(inputId!);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   // Compute status from events
   const inputStatus = useMemo(() => computeInputStatus(events), [events]);
@@ -228,66 +198,62 @@ export default function InputDetailPage() {
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {sortedMutations.map((mutation) => (
-                    <div
-                      key={mutation.id}
-                      className={`flex items-start gap-3 p-3 rounded-lg border ${
-                        mutation.status === "indeterminate"
-                          ? "border-amber-300 bg-amber-50"
-                          : mutation.status === "failed"
-                          ? "border-red-200 bg-red-50"
-                          : "border-gray-200"
-                      }`}
-                    >
-                      <MutationStatusIcon status={mutation.status} />
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="font-medium text-gray-900 truncate">
-                            {getMutationTitle(mutation)}
-                          </span>
-                          <span className="text-xs text-gray-500 whitespace-nowrap">
-                            {formatShortTime(mutation.created_at)}
-                          </span>
-                        </div>
-
-                        {/* Show status details for non-applied mutations */}
-                        {mutation.status === "pending" || mutation.status === "in_flight" ? (
-                          <p className="text-sm text-yellow-600 mt-1">Processing...</p>
-                        ) : mutation.status === "failed" && mutation.error ? (
-                          <p className="text-sm text-red-600 mt-1 line-clamp-2">
-                            {mutation.error}
-                          </p>
-                        ) : mutation.status === "indeterminate" ? (
-                          <p className="text-sm text-amber-600 mt-1">
-                            Uncertain outcome - needs verification
-                          </p>
-                        ) : null}
-
-                        {/* Show tool info */}
-                        {mutation.tool_namespace && mutation.tool_method && (
-                          <p className="text-xs text-gray-500 mt-1">
-                            {mutation.tool_namespace}.{mutation.tool_method}
-                          </p>
-                        )}
-                      </div>
-
-                      {/* Status badge */}
-                      <Badge
-                        variant="outline"
-                        className={
-                          mutation.status === "applied"
-                            ? "text-green-700 border-green-300"
+                  {sortedMutations.map((mutation) => {
+                    const isExpanded = expandedId === mutation.id;
+                    return (
+                      <div
+                        key={mutation.id}
+                        className={`rounded-lg border cursor-pointer transition-all ${
+                          mutation.status === "indeterminate"
+                            ? "border-amber-300 bg-amber-50"
                             : mutation.status === "failed"
-                            ? "text-red-700 border-red-300"
-                            : mutation.status === "indeterminate"
-                            ? "text-amber-700 border-amber-300"
-                            : "text-yellow-700 border-yellow-300"
-                        }
+                            ? "border-red-200 bg-red-50"
+                            : "border-gray-200 hover:border-gray-300"
+                        }`}
+                        onClick={() => setExpandedId(isExpanded ? null : mutation.id)}
                       >
-                        {mutation.status}
-                      </Badge>
-                    </div>
-                  ))}
+                        <div className="flex items-start gap-3 p-3">
+                          <MutationStatusIcon status={mutation.status} />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-medium text-gray-900 truncate">
+                                {getMutationTitle(mutation, "Mutation")}
+                              </span>
+                              <span className="text-xs text-gray-500 whitespace-nowrap">
+                                {formatShortTime(mutation.created_at)}
+                              </span>
+                            </div>
+
+                            {/* Show status details for non-applied mutations */}
+                            {mutation.status === "pending" || mutation.status === "in_flight" ? (
+                              <p className="text-sm text-yellow-600 mt-1">Processing...</p>
+                            ) : mutation.status === "failed" && mutation.error ? (
+                              <p className="text-sm text-red-600 mt-1 line-clamp-2">
+                                {mutation.error}
+                              </p>
+                            ) : mutation.status === "indeterminate" ? (
+                              <p className="text-sm text-amber-600 mt-1">
+                                Uncertain outcome - needs verification
+                              </p>
+                            ) : null}
+
+                            {/* Show tool info */}
+                            {mutation.tool_namespace && mutation.tool_method && (
+                              <p className="text-xs text-gray-500 mt-1">
+                                {mutation.tool_namespace}.{mutation.tool_method}
+                              </p>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <MutationStatusBadge status={mutation.status} />
+                            <ExpandChevron expanded={isExpanded} />
+                          </div>
+                        </div>
+                        {isExpanded && <MutationResultPanel mutation={mutation} />}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>

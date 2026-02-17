@@ -1,39 +1,24 @@
 import React, { useState, useMemo } from "react";
 import { useParams, useSearchParams, Link } from "react-router-dom";
 import {
-  CheckCircle2,
-  XCircle,
-  AlertTriangle,
   Filter,
-  ChevronRight,
-  ChevronDown,
   ArrowLeft,
 } from "lucide-react";
 import { useWorkflow } from "../hooks/dbScriptReads";
 import { useWorkflowMutations } from "../hooks/dbInputReads";
 import { useResolveMutation } from "../hooks/dbWrites";
 import SharedHeader from "./SharedHeader";
-import { Badge, Button } from "../ui";
+import { Button } from "../ui";
 import { getWorkflowTitle } from "../lib/workflowUtils";
-import type { Mutation, MutationStatus } from "@app/db";
+import {
+  MutationStatusIcon,
+  MutationStatusBadge,
+  MutationResultPanel,
+  ExpandChevron,
+  getMutationTitle,
+} from "./MutationRow";
 
 type FilterStatus = "all" | "applied" | "failed" | "indeterminate";
-
-/**
- * Status icon for mutations.
- */
-function MutationStatusIcon({ status }: { status: MutationStatus }) {
-  switch (status) {
-    case "applied":
-      return <CheckCircle2 className="w-4 h-4 text-green-600" />;
-    case "failed":
-      return <XCircle className="w-4 h-4 text-red-600" />;
-    case "indeterminate":
-      return <AlertTriangle className="w-4 h-4 text-amber-600" />;
-    default:
-      return <CheckCircle2 className="w-4 h-4 text-gray-400" />;
-  }
-}
 
 /**
  * Format a timestamp for display.
@@ -61,22 +46,6 @@ function formatTimestamp(timestamp: number): string {
  */
 function formatConnector(namespace: string): string {
   return namespace;
-}
-
-/**
- * Get display title for a mutation.
- */
-function getMutationTitle(mutation: Mutation): string {
-  if (mutation.ui_title) {
-    return mutation.ui_title;
-  }
-
-  // Fallback to tool namespace/method if no ui_title
-  if (mutation.tool_namespace && mutation.tool_method) {
-    return `${mutation.tool_namespace}.${mutation.tool_method}`;
-  }
-
-  return "Output";
 }
 
 /**
@@ -312,45 +281,11 @@ export default function WorkflowOutputsPage() {
                         </div>
                       </div>
                       <div className="flex items-center gap-2 ml-4">
-                        <Badge
-                          variant="outline"
-                          className={
-                            mutation.status === "applied"
-                              ? "text-green-700 border-green-300 bg-green-50"
-                              : mutation.status === "failed"
-                              ? "text-red-700 border-red-300"
-                              : mutation.status === "indeterminate"
-                              ? "text-amber-700 border-amber-300"
-                              : "text-gray-600 border-gray-300"
-                          }
-                        >
-                          {mutation.status}
-                        </Badge>
-                        {isExpanded
-                          ? <ChevronDown className="w-4 h-4 text-gray-400" />
-                          : <ChevronRight className="w-4 h-4 text-gray-400" />
-                        }
+                        <MutationStatusBadge status={mutation.status} />
+                        <ExpandChevron expanded={isExpanded} />
                       </div>
                     </div>
-                    {isExpanded && (
-                      <div className="px-4 pb-4 border-t border-gray-200">
-                        <div className="mt-3">
-                          <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Result</span>
-                          <pre className="mt-1 p-3 bg-gray-50 rounded-md text-xs text-gray-800 overflow-x-auto whitespace-pre-wrap break-words">
-                            {mutation.result
-                              ? (() => {
-                                  try {
-                                    return JSON.stringify(JSON.parse(mutation.result), null, 2);
-                                  } catch {
-                                    return mutation.result;
-                                  }
-                                })()
-                              : <span className="text-gray-400 italic">No result</span>
-                            }
-                          </pre>
-                        </div>
-                      </div>
-                    )}
+                    {isExpanded && <MutationResultPanel mutation={mutation} />}
                   </div>
                 );
               })}
