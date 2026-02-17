@@ -1346,11 +1346,21 @@ return await workflow.consumers.${run.handler_name}.mutate(__prepared__);
       filename: `consumer:${run.handler_name}:mutate`,
     });
 
+    // Tool wrapper stores mutation result in the ledger and aborts the script.
+    // When wasMutationApplied() is true, the abort is expected (mutation is terminal),
+    // so result.ok === false is not an error.
+    const mutationWasApplied = toolWrapper.wasMutationApplied();
+
     // Check if a mutation was created during execution (lazy creation by tool-wrapper)
     const mutation = await api.mutationStore.getByHandlerRunId(run.id);
 
-    if (!result.ok) {
-      // Handle error based on mutation state
+    if (mutationWasApplied) {
+      // Mutation succeeded — tool wrapper already stored result in ledger.
+      // Script was aborted because mutation is terminal. Just transition phase.
+      log(`Handler run ${run.id} (consumer): mutation applied by tool wrapper, transitioning`);
+      await api.handlerRunStore.updatePhase(run.id, "mutated");
+    } else if (!result.ok) {
+      // Genuine error (not a mutation-terminal abort)
       const classifiedError =
         sandbox.context?.classifiedError ||
         new LogicError(result.error, { source: "consumer.mutate" });
@@ -1373,15 +1383,10 @@ return await workflow.consumers.${run.handler_name}.mutate(__prepared__);
       }
       // State machine will read mutation status on next iteration
       return;
-    }
-
-    // If mutation was executed (status is in_flight), mark as applied
-    // Atomic checkpoint: markApplied + updatePhase in a single transaction
-    if (mutation && mutation.status === "in_flight") {
-      await api.db.db.tx(async (tx: DBInterface) => {
-        await api.mutationStore.markApplied(mutation.id, JSON.stringify(result.result), tx);
-        await api.handlerRunStore.updatePhase(run.id, "mutated", tx);
-      });
+    } else if (mutation && mutation.status === "applied") {
+      // Mutation was already applied (e.g. by tool wrapper but abort didn't fire).
+      // Just transition phase — result is already in the ledger.
+      await api.handlerRunStore.updatePhase(run.id, "mutated");
     } else if (!mutation) {
       // Mutate handler completed without calling any mutation tool — no mutation record.
       // Just transition phase; next will receive { status: 'none' }.

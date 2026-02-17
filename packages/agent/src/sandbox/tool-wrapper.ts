@@ -98,6 +98,8 @@ export class ToolWrapper {
   private mutateContext: { handlerRunId: string; workflowId: string; uiTitle?: string } | null = null;
   /** Mutation record created on demand when mutation tool is actually called */
   private createdMutation: Mutation | null = null;
+  /** Whether a mutation was successfully applied and script should terminate */
+  private mutationApplied: boolean = false;
 
   constructor(config: ToolWrapperConfig) {
     this.tools = config.tools;
@@ -128,6 +130,7 @@ export class ToolWrapper {
     this.mutationExecuted = false;
     this.mutateContext = null;
     this.createdMutation = null;
+    this.mutationApplied = false;
   }
 
   /**
@@ -153,6 +156,14 @@ export class ToolWrapper {
    */
   getCreatedMutation(): Mutation | null {
     return this.createdMutation;
+  }
+
+  /**
+   * Check if a mutation was successfully applied during this phase.
+   * When true, the script was aborted because mutation is terminal — not an error.
+   */
+  wasMutationApplied(): boolean {
+    return this.mutationApplied;
   }
 
   /**
@@ -412,6 +423,18 @@ Example: await ${ns}.${name}(<input>)
           }
           throw outError;
         }
+      }
+
+      // Mutation is terminal: store the tool's return value in the ledger
+      // and abort the script. The handler state machine uses the ledger
+      // as the source of truth — the mutate handler's return value is discarded.
+      if (this.createdMutation && this.currentPhase === 'mutate') {
+        await this.api.mutationStore.markApplied(
+          this.createdMutation.id,
+          JSON.stringify(result)
+        );
+        this.mutationApplied = true;
+        this.abortController?.abort("mutation_applied");
       }
 
       return result;

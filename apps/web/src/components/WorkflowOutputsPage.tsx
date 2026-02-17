@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   Filter,
   ChevronRight,
+  ChevronDown,
   ArrowLeft,
 } from "lucide-react";
 import { useWorkflow } from "../hooks/dbScriptReads";
@@ -96,6 +97,7 @@ export default function WorkflowOutputsPage() {
       : "all"
   );
   const [searchQuery, setSearchQuery] = useState("");
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   // Get connector filter from URL params (from dashboard click)
   const connectorFilter = searchParams.get("connector");
@@ -237,94 +239,121 @@ export default function WorkflowOutputsPage() {
             </div>
           ) : (
             <div className="space-y-2">
-              {filteredMutations.map((mutation) => (
-                <div
-                  key={mutation.id}
-                  className={`block p-4 border rounded-lg transition-all ${
-                    mutation.status === "indeterminate"
-                      ? "border-amber-300 bg-amber-50"
-                      : mutation.status === "failed"
-                      ? "border-red-200 bg-red-50"
-                      : "border-gray-200 hover:border-gray-300"
-                  }`}
-                >
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-start gap-3 flex-1 min-w-0">
-                      <MutationStatusIcon status={mutation.status} />
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="font-medium text-gray-900 truncate">
-                            {getMutationTitle(mutation)}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-2 text-xs text-gray-500">
-                          <span>{formatConnector(mutation.tool_namespace)}</span>
-                          <span>•</span>
-                          <span>{mutation.tool_method}</span>
-                          <span>•</span>
-                          <span>{formatTimestamp(mutation.created_at)}</span>
-                        </div>
-                        {/* Show error for failed mutations */}
-                        {mutation.status === "failed" && mutation.error && (
-                          <p className="text-sm text-red-600 mt-2 line-clamp-2">
-                            {mutation.error}
-                          </p>
-                        )}
-                        {/* Show warning + action buttons for indeterminate mutations */}
-                        {mutation.status === "indeterminate" && (
-                          <div className="mt-2">
-                            <p className="text-sm text-amber-600">
-                              Uncertain outcome - needs verification
-                            </p>
-                            <div className="flex gap-2 mt-2">
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="cursor-pointer text-xs border-red-300 text-red-700 hover:bg-red-50"
-                                disabled={resolveMutation.isPending}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  resolveMutation.mutate({ mutation, action: "did_not_happen" });
-                                }}
-                              >
-                                It didn't happen
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="cursor-pointer text-xs border-amber-300 text-amber-700 hover:bg-amber-50"
-                                disabled={resolveMutation.isPending}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  resolveMutation.mutate({ mutation, action: "skip" });
-                                }}
-                              >
-                                Skip
-                              </Button>
-                            </div>
+              {filteredMutations.map((mutation) => {
+                const isExpanded = expandedId === mutation.id;
+                return (
+                  <div
+                    key={mutation.id}
+                    className={`block border rounded-lg transition-all cursor-pointer ${
+                      mutation.status === "indeterminate"
+                        ? "border-amber-300 bg-amber-50"
+                        : mutation.status === "failed"
+                        ? "border-red-200 bg-red-50"
+                        : "border-gray-200 hover:border-gray-300"
+                    }`}
+                    onClick={() => setExpandedId(isExpanded ? null : mutation.id)}
+                  >
+                    <div className="flex items-start justify-between p-4">
+                      <div className="flex items-start gap-3 flex-1 min-w-0">
+                        <MutationStatusIcon status={mutation.status} />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="font-medium text-gray-900 truncate">
+                              {getMutationTitle(mutation)}
+                            </span>
                           </div>
-                        )}
+                          <div className="flex items-center gap-2 text-xs text-gray-500">
+                            <span>{formatConnector(mutation.tool_namespace)}</span>
+                            <span>•</span>
+                            <span>{mutation.tool_method}</span>
+                            <span>•</span>
+                            <span>{formatTimestamp(mutation.created_at)}</span>
+                          </div>
+                          {/* Show error for failed mutations */}
+                          {mutation.status === "failed" && mutation.error && (
+                            <p className="text-sm text-red-600 mt-2 line-clamp-2">
+                              {mutation.error}
+                            </p>
+                          )}
+                          {/* Show warning + action buttons for indeterminate mutations */}
+                          {mutation.status === "indeterminate" && (
+                            <div className="mt-2">
+                              <p className="text-sm text-amber-600">
+                                Uncertain outcome - needs verification
+                              </p>
+                              <div className="flex gap-2 mt-2">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="cursor-pointer text-xs border-red-300 text-red-700 hover:bg-red-50"
+                                  disabled={resolveMutation.isPending}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    resolveMutation.mutate({ mutation, action: "did_not_happen" });
+                                  }}
+                                >
+                                  It didn't happen
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="cursor-pointer text-xs border-amber-300 text-amber-700 hover:bg-amber-50"
+                                  disabled={resolveMutation.isPending}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    resolveMutation.mutate({ mutation, action: "skip" });
+                                  }}
+                                >
+                                  Skip
+                                </Button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 ml-4">
+                        <Badge
+                          variant="outline"
+                          className={
+                            mutation.status === "applied"
+                              ? "text-green-700 border-green-300 bg-green-50"
+                              : mutation.status === "failed"
+                              ? "text-red-700 border-red-300"
+                              : mutation.status === "indeterminate"
+                              ? "text-amber-700 border-amber-300"
+                              : "text-gray-600 border-gray-300"
+                          }
+                        >
+                          {mutation.status}
+                        </Badge>
+                        {isExpanded
+                          ? <ChevronDown className="w-4 h-4 text-gray-400" />
+                          : <ChevronRight className="w-4 h-4 text-gray-400" />
+                        }
                       </div>
                     </div>
-                    <div className="flex items-center gap-2 ml-4">
-                      <Badge
-                        variant="outline"
-                        className={
-                          mutation.status === "applied"
-                            ? "text-green-700 border-green-300 bg-green-50"
-                            : mutation.status === "failed"
-                            ? "text-red-700 border-red-300"
-                            : mutation.status === "indeterminate"
-                            ? "text-amber-700 border-amber-300"
-                            : "text-gray-600 border-gray-300"
-                        }
-                      >
-                        {mutation.status}
-                      </Badge>
-                    </div>
+                    {isExpanded && (
+                      <div className="px-4 pb-4 border-t border-gray-200">
+                        <div className="mt-3">
+                          <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Result</span>
+                          <pre className="mt-1 p-3 bg-gray-50 rounded-md text-xs text-gray-800 overflow-x-auto whitespace-pre-wrap break-words">
+                            {mutation.result
+                              ? (() => {
+                                  try {
+                                    return JSON.stringify(JSON.parse(mutation.result), null, 2);
+                                  } catch {
+                                    return mutation.result;
+                                  }
+                                })()
+                              : <span className="text-gray-400 italic">No result</span>
+                            }
+                          </pre>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
