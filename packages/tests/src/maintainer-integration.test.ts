@@ -52,7 +52,8 @@ async function createIntegrationTables(db: DBInterface): Promise<void> {
       maintenance_fix_count INTEGER NOT NULL DEFAULT 0,
       active_script_id TEXT NOT NULL DEFAULT '',
       handler_config TEXT NOT NULL DEFAULT '',
-      intent_spec TEXT NOT NULL DEFAULT ''
+      intent_spec TEXT NOT NULL DEFAULT '',
+      pending_retry_run_id TEXT NOT NULL DEFAULT ''
     )
   `);
   await db.exec(`CREATE INDEX IF NOT EXISTS idx_workflows_task_id ON workflows(task_id)`);
@@ -87,7 +88,8 @@ async function createIntegrationTables(db: DBInterface): Promise<void> {
       workflow_id TEXT NOT NULL DEFAULT '',
       type TEXT NOT NULL DEFAULT '',
       summary TEXT NOT NULL DEFAULT '',
-      diagram TEXT NOT NULL DEFAULT ''
+      diagram TEXT NOT NULL DEFAULT '',
+      handler_config TEXT NOT NULL DEFAULT ''
     )
   `);
   await db.exec(`CREATE INDEX IF NOT EXISTS idx_scripts_task_id ON scripts(task_id)`);
@@ -725,9 +727,11 @@ describe("Maintainer Integration Tests", () => {
     });
 
     it("should not create maintainer task when at max fix attempts", async () => {
-      // Setup: Workflow at max fix attempts
+      // Setup: Workflow at the escalation boundary (fixCount + 1 >= MAX_FIX_ATTEMPTS)
+      // With MAX_FIX_ATTEMPTS=3, fixCount=2 means the next failure would be the 3rd
+      // consecutive failure, which should escalate instead of creating a maintainer.
       const workflow = createWorkflow({
-        maintenance_fix_count: 3,
+        maintenance_fix_count: MAX_FIX_ATTEMPTS - 1, // 2 — one below max, but triggers escalation
       });
       const script = createScript();
 
@@ -738,19 +742,12 @@ describe("Maintainer Integration Tests", () => {
       let maintainerTasks = await api.taskStore.getMaintainerTasksForWorkflow(workflow.id);
       expect(maintainerTasks.length).toBe(0);
 
-      // In the real implementation, workflow-worker checks:
-      // if (currentFixCount >= MAX_FIX_ATTEMPTS) { escalateToUser(); return; }
-      // So enterMaintenanceMode is NOT called when at max attempts
-
-      // This test verifies that the check happens by testing that if we DO call
-      // enterMaintenanceMode directly, it still works (but in practice, the
-      // workflow-worker guards this)
-
-      // Since the workflow-worker does the guard, here we just verify the
-      // correct behavior would be to escalate, not create maintainer task
+      // In the real implementation, workflow-scheduler checks:
+      // if (fixCount + 1 >= MAX_FIX_ATTEMPTS) { escalateToUser(); return; }
+      // So enterMaintenanceMode is NOT called when the next entry would reach the limit.
 
       // Simulate the guard logic:
-      const shouldEscalate = workflow.maintenance_fix_count >= MAX_FIX_ATTEMPTS;
+      const shouldEscalate = workflow.maintenance_fix_count + 1 >= MAX_FIX_ATTEMPTS;
       expect(shouldEscalate).toBe(true);
 
       // No maintainer task should be created when escalating
@@ -840,21 +837,14 @@ describe("Maintainer Integration Tests", () => {
         createToolCallOptions()
       );
 
-      // Third fix attempt
-      result = await api.enterMaintenanceMode({
-        workflowId: workflow.id,
-        workflowTitle: workflow.title,
-        scriptRunId: "run-3",
-      });
-      expect(result.newFixCount).toBe(3);
-
-      // At this point, if another failure occurs, it should escalate
-      // Verify the fix count is at max
+      // After 2 maintenance entries, the workflow-scheduler would escalate on the
+      // next failure (fixCount + 1 >= MAX_FIX_ATTEMPTS → 2 + 1 >= 3 → true).
+      // Verify the fix count is at the escalation boundary.
       const dbWorkflow = await api.scriptStore.getWorkflow(workflow.id);
-      expect(dbWorkflow?.maintenance_fix_count).toBe(3);
+      expect(dbWorkflow?.maintenance_fix_count).toBe(2);
 
-      // Now if we check the condition (as workflow-worker does):
-      const shouldEscalate = dbWorkflow!.maintenance_fix_count >= MAX_FIX_ATTEMPTS;
+      // Now if we check the condition (as workflow-scheduler does):
+      const shouldEscalate = dbWorkflow!.maintenance_fix_count + 1 >= MAX_FIX_ATTEMPTS;
       expect(shouldEscalate).toBe(true);
     });
   });

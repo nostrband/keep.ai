@@ -322,6 +322,53 @@ Example: await ${ns}.${name}(<input>)
   }
 
   /**
+   * Redact a value for safe inclusion in error messages sent to the maintainer LLM.
+   * Preserves param structure and types for debugging while preventing PII leakage.
+   * - Strings ≤ 8 chars: kept as-is (too short to be meaningful PII)
+   * - Strings > 8 chars: "pre…(N)…fix" — first 3 chars, total length, last 3 chars
+   * - Numbers, booleans, null: preserved as-is
+   * - Arrays: [length, redacted first element] as shape hint
+   * - Objects: recurse into values (keys preserved, string values redacted)
+   */
+  private redactValue(value: unknown): unknown {
+    if (value === null || value === undefined) return value;
+    if (typeof value === 'number' || typeof value === 'boolean') return value;
+    if (typeof value === 'string') {
+      if (value.length <= 8) return value;
+      return `${value.slice(0, 3)}…(${value.length})…${value.slice(-3)}`;
+    }
+    if (Array.isArray(value)) {
+      if (value.length === 0) return [];
+      return [value.length, this.redactValue(value[0])];
+    }
+    if (typeof value === 'object') {
+      const redacted: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+        redacted[k] = this.redactValue(v);
+      }
+      return redacted;
+    }
+    return String(value);
+  }
+
+  /**
+   * Format a synthetic "call trace" for tool errors.
+   * Since only error.message survives to the maintainer LLM (no real stack trace
+   * crosses the QuickJS sandbox boundary), we embed tool call context directly
+   * into the error message so the auto-fix agent can see what was called and with what params.
+   * String values are redacted to avoid leaking PII to the LLM.
+   */
+  private formatCallTrace(ns: string, name: string, input: unknown): string {
+    let paramsStr: string;
+    try {
+      paramsStr = JSON.stringify(this.redactValue(input));
+    } catch {
+      paramsStr = "[unserializable]";
+    }
+    return `\nCall trace (strings redacted): ${ns}.${name}(${paramsStr})`;
+  }
+
+  /**
    * Wrap a tool with validation and mutation enforcement.
    */
   private wrapTool(tool: AnyTool, doc: string) {
@@ -341,7 +388,8 @@ Example: await ${ns}.${name}(<input>)
             `Bad input for '${ns}.${name}' input ${JSON.stringify(input)} errors ${result.errors.join("; ")}`
           );
 
-          const message = `Invalid input for ${ns}.${name}.\nUsage: ${doc}`;
+          const callTrace = this.formatCallTrace(ns, name, input);
+          const message = `Invalid input for ${ns}.${name}.${callTrace}\nUsage: ${doc}`;
           const logicError = new LogicError(message, { source: `${ns}.${name}` });
 
           if (this.workflowId) {
@@ -385,13 +433,15 @@ Example: await ${ns}.${name}(<input>)
           result,
         });
       } catch (e) {
+        const callTrace = this.formatCallTrace(ns, name, validatedInput);
         let classified: ClassifiedError;
         if (isClassifiedError(e)) {
-          // Don't re-create classified errors — re-throw original to preserve
-          // identity (especially AuthError with serviceId/accountId).
+          // Preserve identity (especially AuthError with serviceId/accountId)
+          // but append call trace so the maintainer can see what was called.
           classified = e;
+          classified.message = `${e.message}${callTrace}`;
         } else {
-          const message = `Failed at ${ns}.${name}: ${e}.\nUsage: ${doc}`;
+          const message = `Failed at ${ns}.${name}: ${e}.${callTrace}\nUsage: ${doc}`;
           classified = new LogicError(message, {
             cause: e instanceof Error ? e : undefined,
             source: `${ns}.${name}`
@@ -413,8 +463,9 @@ Example: await ${ns}.${name}(<input>)
       if (tool.outputSchema) {
         const outResult = validateJsonSchema(tool.outputSchema, result);
         if (!outResult.valid) {
+          const callTrace = this.formatCallTrace(ns, name, validatedInput);
           const outError = new LogicError(
-            `Invalid output from ${ns}.${name}: ${outResult.errors.join("; ")}`,
+            `Invalid output from ${ns}.${name}: ${outResult.errors.join("; ")}${callTrace}`,
             { source: `${ns}.${name}` }
           );
           if (this.workflowId) {

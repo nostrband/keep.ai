@@ -1,8 +1,10 @@
 import { KeepDbApi, Workflow } from "@app/db";
 import { ClassifiedError } from "./errors";
 
-// Maximum number of consecutive fix attempts before escalating to user (spec 09b)
-// After this many failed auto-fix attempts, the workflow is paused and user is notified.
+// Maximum consecutive failures before escalating to user (spec 09b).
+// On the Nth consecutive failure, the workflow is paused and user is notified
+// instead of creating another maintainer task. With N=3: 2 auto-fix attempts
+// are made (after the 1st and 2nd failures), and the 3rd failure escalates.
 export const MAX_FIX_ATTEMPTS = 3;
 
 /**

@@ -641,16 +641,20 @@ export class WorkflowScheduler {
 
     const fixCount = freshWorkflow.maintenance_fix_count || 0;
 
-    if (fixCount >= MAX_FIX_ATTEMPTS) {
+    // Check if this failure would exhaust the fix attempt budget.
+    // fixCount tracks completed maintenance entries. This new failure would be
+    // entry #(fixCount+1). When that reaches MAX_FIX_ATTEMPTS, escalate instead
+    // of creating another maintainer — the user should fix it interactively.
+    if (fixCount + 1 >= MAX_FIX_ATTEMPTS) {
       this.debug(
-        `Workflow ${workflow.id} exceeded max fix attempts (${fixCount}/${MAX_FIX_ATTEMPTS}), escalating to user`
+        `Workflow ${workflow.id} reached max fix attempts (${fixCount + 1}/${MAX_FIX_ATTEMPTS}), escalating to user`
       );
       await escalateToUser(this.api, {
         workflow: freshWorkflow,
         scriptRunId: result.sessionId || '',
         error: new LogicError(result.error || 'Logic error'),
         logs: [], // Session-level logs are empty for new-format workflows
-        fixAttempts: fixCount,
+        fixAttempts: fixCount + 1,
       });
       return;
     }
@@ -667,7 +671,7 @@ export class WorkflowScheduler {
     this.debug(
       `Entered maintenance mode for workflow ${workflow.id}, ` +
       `handler: ${result.handlerName || '(none)'}, ` +
-      `fix attempt ${fixCount + 1}/${MAX_FIX_ATTEMPTS}`
+      `fix attempt ${fixCount + 1}/${MAX_FIX_ATTEMPTS - 1}`
     );
   }
 

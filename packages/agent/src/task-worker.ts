@@ -785,6 +785,14 @@ If you cannot fix this issue autonomously, explain why without calling the \`fix
       return;
     }
 
+    // Race condition check: don't activate if workflow was escalated while we were running.
+    // Escalation sets status="error" — activating a fix now would conflict with the
+    // user being asked to fix it interactively.
+    if (workflow.status === 'error') {
+      this.debug("Maintainer completion: workflow was escalated during maintenance, skipping activation");
+      return;
+    }
+
     const shouldActivate = workflow.active_script_id === context.expectedScriptId;
     this.debug("Maintainer completion - shouldActivate:", shouldActivate,
       `(active=${workflow.active_script_id}, expected=${context.expectedScriptId})`);
