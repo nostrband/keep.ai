@@ -790,11 +790,9 @@ export class WorkflowScheduler {
 
       case 'transient':
         this.debug(`Session ${result.sessionId} hit transient error for workflow ${workflowId}: ${result.error}`);
-        // Set pending_retry_run_id for retry after backoff
-        await this.api.scriptStore.updateWorkflowFields(workflowId, {
-          pending_retry_run_id: result.handlerRunId || '',
-        });
-        // Use existing backoff mechanism
+        // EMM already set pending_retry_run_id atomically for post-mutation transient errors.
+        // Pre-mutation transient errors release events (no pending_retry needed).
+        // Use existing backoff mechanism for retry scheduling.
         await this.handleWorkerSignal({
           type: 'retry',
           workflowId,

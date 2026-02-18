@@ -8,15 +8,13 @@
  * See specs/exec-07-session-orchestration.md for design details.
  */
 
-import { KeepDbApi, Workflow, ScriptRun, HandlerRun, isFailedStatus, isPausedStatus, DBInterface } from "@app/db";
+import { KeepDbApi, Workflow, ScriptRun, isFailedStatus, isPausedStatus } from "@app/db";
 import { bytesToHex } from "@noble/ciphers/utils";
 import { randomBytes } from "@noble/ciphers/crypto";
 import {
   executeHandler,
   HandlerExecutionContext,
   HandlerResult,
-  getStartPhaseForRetry,
-  shouldCopyResults,
 } from "./handler-state-machine";
 import { WorkflowConfig } from "./workflow-validator";
 import { getRunStatusForError } from "./failure-handling";
@@ -502,11 +500,16 @@ async function continueSession(
 /**
  * Execute a retry session for a workflow with a pending retry.
  *
- * Core retry logic used by ALL recovery paths (crash, transient, fix).
- * Atomically creates the retry run AND clears pending_retry_run_id in one
- * transaction for crash safety.
+ * Only called for post-mutation failures where pending_retry_run_id is set.
+ * Pre-mutation failures release events (no pending_retry needed) and the
+ * scheduler runs a fresh session instead.
  *
- * After the retry run executes, continues the consumer loop if the run committed.
+ * Uses EMM.createRetryRun() which atomically:
+ * - Creates retry run at emitting phase
+ * - Transfers event reservations from failed run
+ * - Clears pending_retry_run_id
+ *
+ * After the retry run executes, continues the consumer loop if committed.
  *
  * @param workflow - The workflow to retry
  * @param failedHandlerRunId - The handler run ID to retry
@@ -518,7 +521,7 @@ export async function retryWorkflowSession(
   failedHandlerRunId: string,
   context: HandlerExecutionContext
 ): Promise<SessionResult> {
-  const { api } = context;
+  const { api, emm } = context;
 
   // 1. Load failed handler run
   const failedRun = await api.handlerRunStore.get(failedHandlerRunId);
@@ -536,16 +539,9 @@ export async function retryWorkflowSession(
     return executeWorkflowSession(workflow, "event", context);
   }
 
-  // 3. Compute phase reset
-  const startPhase = getStartPhaseForRetry(failedRun.phase, failedRun.handler_type);
-  const copyResults = shouldCopyResults(failedRun.phase);
+  log(`retryWorkflowSession: retrying run ${failedRun.id} (${failedRun.handler_name})`);
 
-  log(
-    `retryWorkflowSession: retrying run ${failedRun.id} (${failedRun.handler_name}), ` +
-    `startPhase=${startPhase}, copyResults=${copyResults}`
-  );
-
-  // 4. Create new session
+  // 3. Create new session
   const sessionId = bytesToHex(randomBytes(16));
   await api.scriptStore.startScriptRun(
     sessionId,
@@ -574,52 +570,18 @@ export async function retryWorkflowSession(
   };
 
   try {
-    // 5. ATOMIC TRANSACTION: create retry run + clear pending_retry_run_id + release events if needed
-    const result: { newRun: HandlerRun | null } = { newRun: null };
-
-    await api.db.db.tx(async (tx: DBInterface) => {
-      // a. Create retry handler run
-      result.newRun = await api.handlerRunStore.create(
-        {
-          script_run_id: sessionId,
-          workflow_id: workflow.id,
-          handler_type: failedRun.handler_type,
-          handler_name: failedRun.handler_name,
-          retry_of: failedRun.id,
-          phase: startPhase,
-          prepare_result: copyResults ? failedRun.prepare_result : undefined,
-          input_state: failedRun.input_state,
-        },
-        tx
-      );
-
-      // b. Clear pending_retry_run_id
-      await api.scriptStore.updateWorkflowFields(workflow.id, {
-        pending_retry_run_id: '',
-      }, tx);
-
-      // c. Release reserved events for consumer pre-mutation resets
-      // Only consumers reserve events (during preparing→prepared), producers never do
-      if (failedRun.handler_type === "consumer" && !copyResults) {
-        await api.eventStore.releaseEvents(failedRun.id, tx);
-      }
-    });
-
-    if (!result.newRun) {
-      throw new Error("Failed to create retry run in transaction");
-    }
-
-    const retryRun = result.newRun;
+    // 4. Create retry run via EMM — atomic with reservation transfer + clear pending_retry
+    const retryRun = await emm.createRetryRun(failedHandlerRunId, sessionId);
     log(`Created retry run ${retryRun.id} in new session ${sessionId}`);
 
-    // 6. Execute the retry run
+    // 5. Execute the retry run
     const handlerResult = await executeHandler(retryRun.id, context);
 
-    // 7. Handle result — EMM already finalized session atomically
+    // 6. Handle result — EMM already finalized session atomically
     const sessionResult = mapHandlerResultToSession(handlerResult, sessionId, retryRun.id, failedRun.handler_name);
     if (sessionResult) return sessionResult;
 
-    // 8. If committed, continue consumer loop
+    // 7. If committed, continue consumer loop
     const continueResult = await continueSession(api, workflow, session, context);
     return continueResult;
   } catch (error) {
