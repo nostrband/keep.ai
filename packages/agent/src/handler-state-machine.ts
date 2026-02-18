@@ -553,108 +553,10 @@ function clampWakeAt(wakeAt: number, now: number): number {
 // Replaced by EMM.updateConsumerPhase(runId, "prepared", opts) which atomically handles
 // phase transition + event reservation + wakeAt persistence.
 
-/**
- * Commit a producer run atomically.
- * Updates handler state, marks run committed, increments handler count,
- * and updates per-producer schedule (exec-13).
- */
-async function commitProducer(
-  api: KeepDbApi,
-  run: HandlerRun,
-  newState: unknown
-): Promise<void> {
-  await api.db.db.tx(async (tx: DBInterface) => {
-    // Update handler state
-    if (newState !== undefined) {
-      await api.handlerStateStore.set(
-        run.workflow_id,
-        run.handler_name,
-        newState,
-        run.id,
-        tx
-      );
-    }
-
-    // Mark run committed
-    await api.handlerRunStore.update(
-      run.id,
-      {
-        phase: "committed",
-        status: "committed",
-        output_state: JSON.stringify(newState),
-        end_timestamp: new Date().toISOString(),
-      },
-      tx
-    );
-
-    // Update session handler count
-    await api.scriptStore.incrementHandlerCount(run.script_run_id, tx);
-
-    // Update per-producer schedule (exec-13)
-    // Get the producer's schedule config and compute next run time
-    const schedule = await api.producerScheduleStore.get(
-      run.workflow_id,
-      run.handler_name,
-      tx
-    );
-    if (schedule) {
-      const nextRunAt = computeNextRunTime(
-        schedule.schedule_type,
-        schedule.schedule_value
-      );
-      await api.producerScheduleStore.updateAfterRun(
-        run.workflow_id,
-        run.handler_name,
-        nextRunAt,
-        tx
-      );
-      log(`Producer ${run.handler_name} next_run_at updated to ${new Date(nextRunAt).toISOString()}`);
-    }
-  });
-  log(`Handler run ${run.id} (producer) committed`);
-}
-
-/**
- * Commit a consumer run atomically.
- * Consumes reserved events, updates handler state, marks run committed, increments handler count.
- */
-async function commitConsumer(
-  api: KeepDbApi,
-  run: HandlerRun,
-  newState: unknown
-): Promise<void> {
-  await api.db.db.tx(async (tx: DBInterface) => {
-    // Consume reserved events
-    await api.eventStore.consumeEvents(run.id, tx);
-
-    // Update handler state
-    if (newState !== undefined) {
-      await api.handlerStateStore.set(
-        run.workflow_id,
-        run.handler_name,
-        newState,
-        run.id,
-        tx
-      );
-    }
-
-    // Mark run committed
-    await api.handlerRunStore.update(
-      run.id,
-      {
-        phase: "committed",
-        status: "committed",
-        output_state: JSON.stringify(newState),
-        end_timestamp: new Date().toISOString(),
-      },
-      tx
-    );
-
-    // Update session handler count
-    await api.scriptStore.incrementHandlerCount(run.script_run_id, tx);
-  });
-  log(`Handler run ${run.id} (consumer) committed`);
-}
+// commitProducer, commitConsumer — removed.
+// Replaced by EMM.commitProducer() and EMM.commitConsumer() which atomically handle
+// state persistence, phase+status transition, event consumption, schedule updates,
+// and session handler count increment.
 
 // ============================================================================
 // Sandbox Execution
@@ -838,8 +740,18 @@ return await workflow.producers.${run.handler_name}.handler(__state__);
         return;
       }
 
-      // Commit with new state
-      await commitProducer(api, run, result.result);
+      // Commit with new state via EMM
+      const schedule = await api.producerScheduleStore.get(run.workflow_id, run.handler_name);
+      let nextRunAt: number | undefined;
+      if (schedule) {
+        nextRunAt = computeNextRunTime(schedule.schedule_type, schedule.schedule_value);
+        log(`Producer ${run.handler_name} next_run_at updated to ${new Date(nextRunAt).toISOString()}`);
+      }
+      await context.emm.commitProducer(run.id, {
+        state: result.result,
+        outputState: JSON.stringify(result.result),
+        nextRunAt,
+      });
 
       // Save logs if any
       if (logs.length > 0) {
@@ -1005,7 +917,7 @@ return await workflow.consumers.${run.handler_name}.prepare(__state__);
     if (prepareResult.reservations.length === 0) {
       // Nothing to process, skip to committed
       log(`Handler run ${run.id} (consumer): prepared → committed (no reservations)`);
-      await commitConsumer(api, run, undefined);
+      await context.emm.commitConsumer(run.id);
       context.schedulerState?.onConsumerCommit(run.workflow_id, run.handler_name, false);
     } else {
       // Has work to do, go to mutating
@@ -1119,7 +1031,7 @@ return await workflow.consumers.${run.handler_name}.prepare(__state__);
     if (!hasNext) {
       // No next handler, commit
       log(`Handler run ${run.id} (consumer): emitting → committed (no next handler)`);
-      await commitConsumer(api, run, undefined);
+      await context.emm.commitConsumer(run.id);
       context.schedulerState?.onConsumerCommit(run.workflow_id, run.handler_name, true);
       return;
     }
@@ -1174,8 +1086,11 @@ return await workflow.consumers.${run.handler_name}.next(__prepared__, __mutatio
         return;
       }
 
-      // Commit with new state
-      await commitConsumer(api, run, result.result);
+      // Commit with new state via EMM
+      await context.emm.commitConsumer(run.id, {
+        state: result.result,
+        outputState: JSON.stringify(result.result),
+      });
       context.schedulerState?.onConsumerCommit(run.workflow_id, run.handler_name, true);
 
       // Save logs if any
