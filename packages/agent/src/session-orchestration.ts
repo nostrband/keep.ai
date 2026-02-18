@@ -47,6 +47,10 @@ export interface SessionResult {
   handlerRunId?: string;
   /** Handler name that failed (new-format only) */
   handlerName?: string;
+  /** Connector service ID from auth error (e.g. "gmail", "gdrive") */
+  serviceId?: string;
+  /** Connector account ID from auth error (e.g. "user@gmail.com") */
+  accountId?: string;
 }
 
 /**
@@ -61,97 +65,23 @@ export interface SessionConfig {
 // Session State Management
 // ============================================================================
 
-/**
- * Complete a session successfully.
- * Aggregates cost from all handler runs.
- */
-async function completeSession(api: KeepDbApi, session: ScriptRun): Promise<void> {
-  // Aggregate cost from handler runs
-  const runs = await api.handlerRunStore.getBySession(session.id);
-  const totalCost = runs.reduce((sum, run) => sum + (run.cost || 0), 0);
-
-  await api.scriptStore.finishScriptRun(
-    session.id,
-    new Date().toISOString(),
-    "completed",
-    "", // no error
-    "", // no logs (logs are per handler run)
-    "", // no error type
-    totalCost
-  );
-  log(`Session ${session.id} completed with cost ${totalCost}`);
-}
+// completeSession, failSession, finishSessionForMaintenance,
+// finishSessionForTransient, suspendSession, handleApprovalNeeded — removed.
+//
+// After Topic 2, EMM.updateHandlerRunStatus() atomically handles session
+// finalization for all failure/pause paths. Success-path finalization uses
+// EMM.finishSession(). Notification creation moved to workflow-scheduler's
+// postSessionResult().
 
 /**
- * Fail a session with an error.
- * Updates workflow status to 'error'.
+ * Finalize a session that failed outside handler execution (e.g., config parse error).
+ * For errors during handler execution, EMM already finalized the session atomically.
  */
-async function failSession(
+async function finishSessionOnOuterError(
   api: KeepDbApi,
   session: ScriptRun,
   error: string,
   errorType: string = "logic"
-): Promise<void> {
-  // Aggregate cost from handler runs
-  const runs = await api.handlerRunStore.getBySession(session.id);
-  const totalCost = runs.reduce((sum, run) => sum + (run.cost || 0), 0);
-
-  await api.scriptStore.finishScriptRun(
-    session.id,
-    new Date().toISOString(),
-    "failed",
-    error,
-    "", // no logs
-    errorType,
-    totalCost
-  );
-
-  // Pause workflow on failure
-  await api.scriptStore.updateWorkflowFields(session.workflow_id, {
-    status: "error",
-  });
-  log(`Session ${session.id} failed: ${error}`);
-}
-
-/**
- * Finish a session for maintenance mode (logic errors eligible for auto-fix).
- * Unlike failSession, does NOT set workflow.status = "error".
- * The workflow stays active — enterMaintenanceMode() will set maintenance=true.
- */
-async function finishSessionForMaintenance(
-  api: KeepDbApi,
-  session: ScriptRun,
-  error: string,
-  errorType: string = "logic"
-): Promise<void> {
-  // Aggregate cost from handler runs
-  const runs = await api.handlerRunStore.getBySession(session.id);
-  const totalCost = runs.reduce((sum, run) => sum + (run.cost || 0), 0);
-
-  await api.scriptStore.finishScriptRun(
-    session.id,
-    new Date().toISOString(),
-    "failed",
-    error,
-    "", // no logs
-    errorType,
-    totalCost
-  );
-
-  // NOTE: Do NOT set workflow.status = "error" here.
-  // enterMaintenanceMode() will set workflow.maintenance = true.
-  log(`Session ${session.id} finished for maintenance: ${error}`);
-}
-
-/**
- * Finish a session for transient errors (network, rate limit).
- * Unlike failSession, does NOT set workflow.status — keeps workflow active
- * so the scheduler can retry via pending_retry_run_id after backoff.
- */
-async function finishSessionForTransient(
-  api: KeepDbApi,
-  session: ScriptRun,
-  error: string
 ): Promise<void> {
   const runs = await api.handlerRunStore.getBySession(session.id);
   const totalCost = runs.reduce((sum, run) => sum + (run.cost || 0), 0);
@@ -162,86 +92,74 @@ async function finishSessionForTransient(
     "failed",
     error,
     "",
-    "network",
+    errorType,
     totalCost
   );
-
-  // NOTE: Do NOT set workflow.status — keeps workflow active for scheduler retry.
-  log(`Session ${session.id} finished for transient error: ${error}`);
+  log(`Session ${session.id} finished (outer error): ${error}`);
 }
 
+// ============================================================================
+// Handler Result → Session Result Mapping
+// ============================================================================
 
 /**
- * Suspend a session with a reason.
- * Updates workflow status to 'paused'.
+ * Map a handler result to a session result.
+ * Returns null if the handler committed (session should continue).
+ *
+ * After Topic 2, EMM.updateHandlerRunStatus() already atomically finalized
+ * the session for all failure/pause paths. This function just maps the
+ * handler status to the appropriate SessionResult — no DB calls needed.
  */
-async function suspendSession(
-  api: KeepDbApi,
-  session: ScriptRun,
-  reason: string
-): Promise<void> {
-  // Aggregate cost from handler runs
-  const runs = await api.handlerRunStore.getBySession(session.id);
-  const totalCost = runs.reduce((sum, run) => sum + (run.cost || 0), 0);
-
-  await api.scriptStore.finishScriptRun(
-    session.id,
-    new Date().toISOString(),
-    "suspended",
-    reason,
-    "", // no logs
-    "", // no error type
-    totalCost
-  );
-
-  // Pause workflow on suspension
-  await api.scriptStore.updateWorkflowFields(session.workflow_id, {
-    status: "paused",
-  });
-  log(`Session ${session.id} suspended: ${reason}`);
-}
-
-/**
- * Handle an auth/permission error from a handler run.
- * Fails the session, sets workflow to error, and creates a notification
- * so the user knows they need to reconnect.
- */
-async function handleApprovalNeeded(
-  api: KeepDbApi,
-  session: ScriptRun,
+function mapHandlerResultToSession(
   result: HandlerResult,
-  workflow: Workflow
-): Promise<SessionResult> {
-  const errorMsg = result.error || "Authorization required";
-  const errType = result.errorType || "auth";
+  sessionId: string,
+  handlerRunId: string,
+  handlerName: string,
+): SessionResult | null {
+  if (result.status === "failed:logic") {
+    return {
+      status: "maintenance",
+      error: result.error || "Handler failed",
+      errorType: result.errorType || "logic",
+      sessionId,
+      handlerRunId,
+      handlerName,
+    };
+  }
 
-  await failSession(api, session, errorMsg, errType);
+  if (isFailedStatus(result.status)) {
+    return {
+      status: "failed",
+      error: result.error || "Handler failed",
+      errorType: result.errorType,
+      sessionId,
+      serviceId: result.serviceId,
+      accountId: result.accountId,
+    };
+  }
 
-  // Create an "error" notification so the user sees an auth banner
-  try {
-    await api.notificationStore.saveNotification({
-      id: crypto.randomUUID(),
-      workflow_id: workflow.id,
-      type: "error",
-      payload: JSON.stringify({
-        error_type: errType,
-        service: result.serviceId,
-        account: result.accountId,
-        message: errorMsg,
-      }),
-      timestamp: new Date().toISOString(),
-      acknowledged_at: "",
-      resolved_at: "",
-      workflow_title: workflow.title,
-    });
-  } catch { /* notification is best-effort */ }
+  if (result.status === "paused:transient") {
+    return {
+      status: "transient",
+      error: result.error || "Transient error",
+      sessionId,
+      handlerRunId,
+      handlerName,
+    };
+  }
 
-  return {
-    status: "failed",
-    error: errorMsg,
-    errorType: errType,
-    sessionId: session.id,
-  };
+  if (isPausedStatus(result.status)) {
+    return {
+      status: "suspended",
+      reason: result.error || "handler_suspended",
+      sessionId,
+      serviceId: result.serviceId,
+      accountId: result.accountId,
+    };
+  }
+
+  // committed or other non-terminal — session should continue
+  return null;
 }
 
 // ============================================================================
@@ -415,7 +333,7 @@ export async function executeWorkflowSession(
         try {
           handlerConfig = JSON.parse(workflow.handler_config) as WorkflowConfig;
         } catch {
-          await failSession(api, session, "Invalid handler_config JSON", "logic");
+          await finishSessionOnOuterError(api, session, "Invalid handler_config JSON", "logic");
           return {
             status: "failed",
             error: "Invalid handler_config JSON",
@@ -453,59 +371,11 @@ export async function executeWorkflowSession(
           // Execute handler
           const result = await executeHandler(handlerRun.id, context);
 
-          // Per exec-09: check status instead of phase for failure/paused detection
-          if (isFailedStatus(result.status)) {
-            const errorMsg = result.error || "Producer failed";
-            const errType = result.errorType || "logic";
-
-            // Route logic errors to maintenance for auto-fix
-            if (result.status === "failed:logic") {
-              await finishSessionForMaintenance(api, session, errorMsg, errType);
-              return {
-                status: "maintenance",
-                error: errorMsg,
-                errorType: errType,
-                sessionId,
-                handlerRunId: handlerRun.id,
-                handlerName: producerName,
-              };
-            }
-
-            await failSession(api, session, errorMsg, errType);
-            return {
-              status: "failed",
-              error: errorMsg,
-              sessionId,
-            };
-          }
-
-          if (result.status === "paused:transient") {
-            await finishSessionForTransient(api, session, result.error || "Transient error");
-            return {
-              status: "transient",
-              error: result.error || "Transient error",
-              sessionId,
-              handlerRunId: handlerRun.id,
-              handlerName: producerName,
-            };
-          }
-
-          if (result.status === "paused:approval") {
-            return handleApprovalNeeded(api, session, result, workflow);
-          }
-
-          if (isPausedStatus(result.status)) {
-            await suspendSession(
-              api,
-              session,
-              result.error || "Producer suspended"
-            );
-            return {
-              status: "suspended",
-              reason: result.error || "Producer suspended",
-              sessionId,
-            };
-          }
+          // Per exec-09: check status instead of phase for failure/paused detection.
+          // EMM already finalized session atomically inside executeHandler —
+          // just map the handler result to a SessionResult.
+          const sessionResult = mapHandlerResultToSession(result, sessionId, handlerRun.id, producerName);
+          if (sessionResult) return sessionResult;
         }
       }
     }
@@ -534,59 +404,10 @@ export async function executeWorkflowSession(
       const result = await executeHandler(handlerRun.id, context);
       iterations++;
 
-      // Per exec-09: check status instead of phase for failure/paused detection
-      if (isFailedStatus(result.status)) {
-        const errorMsg = result.error || "Consumer failed";
-        const errType = result.errorType || "logic";
-
-        // Route logic errors to maintenance for auto-fix
-        if (result.status === "failed:logic") {
-          await finishSessionForMaintenance(api, session, errorMsg, errType);
-          return {
-            status: "maintenance",
-            error: errorMsg,
-            errorType: errType,
-            sessionId,
-            handlerRunId: handlerRun.id,
-            handlerName: consumer.name,
-          };
-        }
-
-        await failSession(api, session, errorMsg, errType);
-        return {
-          status: "failed",
-          error: errorMsg,
-          sessionId,
-        };
-      }
-
-      if (result.status === "paused:transient") {
-        await finishSessionForTransient(api, session, result.error || "Transient error");
-        return {
-          status: "transient",
-          error: result.error || "Transient error",
-          sessionId,
-          handlerRunId: handlerRun.id,
-          handlerName: consumer.name,
-        };
-      }
-
-      if (result.status === "paused:approval") {
-        return handleApprovalNeeded(api, session, result, workflow);
-      }
-
-      if (isPausedStatus(result.status)) {
-        await suspendSession(
-          api,
-          session,
-          result.error || "handler_suspended"
-        );
-        return {
-          status: "suspended",
-          reason: result.error || "handler_suspended",
-          sessionId,
-        };
-      }
+      // Per exec-09: check status instead of phase for failure/paused detection.
+      // EMM already finalized session atomically — just map to SessionResult.
+      const sessionResult = mapHandlerResultToSession(result, sessionId, handlerRun.id, consumer.name);
+      if (sessionResult) return sessionResult;
       // committed = continue checking for more work
     }
 
@@ -594,26 +415,24 @@ export async function executeWorkflowSession(
       log(`Session ${sessionId} hit budget limit (${maxIterations} iterations)`);
     }
 
-    // 3. Complete session
-    await completeSession(api, session);
+    // 3. Complete session via EMM
+    await context.emm.finishSession(sessionId);
     return { status: "completed", sessionId };
   } catch (error) {
-    // Use getRunStatusForError instead of ensureClassified (per exec-12)
+    // Error outside handler execution (e.g., config parse, workflow not found).
+    // No handler run involved, so EMM wasn't called — finalize session directly.
     const { status: runStatus, error: classifiedError } = getRunStatusForError(error, "session-orchestration");
+    await finishSessionOnOuterError(api, session, classifiedError.message, classifiedError.type);
 
-    // Route logic errors to maintenance for auto-fix
     if (runStatus === "failed:logic") {
-      await finishSessionForMaintenance(api, session, classifiedError.message, classifiedError.type);
       return {
         status: "maintenance",
         error: classifiedError.message,
         errorType: classifiedError.type,
         sessionId,
-        // No handlerRunId/handlerName — error occurred outside handler execution
       };
     }
 
-    await failSession(api, session, classifiedError.message, classifiedError.type);
     return {
       status: "failed",
       error: classifiedError.message,
@@ -662,58 +481,12 @@ async function continueSession(
     const result = await executeHandler(handlerRun.id, context);
     iterations++;
 
-    // Per exec-09: check status instead of phase for failure/paused detection
-    if (isFailedStatus(result.status)) {
-      const errorMsg = result.error || "Consumer failed";
-      const errType = result.errorType || "logic";
-
-      // Route logic errors to maintenance for auto-fix
-      if (result.status === "failed:logic") {
-        await finishSessionForMaintenance(api, session, errorMsg, errType);
-        return {
-          status: "maintenance",
-          error: errorMsg,
-          errorType: errType,
-          sessionId: session.id,
-          handlerRunId: handlerRun.id,
-          handlerName: consumer.name,
-        };
-      }
-
-      await failSession(api, session, errorMsg, errType);
-      return {
-        status: "failed",
-        error: errorMsg,
-        sessionId: session.id,
-      };
-    }
-
-    if (result.status === "paused:transient") {
-      await finishSessionForTransient(api, session, result.error || "Transient error");
-      return {
-        status: "transient",
-        error: result.error || "Transient error",
-        sessionId: session.id,
-        handlerRunId: handlerRun.id,
-        handlerName: consumer.name,
-      };
-    }
-
-    if (result.status === "paused:approval") {
-      return handleApprovalNeeded(api, session, result, workflow);
-    }
-
-    if (isPausedStatus(result.status)) {
-      await suspendSession(api, session, result.error || "handler_suspended");
-      return {
-        status: "suspended",
-        reason: result.error || "handler_suspended",
-        sessionId: session.id,
-      };
-    }
+    // EMM already finalized session atomically — just map to SessionResult.
+    const sessionResult = mapHandlerResultToSession(result, session.id, handlerRun.id, consumer.name);
+    if (sessionResult) return sessionResult;
   }
 
-  await completeSession(api, session);
+  await context.emm.finishSession(session.id);
   return { status: "completed", sessionId: session.id };
 }
 
@@ -985,64 +758,19 @@ export async function retryWorkflowSession(
     // 6. Execute the retry run
     const handlerResult = await executeHandler(retryRun.id, context);
 
-    // 7. Handle result
-    if (handlerResult.status === "failed:logic") {
-      const errorMsg = handlerResult.error || "Handler failed";
-      const errType = handlerResult.errorType || "logic";
-      await finishSessionForMaintenance(api, session, errorMsg, errType);
-      return {
-        status: "maintenance",
-        error: errorMsg,
-        errorType: errType,
-        sessionId,
-        handlerRunId: retryRun.id,
-        handlerName: failedRun.handler_name,
-      };
-    }
-
-    if (isFailedStatus(handlerResult.status)) {
-      const errorMsg = handlerResult.error || "Handler failed";
-      const errType = handlerResult.errorType || "logic";
-      await failSession(api, session, errorMsg, errType);
-      return {
-        status: "failed",
-        error: errorMsg,
-        sessionId,
-      };
-    }
-
-    if (handlerResult.status === "paused:transient") {
-      await finishSessionForTransient(api, session, handlerResult.error || "Transient error");
-      return {
-        status: "transient",
-        error: handlerResult.error || "Transient error",
-        sessionId,
-        handlerRunId: retryRun.id,
-        handlerName: failedRun.handler_name,
-      };
-    }
-
-    if (handlerResult.status === "paused:approval") {
-      return handleApprovalNeeded(api, session, handlerResult, workflow);
-    }
-
-    if (isPausedStatus(handlerResult.status)) {
-      await suspendSession(api, session, handlerResult.error || "handler_suspended");
-      return {
-        status: "suspended",
-        reason: handlerResult.error || "handler_suspended",
-        sessionId,
-      };
-    }
+    // 7. Handle result — EMM already finalized session atomically
+    const sessionResult = mapHandlerResultToSession(handlerResult, sessionId, retryRun.id, failedRun.handler_name);
+    if (sessionResult) return sessionResult;
 
     // 8. If committed, continue consumer loop
     const continueResult = await continueSession(api, workflow, session, context);
     return continueResult;
   } catch (error) {
+    // Error outside handler execution — finalize session directly
     const { status: runStatus, error: classifiedError } = getRunStatusForError(error, "retryWorkflowSession");
+    await finishSessionOnOuterError(api, session, classifiedError.message, classifiedError.type);
 
     if (runStatus === "failed:logic") {
-      await finishSessionForMaintenance(api, session, classifiedError.message, classifiedError.type);
       return {
         status: "maintenance",
         error: classifiedError.message,
@@ -1051,7 +779,6 @@ export async function retryWorkflowSession(
       };
     }
 
-    await failSession(api, session, classifiedError.message, classifiedError.type);
     return {
       status: "failed",
       error: classifiedError.message,

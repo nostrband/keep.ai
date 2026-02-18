@@ -621,6 +621,28 @@ export class WorkflowScheduler {
       await this.enterMaintenanceModeForSession(workflow, result);
     }
 
+    // Create auth/permission notification so user sees reconnect banner
+    // (moved from session-orchestration's handleApprovalNeeded)
+    if (result.serviceId || result.accountId) {
+      try {
+        await this.api.notificationStore.saveNotification({
+          id: crypto.randomUUID(),
+          workflow_id: workflow.id,
+          type: "error",
+          payload: JSON.stringify({
+            error_type: result.errorType || "auth",
+            service: result.serviceId,
+            account: result.accountId,
+            message: result.error,
+          }),
+          timestamp: new Date().toISOString(),
+          acknowledged_at: "",
+          resolved_at: "",
+          workflow_title: workflow.title,
+        });
+      } catch { /* notification is best-effort */ }
+    }
+
     // Handle session result by emitting appropriate signals
     await this.handleSessionResult(workflow.id, result);
   }
