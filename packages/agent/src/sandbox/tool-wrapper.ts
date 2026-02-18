@@ -6,6 +6,7 @@ import { createBuiltins } from "./builtins";
 import type { ConnectionManager } from "@app/connectors";
 import { Tool } from "../tools/types";
 import { validateJsonSchema, printJsonSchema } from "../json-schema";
+import type { ExecutionModelManager } from "../execution-model";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyTool = Tool<any, any>;
@@ -51,6 +52,8 @@ export interface ToolWrapperConfig {
    * When set along with workflowId, invalid input errors will abort execution immediately.
    */
   abortController?: AbortController;
+  /** Execution model manager for atomic mutation lifecycle operations */
+  emm?: ExecutionModelManager;
 }
 
 /**
@@ -89,6 +92,7 @@ export class ToolWrapper {
   private taskRunId?: string;
   private taskType?: 'planner' | 'maintainer';
   private abortController?: AbortController;
+  private emm?: ExecutionModelManager;
   private debug = debug("ToolWrapper");
   private toolDocs = new Map<string, string>();
 
@@ -114,6 +118,7 @@ export class ToolWrapper {
     this.taskRunId = config.taskRunId;
     this.taskType = config.taskType;
     this.abortController = config.abortController;
+    this.emm = config.emm;
   }
 
   // ============================================================================
@@ -484,11 +489,20 @@ Example: await ${ns}.${name}(<input>)
       // Mutation is terminal: store the tool's return value in the ledger
       // and abort the script. The handler state machine uses the ledger
       // as the source of truth — the mutate handler's return value is discarded.
+      // EMM.applyMutation atomically: sets status=applied + mutation_outcome=success +
+      // advances phase to mutated + clears workflow.error.
       if (this.createdMutation && this.currentPhase === 'mutate') {
-        await this.api.mutationStore.markApplied(
-          this.createdMutation.id,
-          JSON.stringify(result)
-        );
+        if (this.emm) {
+          await this.emm.applyMutation(this.createdMutation.id, {
+            result: JSON.stringify(result),
+          });
+        } else {
+          // Fallback for non-workflow (task) mode
+          await this.api.mutationStore.markApplied(
+            this.createdMutation.id,
+            JSON.stringify(result)
+          );
+        }
         this.mutationApplied = true;
         this.abortController?.abort("mutation_applied");
       }

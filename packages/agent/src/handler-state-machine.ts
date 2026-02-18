@@ -446,7 +446,7 @@ async function failRun(
  * @returns true if mutation resolved (applied/failed), false if needs background reconciliation
  */
 async function handleUncertainOutcome(
-  api: KeepDbApi,
+  emm: ExecutionModelManager,
   mutation: Mutation,
   errorMessage: string
 ): Promise<"applied" | "failed" | "needs_reconcile" | "indeterminate"> {
@@ -467,7 +467,7 @@ async function handleUncertainOutcome(
   )) {
     // No reconcile method - immediately indeterminate
     log(`No reconcile method for ${mutationParams.toolNamespace}:${mutationParams.toolMethod}`);
-    await api.mutationStore.markIndeterminate(mutation.id, errorMessage);
+    await emm.updateMutationStatus(mutation.id, "indeterminate", { error: errorMessage });
     return "indeterminate";
   }
 
@@ -478,41 +478,41 @@ async function handleUncertainOutcome(
 
     if (!result) {
       // Registry returned null (shouldn't happen since we checked hasReconcileMethod)
-      await api.mutationStore.markIndeterminate(mutation.id, errorMessage);
+      await emm.updateMutationStatus(mutation.id, "indeterminate", { error: errorMessage });
       return "indeterminate";
     }
 
     switch (result.status) {
       case "applied":
-        // Mutation confirmed as committed
+        // Mutation confirmed as committed — EMM atomically sets status + mutation_outcome + phase
         log(`Immediate reconciliation confirmed applied for mutation ${mutation.id}`);
-        await api.mutationStore.markApplied(
+        await emm.applyMutation(
           mutation.id,
-          result.result ? JSON.stringify(result.result) : ""
+          { result: result.result ? JSON.stringify(result.result) : "" }
         );
         return "applied";
 
       case "failed":
-        // Mutation confirmed as not committed - safe to retry
+        // Mutation confirmed as not committed — EMM atomically releases events + clears state
         log(`Immediate reconciliation confirmed failed for mutation ${mutation.id}`);
-        await api.mutationStore.markFailed(mutation.id, errorMessage);
+        await emm.failMutation(mutation.id, { error: errorMessage });
         return "failed";
 
       case "retry":
         // Reconciliation inconclusive - hand off to background
         log(`Immediate reconciliation returned retry for mutation ${mutation.id}`);
-        await api.mutationStore.markNeedsReconcile(mutation.id, errorMessage);
+        await emm.updateMutationStatus(mutation.id, "needs_reconcile", { error: errorMessage });
         return "needs_reconcile";
 
       default:
         // Unknown status - treat as indeterminate
-        await api.mutationStore.markIndeterminate(mutation.id, errorMessage);
+        await emm.updateMutationStatus(mutation.id, "indeterminate", { error: errorMessage });
         return "indeterminate";
     }
   } catch (error) {
     // Reconciliation attempt itself failed - treat as needs_reconcile
     log(`Immediate reconciliation threw error: ${error}`);
-    await api.mutationStore.markNeedsReconcile(mutation.id, errorMessage);
+    await emm.updateMutationStatus(mutation.id, "needs_reconcile", { error: errorMessage });
     return "needs_reconcile";
   }
 }
@@ -636,6 +636,7 @@ async function createHandlerSandbox(
     scriptRunId: run.script_run_id,
     handlerRunId: run.id,
     abortController: context.abortController,
+    emm: context.emm,
   });
 
   // Set the ref so getPhase callback can access the wrapper
@@ -944,7 +945,7 @@ return await workflow.consumers.${run.handler_name}.prepare(__state__);
       // Crashed mid-mutation → uncertain outcome
       // Per exec-18: Attempt immediate reconciliation before marking indeterminate
       const outcome = await handleUncertainOutcome(
-        api,
+        context.emm,
         mutation,
         "Mutation was in_flight at restart - outcome uncertain"
       );
@@ -1193,10 +1194,10 @@ return await workflow.consumers.${run.handler_name}.mutate(__prepared__);
     const mutation = await api.mutationStore.getByHandlerRunId(run.id);
 
     if (mutationWasApplied) {
-      // Mutation succeeded — tool wrapper already stored result in ledger.
-      // Script was aborted because mutation is terminal. Just transition phase.
-      log(`Handler run ${run.id} (consumer): mutation applied by tool wrapper, transitioning`);
-      await context.emm.updateConsumerPhase(run.id, "mutated");
+      // Mutation succeeded — tool wrapper's emm.applyMutation() already atomically
+      // set mutation status, mutation_outcome, and advanced phase to mutated.
+      // Nothing to do here.
+      log(`Handler run ${run.id} (consumer): mutation applied by tool wrapper`);
     } else if (!result.ok) {
       // Genuine error (not a mutation-terminal abort)
       const classifiedError =
@@ -1210,13 +1211,12 @@ return await workflow.consumers.${run.handler_name}.mutate(__prepared__);
 
       if (mutation) {
         if (isDefiniteFailure(classifiedError)) {
-          await api.mutationStore.markFailed(
-            mutation.id,
-            classifiedError.message
-          );
+          await context.emm.failMutation(mutation.id, {
+            error: classifiedError.message,
+          });
         } else if (mutation.status === "in_flight") {
           // Uncertain outcome - attempt immediate reconciliation (exec-18)
-          await handleUncertainOutcome(api, mutation, classifiedError.message);
+          await handleUncertainOutcome(context.emm, mutation, classifiedError.message);
         }
         // State machine will read mutation status on next iteration
       } else {
@@ -1253,13 +1253,12 @@ return await workflow.consumers.${run.handler_name}.mutate(__prepared__);
 
     if (mutation) {
       if (isDefiniteFailure(classifiedError)) {
-        await api.mutationStore.markFailed(
-          mutation.id,
-          classifiedError.message
-        );
+        await context.emm.failMutation(mutation.id, {
+          error: classifiedError.message,
+        });
       } else if (mutation.status === "in_flight") {
         // Uncertain outcome - attempt immediate reconciliation (exec-18)
-        await handleUncertainOutcome(api, mutation, classifiedError.message);
+        await handleUncertainOutcome(context.emm, mutation, classifiedError.message);
       }
       // State machine will read mutation status on next iteration
     } else {
