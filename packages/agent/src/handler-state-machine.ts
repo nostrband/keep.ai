@@ -549,63 +549,9 @@ function clampWakeAt(wakeAt: number, now: number): number {
   return Math.max(min, Math.min(wakeAt, max));
 }
 
-/**
- * Save prepare result, reserve events, and record wakeAt atomically.
- */
-async function savePrepareAndReserve(
-  api: KeepDbApi,
-  run: HandlerRun,
-  prepareResult: PrepareResult,
-  context?: HandlerExecutionContext
-): Promise<void> {
-  const now = Date.now();
-
-  // Process wakeAt (exec-11)
-  let wakeAtMs = 0;
-  if (prepareResult.wakeAt) {
-    try {
-      const parsed = new Date(prepareResult.wakeAt).getTime();
-      wakeAtMs = clampWakeAt(parsed, now);
-      if (wakeAtMs !== parsed) {
-        log(`Handler run ${run.id} wakeAt clamped: ${prepareResult.wakeAt} → ${new Date(wakeAtMs).toISOString()}`);
-      }
-    } catch {
-      log(`Handler run ${run.id} invalid wakeAt ignored: ${prepareResult.wakeAt}`);
-    }
-  }
-
-  await api.db.db.tx(async (tx: DBInterface) => {
-    // Save prepare result
-    await api.handlerRunStore.update(
-      run.id,
-      {
-        prepare_result: JSON.stringify(prepareResult),
-        phase: "prepared",
-      },
-      tx
-    );
-
-    // Reserve events
-    if (prepareResult.reservations && prepareResult.reservations.length > 0) {
-      await api.eventStore.reserveEvents(run.id, prepareResult.reservations, tx);
-    }
-
-    // Record wakeAt per-consumer (exec-11)
-    // Always update - 0 clears any previous wakeAt
-    await api.handlerStateStore.updateWakeAt(
-      run.workflow_id,
-      run.handler_name,
-      wakeAtMs,
-      tx
-    );
-  });
-
-  // Update in-memory wakeAt cache
-  context?.schedulerState?.setWakeAt(run.workflow_id, run.handler_name, wakeAtMs);
-
-  const wakeAtInfo = wakeAtMs > 0 ? `, wakeAt=${new Date(wakeAtMs).toISOString()}` : "";
-  log(`Handler run ${run.id} prepared with ${prepareResult.reservations?.length || 0} reservations${wakeAtInfo}`);
-}
+// savePrepareAndReserve — removed.
+// Replaced by EMM.updateConsumerPhase(runId, "prepared", opts) which atomically handles
+// phase transition + event reservation + wakeAt persistence.
 
 /**
  * Commit a producer run atomically.
@@ -917,8 +863,8 @@ const consumerPhaseHandlers: Record<string, PhaseHandler> = {
   /**
    * pending → preparing: Transition to preparing phase.
    */
-  pending: async (api: KeepDbApi, run: HandlerRun) => {
-    await api.handlerRunStore.updatePhase(run.id, "preparing");
+  pending: async (api: KeepDbApi, run: HandlerRun, context: HandlerExecutionContext) => {
+    await context.emm.updateConsumerPhase(run.id, "preparing");
     log(`Handler run ${run.id} (consumer): pending → preparing`);
   },
 
@@ -1008,7 +954,32 @@ return await workflow.consumers.${run.handler_name}.prepare(__state__);
         return;
       }
 
-      await savePrepareAndReserve(api, run, prepareResult, context);
+      // Transition to prepared phase via EMM — atomic with event reservation and wakeAt
+      const now = Date.now();
+      let wakeAtMs = 0;
+      if (prepareResult.wakeAt) {
+        try {
+          const parsed = new Date(prepareResult.wakeAt).getTime();
+          wakeAtMs = clampWakeAt(parsed, now);
+          if (wakeAtMs !== parsed) {
+            log(`Handler run ${run.id} wakeAt clamped: ${prepareResult.wakeAt} → ${new Date(wakeAtMs).toISOString()}`);
+          }
+        } catch {
+          log(`Handler run ${run.id} invalid wakeAt ignored: ${prepareResult.wakeAt}`);
+        }
+      }
+
+      await context.emm.updateConsumerPhase(run.id, "prepared", {
+        reservations: prepareResult.reservations || [],
+        prepareResult: JSON.stringify(prepareResult),
+        wakeAt: wakeAtMs || undefined,
+      });
+
+      // Update in-memory wakeAt cache
+      context.schedulerState?.setWakeAt(run.workflow_id, run.handler_name, wakeAtMs);
+
+      const wakeAtInfo = wakeAtMs > 0 ? `, wakeAt=${new Date(wakeAtMs).toISOString()}` : "";
+      log(`Handler run ${run.id} prepared with ${prepareResult.reservations?.length || 0} reservations${wakeAtInfo}`);
 
       // Save logs if any
       if (logs.length > 0) {
@@ -1039,7 +1010,7 @@ return await workflow.consumers.${run.handler_name}.prepare(__state__);
     } else {
       // Has work to do, go to mutating
       log(`Handler run ${run.id} (consumer): prepared → mutating`);
-      await api.handlerRunStore.updatePhase(run.id, "mutating");
+      await context.emm.updateConsumerPhase(run.id, "mutating");
     }
   },
 
@@ -1068,7 +1039,7 @@ return await workflow.consumers.${run.handler_name}.prepare(__state__);
       if (outcome === "applied") {
         // Reconciliation confirmed mutation succeeded
         log(`Handler run ${run.id} (consumer): mutating → mutated (reconciliation confirmed)`);
-        await api.handlerRunStore.updatePhase(run.id, "mutated");
+        await context.emm.updateConsumerPhase(run.id, "mutated");
       } else if (outcome === "failed") {
         // Reconciliation confirmed mutation did not happen
         // State machine will restart mutate phase on next iteration
@@ -1088,7 +1059,7 @@ return await workflow.consumers.${run.handler_name}.prepare(__state__);
       }
     } else if (mutation.status === "applied") {
       log(`Handler run ${run.id} (consumer): mutating → mutated`);
-      await api.handlerRunStore.updatePhase(run.id, "mutated");
+      await context.emm.updateConsumerPhase(run.id, "mutated");
     } else if (mutation.status === "needs_reconcile") {
       // Awaiting background reconciliation - ensure run is paused via EMM
       log(`Handler run ${run.id} (consumer): awaiting reconciliation`);
@@ -1115,9 +1086,9 @@ return await workflow.consumers.${run.handler_name}.prepare(__state__);
   /**
    * mutated → emitting: Transition to emitting phase.
    */
-  mutated: async (api: KeepDbApi, run: HandlerRun) => {
+  mutated: async (api: KeepDbApi, run: HandlerRun, context: HandlerExecutionContext) => {
     log(`Handler run ${run.id} (consumer): mutated → emitting`);
-    await api.handlerRunStore.updatePhase(run.id, "emitting");
+    await context.emm.updateConsumerPhase(run.id, "emitting");
   },
 
   /**
@@ -1253,7 +1224,7 @@ async function executeMutate(
   if (!hasMutate) {
     // No mutate handler, skip to mutated
     log(`Handler run ${run.id} (consumer): mutating → mutated (no mutate handler)`);
-    await api.handlerRunStore.updatePhase(run.id, "mutated");
+    await context.emm.updateConsumerPhase(run.id, "mutated");
     return;
   }
 
@@ -1310,7 +1281,7 @@ return await workflow.consumers.${run.handler_name}.mutate(__prepared__);
       // Mutation succeeded — tool wrapper already stored result in ledger.
       // Script was aborted because mutation is terminal. Just transition phase.
       log(`Handler run ${run.id} (consumer): mutation applied by tool wrapper, transitioning`);
-      await api.handlerRunStore.updatePhase(run.id, "mutated");
+      await context.emm.updateConsumerPhase(run.id, "mutated");
     } else if (!result.ok) {
       // Genuine error (not a mutation-terminal abort)
       const classifiedError =
@@ -1343,11 +1314,11 @@ return await workflow.consumers.${run.handler_name}.mutate(__prepared__);
     } else if (mutation && mutation.status === "applied") {
       // Mutation was already applied (e.g. by tool wrapper but abort didn't fire).
       // Just transition phase — result is already in the ledger.
-      await api.handlerRunStore.updatePhase(run.id, "mutated");
+      await context.emm.updateConsumerPhase(run.id, "mutated");
     } else if (!mutation) {
       // Mutate handler completed without calling any mutation tool — no mutation record.
       // Just transition phase; next will receive { status: 'none' }.
-      await api.handlerRunStore.updatePhase(run.id, "mutated");
+      await context.emm.updateConsumerPhase(run.id, "mutated");
     }
 
     // Save logs if any
