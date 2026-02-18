@@ -7,7 +7,6 @@ import { isValidEnv } from "./env";
 import type { ConnectionManager } from "@app/connectors";
 import {
   executeWorkflowSessionIfIdle,
-  resumeIncompleteSessions,
   retryWorkflowSession,
   canStartSession,
   type SessionResult,
@@ -177,42 +176,60 @@ export class WorkflowScheduler {
   public async start(): Promise<void> {
     if (this.interval) return;
 
-    // Resume any incomplete sessions from app restart (exec-07)
+    const emm = new ExecutionModelManager(this.api);
+
+    // Step 1: Recover crashed runs — marks crashed, handles events atomically
     try {
-      await this.resumeIncompleteSessions();
+      this.debug("Recovering crashed runs...");
+      await emm.recoverCrashedRuns();
+      this.debug("Crashed runs recovered");
     } catch (e) {
-      this.debug("Error resuming incomplete sessions:", e);
+      this.debug("Error recovering crashed runs:", e);
     }
 
-    // Initialize scheduler state for all active workflows (sets consumers dirty for restart recovery)
+    // Step 2: Recover unfinished sessions (all runs committed but session not closed)
+    try {
+      await emm.recoverUnfinishedSessions();
+    } catch (e) {
+      this.debug("Error recovering unfinished sessions:", e);
+    }
+
+    // Step 3: Recover maintenance mode — ensure tasks exist for maintenance=true workflows
+    try {
+      const maintenanceWorkflowIds = await emm.recoverMaintenanceMode();
+      for (const wfId of maintenanceWorkflowIds) {
+        await this.ensureMaintenanceTask(wfId);
+      }
+    } catch (e) {
+      this.debug("Error recovering maintenance mode:", e);
+    }
+
+    // Step 4: Diagnostic assertion — must be AFTER recoverCrashedRuns
+    try {
+      await emm.assertNoOrphanedReservedEvents();
+    } catch (e) {
+      this.debug("Error in orphaned events assertion:", e);
+    }
+
+    // Step 5: Initialize scheduler state for all active workflows
     try {
       await this.initializeSchedulerState();
     } catch (e) {
       this.debug("Error initializing scheduler state:", e);
     }
 
-    // Backfill handler_config for pre-migration scripts (one-time on startup)
+    // Step 6: Backfill handler_config for pre-migration scripts
     try {
       await this.backfillScriptHandlerConfigs();
     } catch (e) {
       this.debug("Error backfilling script handler configs:", e);
     }
 
-    // Ensure producer schedules exist for all active workflows
+    // Step 7: Ensure producer schedules exist for all active workflows
     try {
       await this.ensureProducerSchedules();
     } catch (e) {
       this.debug("Error ensuring producer schedules:", e);
-    }
-
-    // Release orphaned event reservations from previous run
-    try {
-      const released = await this.api.eventStore.releaseOrphanedReservedEvents();
-      if (released > 0) {
-        this.debug(`Released ${released} orphaned reserved events`);
-      }
-    } catch (e) {
-      this.debug("Error releasing reserved events:", e);
     }
 
     this.interval = setInterval(() => this.checkWork(), 10000);
@@ -222,14 +239,35 @@ export class WorkflowScheduler {
   }
 
   /**
-   * Resume incomplete workflow sessions on startup.
-   * Called automatically by start().
+   * Ensure a maintainer task exists for a workflow in maintenance mode.
+   * Covers the crash window between maintenance flag set and task creation.
    */
-  private async resumeIncompleteSessions(): Promise<void> {
-    const context = this.createExecutionContext();
-    this.debug("Resuming incomplete sessions...");
-    await resumeIncompleteSessions(context);
-    this.debug("Incomplete sessions resumed");
+  private async ensureMaintenanceTask(workflowId: string): Promise<void> {
+    const tasks = await this.api.taskStore.getMaintainerTasksForWorkflow(workflowId);
+    // If the most recent maintainer task is still active (state="wait"), skip
+    if (tasks.length > 0 && tasks[0].state === "wait") {
+      this.debug(`Maintenance task already exists for workflow ${workflowId}`);
+      return;
+    }
+
+    // Need to create a maintenance task
+    const workflow = await this.api.scriptStore.getWorkflow(workflowId);
+    if (!workflow) return;
+
+    // Find the most recent failed handler run to provide context
+    const recentRuns = await this.api.handlerRunStore.getByWorkflow(workflowId, { limit: 10 });
+    const failedRun = recentRuns.find(r =>
+      r.status.startsWith("failed:") || r.status === "crashed"
+    );
+
+    this.debug(`Creating maintenance task for recovered workflow ${workflowId}`);
+    await this.api.enterMaintenanceMode({
+      workflowId: workflow.id,
+      workflowTitle: workflow.title,
+      scriptRunId: failedRun?.script_run_id || '',
+      handlerRunId: failedRun?.id,
+      handlerName: failedRun?.handler_name,
+    });
   }
 
   /**

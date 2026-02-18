@@ -9,7 +9,6 @@ import {
   executeWorkflowSession,
   executeWorkflowSessionIfIdle,
   canStartSession,
-  resumeIncompleteSessions,
   getSessionCost,
   HandlerExecutionContext,
   ExecutionModelManager,
@@ -721,70 +720,8 @@ describe("Session Orchestration", () => {
     });
   });
 
-  describe("resumeIncompleteSessions - Crash Recovery", () => {
-    it("should skip workflows that are not active", async () => {
-      await createWorkflowWithScript(
-        db,
-        "workflow-1",
-        "script-1",
-        "const workflow = {};",
-        "{}"
-      );
-
-      // Set workflow to paused
-      await api.scriptStore.updateWorkflowFields("workflow-1", { status: "paused" });
-
-      // Create incomplete handler run
-      await api.handlerRunStore.create({
-        script_run_id: "session-1",
-        workflow_id: "workflow-1",
-        handler_type: "consumer",
-        handler_name: "process",
-      });
-
-      const context: HandlerExecutionContext = { api, emm: new ExecutionModelManager(api) };
-
-      // Should not throw and should skip paused workflow
-      await resumeIncompleteSessions(context);
-
-      // Handler run should still be incomplete
-      const runs = await api.handlerRunStore.getIncomplete("workflow-1");
-      expect(runs).toHaveLength(1);
-    });
-
-    it("should resume incomplete handler runs for active workflows", async () => {
-      await createWorkflowWithScript(
-        db,
-        "workflow-1",
-        "script-1",
-        "const workflow = {};",
-        "{}"
-      );
-
-      // Create session
-      await db.exec(
-        `INSERT INTO script_runs (id, script_id, workflow_id, status, type, start_timestamp) VALUES (?, ?, ?, 'running', 'schedule', datetime('now'))`,
-        ["session-1", "script-1", "workflow-1"]
-      );
-
-      // Create incomplete handler run - will fail on resume since workflow script is minimal
-      await api.handlerRunStore.create({
-        script_run_id: "session-1",
-        workflow_id: "workflow-1",
-        handler_type: "producer",
-        handler_name: "checkEmails",
-      });
-
-      const context: HandlerExecutionContext = { api, emm: new ExecutionModelManager(api) };
-
-      // Resume should attempt to execute the incomplete run
-      await resumeIncompleteSessions(context);
-
-      // Run should have been processed (either completed or failed)
-      const runs = await api.handlerRunStore.getIncomplete("workflow-1");
-      expect(runs).toHaveLength(0);
-    });
-  });
+  // resumeIncompleteSessions tests removed — crash recovery now handled by
+  // EMM.recoverCrashedRuns() / recoverUnfinishedSessions() / recoverMaintenanceMode().
 
   describe("Session Handler Run Order", () => {
     it("should create handler runs with correct handler_type and handler_name", async () => {

@@ -150,7 +150,6 @@ export { ExecutionModelManager } from "./execution-model";
 export {
   executeWorkflowSession,
   executeWorkflowSessionIfIdle,
-  resumeIncompleteSessions,
   canStartSession,
   getSessionCost,
   type SessionTrigger,
