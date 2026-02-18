@@ -52,9 +52,10 @@ export async function escalateToUser(
     messageCreated: false,
   };
 
-  // 1. Set workflow to error status and reset fix count (gives user a fresh start)
+  // 1. Set workflow error and reset fix count (gives user a fresh start)
+  // status stays "active" — workflow.error is system-controlled
   await api.scriptStore.updateWorkflowFields(workflow.id, {
-    status: "error",
+    error: `Max fix attempts exhausted (${fixAttempts}/${MAX_FIX_ATTEMPTS}): ${error.message}`,
     maintenance: false,
     maintenance_fix_count: 0,
   });

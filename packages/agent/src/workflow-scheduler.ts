@@ -88,9 +88,9 @@ export class WorkflowScheduler {
             `Workflow ${signal.workflowId} exceeded max retries (${currentState.retryCount}/${WorkflowScheduler.MAX_NETWORK_RETRIES}), escalating to user attention (${signal.errorType || 'network'}): ${signal.error || 'Max retries exceeded'}`
           );
 
-          // Mark workflow as error status and clear pending_retry_run_id
+          // Mark workflow with error and clear pending_retry_run_id
           await this.api.scriptStore.updateWorkflowFields(signal.workflowId, {
-            status: 'error',
+            error: signal.error || 'Max retries exceeded',
             pending_retry_run_id: '',
           });
           this.workflowRetryState.delete(signal.workflowId);
@@ -441,16 +441,19 @@ export class WorkflowScheduler {
       // Get all workflows
       const allWorkflows = await this.api.scriptStore.listWorkflows(1000, 0);
 
-      // Filter active workflows - per spec 06, only workflows with status="active" run
-      // Draft ("draft"), Ready ("ready"), Paused ("paused"), and Error ("error") workflows do not run on schedule
+      // Filter active workflows — only workflows with status="active", no error, and not in maintenance run.
+      // workflow.error is system-controlled (set by EMM for auth/reconciliation/internal errors).
+      // Indeterminate mutations are covered by workflow.error (set by paused:reconciliation).
       const activeWorkflows: Workflow[] = [];
       for (const w of allWorkflows) {
-        if (w.status !== 'active' || w.maintenance) continue;
+        if (w.status !== 'active' || w.maintenance || w.error) continue;
 
-        // Guard: workflows without handler_config cannot run — pause to prevent infinite loops
+        // Guard: workflows without handler_config cannot run — set error to prevent infinite loops
         if (!w.handler_config || !w.handler_config.trim()) {
-          this.debug(`Pausing workflow ${w.id} (${w.title}): missing handler_config`);
-          await this.api.scriptStore.updateWorkflowFields(w.id, { status: 'error' });
+          this.debug(`Blocking workflow ${w.id} (${w.title}): missing handler_config`);
+          await this.api.scriptStore.updateWorkflowFields(w.id, {
+            error: 'Workflow has no handler configuration. Re-activate the script to fix.',
+          });
           try {
             await this.api.notificationStore.saveNotification({
               id: crypto.randomUUID(),
@@ -466,14 +469,6 @@ export class WorkflowScheduler {
               workflow_title: w.title,
             });
           } catch { /* notification is best-effort */ }
-          continue;
-        }
-
-        // Guard: workflows with indeterminate mutations must not run — re-pause
-        const indeterminate = await this.api.mutationStore.getByWorkflow(w.id, { status: "indeterminate" });
-        if (indeterminate.length > 0) {
-          this.debug(`Workflow ${w.id} has indeterminate mutations, re-pausing`);
-          await this.api.scriptStore.updateWorkflowFields(w.id, { status: 'paused' });
           continue;
         }
 
@@ -755,15 +750,15 @@ export class WorkflowScheduler {
 
       case 'suspended':
         this.debug(`Session ${result.sessionId} suspended for workflow ${workflowId}: ${result.reason}`);
-        // Workflow was paused (status already set by session-orchestration)
+        // Workflow was paused (EMM set workflow status during session finalization)
         // Clear retry state - user needs to manually resume
         this.workflowRetryState.delete(workflowId);
         break;
 
       case 'failed':
         this.debug(`Session ${result.sessionId} failed for workflow ${workflowId}: ${result.error}`);
-        // Session-orchestration already set workflow status to 'error'
-        // Signal that user needs attention
+        // EMM already set workflow.error during handler run finalization
+        // Signal to clear retry state — user needs attention
         await this.handleWorkerSignal({
           type: 'needs_attention',
           workflowId,
