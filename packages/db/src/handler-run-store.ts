@@ -97,26 +97,81 @@ export function isFailedStatus(status: RunStatus): boolean {
 export type HandlerErrorType = "auth" | "permission" | "network" | "logic" | "unknown";
 
 /**
- * Handler run record - granular execution tracking.
+ * Mutation outcome on a handler run — denormalized from the mutations table.
+ *
+ * Values:
+ * - "" — No mutation tool was called (pre-mutation), or mutation hasn't resolved yet
+ * - "success" — Mutation was applied successfully (set by applyMutation)
+ * - "failure" — Mutation definitively failed (set by failMutation)
+ * - "skipped" — User chose to skip the mutation (set by skipMutation)
+ *
+ * Used by updateHandlerRunStatus to determine event disposition:
+ * - mutation_outcome = "failure" → treat as pre-mutation (release events)
+ * - mutation_outcome = "success" or "skipped" → treat as post-mutation (keep events reserved)
+ * - mutation_outcome = "" with phase < mutated → pre-mutation
+ *
+ * Used by crash recovery to determine the right recovery path without
+ * joining to the mutations table.
+ */
+export type MutationOutcome = "" | "success" | "failure" | "skipped";
+
+/**
+ * Handler run record — granular execution tracking for producers and consumers.
+ *
+ * Each handler run tracks a single execution attempt through the phase state machine.
+ * Multiple runs may be linked via retry_of to form a retry chain.
+ *
+ * Key relationships:
+ * - Belongs to a session (script_run) via script_run_id
+ * - Belongs to a workflow via workflow_id
+ * - May have one mutation record (1:1) in the mutations table
+ * - May reserve events (via reserved_by_run_id in events table)
  */
 export interface HandlerRun {
   id: string;
+  /** Session (script_run) this handler run belongs to */
   script_run_id: string;
+  /** Workflow this handler run belongs to */
   workflow_id: string;
+  /** Whether this is a producer or consumer handler */
   handler_type: HandlerType;
+  /** Name of the handler (e.g. "pollEmail", "processNotifications") */
   handler_name: string;
+  /**
+   * Current execution phase — tracks progress through the state machine.
+   * Phase only moves forward. Failures do NOT change phase.
+   * See HandlerRunPhase for the progression.
+   */
   phase: HandlerRunPhase;
-  status: RunStatus; // Why execution is paused/stopped
-  retry_of: string; // ID of previous attempt (empty for first attempt)
-  prepare_result: string; // JSON: { reservations, data, ui }
-  input_state: string; // JSON: State received from previous run
-  output_state: string; // JSON: State returned by handler
+  /**
+   * Why execution is paused/stopped — orthogonal to phase.
+   * Phase tracks WHERE we are, status tracks WHY we stopped.
+   * See RunStatus for all possible values.
+   */
+  status: RunStatus;
+  /** ID of previous attempt in retry chain (empty for first attempt) */
+  retry_of: string;
+  /** JSON: PrepareResult from prepare phase ({ reservations, data, ui }) */
+  prepare_result: string;
+  /** JSON: Handler state received at the start of this run */
+  input_state: string;
+  /** JSON: Handler state returned by this run (set on commit) */
+  output_state: string;
   start_timestamp: string;
   end_timestamp: string;
+  /** Error message if the run failed/paused */
   error: string;
+  /** Classified error type for failure routing */
   error_type: HandlerErrorType | "";
-  cost: number; // Microdollars
-  logs: string; // JSON array of log entries
+  /** Cost in microdollars (cost * 1,000,000) */
+  cost: number;
+  /** JSON array of log entries */
+  logs: string;
+  /**
+   * Denormalized mutation outcome — set by applyMutation/failMutation/skipMutation.
+   * See MutationOutcome type for values and usage.
+   */
+  mutation_outcome: MutationOutcome;
 }
 
 /**
@@ -149,6 +204,7 @@ export interface UpdateHandlerRunInput {
   error_type?: HandlerErrorType | "";
   cost?: number;
   logs?: string;
+  mutation_outcome?: MutationOutcome;
 }
 
 /**
@@ -166,6 +222,8 @@ export class HandlerRunStore {
 
   /**
    * Get a handler run by ID.
+   *
+   * @internal Execution-model primitive. Use ExecutionModelManager for state transitions.
    */
   async get(id: string, tx?: DBInterface): Promise<HandlerRun | null> {
     const db = tx || this.db.db;
@@ -183,6 +241,8 @@ export class HandlerRunStore {
 
   /**
    * Create a new handler run.
+   *
+   * @internal Execution-model primitive. Use ExecutionModelManager for state transitions.
    */
   async create(
     input: CreateHandlerRunInput,
@@ -199,8 +259,8 @@ export class HandlerRunStore {
       `INSERT INTO handler_runs (
         id, script_run_id, workflow_id, handler_type, handler_name,
         phase, status, retry_of, prepare_result, input_state, output_state,
-        start_timestamp, end_timestamp, error, error_type, cost, logs
-      ) VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, '', ?, '', '', '', 0, '[]')`,
+        start_timestamp, end_timestamp, error, error_type, cost, logs, mutation_outcome
+      ) VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, '', ?, '', '', '', 0, '[]', '')`,
       [
         id,
         input.script_run_id,
@@ -233,11 +293,14 @@ export class HandlerRunStore {
       error_type: "",
       cost: 0,
       logs: "[]",
+      mutation_outcome: "",
     };
   }
 
   /**
    * Update a handler run.
+   *
+   * @internal Execution-model primitive. Use ExecutionModelManager for state transitions.
    */
   async update(
     id: string,
@@ -285,6 +348,10 @@ export class HandlerRunStore {
       updates.push("logs = ?");
       params.push(input.logs);
     }
+    if (input.mutation_outcome !== undefined) {
+      updates.push("mutation_outcome = ?");
+      params.push(input.mutation_outcome);
+    }
 
     if (updates.length === 0) return;
 
@@ -297,6 +364,8 @@ export class HandlerRunStore {
 
   /**
    * Update handler run phase.
+   *
+   * @internal Execution-model primitive. Use ExecutionModelManager for state transitions.
    */
   async updatePhase(
     id: string,
@@ -308,6 +377,8 @@ export class HandlerRunStore {
 
   /**
    * Get handler runs by session (script_run).
+   *
+   * @internal Execution-model primitive. Use ExecutionModelManager for state transitions.
    */
   async getBySession(
     scriptRunId: string,
@@ -326,6 +397,8 @@ export class HandlerRunStore {
   /**
    * Get incomplete (non-terminal) handler runs for a workflow.
    * Returns runs with status='active' (currently executing).
+   *
+   * @internal Execution-model primitive. Use ExecutionModelManager for state transitions.
    */
   async getIncomplete(
     workflowId: string,
@@ -346,6 +419,8 @@ export class HandlerRunStore {
   /**
    * Get workflow IDs that have incomplete handler runs.
    * Returns workflow IDs with runs in status='active'.
+   *
+   * @internal Execution-model primitive. Use ExecutionModelManager for state transitions.
    */
   async getWorkflowsWithIncompleteRuns(tx?: DBInterface): Promise<string[]> {
     const db = tx || this.db.db;
@@ -519,6 +594,7 @@ export class HandlerRunStore {
       error_type: row.error_type as HandlerErrorType | "",
       cost: row.cost as number,
       logs: row.logs as string,
+      mutation_outcome: (row.mutation_outcome as MutationOutcome) || "", // Default for pre-v48 rows
     };
   }
 }

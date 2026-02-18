@@ -9,15 +9,25 @@ import { DBInterface } from "./interfaces";
 export type ScheduleType = "interval" | "cron";
 
 /**
- * Producer schedule record.
+ * Producer schedule record — per-producer scheduling state.
+ *
+ * Each producer has its own schedule that runs independently (exec-13).
+ * The scheduler checks next_run_at to determine when to launch a producer run.
+ * After each run, commitProducer updates next_run_at via updateAfterRun().
  */
 export interface ProducerSchedule {
   id: string;
+  /** Workflow this schedule belongs to */
   workflow_id: string;
+  /** Producer handler name (matches WorkflowConfig.producers key) */
   producer_name: string;
+  /** Schedule type: 'interval' (ms between runs) or 'cron' (cron expression) */
   schedule_type: ScheduleType;
+  /** Schedule value: milliseconds string for interval, cron expression for cron */
   schedule_value: string;
+  /** Unix ms timestamp of next scheduled run. Scheduler launches when now >= next_run_at */
   next_run_at: number;
+  /** Unix ms timestamp of last completed run (0 if never run) */
   last_run_at: number;
   created_at: number;
   updated_at: number;
@@ -177,6 +187,8 @@ export class ProducerScheduleStore {
   /**
    * Update schedule after producer runs.
    * Sets last_run_at to now and next_run_at to the provided value.
+   *
+   * @internal Execution-model primitive. Use ExecutionModelManager for state transitions.
    */
   async updateAfterRun(
     workflowId: string,

@@ -21,6 +21,7 @@ import { MutationStore } from "./mutation-store";
 import { HandlerStateStore } from "./handler-state-store";
 import { ProducerScheduleStore } from "./producer-schedule-store";
 import { InputStore } from "./input-store";
+import { ExecutionModelStore } from "./execution-model-store";
 
 export class KeepDbApi {
   public readonly db: KeepDb;
@@ -43,6 +44,7 @@ export class KeepDbApi {
   public readonly handlerStateStore: HandlerStateStore;
   public readonly producerScheduleStore: ProducerScheduleStore;
   public readonly inputStore: InputStore;
+  public readonly executionModelStore: ExecutionModelStore;
 
   constructor(db: KeepDb) {
     this.db = db;
@@ -65,6 +67,14 @@ export class KeepDbApi {
     this.handlerStateStore = new HandlerStateStore(db);
     this.producerScheduleStore = new ProducerScheduleStore(db);
     this.inputStore = new InputStore(db);
+    this.executionModelStore = new ExecutionModelStore(
+      this.handlerRunStore,
+      this.scriptStore,
+      this.eventStore,
+      this.mutationStore,
+      this.handlerStateStore,
+      this.producerScheduleStore,
+    );
   }
 
   async addMessage(input: {
@@ -351,6 +361,7 @@ export class KeepDbApi {
         handler_config: "",  // Will be set when script is saved (exec-05)
         intent_spec: "",  // Will be extracted after first planner save (exec-17)
         pending_retry_run_id: "",  // No pending retry
+        error: "",  // No system error
       };
 
       // Create the matching workflow

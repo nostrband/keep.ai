@@ -4,18 +4,36 @@ import { KeepDb } from "./database";
 import { DBInterface } from "./interfaces";
 
 /**
- * Handler state record - persistent state per handler.
+ * Handler state record — persistent state per handler.
+ *
+ * Each handler (producer or consumer) maintains state across runs.
+ * State is updated atomically during commit (commitProducer/commitConsumer)
+ * as part of the handler run's finalization transaction.
+ *
+ * For producers: typically stores cursors/pagination tokens (e.g., last seen email ID).
+ * For consumers: typically stores processing state (e.g., accumulated results, counters).
  */
 export interface HandlerState {
   id: string;
+  /** Workflow this handler state belongs to */
   workflow_id: string;
+  /** Handler name (matches producer/consumer name in WorkflowConfig) */
   handler_name: string;
+  /**
+   * JSON-serializable handler state object. Written by the handler's
+   * next() function return value and committed atomically with the run.
+   * Read by the handler on next invocation as context.
+   */
   state: unknown;
+  /** Unix ms timestamp of last update */
   updated_at: number;
+  /** Handler run ID that last updated this state */
   updated_by_run_id: string;
   /**
    * Wake time for time-based scheduling (exec-11).
-   * Unix timestamp in milliseconds. 0 means no scheduled wake.
+   * Unix timestamp in milliseconds. When non-zero and due (wake_at <= now),
+   * the scheduler triggers the handler even without pending events.
+   * 0 means no scheduled wake.
    */
   wake_at: number;
 }
@@ -82,6 +100,8 @@ export class HandlerStateStore {
 
   /**
    * Set handler state (insert or update).
+   *
+   * @internal Execution-model primitive. Use ExecutionModelManager for state transitions.
    */
   async set(
     workflowId: string,
@@ -170,6 +190,8 @@ export class HandlerStateStore {
    * @param workflowId - Workflow ID
    * @param handlerName - Handler name
    * @param wakeAt - Wake time in milliseconds (0 to clear)
+   *
+   * @internal Execution-model primitive. Use ExecutionModelManager for state transitions.
    */
   async updateWakeAt(
     workflowId: string,

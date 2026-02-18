@@ -14,11 +14,23 @@ export type EventStatus = "pending" | "reserved" | "consumed" | "skipped";
 
 /**
  * Event record in a topic stream.
+ *
+ * Events flow through topics connecting producers to consumers.
+ * Lifecycle: pending → reserved → consumed | skipped
+ *
+ * When a consumer reserves events, they are locked to that handler run.
+ * The execution model controls disposition based on mutation outcome:
+ * - Pre-mutation failure: events released back to pending (re-delivered)
+ * - Post-mutation success/skip: events consumed (marked done)
+ * - Post-mutation failure: events stay reserved for retry run
  */
 export interface Event {
   id: string;
+  /** Topic this event belongs to */
   topic_id: string;
+  /** Workflow this event belongs to */
   workflow_id: string;
+  /** Producer-assigned deduplication key (unique within topic) */
   message_id: string;
   /**
    * @deprecated Event titles are deprecated per exec-15. User-facing metadata
@@ -26,12 +38,24 @@ export interface Event {
    * with existing events but should not be used for new events.
    */
   title: string;
+  /** JSON payload — the actual event data passed to consumer handlers */
   payload: unknown;
+  /** Current event status (see EventStatus for lifecycle) */
   status: EventStatus;
+  /**
+   * Handler run ID that has reserved this event (empty if not reserved).
+   * Used by the execution model to find events belonging to a run
+   * for consume/release/skip/transfer operations.
+   */
   reserved_by_run_id: string;
+  /** Handler run ID (producer) that created this event */
   created_by_run_id: string;
   /** Array of input IDs that caused this event (exec-15 causal tracking) */
   caused_by: string[];
+  /**
+   * Delivery attempt counter. Incremented each time events are released
+   * back to pending after a failed consumer run. Starts at 1.
+   */
   attempt_number: number;
   created_at: number;
   updated_at: number;
@@ -283,6 +307,8 @@ export class EventStore {
    *
    * @param handlerRunId - Handler run reserving the events
    * @param reservations - Array of { topic, ids } to reserve
+   *
+   * @internal Execution-model primitive. Use ExecutionModelManager for state transitions.
    */
   async reserveEvents(
     handlerRunId: string,
@@ -321,6 +347,8 @@ export class EventStore {
   /**
    * Consume events reserved by a handler run.
    * Sets status='consumed' for all events reserved by this run.
+   *
+   * @internal Execution-model primitive. Use ExecutionModelManager for state transitions.
    */
   async consumeEvents(handlerRunId: string, tx?: DBInterface): Promise<void> {
     const db = tx || this.db.db;
@@ -337,6 +365,8 @@ export class EventStore {
   /**
    * Skip events reserved by a handler run.
    * Sets status='skipped' for all events reserved by this run.
+   *
+   * @internal Execution-model primitive. Use ExecutionModelManager for state transitions.
    */
   async skipEvents(handlerRunId: string, tx?: DBInterface): Promise<void> {
     const db = tx || this.db.db;
@@ -353,6 +383,8 @@ export class EventStore {
   /**
    * Release events reserved by a handler run back to pending.
    * Used when a handler run fails and needs to release reservations.
+   *
+   * @internal Execution-model primitive. Use ExecutionModelManager for state transitions.
    */
   async releaseEvents(handlerRunId: string, tx?: DBInterface): Promise<void> {
     const db = tx || this.db.db;
@@ -363,6 +395,31 @@ export class EventStore {
        SET status = 'pending', reserved_by_run_id = '', attempt_number = attempt_number + 1, updated_at = ?
        WHERE reserved_by_run_id = ? AND status = 'reserved'`,
       [now, handlerRunId]
+    );
+  }
+
+  /**
+   * Transfer event reservations from one handler run to another.
+   *
+   * Used by createRetryRun to transfer reserved events from the failed run
+   * to the retry run, so consumeEvents(newRunId) works when retry succeeds.
+   *
+   * For skipped mutations, events are already in "skipped" status — this
+   * is a no-op (WHERE status = 'reserved' matches nothing).
+   *
+   * @internal Execution-model primitive. Use ExecutionModelManager for state transitions.
+   */
+  async transferReservations(
+    fromRunId: string,
+    toRunId: string,
+    tx?: DBInterface
+  ): Promise<void> {
+    const db = tx || this.db.db;
+    const now = Date.now();
+    await db.exec(
+      `UPDATE events SET reserved_by_run_id = ?, updated_at = ?
+       WHERE reserved_by_run_id = ? AND status = 'reserved'`,
+      [toRunId, now, fromRunId]
     );
   }
 

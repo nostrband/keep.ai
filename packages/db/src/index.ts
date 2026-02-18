@@ -63,7 +63,7 @@ export type { Event, EventStatus, PublishEvent, PeekEventsOptions, EventReservat
 
 // Handler run store (execution model - handler runs)
 export { HandlerRunStore, isTerminalStatus, isPausedStatus, isFailedStatus } from "./handler-run-store";
-export type { HandlerRun, HandlerType, HandlerRunPhase, HandlerErrorType, RunStatus, CreateHandlerRunInput, UpdateHandlerRunInput } from "./handler-run-store";
+export type { HandlerRun, HandlerType, HandlerRunPhase, HandlerErrorType, RunStatus, MutationOutcome, CreateHandlerRunInput, UpdateHandlerRunInput } from "./handler-run-store";
 
 // Mutation store (execution model - mutations)
 export { MutationStore } from "./mutation-store";
@@ -76,6 +76,9 @@ export type { HandlerState } from "./handler-state-store";
 // Producer schedule store (execution model - producer scheduling, exec-13)
 export { ProducerScheduleStore } from "./producer-schedule-store";
 export type { ProducerSchedule, ScheduleType } from "./producer-schedule-store";
+
+// Execution model store (facade for ExecutionModelManager)
+export { ExecutionModelStore } from "./execution-model-store";
 
 // Input store (execution model - Input Ledger, exec-15, exec-16)
 export { InputStore } from "./input-store";

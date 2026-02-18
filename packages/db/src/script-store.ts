@@ -30,18 +30,36 @@ export interface DraftActivitySummary {
   waitingForInput: number;    // Drafts where agent asked a question
 }
 
+/**
+ * Script record — a versioned snapshot of workflow code.
+ *
+ * Scripts are created by the planner (new major version) or maintainer
+ * (new minor version for auto-fixes). The active script for a workflow
+ * is referenced by workflow.active_script_id.
+ */
 export interface Script {
   id: string;
+  /** Task (planner conversation) that created this script version */
   task_id: string;
-  major_version: number;  // Incremented by planner's save tool
-  minor_version: number;  // Incremented by maintainer's fix tool (default 0)
+  /** Major version: incremented by planner's save tool (new features/rewrites) */
+  major_version: number;
+  /** Minor version: incremented by maintainer's fix tool (auto-fix patches, default 0) */
+  minor_version: number;
+  /** ISO timestamp of when this version was created */
   timestamp: string;
+  /** The executable TypeScript code for this script version */
   code: string;
+  /** Human-readable description of what changed in this version */
   change_comment: string;
+  /** Workflow this script belongs to */
   workflow_id: string;
+  /** Script type identifier */
   type: string;
+  /** AI-generated summary of what the script does */
   summary: string;
+  /** ASCII diagram of the workflow's producer/consumer topology */
   diagram: string;
+  /** JSON WorkflowConfig from exec-05 validation (topics, producers, consumers) */
   handler_config: string;
 }
 
@@ -53,20 +71,42 @@ export function formatVersion(major: number, minor: number): string {
   return `${major}.${minor}`;
 }
 
+/**
+ * Script run record — legacy execution tracking (pre-execution-model).
+ *
+ * ScriptRun tracks legacy "monolithic" runs where the entire script
+ * executed as one unit. The execution model replaces this with
+ * HandlerRun records that track per-handler execution with phases.
+ *
+ * Still used for: task runs (planner/maintainer), non-workflow executions.
+ * For workflow execution, see HandlerRun in handler-run-store.ts.
+ */
 export interface ScriptRun {
   id: string;
+  /** Script version that was executed */
   script_id: string;
+  /** ISO timestamp when execution started */
   start_timestamp: string;
+  /** ISO timestamp when execution ended (empty if still running) */
   end_timestamp: string;
+  /** Error message if execution failed (empty on success) */
   error: string;
-  error_type: string;   // Classified error type: 'auth', 'permission', 'network', 'logic', or '' (no error)
+  /** Classified error type: 'auth' | 'permission' | 'network' | 'logic' | '' (no error) */
+  error_type: string;
+  /** JSON-serialized execution result */
   result: string;
+  /** JSON-serialized execution logs */
   logs: string;
+  /** Workflow this run belongs to */
   workflow_id: string;
+  /** Run type identifier */
   type: string;
-  retry_of: string;     // ID of the original failed run (empty for non-retry runs)
-  retry_count: number;  // Which retry attempt this is (0 for non-retry runs)
-  cost: number;         // Total cost in microdollars (cost * 1,000,000) accumulated from tool calls
+  /** ID of the original failed run this is retrying (empty for non-retry runs) */
+  retry_of: string;
+  /** Which retry attempt this is (0 for first/non-retry runs) */
+  retry_count: number;
+  /** Total cost in microdollars (cost * 1,000,000) accumulated from tool calls */
+  cost: number;
 }
 
 /**
@@ -94,18 +134,52 @@ export interface Workflow {
   id: string;
   title: string;
   task_id: string;
-  chat_id: string;                // Direct link to workflow's chat (Spec 09)
+  /** Direct link to workflow's chat (Spec 09) */
+  chat_id: string;
   timestamp: string;
-  cron: string;                // Denormalized from producers: most-frequent schedule as cron expression (written by save/fix tools)
+  /** Denormalized from producers: most-frequent schedule as cron expression (written by save/fix tools) */
+  cron: string;
   events: string;
+  /**
+   * User-controlled workflow status. Only changed by explicit user action
+   * (pause/resume/activate). The execution model NEVER touches this field.
+   * Values: "draft" | "ready" | "active" | "paused" | "error" (legacy, migrating to error field)
+   *
+   * Scheduler checks: status = "active" AND error = "" AND NOT maintenance
+   */
   status: string;
-  next_run_timestamp: string;  // Denormalized from producer_schedules: soonest next_run_at as ISO string (written by save/fix tools)
+  /** Denormalized from producer_schedules: soonest next_run_at as ISO string (written by save/fix tools) */
+  next_run_timestamp: string;
+  /**
+   * Auto-fix mechanism flag. Set atomically by updateHandlerRunStatus on failed:logic.
+   * Cleared by exitMaintenanceMode after maintainer fixes the script.
+   * While true, scheduler won't start new runs.
+   */
   maintenance: boolean;
-  maintenance_fix_count: number;  // Tracks consecutive fix attempts in maintenance mode
-  active_script_id: string;       // ID of the script version that should execute when workflow runs
-  handler_config: string;         // JSON WorkflowConfig from exec-05 validation (topics, producers, consumers)
-  intent_spec: string;            // JSON IntentSpec from exec-17 (empty string if not yet extracted)
-  pending_retry_run_id: string;   // Handler run ID to retry on next scheduler tick (empty = no pending retry)
+  /** Tracks consecutive fix attempts in maintenance mode (reset on success) */
+  maintenance_fix_count: number;
+  /** ID of the script version that should execute when workflow runs */
+  active_script_id: string;
+  /** JSON WorkflowConfig from exec-05 validation (topics, producers, consumers) */
+  handler_config: string;
+  /** JSON IntentSpec from exec-17 (empty string if not yet extracted) */
+  intent_spec: string;
+  /**
+   * Handler run ID to retry on next scheduler tick (empty = no pending retry).
+   * Set by updateHandlerRunStatus for post-mutation failures.
+   * Set by skipMutation for skipped mutations (next() must still run).
+   * Cleared by createRetryRun when the retry run is created.
+   */
+  pending_retry_run_id: string;
+  /**
+   * System-controlled error description. Set by updateHandlerRunStatus when
+   * handler needs user attention (paused:approval, paused:reconciliation, failed:internal).
+   * Cleared by mutation resolution methods (applyMutation, failMutation, skipMutation).
+   * Empty string = no error. Orthogonal to status (user-controlled).
+   *
+   * Scheduler checks: status = "active" AND error = "" AND NOT maintenance
+   */
+  error: string;
 }
 
 export class ScriptStore {
@@ -351,7 +425,11 @@ export class ScriptStore {
     );
   }
 
-  // Update a script run with end_timestamp, optional error, result, logs, and cost
+  /**
+   * Update a script run with end_timestamp, optional error, result, logs, and cost.
+   *
+   * @internal Execution-model primitive. Use ExecutionModelManager for state transitions.
+   */
   async finishScriptRun(id: string, end_timestamp: string, result: string, error: string = '', logs: string = '', error_type: string = '', cost: number = 0, tx?: DBInterface): Promise<void> {
     const db = tx || this.db.db;
     await db.exec(
@@ -639,9 +717,9 @@ export class ScriptStore {
   async addWorkflow(workflow: Workflow, tx?: DBInterface): Promise<void> {
     const db = tx || this.db.db;
     await db.exec(
-      `INSERT INTO workflows (id, title, task_id, chat_id, timestamp, cron, events, status, next_run_timestamp, maintenance, maintenance_fix_count, active_script_id, handler_config, intent_spec, pending_retry_run_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [workflow.id, workflow.title, workflow.task_id, workflow.chat_id || '', workflow.timestamp, workflow.cron, workflow.events, workflow.status, workflow.next_run_timestamp, workflow.maintenance ? 1 : 0, workflow.maintenance_fix_count || 0, workflow.active_script_id || '', workflow.handler_config || '', workflow.intent_spec || '', workflow.pending_retry_run_id || '']
+      `INSERT INTO workflows (id, title, task_id, chat_id, timestamp, cron, events, status, next_run_timestamp, maintenance, maintenance_fix_count, active_script_id, handler_config, intent_spec, pending_retry_run_id, error)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [workflow.id, workflow.title, workflow.task_id, workflow.chat_id || '', workflow.timestamp, workflow.cron, workflow.events, workflow.status, workflow.next_run_timestamp, workflow.maintenance ? 1 : 0, workflow.maintenance_fix_count || 0, workflow.active_script_id || '', workflow.handler_config || '', workflow.intent_spec || '', workflow.pending_retry_run_id || '', workflow.error || '']
     );
   }
 
@@ -660,7 +738,7 @@ export class ScriptStore {
   // Get a workflow by ID
   async getWorkflow(id: string): Promise<Workflow | null> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, title, task_id, chat_id, timestamp, cron, events, status, next_run_timestamp, maintenance, maintenance_fix_count, active_script_id, handler_config, intent_spec, pending_retry_run_id
+      `SELECT id, title, task_id, chat_id, timestamp, cron, events, status, next_run_timestamp, maintenance, maintenance_fix_count, active_script_id, handler_config, intent_spec, pending_retry_run_id, error
        FROM workflows
        WHERE id = ?`,
       [id]
@@ -687,13 +765,14 @@ export class ScriptStore {
       handler_config: (row.handler_config as string) || '',
       intent_spec: (row.intent_spec as string) || '',
       pending_retry_run_id: (row.pending_retry_run_id as string) || '',
+      error: (row.error as string) || '',
     };
   }
 
   // Get workflow by task_id
   async getWorkflowByTaskId(task_id: string): Promise<Workflow | null> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, title, task_id, chat_id, timestamp, cron, events, status, next_run_timestamp, maintenance, maintenance_fix_count, active_script_id, handler_config, intent_spec, pending_retry_run_id
+      `SELECT id, title, task_id, chat_id, timestamp, cron, events, status, next_run_timestamp, maintenance, maintenance_fix_count, active_script_id, handler_config, intent_spec, pending_retry_run_id, error
        FROM workflows
        WHERE task_id = ?
        LIMIT 1`,
@@ -721,13 +800,14 @@ export class ScriptStore {
       handler_config: (row.handler_config as string) || '',
       intent_spec: (row.intent_spec as string) || '',
       pending_retry_run_id: (row.pending_retry_run_id as string) || '',
+      error: (row.error as string) || '',
     };
   }
 
   // Get workflow by chat_id (Spec 09)
   async getWorkflowByChatId(chat_id: string): Promise<Workflow | null> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, title, task_id, chat_id, timestamp, cron, events, status, next_run_timestamp, maintenance, maintenance_fix_count, active_script_id, handler_config, intent_spec, pending_retry_run_id
+      `SELECT id, title, task_id, chat_id, timestamp, cron, events, status, next_run_timestamp, maintenance, maintenance_fix_count, active_script_id, handler_config, intent_spec, pending_retry_run_id, error
        FROM workflows
        WHERE chat_id = ?
        LIMIT 1`,
@@ -755,6 +835,7 @@ export class ScriptStore {
       handler_config: (row.handler_config as string) || '',
       intent_spec: (row.intent_spec as string) || '',
       pending_retry_run_id: (row.pending_retry_run_id as string) || '',
+      error: (row.error as string) || '',
     };
   }
 
@@ -764,7 +845,7 @@ export class ScriptStore {
     offset: number = 0
   ): Promise<Workflow[]> {
     const results = await this.db.db.execO<Record<string, unknown>>(
-      `SELECT id, title, task_id, chat_id, timestamp, cron, events, status, next_run_timestamp, maintenance, maintenance_fix_count, active_script_id, handler_config, intent_spec, pending_retry_run_id
+      `SELECT id, title, task_id, chat_id, timestamp, cron, events, status, next_run_timestamp, maintenance, maintenance_fix_count, active_script_id, handler_config, intent_spec, pending_retry_run_id, error
        FROM workflows
        ORDER BY timestamp DESC
        LIMIT ? OFFSET ?`,
@@ -789,6 +870,7 @@ export class ScriptStore {
       handler_config: (row.handler_config as string) || '',
       intent_spec: (row.intent_spec as string) || '',
       pending_retry_run_id: (row.pending_retry_run_id as string) || '',
+      error: (row.error as string) || '',
     }));
   }
 
@@ -821,12 +903,16 @@ export class ScriptStore {
     );
   }
 
-  // Update only specific fields of a workflow atomically
-  // This prevents concurrent update issues where stale workflow objects overwrite concurrent changes
-  // Note: timestamp is NOT included - it's the creation timestamp and should never be updated
+  /**
+   * Update only specific fields of a workflow atomically.
+   * This prevents concurrent update issues where stale workflow objects overwrite concurrent changes.
+   * Note: timestamp is NOT included - it's the creation timestamp and should never be updated.
+   *
+   * @internal Execution-model primitive. Use ExecutionModelManager for state transitions.
+   */
   async updateWorkflowFields(
     workflowId: string,
-    fields: Partial<Pick<Workflow, 'next_run_timestamp' | 'status' | 'cron' | 'maintenance' | 'maintenance_fix_count' | 'active_script_id' | 'title' | 'handler_config' | 'intent_spec' | 'pending_retry_run_id'>>,
+    fields: Partial<Pick<Workflow, 'next_run_timestamp' | 'status' | 'cron' | 'maintenance' | 'maintenance_fix_count' | 'active_script_id' | 'title' | 'handler_config' | 'intent_spec' | 'pending_retry_run_id' | 'error'>>,
     tx?: DBInterface
   ): Promise<void> {
     const db = tx || this.db.db;
@@ -873,6 +959,10 @@ export class ScriptStore {
     if (fields.pending_retry_run_id !== undefined) {
       setClauses.push('pending_retry_run_id = ?');
       values.push(fields.pending_retry_run_id);
+    }
+    if (fields.error !== undefined) {
+      setClauses.push('error = ?');
+      values.push(fields.error);
     }
 
     if (setClauses.length === 0) return;
@@ -980,6 +1070,7 @@ export class ScriptStore {
         handler_config: (row.handler_config as string) || '',
         intent_spec: (row.intent_spec as string) || '',
         pending_retry_run_id: (row.pending_retry_run_id as string) || '',
+        error: (row.error as string) || '',
       };
 
       const lastActivity = row.last_activity as string;
@@ -1096,6 +1187,8 @@ export class ScriptStore {
    * Get all active (currently running) script runs.
    * A run is active if it has no end_timestamp (empty string).
    * Returns runs ordered by start_timestamp descending.
+   *
+   * @internal Execution-model primitive. Use ExecutionModelManager for state transitions.
    */
   async getActiveScriptRuns(): Promise<ScriptRun[]> {
     const results = await this.db.db.execO<Record<string, unknown>>(
@@ -1216,6 +1309,8 @@ export class ScriptStore {
    * @param scriptRunId - The script run (session) ID
    * @param tx - Optional transaction context
    * @returns The new handler run count
+   *
+   * @internal Execution-model primitive. Use ExecutionModelManager for state transitions.
    */
   async incrementHandlerCount(scriptRunId: string, tx?: DBInterface): Promise<number> {
     const db = tx || this.db.db;

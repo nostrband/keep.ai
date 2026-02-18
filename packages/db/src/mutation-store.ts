@@ -49,23 +49,50 @@ export type MutationResolution =
   | "user_assert_applied";
 
 /**
- * Mutation record - ledger for tracking external side effects.
+ * Mutation record — ledger entry for tracking external side effects.
+ *
+ * Each consumer handler run can have at most one mutation (1:1 relationship).
+ * The mutation tracks the external call (e.g., send email, post message)
+ * for crash recovery and reconciliation.
+ *
+ * Lifecycle: pending → in_flight → applied | failed | needs_reconcile → indeterminate
+ *
+ * The mutation status determines how the execution model handles crashes:
+ * - pending/failed: Pre-mutation, safe to release events and retry
+ * - in_flight: Uncertain, needs reconciliation if connector supports it
+ * - applied: Post-mutation, events must be consumed (no re-delivery)
+ * - needs_reconcile: Actively attempting to verify outcome
+ * - indeterminate: Reconciliation exhausted, needs user resolution
  */
 export interface Mutation {
   id: string;
+  /** Handler run that owns this mutation (1:1 relationship) */
   handler_run_id: string;
+  /** Workflow this mutation belongs to */
   workflow_id: string;
+  /** Connector name (e.g., 'gmail', 'slack') — set when tool is called */
   tool_namespace: string;
+  /** Method name within connector (e.g., 'send', 'post') — set when tool is called */
   tool_method: string;
-  params: string; // JSON
+  /** JSON-serialized tool call parameters — set when tool is called */
+  params: string;
+  /** Connector-generated key for idempotent retries */
   idempotency_key: string;
+  /** Current mutation status (see MutationStatus) */
   status: MutationStatus;
-  result: string; // JSON
+  /** JSON-serialized tool call result (only when status=applied) */
+  result: string;
+  /** Error message (when status=failed, needs_reconcile, or indeterminate) */
   error: string;
+  /** Number of reconciliation attempts made so far */
   reconcile_attempts: number;
+  /** Unix ms timestamp of last reconciliation attempt (0 if none) */
   last_reconcile_at: number;
+  /** Unix ms timestamp of next scheduled reconciliation (0 if none) */
   next_reconcile_at: number;
+  /** User resolution for indeterminate mutations (empty if not resolved) */
   resolved_by: MutationResolution | "";
+  /** Unix ms timestamp when user resolved this mutation (0 if not resolved) */
   resolved_at: number;
   /** User-facing title from prepareResult.ui.title (exec-15) */
   ui_title: string;
@@ -131,6 +158,8 @@ export class MutationStore {
 
   /**
    * Get a mutation by ID.
+   *
+   * @internal Execution-model primitive. Use ExecutionModelManager for state transitions.
    */
   async get(id: string, tx?: DBInterface): Promise<Mutation | null> {
     const db = tx || this.db.db;
@@ -148,6 +177,8 @@ export class MutationStore {
 
   /**
    * Get a mutation by handler run ID.
+   *
+   * @internal Execution-model primitive. Use ExecutionModelManager for state transitions.
    */
   async getByHandlerRunId(
     handlerRunId: string,
@@ -279,6 +310,8 @@ export class MutationStore {
 
   /**
    * Update a mutation.
+   *
+   * @internal Execution-model primitive. Use ExecutionModelManager for state transitions.
    */
   async update(
     id: string,
