@@ -143,6 +143,9 @@ export {
   type HandlerExecutionContext,
 } from "./handler-state-machine";
 
+// Execution model manager
+export { ExecutionModelManager } from "./execution-model";
+
 // Session orchestration (exec-07)
 export {
   executeWorkflowSession,

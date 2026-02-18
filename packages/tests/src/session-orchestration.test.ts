@@ -12,6 +12,7 @@ import {
   resumeIncompleteSessions,
   getSessionCost,
   HandlerExecutionContext,
+  ExecutionModelManager,
 } from "@app/agent";
 
 /**
@@ -261,7 +262,7 @@ describe("Session Orchestration", () => {
       );
 
       const workflow = await api.scriptStore.getWorkflow("workflow-1");
-      const context: HandlerExecutionContext = { api };
+      const context: HandlerExecutionContext = { api, emm: new ExecutionModelManager(api) };
 
       const result = await executeWorkflowSession(
         workflow!,
@@ -284,7 +285,7 @@ describe("Session Orchestration", () => {
       );
 
       const workflow = await api.scriptStore.getWorkflow("workflow-1");
-      const context: HandlerExecutionContext = { api };
+      const context: HandlerExecutionContext = { api, emm: new ExecutionModelManager(api) };
 
       const result = await executeWorkflowSession(
         workflow!,
@@ -306,7 +307,7 @@ describe("Session Orchestration", () => {
       );
 
       const workflow = await api.scriptStore.getWorkflow("workflow-1");
-      const context: HandlerExecutionContext = { api };
+      const context: HandlerExecutionContext = { api, emm: new ExecutionModelManager(api) };
 
       const result = await executeWorkflowSession(
         workflow!,
@@ -333,7 +334,7 @@ describe("Session Orchestration", () => {
       );
 
       const workflow = await api.scriptStore.getWorkflow("workflow-1");
-      const context: HandlerExecutionContext = { api };
+      const context: HandlerExecutionContext = { api, emm: new ExecutionModelManager(api) };
 
       const result = await executeWorkflowSession(
         workflow!,
@@ -356,7 +357,7 @@ describe("Session Orchestration", () => {
       );
 
       const workflow = await api.scriptStore.getWorkflow("workflow-1");
-      const context: HandlerExecutionContext = { api };
+      const context: HandlerExecutionContext = { api, emm: new ExecutionModelManager(api) };
 
       const result = await executeWorkflowSession(
         workflow!,
@@ -383,7 +384,7 @@ describe("Session Orchestration", () => {
       );
 
       const workflow = await api.scriptStore.getWorkflow("workflow-1");
-      const context: HandlerExecutionContext = { api };
+      const context: HandlerExecutionContext = { api, emm: new ExecutionModelManager(api) };
 
       const result = await executeWorkflowSession(
         workflow!,
@@ -415,7 +416,7 @@ describe("Session Orchestration", () => {
       );
 
       const workflow = await api.scriptStore.getWorkflow("workflow-1");
-      const context: HandlerExecutionContext = { api };
+      const context: HandlerExecutionContext = { api, emm: new ExecutionModelManager(api) };
 
       const result = await executeWorkflowSession(
         workflow!,
@@ -441,7 +442,7 @@ describe("Session Orchestration", () => {
       );
 
       const workflow = await api.scriptStore.getWorkflow("workflow-1");
-      const context: HandlerExecutionContext = { api };
+      const context: HandlerExecutionContext = { api, emm: new ExecutionModelManager(api) };
 
       const result = await executeWorkflowSession(
         workflow!,
@@ -466,7 +467,7 @@ describe("Session Orchestration", () => {
       );
 
       const workflow = await api.scriptStore.getWorkflow("workflow-1");
-      const context: HandlerExecutionContext = { api };
+      const context: HandlerExecutionContext = { api, emm: new ExecutionModelManager(api) };
 
       const result = await executeWorkflowSession(
         workflow!,
@@ -496,7 +497,7 @@ describe("Session Orchestration", () => {
       await api.topicStore.create("workflow-1", "emails");
 
       const workflow = await api.scriptStore.getWorkflow("workflow-1");
-      const context: HandlerExecutionContext = { api };
+      const context: HandlerExecutionContext = { api, emm: new ExecutionModelManager(api) };
 
       const result = await executeWorkflowSession(
         workflow!,
@@ -524,7 +525,7 @@ describe("Session Orchestration", () => {
       await createTopicWithEvents(api, "workflow-1", "emails", ["msg-1"]);
 
       const workflow = await api.scriptStore.getWorkflow("workflow-1");
-      const context: HandlerExecutionContext = { api };
+      const context: HandlerExecutionContext = { api, emm: new ExecutionModelManager(api) };
 
       const result = await executeWorkflowSession(
         workflow!,
@@ -554,7 +555,7 @@ describe("Session Orchestration", () => {
       ]);
 
       const workflow = await api.scriptStore.getWorkflow("workflow-1");
-      const context: HandlerExecutionContext = { api };
+      const context: HandlerExecutionContext = { api, emm: new ExecutionModelManager(api) };
 
       // Run with low iteration limit
       const result = await executeWorkflowSession(
@@ -629,7 +630,7 @@ describe("Session Orchestration", () => {
       });
 
       const workflow = await api.scriptStore.getWorkflow("workflow-1");
-      const context: HandlerExecutionContext = { api };
+      const context: HandlerExecutionContext = { api, emm: new ExecutionModelManager(api) };
 
       const result = await executeWorkflowSessionIfIdle(
         workflow!,
@@ -650,7 +651,7 @@ describe("Session Orchestration", () => {
       );
 
       const workflow = await api.scriptStore.getWorkflow("workflow-1");
-      const context: HandlerExecutionContext = { api };
+      const context: HandlerExecutionContext = { api, emm: new ExecutionModelManager(api) };
 
       const result = await executeWorkflowSessionIfIdle(
         workflow!,
@@ -741,7 +742,7 @@ describe("Session Orchestration", () => {
         handler_name: "process",
       });
 
-      const context: HandlerExecutionContext = { api };
+      const context: HandlerExecutionContext = { api, emm: new ExecutionModelManager(api) };
 
       // Should not throw and should skip paused workflow
       await resumeIncompleteSessions(context);
@@ -774,7 +775,7 @@ describe("Session Orchestration", () => {
         handler_name: "checkEmails",
       });
 
-      const context: HandlerExecutionContext = { api };
+      const context: HandlerExecutionContext = { api, emm: new ExecutionModelManager(api) };
 
       // Resume should attempt to execute the incomplete run
       await resumeIncompleteSessions(context);
@@ -798,7 +799,7 @@ describe("Session Orchestration", () => {
       );
 
       const workflow = await api.scriptStore.getWorkflow("workflow-1");
-      const context: HandlerExecutionContext = { api };
+      const context: HandlerExecutionContext = { api, emm: new ExecutionModelManager(api) };
 
       const result = await executeWorkflowSession(
         workflow!,
@@ -831,7 +832,7 @@ describe("Session Orchestration", () => {
       await createTopicWithEvents(api, "workflow-1", "emails", ["msg-1"]);
 
       const workflow = await api.scriptStore.getWorkflow("workflow-1");
-      const context: HandlerExecutionContext = { api };
+      const context: HandlerExecutionContext = { api, emm: new ExecutionModelManager(api) };
 
       const result = await executeWorkflowSession(
         workflow!,
@@ -862,7 +863,7 @@ describe("Session Orchestration", () => {
       );
 
       const workflow = await api.scriptStore.getWorkflow("workflow-1");
-      const context: HandlerExecutionContext = { api };
+      const context: HandlerExecutionContext = { api, emm: new ExecutionModelManager(api) };
 
       const result = await executeWorkflowSession(
         workflow!,
@@ -894,7 +895,7 @@ describe("Session Orchestration", () => {
       await api.handlerStateStore.updateWakeAt("workflow-1", "dailyDigest", futureTime);
 
       const workflow = await api.scriptStore.getWorkflow("workflow-1");
-      const context: HandlerExecutionContext = { api };
+      const context: HandlerExecutionContext = { api, emm: new ExecutionModelManager(api) };
 
       const result = await executeWorkflowSession(
         workflow!,
@@ -926,7 +927,7 @@ describe("Session Orchestration", () => {
       await api.handlerStateStore.updateWakeAt("workflow-1", "dailyDigest", pastTime);
 
       const workflow = await api.scriptStore.getWorkflow("workflow-1");
-      const context: HandlerExecutionContext = { api };
+      const context: HandlerExecutionContext = { api, emm: new ExecutionModelManager(api) };
 
       const result = await executeWorkflowSession(
         workflow!,
@@ -956,7 +957,7 @@ describe("Session Orchestration", () => {
       await api.handlerStateStore.updateWakeAt("workflow-1", "processEmail", pastTime);
 
       const workflow = await api.scriptStore.getWorkflow("workflow-1");
-      const context: HandlerExecutionContext = { api };
+      const context: HandlerExecutionContext = { api, emm: new ExecutionModelManager(api) };
 
       const result = await executeWorkflowSession(
         workflow!,
@@ -983,7 +984,7 @@ describe("Session Orchestration", () => {
       await api.handlerStateStore.updateWakeAt("workflow-1", "nonExistentConsumer", pastTime);
 
       const workflow = await api.scriptStore.getWorkflow("workflow-1");
-      const context: HandlerExecutionContext = { api };
+      const context: HandlerExecutionContext = { api, emm: new ExecutionModelManager(api) };
 
       const result = await executeWorkflowSession(
         workflow!,
@@ -1014,7 +1015,7 @@ describe("Session Orchestration", () => {
       await api.handlerStateStore.updateWakeAt("workflow-1", "processEmail", 0);
 
       const workflow = await api.scriptStore.getWorkflow("workflow-1");
-      const context: HandlerExecutionContext = { api };
+      const context: HandlerExecutionContext = { api, emm: new ExecutionModelManager(api) };
 
       const result = await executeWorkflowSession(
         workflow!,

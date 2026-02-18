@@ -39,6 +39,7 @@ import {
   ReconciliationRegistry,
   type MutationParams,
 } from "./reconciliation";
+import { ExecutionModelManager } from "./execution-model";
 import type { ConnectionManager } from "@app/connectors";
 import type { SchedulerStateManager } from "./scheduler-state";
 import debug from "debug";
@@ -94,6 +95,7 @@ export interface PrepareResult {
  */
 export interface HandlerExecutionContext {
   api: KeepDbApi;
+  emm: ExecutionModelManager;
   connectionManager?: ConnectionManager;
   userPath?: string;
   abortController?: AbortController;
@@ -395,25 +397,25 @@ export async function createRetryRun(
 // ============================================================================
 
 /**
- * Mark a handler run as failed with classified error.
+ * Mark a handler run as failed with classified error via EMM.
+ *
+ * This atomically handles: status + event disposition + session finalization +
+ * maintenance flag + workflow.error — eliminating crash windows (Bugs 1-2).
  *
  * Per exec-09 spec, this sets status based on error type instead of
  * changing phase. Phase stays at the point of failure.
  */
 async function failRun(
-  api: KeepDbApi,
+  emm: ExecutionModelManager,
   run: HandlerRun,
   error: ClassifiedError,
   context?: HandlerExecutionContext
 ): Promise<void> {
   const errorType = errorTypeToHandlerErrorType(error.type);
   const status = errorTypeToRunStatus(error.type);
-  await api.handlerRunStore.update(run.id, {
-    // Keep phase at point of failure, set status instead
-    status,
+  await emm.updateHandlerRunStatus(run.id, status, {
     error: error.message,
-    error_type: errorType,
-    end_timestamp: new Date().toISOString(),
+    errorType: errorType,
   });
   // Extract serviceId/accountId from AuthError into context for notification creation
   if (context && error instanceof AuthError) {
@@ -423,69 +425,9 @@ async function failRun(
   log(`Handler run ${run.id} ${status}: ${error.message} (${errorType})`);
 }
 
-/**
- * Mark a handler run as paused with a specific status and reason.
- *
- * Per exec-09 spec, this sets status without changing phase.
- */
-async function pauseRun(
-  api: KeepDbApi,
-  run: HandlerRun,
-  status: RunStatus,
-  reason: string
-): Promise<void> {
-  await api.handlerRunStore.update(run.id, {
-    status,
-    error: reason,
-    end_timestamp: new Date().toISOString(),
-  });
-  log(`Handler run ${run.id} ${status}: ${reason}`);
-}
-
-/**
- * Mark a handler run as suspended with reason.
- *
- * @deprecated Use pauseRun with appropriate status instead.
- * Kept for backwards compatibility during migration.
- */
-async function suspendRun(
-  api: KeepDbApi,
-  run: HandlerRun,
-  reason: string
-): Promise<void> {
-  await pauseRun(api, run, "paused:reconciliation", reason);
-}
-
-/**
- * Pause a handler run and its workflow for indeterminate mutation.
- *
- * Per exec-14 spec:
- * - Set run status to paused:reconciliation
- * - Pause workflow so scheduler doesn't pick it up
- * - User must manually resolve the indeterminate mutation
- */
-async function pauseRunForIndeterminate(
-  api: KeepDbApi,
-  run: HandlerRun,
-  reason: string
-): Promise<void> {
-  // Atomic: pause handler run + set pending_retry_run_id + pause workflow
-  // pending_retry_run_id must be set atomically when marking indeterminate
-  // so the scheduler can find the orphaned run when the user resolves.
-  await api.db.db.tx(async (tx: DBInterface) => {
-    await api.handlerRunStore.update(run.id, {
-      status: "paused:reconciliation" as RunStatus,
-      error: reason,
-      end_timestamp: new Date().toISOString(),
-    }, tx);
-    await api.scriptStore.updateWorkflowFields(run.workflow_id, {
-      status: "paused",
-      pending_retry_run_id: run.id,
-    }, tx);
-  });
-  log(`Handler run ${run.id} paused:reconciliation: ${reason}`);
-  log(`Workflow ${run.workflow_id} paused due to indeterminate mutation, pending_retry_run_id set`);
-}
+// pauseRun, suspendRun, pauseRunForIndeterminate — removed.
+// These are now handled by EMM.updateHandlerRunStatus() which atomically handles
+// event disposition, session finalization, pending_retry_run_id, and workflow.error.
 
 // ============================================================================
 // Immediate Reconciliation (exec-18)
@@ -946,7 +888,7 @@ return await workflow.producers.${run.handler_name}.handler(__state__);
         const classifiedError =
           sandbox.context?.classifiedError ||
           new LogicError(result.error, { source: "producer.handler" });
-        await failRun(api, run, classifiedError, context);
+        await failRun(context.emm, run, classifiedError, context);
         return;
       }
 
@@ -960,7 +902,7 @@ return await workflow.producers.${run.handler_name}.handler(__state__);
     } catch (error) {
       // Use getRunStatusForError instead of ensureClassified (per exec-12)
       const { error: classifiedError } = getRunStatusForError(error, "producer.handler");
-      await failRun(api, run, classifiedError, context);
+      await failRun(context.emm, run, classifiedError, context);
     } finally {
       sandbox.dispose();
     }
@@ -1048,7 +990,7 @@ return await workflow.consumers.${run.handler_name}.prepare(__state__);
         const classifiedError =
           sandbox.context?.classifiedError ||
           new LogicError(result.error, { source: "consumer.prepare" });
-        await failRun(api, run, classifiedError, context);
+        await failRun(context.emm, run, classifiedError, context);
         return;
       }
 
@@ -1056,7 +998,7 @@ return await workflow.consumers.${run.handler_name}.prepare(__state__);
       const prepareResult = result.result as PrepareResult;
       if (!prepareResult || !Array.isArray(prepareResult.reservations)) {
         await failRun(
-          api,
+          context.emm,
           run,
           new LogicError(
             "Consumer prepare must return { reservations: [...] }",
@@ -1075,7 +1017,7 @@ return await workflow.consumers.${run.handler_name}.prepare(__state__);
     } catch (error) {
       // Use getRunStatusForError instead of ensureClassified (per exec-12)
       const { error: classifiedError } = getRunStatusForError(error, "consumer.prepare");
-      await failRun(api, run, classifiedError, context);
+      await failRun(context.emm, run, classifiedError, context);
     } finally {
       sandbox.dispose();
     }
@@ -1132,26 +1074,36 @@ return await workflow.consumers.${run.handler_name}.prepare(__state__);
         // State machine will restart mutate phase on next iteration
         log(`Handler run ${run.id} (consumer): reconciliation confirmed mutation failed, will retry`);
       } else if (outcome === "needs_reconcile") {
-        // Reconciliation pending - pause for background reconciliation
+        // Reconciliation pending - pause for background reconciliation via EMM
         log(`Handler run ${run.id} (consumer): needs background reconciliation`);
-        await pauseRun(api, run, "paused:reconciliation", "needs_reconcile");
+        await context.emm.updateHandlerRunStatus(run.id, "paused:reconciliation", {
+          error: "needs_reconcile",
+        });
       } else {
-        // Indeterminate - pause workflow for user resolution
-        await pauseRunForIndeterminate(api, run, "indeterminate_mutation");
+        // Indeterminate - pause workflow for user resolution via EMM
+        // EMM handles: pending_retry_run_id + workflow.error atomically
+        await context.emm.updateHandlerRunStatus(run.id, "paused:reconciliation", {
+          error: "indeterminate_mutation",
+        });
       }
     } else if (mutation.status === "applied") {
       log(`Handler run ${run.id} (consumer): mutating → mutated`);
       await api.handlerRunStore.updatePhase(run.id, "mutated");
     } else if (mutation.status === "needs_reconcile") {
-      // Awaiting background reconciliation - ensure run is paused
+      // Awaiting background reconciliation - ensure run is paused via EMM
       log(`Handler run ${run.id} (consumer): awaiting reconciliation`);
-      await pauseRun(api, run, "paused:reconciliation", "needs_reconcile");
+      await context.emm.updateHandlerRunStatus(run.id, "paused:reconciliation", {
+        error: "needs_reconcile",
+      });
     } else if (mutation.status === "indeterminate") {
-      // Already indeterminate from previous attempt - ensure workflow paused
-      await pauseRunForIndeterminate(api, run, "indeterminate_mutation");
+      // Already indeterminate from previous attempt - pause via EMM
+      // EMM handles: pending_retry_run_id + workflow.error atomically
+      await context.emm.updateHandlerRunStatus(run.id, "paused:reconciliation", {
+        error: "indeterminate_mutation",
+      });
     } else if (mutation.status === "failed") {
       await failRun(
-        api,
+        context.emm,
         run,
         new LogicError(mutation.error || "Mutation failed", {
           source: "consumer.mutate",
@@ -1247,7 +1199,7 @@ return await workflow.consumers.${run.handler_name}.next(__prepared__, __mutatio
         const classifiedError =
           sandbox.context?.classifiedError ||
           new LogicError(result.error, { source: "consumer.next" });
-        await failRun(api, run, classifiedError, context);
+        await failRun(context.emm, run, classifiedError, context);
         return;
       }
 
@@ -1262,7 +1214,7 @@ return await workflow.consumers.${run.handler_name}.next(__prepared__, __mutatio
     } catch (error) {
       // Use getRunStatusForError instead of ensureClassified (per exec-12)
       const { error: classifiedError } = getRunStatusForError(error, "consumer.next");
-      await failRun(api, run, classifiedError, context);
+      await failRun(context.emm, run, classifiedError, context);
     } finally {
       sandbox.dispose();
     }
@@ -1385,7 +1337,7 @@ return await workflow.consumers.${run.handler_name}.mutate(__prepared__);
         // No mutation record — error occurred before mutation was created
         // (e.g., input validation failure). This is a definite failure;
         // without failRun the state machine loops forever re-executing mutate.
-        await failRun(api, run, classifiedError, context);
+        await failRun(context.emm, run, classifiedError, context);
       }
       return;
     } else if (mutation && mutation.status === "applied") {
@@ -1427,7 +1379,7 @@ return await workflow.consumers.${run.handler_name}.mutate(__prepared__);
     } else {
       // No mutation record — error before mutation was created.
       // Must failRun or the state machine loops forever.
-      await failRun(api, run, classifiedError, context);
+      await failRun(context.emm, run, classifiedError, context);
     }
   } finally {
     sandbox.dispose();
@@ -1491,12 +1443,10 @@ export async function executeHandler(
 
     const handler = phaseHandlers[run.phase];
     if (!handler) {
-      // Unknown phase - this shouldn't happen
-      await api.handlerRunStore.update(run.id, {
-        status: "failed:internal",
+      // Unknown phase - this shouldn't happen. Use EMM for atomic handling.
+      await context.emm.updateHandlerRunStatus(run.id, "failed:internal", {
         error: `Unknown phase: ${run.phase}`,
-        error_type: "logic",
-        end_timestamp: new Date().toISOString(),
+        errorType: "logic",
       });
       return {
         phase: run.phase,
@@ -1513,7 +1463,7 @@ export async function executeHandler(
       // Unexpected error in phase handler itself
       // Use getRunStatusForError instead of ensureClassified (per exec-12)
       const { status, error: classifiedError } = getRunStatusForError(error, "handler-state-machine");
-      await failRun(api, run, classifiedError, context);
+      await failRun(context.emm, run, classifiedError, context);
       return {
         phase: run.phase,
         status,

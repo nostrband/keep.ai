@@ -11,7 +11,7 @@ import {
   HandlerRun,
 } from "@app/db";
 import { createDBNode } from "@app/node";
-import { executeHandler, isTerminal, HandlerExecutionContext } from "@app/agent";
+import { executeHandler, isTerminal, HandlerExecutionContext, ExecutionModelManager } from "@app/agent";
 
 /**
  * Helper to create all required tables for handler state machine tests.
@@ -264,7 +264,7 @@ describe("Handler State Machine", () => {
 
   describe("executeHandler - Basic Flow", () => {
     it("should return failed result for non-existent handler run", async () => {
-      const context: HandlerExecutionContext = { api };
+      const context: HandlerExecutionContext = { api, emm: new ExecutionModelManager(api) };
 
       const result = await executeHandler("non-existent-run", context);
 
@@ -291,7 +291,7 @@ describe("Handler State Machine", () => {
         end_timestamp: new Date().toISOString(),
       });
 
-      const context: HandlerExecutionContext = { api };
+      const context: HandlerExecutionContext = { api, emm: new ExecutionModelManager(api) };
       const result = await executeHandler(run.id, context);
 
       expect(result.phase).toBe("committed");
@@ -316,7 +316,7 @@ describe("Handler State Machine", () => {
         end_timestamp: new Date().toISOString(),
       });
 
-      const context: HandlerExecutionContext = { api };
+      const context: HandlerExecutionContext = { api, emm: new ExecutionModelManager(api) };
       const result = await executeHandler(run.id, context);
 
       expect(result.phase).toBe("executing");
@@ -341,7 +341,7 @@ describe("Handler State Machine", () => {
         end_timestamp: new Date().toISOString(),
       });
 
-      const context: HandlerExecutionContext = { api };
+      const context: HandlerExecutionContext = { api, emm: new ExecutionModelManager(api) };
       const result = await executeHandler(run.id, context);
 
       expect(result.phase).toBe("mutating");
@@ -387,7 +387,7 @@ describe("Handler State Machine", () => {
       // Transition to executing first (as pending → executing is immediate)
       await api.handlerRunStore.updatePhase(run.id, "executing");
 
-      const context: HandlerExecutionContext = { api };
+      const context: HandlerExecutionContext = { api, emm: new ExecutionModelManager(api) };
       const result = await executeHandler(run.id, context);
 
       // Per exec-09: phase stays at executing, status indicates failure
@@ -414,7 +414,7 @@ describe("Handler State Machine", () => {
 
       await api.handlerRunStore.updatePhase(run.id, "executing");
 
-      const context: HandlerExecutionContext = { api };
+      const context: HandlerExecutionContext = { api, emm: new ExecutionModelManager(api) };
       const result = await executeHandler(run.id, context);
 
       // Per exec-09: phase stays at executing, status indicates failure
@@ -463,7 +463,7 @@ describe("Handler State Machine", () => {
         prepare_result: JSON.stringify({ reservations: [] }),
       });
 
-      const context: HandlerExecutionContext = { api };
+      const context: HandlerExecutionContext = { api, emm: new ExecutionModelManager(api) };
       const result = await executeHandler(run.id, context);
 
       expect(result.phase).toBe("committed");
@@ -489,7 +489,7 @@ describe("Handler State Machine", () => {
       const before = await api.handlerRunStore.get(run.id);
       expect(before?.phase).toBe("prepared");
 
-      const context: HandlerExecutionContext = { api };
+      const context: HandlerExecutionContext = { api, emm: new ExecutionModelManager(api) };
 
       // Execute - should transition prepared → mutating
       // Since there's no workflow, it will fail, but the phase should have transitioned first
@@ -541,7 +541,7 @@ describe("Handler State Machine", () => {
         params: '{"to":"test@example.com"}',
       });
 
-      const context: HandlerExecutionContext = { api };
+      const context: HandlerExecutionContext = { api, emm: new ExecutionModelManager(api) };
       const result = await executeHandler(run.id, context);
 
       // Per exec-09: phase stays at mutating, status indicates indeterminate
@@ -581,7 +581,7 @@ describe("Handler State Machine", () => {
       });
       await api.mutationStore.markApplied(mutation.id, JSON.stringify({ success: true }));
 
-      const context: HandlerExecutionContext = { api };
+      const context: HandlerExecutionContext = { api, emm: new ExecutionModelManager(api) };
 
       // Execute - should transition mutating → mutated → emitting → committed (no next handler)
       const result = await executeHandler(run.id, context);
@@ -619,7 +619,7 @@ describe("Handler State Machine", () => {
       });
       await api.mutationStore.markFailed(mutation.id, "External API error");
 
-      const context: HandlerExecutionContext = { api };
+      const context: HandlerExecutionContext = { api, emm: new ExecutionModelManager(api) };
       const result = await executeHandler(run.id, context);
 
       // Per exec-09: phase stays at mutating, status indicates failure
@@ -658,7 +658,7 @@ describe("Handler State Machine", () => {
       });
       await api.mutationStore.markIndeterminate(mutation.id, "Network timeout - outcome uncertain");
 
-      const context: HandlerExecutionContext = { api };
+      const context: HandlerExecutionContext = { api, emm: new ExecutionModelManager(api) };
       const result = await executeHandler(run.id, context);
 
       // Per exec-09: phase stays at point of failure, status indicates why stopped
@@ -693,7 +693,7 @@ describe("Handler State Machine", () => {
         prepare_result: JSON.stringify({ reservations: [], data: {} }),
       });
 
-      const context: HandlerExecutionContext = { api };
+      const context: HandlerExecutionContext = { api, emm: new ExecutionModelManager(api) };
       const result = await executeHandler(run.id, context);
 
       expect(result.phase).toBe("committed");

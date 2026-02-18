@@ -14,6 +14,7 @@ import {
   type SessionTrigger,
 } from "./session-orchestration";
 import type { HandlerExecutionContext } from "./handler-state-machine";
+import { ExecutionModelManager } from "./execution-model";
 import { initializeProducerSchedules } from "./producer-schedule-init";
 import { isWorkflowFormatScript, validateWorkflowScript, type WorkflowConfig } from "./workflow-validator";
 import { SchedulerStateManager } from "./scheduler-state";
@@ -335,6 +336,7 @@ export class WorkflowScheduler {
   private createExecutionContext(): HandlerExecutionContext {
     return {
       api: this.api,
+      emm: new ExecutionModelManager(this.api),
       connectionManager: this.connectionManager,
       userPath: this.userPath,
       schedulerState: this.schedulerState,
