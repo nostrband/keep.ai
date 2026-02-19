@@ -89,9 +89,9 @@ export class WorkflowScheduler {
           );
 
           // Mark workflow with error and clear pending_retry_run_id
-          await this.api.scriptStore.updateWorkflowFields(signal.workflowId, {
-            error: signal.error || 'Max retries exceeded',
-            pending_retry_run_id: '',
+          const emm = new ExecutionModelManager(this.api);
+          await emm.blockWorkflow(signal.workflowId, signal.error || 'Max retries exceeded', {
+            clearPendingRetry: true,
           });
           this.workflowRetryState.delete(signal.workflowId);
           break;
@@ -451,9 +451,8 @@ export class WorkflowScheduler {
         // Guard: workflows without handler_config cannot run — set error to prevent infinite loops
         if (!w.handler_config || !w.handler_config.trim()) {
           this.debug(`Blocking workflow ${w.id} (${w.title}): missing handler_config`);
-          await this.api.scriptStore.updateWorkflowFields(w.id, {
-            error: 'Workflow has no handler configuration. Re-activate the script to fix.',
-          });
+          const emm = new ExecutionModelManager(this.api);
+          await emm.blockWorkflow(w.id, 'Workflow has no handler configuration. Re-activate the script to fix.');
           try {
             await this.api.notificationStore.saveNotification({
               id: crypto.randomUUID(),

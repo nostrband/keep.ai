@@ -927,6 +927,26 @@ export class ExecutionModelManager {
   // ==========================================================================
 
   /**
+   * Block a workflow with an error — scheduler-level decision.
+   *
+   * Sets workflow.error (system-controlled). Does NOT touch workflow.status
+   * (user-controlled). Optionally clears pending_retry_run_id (e.g. when
+   * max network retries are exceeded).
+   *
+   * Called by the scheduler when a workflow needs user attention for reasons
+   * outside the handler execution model (missing config, max retries, etc.).
+   */
+  async blockWorkflow(
+    workflowId: string,
+    error: string,
+    opts?: { clearPendingRetry?: boolean },
+  ): Promise<void> {
+    const fields: Record<string, any> = { error };
+    if (opts?.clearPendingRetry) fields.pending_retry_run_id = "";
+    await this.store.updateWorkflowFields(workflowId, fields);
+  }
+
+  /**
    * Exit maintenance mode — called after maintainer fixes script.
    * Sets workflow.maintenance = false. Does NOT clear pending_retry_run_id —
    * if one was set for a post-mutation failure, the scheduler will process it

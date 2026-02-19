@@ -526,17 +526,19 @@ export async function retryWorkflowSession(
   // 1. Load failed handler run
   const failedRun = await api.handlerRunStore.get(failedHandlerRunId);
   if (!failedRun) {
-    log(`retryWorkflowSession: failed run ${failedHandlerRunId} not found, clearing and falling back`);
-    await api.scriptStore.updateWorkflowFields(workflow.id, { pending_retry_run_id: '' });
-    return executeWorkflowSession(workflow, "event", context);
+    throw new Error(
+      `retryWorkflowSession: pending_retry_run_id ${failedHandlerRunId} ` +
+      `references a non-existent handler run (workflow ${workflow.id})`
+    );
   }
 
-  // 2. Check if already retried (race: two recovery paths)
+  // 2. Check if already retried
   const existingRetries = await api.handlerRunStore.getRetriesOf(failedHandlerRunId);
   if (existingRetries.length > 0) {
-    log(`retryWorkflowSession: run ${failedHandlerRunId} already retried, clearing and falling back`);
-    await api.scriptStore.updateWorkflowFields(workflow.id, { pending_retry_run_id: '' });
-    return executeWorkflowSession(workflow, "event", context);
+    throw new Error(
+      `retryWorkflowSession: pending_retry_run_id ${failedHandlerRunId} ` +
+      `was already retried (workflow ${workflow.id})`
+    );
   }
 
   log(`retryWorkflowSession: retrying run ${failedRun.id} (${failedRun.handler_name})`);

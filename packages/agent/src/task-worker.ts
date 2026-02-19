@@ -820,7 +820,7 @@ If you cannot fix this issue autonomously, explain why without calling the \`fix
 
   /**
    * Escalate a maintainer failure to the user.
-   * Sets workflow to error status and creates a notification with the explanation.
+   * Sets workflow.error and clears maintenance, then creates a notification.
    */
   private async escalateMaintainerFailure(
     workflowId: string,
@@ -834,9 +834,10 @@ If you cannot fix this issue autonomously, explain why without calling the \`fix
       return;
     }
 
-    // Set workflow to error status and clear maintenance
+    // Set workflow.error (system-controlled) and clear maintenance.
+    // workflow.status stays "active" — scheduler blocks via error field.
     await this.api.scriptStore.updateWorkflowFields(workflowId, {
-      status: "error",
+      error: "Maintainer failed to fix the script automatically",
       maintenance: false,
       maintenance_fix_count: 0, // Reset so user gets fresh attempts
     });
