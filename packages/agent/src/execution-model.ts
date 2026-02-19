@@ -19,9 +19,10 @@
  *   - The mutation boundary divides pre/post-mutation behavior:
  *     Pre-mutation (mutation_outcome = "" or "failure"): events released, fresh retry
  *     Post-mutation (mutation_outcome = "success" or "skipped"): events preserved, retry from emitting
- *   - Mutation methods (apply/fail/skip) are about the mutation phase — they NEVER touch run status.
+ *   - Mutation methods (apply/fail) are about the mutation phase — they NEVER touch run status.
  *     Run status is handled by updateHandlerRunStatus, which is orthogonal.
- *   - workflow.status is user-controlled (never touched by this module)
+ *     Skip is UI-only and lives in ExecutionModelClient (browser package).
+ *   - workflow.status is user-controlled (managed by ExecutionModelClient, never by this module)
  *   - workflow.error is system-controlled (set/cleared by this module)
  *
  * References:
@@ -105,6 +106,10 @@ export interface CommitProducerOpts {
 export interface ApplyMutationOpts {
   /** Serialized mutation result JSON */
   result?: string;
+  /** How the mutation was resolved (e.g. "reconciliation") */
+  resolvedBy?: MutationResolution | "";
+  /** When the mutation was resolved (milliseconds since epoch) */
+  resolvedAt?: number;
 }
 
 /**
@@ -115,14 +120,6 @@ export interface FailMutationOpts {
   error?: string;
   /** How the mutation was resolved (e.g. "user_assert_failed") */
   resolvedBy?: MutationResolution | "";
-  /** When the mutation was resolved (milliseconds since epoch) */
-  resolvedAt?: number;
-}
-
-/**
- * Options for skipMutation.
- */
-export interface SkipMutationOpts {
   /** When the mutation was resolved (milliseconds since epoch) */
   resolvedAt?: number;
 }
@@ -613,14 +610,14 @@ export class ExecutionModelManager {
       this._assertMutationNotTerminal(mutation, "applyMutation");
 
       // Update mutation record
-      await this.store.updateMutation(
-        mutationId,
-        {
-          status: "applied",
-          result: opts?.result || "",
-        },
-        tx,
-      );
+      const mutationUpdate: any = {
+        status: "applied",
+        result: opts?.result || "",
+      };
+      if (opts?.resolvedBy) mutationUpdate.resolved_by = opts.resolvedBy;
+      if (opts?.resolvedAt !== undefined) mutationUpdate.resolved_at = opts.resolvedAt;
+      else if (opts?.resolvedBy) mutationUpdate.resolved_at = Date.now();
+      await this.store.updateMutation(mutationId, mutationUpdate, tx);
 
       // Set mutation_outcome on handler run
       await this.store.updateHandlerRun(
@@ -637,7 +634,10 @@ export class ExecutionModelManager {
         tx,
       );
 
-      // Clear workflow.error (mutation resolved, no longer needs attention)
+      // Clear workflow.error (mutation resolved, no longer needs attention).
+      // For reconciliation: pending_retry_run_id was already set when the run
+      // entered paused:reconciliation — clearing error unblocks the scheduler
+      // to process the existing pending retry.
       await this.store.updateWorkflowFields(
         mutation.workflow_id,
         { error: "" },
@@ -735,83 +735,12 @@ export class ExecutionModelManager {
   }
 
   // ==========================================================================
-  // Method 7: skipMutation
+  // Method 7: skipMutation — REMOVED
+  //
+  // skipMutation is UI-only (only the user can decide to skip). It now lives
+  // exclusively in ExecutionModelClient (packages/browser/src/execution-model-client.ts)
+  // as resolveMutationSkipped(). No backend code ever calls skipMutation.
   // ==========================================================================
-
-  /**
-   * Skip a mutation — user chose to skip this event.
-   *
-   * Atomically: set mutation status (failed + user_skip), set mutation_outcome
-   * to "skipped", advance phase to "mutated", skip events, set pending_retry,
-   * and clear workflow.error.
-   *
-   * After skip, the run is at phase=mutated, status=paused:reconciliation.
-   * The scheduler (when workflow is active and error is clear) processes
-   * pending_retry_run_id: creates a retry run at emitting phase, which
-   * executes next() with mutationResult = { status: "skipped" }.
-   *
-   * next() MUST always run — it updates consumer state and may produce events.
-   *
-   * @param mutationId - Mutation record ID
-   * @param opts - Options (resolvedAt)
-   */
-  async skipMutation(
-    mutationId: string,
-    opts?: SkipMutationOpts,
-  ): Promise<void> {
-    await this.api.db.db.tx(async (tx) => {
-      const mutation = await this.store.getMutation(mutationId, tx);
-      if (!mutation) throw new Error(`Mutation not found: ${mutationId}`);
-
-      // Input validation
-      this._assertMutationNotTerminal(mutation, "skipMutation");
-
-      const now = Date.now();
-
-      // Update mutation record
-      await this.store.updateMutation(
-        mutationId,
-        {
-          status: "failed",
-          resolved_by: "user_skip",
-          resolved_at: opts?.resolvedAt || now,
-        },
-        tx,
-      );
-
-      // Set mutation_outcome on handler run
-      await this.store.updateHandlerRun(
-        mutation.handler_run_id,
-        { mutation_outcome: "skipped" },
-        tx,
-      );
-
-      // Advance phase to "mutated" (mutate phase complete, outcome known)
-      await this.updateConsumerPhase(
-        mutation.handler_run_id,
-        "mutated",
-        undefined,
-        tx,
-      );
-
-      // Skip events — mark as "skipped" (terminal for those events)
-      await this.store.skipEvents(mutation.handler_run_id, tx);
-
-      // Set pending_retry_run_id so scheduler creates retry for next()
-      await this.store.updateWorkflowFields(
-        mutation.workflow_id,
-        { pending_retry_run_id: mutation.handler_run_id },
-        tx,
-      );
-
-      // Clear workflow.error (mutation resolved, no longer needs attention)
-      await this.store.updateWorkflowFields(
-        mutation.workflow_id,
-        { error: "" },
-        tx,
-      );
-    });
-  }
 
   // ==========================================================================
   // Method 8: createRetryRun
@@ -822,8 +751,8 @@ export class ExecutionModelManager {
    *
    * Invariant: only called for post-mutation runs. pending_retry_run_id is
    * only set by updateHandlerRunStatus for post-mutation failures or by
-   * skipMutation. Pre-mutation failures release events and never set
-   * pending_retry_run_id.
+   * EMC.resolveMutationSkipped. Pre-mutation failures release events and
+   * never set pending_retry_run_id.
    *
    * Throws if the failed run is pre-mutation — guards against caller misuse.
    *
@@ -967,7 +896,7 @@ export class ExecutionModelManager {
     if (!allowedStatuses.includes(newStatus)) {
       throw new Error(
         `updateMutationStatus only handles non-terminal transitions. ` +
-          `Use applyMutation/failMutation/skipMutation for terminal outcomes. ` +
+          `Use applyMutation/failMutation for terminal outcomes (or EMC for skip). ` +
           `Got: ${newStatus}`,
       );
     }
@@ -990,32 +919,12 @@ export class ExecutionModelManager {
 
   // ==========================================================================
   // Auxiliary methods
+  //
+  // pauseWorkflow / resumeWorkflow — REMOVED
+  // These are UI-only operations. They now live exclusively in
+  // ExecutionModelClient (packages/browser/src/execution-model-client.ts).
+  // No backend code ever calls them.
   // ==========================================================================
-
-  /**
-   * Pause a workflow — user-initiated action.
-   * Sets workflow.status = "paused". Does NOT touch handler runs, events,
-   * mutations, or workflow.error.
-   */
-  async pauseWorkflow(workflowId: string): Promise<void> {
-    await this.store.updateWorkflowFields(workflowId, {
-      status: "paused",
-    });
-  }
-
-  /**
-   * Resume a workflow — user-initiated action.
-   * Sets workflow.status = "active". Does NOT touch handler runs, events,
-   * mutations, or workflow.error.
-   *
-   * If workflow.error is set, the scheduler still won't run — the error
-   * must be resolved first (e.g. reconnect auth, resolve indeterminate mutation).
-   */
-  async resumeWorkflow(workflowId: string): Promise<void> {
-    await this.store.updateWorkflowFields(workflowId, {
-      status: "active",
-    });
-  }
 
   /**
    * Exit maintenance mode — called after maintainer fixes script.

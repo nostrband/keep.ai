@@ -28,14 +28,14 @@ export default function ArchivedPage() {
       return;
     }
 
-    const restoreStatus = workflow.active_script_id ? "paused" : "draft";
-
     updateWorkflowMutation.mutate({
       workflowId,
-      status: restoreStatus
+      status: "restore",
+      hasActiveScript: !!workflow.active_script_id,
     }, {
       onSuccess: () => {
-        success.show(`Workflow restored to ${restoreStatus}`);
+        const restoredTo = workflow.active_script_id ? "paused" : "draft";
+        success.show(`Workflow restored to ${restoredTo}`);
       },
       onError: (err) => {
         console.error("Failed to restore workflow:", err);

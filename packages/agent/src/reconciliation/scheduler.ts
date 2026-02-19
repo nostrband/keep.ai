@@ -7,8 +7,12 @@
  * This scheduler:
  * 1. Periodically checks for mutations due for reconciliation
  * 2. Attempts reconciliation using the registry
- * 3. Handles outcomes (applied/failed/retry/exhausted)
- * 4. Updates mutation state and resumes workflows as needed
+ * 3. Handles outcomes via EMM (applied/failed/retry/exhausted)
+ *
+ * Resolution paths (no manual "resumeWorkflow" needed):
+ * - Applied: emm.applyMutation(setPendingRetry) → scheduler retry path → next()
+ * - Failed: emm.failMutation() → events released → scheduler runs fresh session
+ * - Exhausted: emm.updateMutationStatus(indeterminate) → user must resolve
  */
 
 import { KeepDbApi, Mutation } from "@app/db";
@@ -19,6 +23,7 @@ import {
   DEFAULT_RECONCILIATION_POLICY,
   calculateBackoff,
 } from "./types";
+import { ExecutionModelManager } from "../execution-model";
 import debug from "debug";
 
 const log = debug("reconciliation:scheduler");
@@ -40,6 +45,7 @@ export interface ReconciliationSchedulerConfig {
  */
 export class ReconciliationScheduler {
   private api: KeepDbApi;
+  private emm: ExecutionModelManager;
   private policy: ReconciliationPolicy;
   private checkIntervalMs: number;
   private interval: ReturnType<typeof setInterval> | null = null;
@@ -47,6 +53,7 @@ export class ReconciliationScheduler {
 
   constructor(config: ReconciliationSchedulerConfig) {
     this.api = config.api;
+    this.emm = new ExecutionModelManager(config.api);
     this.policy = config.policy || DEFAULT_RECONCILIATION_POLICY;
     this.checkIntervalMs = config.checkIntervalMs || 10_000;
   }
@@ -177,48 +184,48 @@ export class ReconciliationScheduler {
 
   /**
    * Handle successful reconciliation (mutation confirmed applied).
+   *
+   * Uses EMM.applyMutation which clears workflow.error — this unblocks the
+   * scheduler to process the existing pending_retry_run_id (set when the run
+   * entered paused:reconciliation). The scheduler then calls createRetryRun()
+   * → new run at emitting → next().
    */
   private async handleApplied(mutation: Mutation, result: unknown): Promise<void> {
-    await this.api.mutationStore.markApplied(
-      mutation.id,
-      result ? JSON.stringify(result) : ""
-    );
-
-    // Resume the workflow
-    await this.resumeWorkflow(mutation);
+    await this.emm.applyMutation(mutation.id, {
+      result: result ? JSON.stringify(result) : "",
+      resolvedBy: "reconciliation",
+    });
+    log(`Mutation ${mutation.id} applied via reconciliation`);
   }
 
   /**
    * Handle failed reconciliation (mutation confirmed not applied).
+   *
+   * Uses EMM.failMutation which atomically: sets mutation_outcome=failure,
+   * advances phase, releases events, clears pending_retry, clears error.
+   * The scheduler runs a fresh session to reprocess the released events.
    */
   private async handleFailed(mutation: Mutation): Promise<void> {
-    await this.api.mutationStore.markFailed(
-      mutation.id,
-      "Reconciliation confirmed mutation did not complete"
-    );
-
-    // Resume the workflow - mutate phase will be re-executed
-    await this.resumeWorkflow(mutation);
+    await this.emm.failMutation(mutation.id, {
+      error: "Reconciliation confirmed mutation did not complete",
+      resolvedBy: "reconciliation",
+    });
+    log(`Mutation ${mutation.id} failed via reconciliation, events released`);
   }
 
   /**
    * Handle exhausted reconciliation attempts.
+   *
+   * Marks mutation as indeterminate — user must resolve it manually.
+   * workflow.error and pending_retry_run_id are already set from when the run
+   * entered paused:reconciliation (via EMM.updateHandlerRunStatus), so no
+   * workflow field changes are needed here.
    */
   private async handleExhausted(mutation: Mutation): Promise<void> {
-    // Atomic: mark indeterminate + set pending_retry_run_id + pause workflow
-    // pending_retry_run_id must be set atomically when marking indeterminate
-    await this.api.db.db.tx(async (tx: any) => {
-      await this.api.mutationStore.markIndeterminate(
-        mutation.id,
-        `Reconciliation exhausted after ${mutation.reconcile_attempts} attempts`,
-        tx
-      );
-      await this.api.scriptStore.updateWorkflowFields(mutation.workflow_id, {
-        status: "paused",
-        pending_retry_run_id: mutation.handler_run_id,
-      }, tx);
+    await this.emm.updateMutationStatus(mutation.id, "indeterminate", {
+      error: `Reconciliation exhausted after ${mutation.reconcile_attempts} attempts`,
     });
-    log(`Workflow ${mutation.workflow_id} paused due to exhausted reconciliation, pending_retry_run_id set`);
+    log(`Mutation ${mutation.id} marked indeterminate after exhausted reconciliation`);
   }
 
   /**
@@ -230,42 +237,5 @@ export class ReconciliationScheduler {
 
     await this.api.mutationStore.scheduleNextReconcile(mutation.id, delayMs);
     log(`Scheduled next reconciliation for mutation ${mutation.id} in ${delayMs}ms`);
-  }
-
-  /**
-   * Resume a workflow after reconciliation resolves.
-   */
-  private async resumeWorkflow(mutation: Mutation): Promise<void> {
-    // Get the workflow
-    const workflow = await this.api.scriptStore.getWorkflow(mutation.workflow_id);
-    if (!workflow) {
-      log(`Workflow ${mutation.workflow_id} not found, cannot resume`);
-      return;
-    }
-
-    // Get the handler run associated with this mutation
-    const handlerRun = await this.api.handlerRunStore.get(mutation.handler_run_id);
-
-    // Wrap both updates in a transaction for atomicity — crash between them
-    // would leave workflow active but handler_run paused, preventing recovery
-    await this.api.db.db.tx(async (tx) => {
-      if (workflow.status === "paused") {
-        await this.api.scriptStore.updateWorkflowFields(
-          mutation.workflow_id,
-          { status: "active" },
-          tx
-        );
-        log(`Workflow ${mutation.workflow_id} resumed after reconciliation`);
-      }
-
-      if (handlerRun && handlerRun.status === "paused:reconciliation") {
-        await this.api.handlerRunStore.update(
-          handlerRun.id,
-          { status: "active" },
-          tx
-        );
-        log(`Handler run ${handlerRun.id} resumed after reconciliation`);
-      }
-    });
   }
 }

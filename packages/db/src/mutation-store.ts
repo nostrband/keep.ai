@@ -41,12 +41,14 @@ export interface ReconcileResult {
  * - user_assert_failed: User verified mutation did not happen
  * - user_skip: User wants to skip this event
  * - user_retry: Legacy alias for user_assert_failed (creates retry)
+ * - reconciliation: Resolved by automated reconciliation scheduler
  */
 export type MutationResolution =
   | "user_skip"
   | "user_retry"
   | "user_assert_failed"
-  | "user_assert_applied";
+  | "user_assert_applied"
+  | "reconciliation";
 
 /**
  * Mutation record — ledger entry for tracking external side effects.

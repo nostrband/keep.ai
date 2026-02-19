@@ -36,7 +36,9 @@ async function createTables(db: DBInterface): Promise<void> {
       active_script_id TEXT NOT NULL DEFAULT '',
       handler_config TEXT NOT NULL DEFAULT '',
       intent_spec TEXT NOT NULL DEFAULT '',
-      consumer_sleep_until INTEGER NOT NULL DEFAULT 0
+      consumer_sleep_until INTEGER NOT NULL DEFAULT 0,
+      error TEXT NOT NULL DEFAULT '',
+      pending_retry_run_id TEXT NOT NULL DEFAULT ''
     )
   `);
 
@@ -93,7 +95,8 @@ async function createTables(db: DBInterface): Promise<void> {
       error TEXT NOT NULL DEFAULT '',
       error_type TEXT NOT NULL DEFAULT '',
       cost INTEGER NOT NULL DEFAULT 0,
-      logs TEXT NOT NULL DEFAULT '[]'
+      logs TEXT NOT NULL DEFAULT '[]',
+      mutation_outcome TEXT NOT NULL DEFAULT ''
     )
   `);
   await db.exec(`CREATE INDEX IF NOT EXISTS idx_handler_runs_script_run ON handler_runs(script_run_id)`);
@@ -524,11 +527,21 @@ describe("ReconciliationScheduler", () => {
     // Wait for scheduler to process
     await new Promise((resolve) => setTimeout(resolve, 200));
 
-    // Verify mutation was resolved
+    // Verify mutation was resolved via EMM
     const updated = await api.mutationStore.get(mutation.id);
     expect(updated?.status).toBe("applied");
     expect(updated?.result).toContain("msg-123");
+    expect(updated?.resolved_by).toBe("reconciliation");
     expect(mockReconcile).toHaveBeenCalled();
+
+    // Verify handler run mutation_outcome set by EMM
+    const updatedRun = await api.handlerRunStore.get(handlerRun.id);
+    expect(updatedRun?.mutation_outcome).toBe("success");
+    expect(updatedRun?.phase).toBe("mutated");
+
+    // Verify workflow.error cleared (unblocks scheduler to process pending_retry)
+    const workflow = await api.scriptStore.getWorkflow("workflow-1");
+    expect(workflow?.error).toBe("");
   });
 
   it("should mark indeterminate when max attempts exhausted", async () => {
@@ -582,12 +595,14 @@ describe("ReconciliationScheduler", () => {
     // Wait for scheduler to process
     await new Promise((resolve) => setTimeout(resolve, 200));
 
-    // Verify mutation was marked indeterminate
+    // Verify mutation was marked indeterminate via EMM
     const updated = await api.mutationStore.get(mutation.id);
     expect(updated?.status).toBe("indeterminate");
 
-    // Verify workflow was paused
+    // Verify workflow status unchanged — handleExhausted no longer touches it.
+    // In production, workflow.error and pending_retry_run_id are already set
+    // when the run entered paused:reconciliation via EMM.updateHandlerRunStatus.
     const workflow = await api.scriptStore.getWorkflow("workflow-1");
-    expect(workflow?.status).toBe("paused");
+    expect(workflow?.status).toBe("active");
   });
 });

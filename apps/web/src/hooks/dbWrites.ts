@@ -5,6 +5,7 @@ import { qk } from "./queryKeys";
 import { useDbQuery } from "./dbQuery";
 import { File } from "@app/db";
 import type { Mutation } from "@app/db";
+import { ExecutionModelClient } from "@app/browser";
 
 export function useCreateTask() {
   const { api } = useDbQuery();
@@ -152,26 +153,41 @@ export function usePauseTask() {
   });
 }
 
+/**
+ * Update workflow status via ExecutionModelClient.
+ *
+ * Handles all user-controlled status transitions: pause, resume, archive, restore.
+ * Resume also clears workflow.error (user signal that issue is addressed).
+ */
 export function useUpdateWorkflow() {
   const { api } = useDbQuery();
 
   return useMutation({
     mutationFn: async (input: {
       workflowId: string;
-      status?: string;
-      title?: string;
-      cron?: string;
-      next_run_timestamp?: string;
+      status: string;
+      /** Whether the workflow has an active script (needed for unarchive) */
+      hasActiveScript?: boolean;
     }) => {
       if (!api) throw new Error("Script store not available");
 
-      const fields: Parameters<typeof api.scriptStore.updateWorkflowFields>[1] = {};
-      if (input.status !== undefined) fields.status = input.status;
-      if (input.title !== undefined) fields.title = input.title;
-      if (input.cron !== undefined) fields.cron = input.cron;
-      if (input.next_run_timestamp !== undefined) fields.next_run_timestamp = input.next_run_timestamp;
+      const emc = new ExecutionModelClient(api);
 
-      await api.scriptStore.updateWorkflowFields(input.workflowId, fields);
+      switch (input.status) {
+        case "paused":
+          await emc.pauseWorkflow(input.workflowId);
+          break;
+        case "active":
+          await emc.resumeWorkflow(input.workflowId);
+          break;
+        case "archived":
+          await emc.archiveWorkflow(input.workflowId);
+          break;
+        default:
+          // Unarchive: "draft" or other restore statuses
+          await emc.unarchiveWorkflow(input.workflowId, !!input.hasActiveScript);
+          break;
+      }
     },
     onSuccess: (_result, { workflowId }) => {
       // Invalidate workflow-related queries to get fresh data
@@ -322,13 +338,11 @@ export function useDisconnectConnection(apiEndpoint: string) {
 }
 
 /**
- * Resolve an indeterminate mutation.
+ * Resolve an indeterminate mutation via ExecutionModelClient.
  *
  * Two actions:
- * - "did_not_happen": Mark mutation failed, release events, clear pending_retry
- * - "skip": Mark mutation failed (skipped), skip events, commit run, clear pending_retry
- *
- * Neither action auto-resumes the workflow — user must manually resume.
+ * - "did_not_happen": EMC.resolveMutationFailed — release events, fresh session
+ * - "skip": EMC.resolveMutationSkipped — skip events, set up retry for next()
  */
 export function useResolveMutation() {
   const { api } = useDbQuery();
@@ -340,55 +354,14 @@ export function useResolveMutation() {
     }) => {
       if (!api) throw new Error("Database not available");
 
+      const emc = new ExecutionModelClient(api);
       const { mutation, action } = input;
-      const run = await api.handlerRunStore.get(mutation.handler_run_id);
-      if (!run) throw new Error("Handler run not found");
 
-      const now = Date.now();
-      const endTimestamp = new Date().toISOString();
-
-      await api.db.db.tx(async (tx: any) => {
-        if (action === "did_not_happen") {
-          // User confirms mutation did not complete
-          await api.mutationStore.update(mutation.id, {
-            status: "failed",
-            resolved_by: "user_assert_failed",
-            resolved_at: now,
-          }, tx);
-          await api.handlerRunStore.update(run.id, {
-            status: "failed:logic" as any,
-            error: "User confirmed mutation did not complete",
-            end_timestamp: endTimestamp,
-          }, tx);
-          // Release reserved events — mutation didn't happen, events can be reprocessed
-          await api.eventStore.releaseEvents(run.id, tx);
-          // Clear pending retry — no retry needed for failed mutation
-          await api.scriptStore.updateWorkflowFields(run.workflow_id, {
-            pending_retry_run_id: '',
-          }, tx);
-        } else {
-          // User wants to skip this event
-          await api.mutationStore.update(mutation.id, {
-            status: "failed",
-            resolved_by: "user_skip",
-            resolved_at: now,
-          }, tx);
-          // Skip events — mark as skipped (not reprocessed)
-          await api.eventStore.skipEvents(run.id, tx);
-          // Mark run as committed (event processed, even though mutation was skipped)
-          await api.handlerRunStore.update(run.id, {
-            phase: "committed" as any,
-            status: "committed" as any,
-            error: "",
-            end_timestamp: endTimestamp,
-          }, tx);
-          await api.scriptStore.incrementHandlerCount(run.script_run_id, tx);
-          // Clear pending retry
-          await api.scriptStore.updateWorkflowFields(run.workflow_id, {
-            pending_retry_run_id: '',
-          }, tx);
-        }
-      });
+      if (action === "did_not_happen") {
+        await emc.resolveMutationFailed(mutation.id);
+      } else {
+        await emc.resolveMutationSkipped(mutation.id);
+      }
 
       return { action, mutationId: mutation.id };
     },

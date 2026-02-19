@@ -176,15 +176,14 @@ export default function WorkflowDetailPage() {
   const handleRestore = async () => {
     if (!workflow) return;
 
-    // Smart restore: "paused" if has scripts, "draft" if not (spec: smart-workflow-restore-status)
-    const restoreStatus = workflow.active_script_id ? "paused" : "draft";
-
     updateWorkflowMutation.mutate({
       workflowId: workflow.id,
-      status: restoreStatus,
+      status: "restore",
+      hasActiveScript: !!workflow.active_script_id,
     }, {
       onSuccess: () => {
-        success.show(`Workflow restored to ${restoreStatus}`);
+        const restoredTo = workflow.active_script_id ? "paused" : "draft";
+        success.show(`Workflow restored to ${restoredTo}`);
       },
     });
   };

@@ -5,6 +5,7 @@ import { useDbQuery } from "./dbQuery";
 import { notifyTablesChanged } from "../queryClient";
 import { Notification } from "packages/db/dist";
 import { useConnections } from "./dbConnectionReads";
+import { ExecutionModelClient } from "@app/browser";
 
 export interface NotificationsResult {
   notifications: Notification[];
@@ -228,6 +229,7 @@ export function useResumableWorkflows(service?: string) {
 
 /**
  * Batch mutation to resume workflows and resolve their auth notifications.
+ * Uses EMC.resumeWorkflow which also clears workflow.error.
  */
 export function useResumeWorkflows() {
   const { api } = useDbQuery();
@@ -237,8 +239,9 @@ export function useResumeWorkflows() {
     mutationFn: async (workflows: ResumableWorkflow[]) => {
       if (!api) throw new Error("API not available");
 
+      const emc = new ExecutionModelClient(api);
       for (const w of workflows) {
-        await api.scriptStore.updateWorkflowFields(w.workflowId, { status: "active" });
+        await emc.resumeWorkflow(w.workflowId);
         await api.notificationStore.resolveNotification(w.notificationId);
       }
     },
