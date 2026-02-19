@@ -516,8 +516,8 @@ const producerPhaseHandlers: Record<string, PhaseHandler> = {
   /**
    * pending → executing: Transition to executing phase.
    */
-  pending: async (api: KeepDbApi, run: HandlerRun) => {
-    await api.handlerRunStore.updatePhase(run.id, "executing");
+  pending: async (api: KeepDbApi, run: HandlerRun, context: HandlerExecutionContext) => {
+    await context.emm.updateProducerPhase(run.id, "executing");
     log(`Handler run ${run.id} (producer): pending → executing`);
   },
 
@@ -803,9 +803,9 @@ return await workflow.consumers.${run.handler_name}.prepare(__state__);
         "Mutation was in_flight at restart - outcome uncertain"
       );
       if (outcome === "applied") {
-        // Reconciliation confirmed mutation succeeded
+        // Reconciliation confirmed mutation succeeded.
+        // applyMutation() already advanced phase to "mutated" atomically.
         log(`Handler run ${run.id} (consumer): mutating → mutated (reconciliation confirmed)`);
-        await context.emm.updateConsumerPhase(run.id, "mutated");
       } else if (outcome === "failed") {
         // Reconciliation confirmed mutation did not happen
         // State machine will restart mutate phase on next iteration
@@ -824,8 +824,12 @@ return await workflow.consumers.${run.handler_name}.prepare(__state__);
         });
       }
     } else if (mutation.status === "applied") {
-      log(`Handler run ${run.id} (consumer): mutating → mutated`);
-      await context.emm.updateConsumerPhase(run.id, "mutated");
+      // Unreachable: applyMutation() atomically sets phase="mutated" in the same TX
+      // that sets mutation.status="applied", so the state machine would dispatch to
+      // handleConsumerMutated, not handleConsumerMutating.
+      throw new Error(
+        `Impossible state: mutation applied but run ${run.id} phase is still mutating`,
+      );
     } else if (mutation.status === "needs_reconcile") {
       // Awaiting background reconciliation - ensure run is paused via EMM
       log(`Handler run ${run.id} (consumer): awaiting reconciliation`);
@@ -1080,9 +1084,10 @@ return await workflow.consumers.${run.handler_name}.mutate(__prepared__);
       }
       return;
     } else if (mutation && mutation.status === "applied") {
-      // Mutation was already applied (e.g. by tool wrapper but abort didn't fire).
-      // Just transition phase — result is already in the ledger.
-      await context.emm.updateConsumerPhase(run.id, "mutated");
+      // Mutation was already applied by tool wrapper (abort didn't fire).
+      // applyMutation() already advanced phase to "mutated" atomically —
+      // state machine will see it on next iteration.
+      log(`Handler run ${run.id} (consumer): mutation already applied, phase already mutated`);
     } else if (!mutation) {
       // Mutate handler completed without calling any mutation tool — no mutation record.
       // Just transition phase; next will receive { status: 'none' }.

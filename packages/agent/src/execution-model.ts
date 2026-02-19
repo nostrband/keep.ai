@@ -163,6 +163,12 @@ const CONSUMER_PHASE_ORDER: Record<string, number> = {
   committed: 6,
 };
 
+const PRODUCER_PHASE_ORDER: Record<string, number> = {
+  pending: 0,
+  executing: 1,
+  committed: 2,
+};
+
 // ============================================================================
 // ExecutionModelManager
 // ============================================================================
@@ -447,6 +453,56 @@ export class ExecutionModelManager {
   }
 
   // ==========================================================================
+  // Method 2b: updateProducerPhase
+  // ==========================================================================
+
+  /**
+   * Advance a producer handler run's phase forward.
+   *
+   * Validates forward-only ordering: pending → executing → committed.
+   * "committed" is blocked — must use commitProducer() instead.
+   *
+   * @param runId - Handler run ID
+   * @param newPhase - Target phase
+   */
+  async updateProducerPhase(
+    runId: string,
+    newPhase: HandlerRunPhase,
+  ): Promise<void> {
+    if (newPhase === "committed") {
+      throw new Error(
+        "Cannot advance to 'committed' via updateProducerPhase. Use commitProducer() instead.",
+      );
+    }
+
+    await this.api.db.db.tx(async (tx) => {
+      const run = await this.store.getHandlerRun(runId, tx);
+      if (!run) throw new Error(`Handler run not found: ${runId}`);
+
+      if (run.handler_type !== "producer") {
+        throw new Error(
+          `updateProducerPhase called on ${run.handler_type} run. Use updateConsumerPhase instead.`,
+        );
+      }
+
+      const currentOrder = PRODUCER_PHASE_ORDER[run.phase];
+      const newOrder = PRODUCER_PHASE_ORDER[newPhase];
+      if (currentOrder === undefined || newOrder === undefined) {
+        throw new Error(
+          `Invalid producer phase transition: ${run.phase} → ${newPhase}`,
+        );
+      }
+      if (newOrder <= currentOrder) {
+        throw new Error(
+          `Producer phase must advance forward: ${run.phase} (${currentOrder}) → ${newPhase} (${newOrder})`,
+        );
+      }
+
+      await this.store.updateHandlerRunPhase(runId, newPhase, tx);
+    });
+  }
+
+  // ==========================================================================
   // Method 3: commitConsumer
   // ==========================================================================
 
@@ -474,6 +530,11 @@ export class ExecutionModelManager {
         throw new Error(
           `commitConsumer called on ${run.handler_type} run. Use commitProducer instead.`,
         );
+      }
+
+      // Guard: double commit is a bug — caller must not commit the same run twice
+      if (run.status === "committed") {
+        throw new Error(`commitConsumer: run ${runId} is already committed`);
       }
 
       // Consume events reserved by this run (pending → consumed)
@@ -536,6 +597,11 @@ export class ExecutionModelManager {
         throw new Error(
           `commitProducer called on ${run.handler_type} run. Use commitConsumer instead.`,
         );
+      }
+
+      // Guard: double commit is a bug — caller must not commit the same run twice
+      if (run.status === "committed") {
+        throw new Error(`commitProducer: run ${runId} is already committed`);
       }
 
       // Save handler persistent state if provided
