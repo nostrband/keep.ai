@@ -705,7 +705,8 @@ export class WorkflowScheduler {
       this.debug(
         `Workflow ${workflow.id} reached max fix attempts (${fixCount + 1}/${MAX_FIX_ATTEMPTS}), escalating to user`
       );
-      await escalateToUser(this.api, {
+      const emm = new ExecutionModelManager(this.api);
+      await escalateToUser(this.api, emm, {
         workflow: freshWorkflow,
         scriptRunId: result.sessionId || '',
         error: new LogicError(result.error || 'Logic error'),

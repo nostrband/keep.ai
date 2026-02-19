@@ -1,5 +1,6 @@
 import { KeepDbApi, Workflow } from "@app/db";
 import { ClassifiedError } from "./errors";
+import { ExecutionModelManager } from "./execution-model";
 
 // Maximum consecutive failures before escalating to user (spec 09b).
 // On the Nth consecutive failure, the workflow is paused and user is notified
@@ -42,6 +43,7 @@ export interface EscalateToUserResult {
  */
 export async function escalateToUser(
   api: KeepDbApi,
+  emm: ExecutionModelManager,
   options: EscalateToUserOptions
 ): Promise<EscalateToUserResult> {
   const { workflow, scriptRunId, error, logs, fixAttempts } = options;
@@ -52,13 +54,13 @@ export async function escalateToUser(
     messageCreated: false,
   };
 
-  // 1. Set workflow error and reset fix count (gives user a fresh start)
-  // status stays "active" — workflow.error is system-controlled
-  await api.scriptStore.updateWorkflowFields(workflow.id, {
-    error: `Max fix attempts exhausted (${fixAttempts}/${MAX_FIX_ATTEMPTS}): ${error.message}`,
-    maintenance: false,
-    maintenance_fix_count: 0,
-  });
+  // 1. Block workflow with error (EMM-controlled), clear maintenance, reset fix count
+  await emm.blockWorkflow(
+    workflow.id,
+    `Max fix attempts exhausted (${fixAttempts}/${MAX_FIX_ATTEMPTS}): ${error.message}`,
+  );
+  await emm.exitMaintenanceMode(workflow.id);
+  await api.scriptStore.resetMaintenanceFixCount(workflow.id);
 
   // 2. Create an "escalated" notification
   try {

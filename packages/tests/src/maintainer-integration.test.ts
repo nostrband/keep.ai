@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { DBInterface, KeepDb, KeepDbApi, ScriptStore, Script, Workflow, Task, InboxStore, NotificationStore } from "@app/db";
 import { createDBNode } from "@app/node";
-import { makeFixTool, FixResult, MAX_FIX_ATTEMPTS, escalateToUser, LogicError } from "@app/agent";
+import { makeFixTool, FixResult, MAX_FIX_ATTEMPTS, escalateToUser, LogicError, ExecutionModelManager } from "@app/agent";
 
 /**
  * Integration tests for the Maintainer Task Type flow.
@@ -564,7 +564,7 @@ describe("Maintainer Integration Tests", () => {
 
       // Call the actual escalateToUser function instead of manually implementing the logic
       const error = new LogicError("Persistent logic error after 3 fix attempts");
-      const result = await escalateToUser(api, {
+      const result = await escalateToUser(api, new ExecutionModelManager(api), {
         workflow: workflow,
         scriptRunId: "script-run-fail",
         error: error,
@@ -580,9 +580,10 @@ describe("Maintainer Integration Tests", () => {
 
       // Verify escalation results in database
 
-      // 1. Workflow status should be "error"
+      // 1. Workflow should have error set (status stays "active", error is system-controlled)
       dbWorkflow = await api.scriptStore.getWorkflow(workflow.id);
-      expect(dbWorkflow?.status).toBe("error");
+      expect(dbWorkflow?.status).toBe("active");
+      expect(dbWorkflow?.error).toContain("Max fix attempts exhausted");
       expect(dbWorkflow?.maintenance).toBe(false);
       expect(dbWorkflow?.maintenance_fix_count).toBe(0); // Reset for fresh attempts
 
@@ -617,7 +618,7 @@ describe("Maintainer Integration Tests", () => {
 
       // Call escalateToUser with the actual function
       const error = new LogicError("Script failed with invalid data");
-      const result = await escalateToUser(api, {
+      const result = await escalateToUser(api, new ExecutionModelManager(api), {
         workflow: workflow,
         scriptRunId: "script-run-with-message",
         error: error,
@@ -662,7 +663,7 @@ describe("Maintainer Integration Tests", () => {
 
       // Call escalateToUser
       const error = new LogicError("Error without chat notification");
-      const result = await escalateToUser(api, {
+      const result = await escalateToUser(api, new ExecutionModelManager(api), {
         workflow: workflow,
         scriptRunId: "script-run-no-chat",
         error: error,
@@ -676,9 +677,10 @@ describe("Maintainer Integration Tests", () => {
       // Message should NOT be created since there's no chat
       expect(result.messageCreated).toBe(false);
 
-      // Workflow should still be set to error status
+      // Workflow should have error set (status stays "active")
       const dbWorkflow = await api.scriptStore.getWorkflow(workflow.id);
-      expect(dbWorkflow?.status).toBe("error");
+      expect(dbWorkflow?.status).toBe("active");
+      expect(dbWorkflow?.error).toContain("Max fix attempts exhausted");
     });
 
     it("should include recent logs in escalation message", async () => {
@@ -703,7 +705,7 @@ describe("Maintainer Integration Tests", () => {
       const manyLogs = Array.from({ length: 30 }, (_, i) => `Log line ${i + 1}`);
 
       const error = new LogicError("Error with many logs");
-      await escalateToUser(api, {
+      await escalateToUser(api, new ExecutionModelManager(api), {
         workflow: workflow,
         scriptRunId: "script-run-logs",
         error: error,
